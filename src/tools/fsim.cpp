@@ -79,7 +79,7 @@ struct options
     int n_ants = 64;
     int n_chans_per_output_stream = 512;
     int n_chans_total = 32768;
-    int n_spectra_per_heap = 256;
+    int n_jones_per_batch = 1 << 20;
     size_t packet_payload_size_bytes = 8192;
     bool run_once = false;
     bool ibv = false;
@@ -90,6 +90,7 @@ struct options
     size_t packets_per_heap;
     size_t timestamp_step; // This is the amount the timestamp must increment between successive heaps of the same
                         // F-Engine.
+    int n_spectra_per_heap;
 };
 
 // TODO: These constexpr could be neatened up a bit.
@@ -132,8 +133,8 @@ static options parse_options(int argc, const char **argv)
                        "Number of channels out of the FFT. (Normally half of FFT size)");
     desc.add_options()("channels-per-substream", make_opt(opts.n_chans_per_output_stream),
                        "Each F-Engine output substream transmits a subset of the FFT channels");
-    desc.add_options()("spectra-per-heap", make_opt(opts.n_spectra_per_heap),
-                       "The F-Engine cornerturn groups a number of samples into each channel per packet");
+    desc.add_options()("jones-per-batch", make_opt(opts.n_jones_per_batch),
+                       "Number of Jones vectors in each output batch");
     desc.add_options()("dst-packet-payload", make_opt(opts.packet_payload_size_bytes),
                        "The number of payload bytes per packet");
     desc.add_options()("ibv", make_opt(opts.ibv), "Use ibverbs acceleration");
@@ -172,6 +173,7 @@ static options parse_options(int argc, const char **argv)
      * contains many smaller packets. Each packet also contains other SPEAD
      * data and is thus slightly larger than the payload size.
      */
+    opts.n_spectra_per_heap = opts.n_jones_per_batch / opts.n_chans_total;
     opts.heap_size_bytes =
         opts.n_chans_per_output_stream * opts.n_spectra_per_heap * N_POLS * COMPLEXITY * SAMPLE_BITS / 8;
     // Round up when dividing

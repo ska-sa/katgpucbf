@@ -21,8 +21,7 @@
 # run.
 array_size = [1, 3, 4, 19, 33, 64, 80]
 
-# This is always set to 256 for the MeerKAT case.
-num_spectra_per_heap = [256]
+num_jones_per_batch = [2**20]
 
 # Number of FFT channels out of the F-Engine
 num_channels = [1024, 8192, 32768]

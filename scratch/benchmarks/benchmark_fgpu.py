@@ -147,6 +147,14 @@ def fgpu_factory(
     katcp_port = 7140 + index
     prometheus_port = 7250 + index
     name = f"fgpu-{index}"
+    wideband_kwargs = {
+        "name": "wideband",
+        "channels": args.channels,
+        "dst": f"239.102.{200 + index}.0+{args.xb - 1}:7148",
+    }
+    if args.jones_per_batch is not None:
+        wideband_kwargs["jones_per_batch"] = args.jones_per_batch
+    wideband_arg = ",".join(f"{key}={value}" for key, value in wideband_kwargs.items())
     command = (
         "docker run "
         f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host "
@@ -166,16 +174,22 @@ def fgpu_factory(
         f"--sync-epoch={sync_time} "
         f"--feng-id={index} "
         f"{'--use-vkgdr --max-delay-diff=65536' if args.use_vkgdr else ''} "
-        f"--wideband=name=wideband,channels={args.channels},dst=239.102.{200 + index}.0+{args.xb - 1}:7148 "
+        f"--wideband={wideband_arg} "
         f"239.102.{index}.64+15:7148 "
     )
     if args.narrowband:
-        command += (
-            f"--narrowband=name=narrowband,channels={args.narrowband_channels},"
-            f"decimation={args.narrowband_decimation},centre_frequency={adc_sample_rate / 4},"
-            f"dst=239.102.{216 + index}.0+{args.xb // args.narrowband_decimation - 1}:7148 "
-        )
-    for arg in ["spectra_per_heap", "array_size", "dig_sample_bits"]:
+        narrowband_kwargs = {
+            "name": "narrowband",
+            "channels": args.narrowband_channels,
+            "decimation": args.narrowband_decimation,
+            "centre_frequency": adc_sample_rate / 4,
+            "dst": f"239.102.{216 + index}.0+{args.xb // args.narrowband_decimation - 1}:7148",
+        }
+        if args.jones_per_batch is not None:
+            narrowband_kwargs["jones_per_batch"] = args.jones_per_batch
+        narrowband_arg = ",".join(f"{key}={value}" for key, value in narrowband_kwargs.items())
+        command += f"--narrowband={narrowband_arg} "
+    for arg in ["array_size", "dig_sample_bits"]:
         value = getattr(args, arg)
         if value is not None:
             dashed = arg.replace("_", "-")
@@ -419,10 +433,10 @@ async def main():  # noqa: D103
         help="The number of antennas in the array.",
     )
     parser.add_argument(
-        "--spectra-per-heap",
+        "--jones-per-batch",
         type=int,
-        metavar="SPECTRA",
-        help="Spectra in each output heap",
+        metavar="SAMPLES",
+        help="Jones vectors in each output batch",
     )
     parser.add_argument(
         "--dig-heap-samples",
