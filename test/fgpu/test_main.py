@@ -21,6 +21,7 @@ from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf.fgpu.main import (
     DEFAULT_DDC_TAPS_RATIO,
+    DEFAULT_SAMPLES_PER_HEAP,
     DEFAULT_TAPS,
     DEFAULT_W_CUTOFF,
     DEFAULT_WEIGHT_PASS,
@@ -80,13 +81,14 @@ class TestParseNarrowband:
             taps=DEFAULT_TAPS,
             ddc_taps=DEFAULT_DDC_TAPS_RATIO * 8,
             w_cutoff=DEFAULT_W_CUTOFF,
+            samples_per_heap=DEFAULT_SAMPLES_PER_HEAP,
         )
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
         assert parse_narrowband(
             "name=foo,channels=1024,centre_frequency=400e6,decimation=8,taps=8,"
-            "w_cutoff=0.5,dst=239.1.2.3+1:7148,ddc_taps=128,weight_pass=0.3"
+            "w_cutoff=0.5,dst=239.1.2.3+1:7148,ddc_taps=128,weight_pass=0.3,samples_per_heap=262144"
         ) == NarrowbandOutput(
             name="foo",
             channels=1024,
@@ -97,6 +99,7 @@ class TestParseNarrowband:
             dst=[Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
             ddc_taps=128,
             weight_pass=0.3,
+            samples_per_heap=262144,
         )
 
     @pytest.mark.parametrize(
@@ -130,11 +133,11 @@ class TestParseArgs:
             "--dst-interface=lo",
             "--adc-sample-rate=1712000000.0",
             "--sync-epoch=0",
-            "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9",
+            "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9,samples_per_heap=262144",
             (
                 "--narrowband=name=nb0,dst=239.1.0.0+1,channels=32768,"
                 "centre_frequency=400e6,decimation=8,taps=4,w_cutoff=0.8,"
-                "ddc_taps=64,weight_pass=0.3"
+                "ddc_taps=64,weight_pass=0.3,samples_per_heap=524288"
             ),
             "--narrowband=name=nb1,dst=239.2.0.0+0:7149,channels=8192,centre_frequency=300e6,decimation=16",
             "239.0.1.0+15:7148",
@@ -147,6 +150,7 @@ class TestParseArgs:
                 channels=1024,
                 taps=64,
                 w_cutoff=0.9,
+                samples_per_heap=262144,
             ),
             NarrowbandOutput(
                 name="nb0",
@@ -158,6 +162,7 @@ class TestParseArgs:
                 w_cutoff=0.8,
                 ddc_taps=64,
                 weight_pass=0.3,
+                samples_per_heap=524288,
             ),
             NarrowbandOutput(
                 name="nb1",
@@ -169,5 +174,6 @@ class TestParseArgs:
                 w_cutoff=DEFAULT_W_CUTOFF,
                 ddc_taps=DEFAULT_DDC_TAPS_RATIO * 16,
                 weight_pass=DEFAULT_WEIGHT_PASS,
+                samples_per_heap=DEFAULT_SAMPLES_PER_HEAP,
             ),
         ]

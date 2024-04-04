@@ -18,7 +18,7 @@
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
-from katsdpsigproc.accel import DeviceArray
+from katsdpsigproc.accel import DeviceArray, roundup
 from numba import njit, prange
 
 from katgpucbf.xbgpu.correlation import Correlation, CorrelationTemplate, device_filter
@@ -93,28 +93,30 @@ def fill_random(rng: np.random.Generator, buf: DeviceArray, command_queue: Abstr
 
 
 @pytest.mark.combinations(
-    "num_ants, num_channels, num_spectra_per_heap",
+    "num_ants, num_channels, num_samples_per_heap",
     test_parameters.array_size,
     test_parameters.num_channels,
-    test_parameters.num_spectra_per_heap,
+    test_parameters.num_samples_per_heap,
 )
 def test_correlator(
     context: AbstractContext,
     command_queue: AbstractCommandQueue,
     num_ants: int,
-    num_spectra_per_heap: int,
+    num_samples_per_heap: int,
     num_channels: int,
 ) -> None:
     """Test the Tensor Core correlation kernel for correctness."""
     n_chans_per_stream = num_channels // num_ants
     n_batches = 7
+    # The kernel requires it to be a multiple of 16
+    n_spectra_per_heap = roundup(num_samples_per_heap // n_chans_per_stream, 16)
     batch_ranges = [(1, 5), (3, 4), (0, 7)]
 
     template = CorrelationTemplate(
         context,
         n_ants=num_ants,
         n_channels=n_chans_per_stream,
-        n_spectra_per_heap=num_spectra_per_heap,
+        n_spectra_per_heap=n_spectra_per_heap,
         input_sample_bits=8,
     )
 
@@ -144,9 +146,12 @@ def test_correlator(
     fill_random(rng, buf_visibilities_device, command_queue)
 
     # Calculate expected values
-    calculated_visibilities_host = np.zeros(buf_visibilities_host.shape, buf_visibilities_host.dtype)
+    calculated_visibilities_host = np.zeros(buf_visibilities_host.shape, np.int64)
     for first_batch, last_batch in batch_ranges:
         calculated_visibilities_host += correlate_host(buf_samples_host[first_batch:last_batch])
+    calculated_visibilities_host = np.clip(
+        calculated_visibilities_host, -np.iinfo(np.int32).max, np.iinfo(np.int32).max
+    )
 
     # Calculate using the kernel
     buf_samples_device.set(command_queue, buf_samples_host)

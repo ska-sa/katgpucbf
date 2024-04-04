@@ -29,9 +29,22 @@ class Output(ABC):
 
     name: str
     channels: int
+    samples_per_heap: int
     taps: int
     w_cutoff: float
     dst: list[Endpoint]
+
+    def __post_init__(self) -> None:
+        if self.channels % len(self.dst) != 0:
+            raise ValueError("channels must be a multiple of the number of destinations")
+        channels_per_substream = self.channels // len(self.dst)
+        if self.samples_per_heap % channels_per_substream != 0:
+            raise ValueError("samples_per_heap must be a multiple of the number of channels per substream")
+
+    @property
+    def spectra_per_heap(self) -> int:
+        """Number of spectra in each output heap."""
+        return self.samples_per_heap * len(self.dst) // self.channels
 
     @property
     @abstractmethod
@@ -117,6 +130,7 @@ class NarrowbandOutput(Output):
     weight_pass: float
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if self.decimation % 2 != 0:
             raise ValueError("decimation factor must be even")
 

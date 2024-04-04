@@ -188,17 +188,17 @@ class TestBSend:
                 np.testing.assert_equal(items["bf_raw"].value, data[j, i, ...])
 
     @pytest.mark.combinations(
-        "num_engines, num_channels, num_spectra_per_heap",
+        "num_engines, num_channels, num_samples_per_heap",
         [4, 128, 512],
         test_parameters.num_channels,
-        test_parameters.num_spectra_per_heap,
+        test_parameters.num_samples_per_heap,
     )
     async def test_send_simple(
         self,
         context: AbstractContext,
         num_engines: int,
         num_channels: int,
-        num_spectra_per_heap: int,
+        num_samples_per_heap: int,
         outputs: Sequence[BOutput],
         time_converter: TimeConverter,
         sensors: SensorSet,
@@ -217,8 +217,8 @@ class TestBSend:
             Total number of engines required to process this array configuration.
         num_channels
             Total number of channels processed by a (theoretical) F-engine.
-        num_spectra_per_heap
-            Total number of packed spectra in every recevied channel.
+        num_samples_per_heap
+            Total number of packed complex samples in every received heap.
         outputs, time_converter, sensors
             Fixtures.
         """
@@ -227,9 +227,10 @@ class TestBSend:
         # it satisfies all values of `num_engines`, which can be as small as 4.
         engine_id = 3
 
-        # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
-        heap_timestamp_step = num_channels * 2 * num_spectra_per_heap
         n_channels_per_substream = num_channels // num_engines
+        n_spectra_per_heap = num_samples_per_heap // n_channels_per_substream
+        # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
+        heap_timestamp_step = num_channels * 2 * n_spectra_per_heap
         channel_offset = n_channels_per_substream * engine_id
         queues = [spead2.InprocQueue() for _ in outputs]
         send_stream = BSend(
@@ -238,7 +239,7 @@ class TestBSend:
             n_tx_items=N_TX_ITEMS,
             n_channels=num_channels,
             n_channels_per_substream=n_channels_per_substream,
-            spectra_per_heap=num_spectra_per_heap,
+            spectra_per_heap=n_spectra_per_heap,
             adc_sample_rate=time_converter.adc_sample_rate,
             timestamp_step=heap_timestamp_step,
             send_rate_factor=0.0,  # Send as fast as possible
@@ -255,7 +256,7 @@ class TestBSend:
             sensors,
             send_stream,
             n_channels_per_substream,
-            num_spectra_per_heap,
+            n_spectra_per_heap,
             heap_timestamp_step,
         )
         for queue in queues:
@@ -268,6 +269,6 @@ class TestBSend:
             engine_id,
             channel_offset,
             n_channels_per_substream,
-            num_spectra_per_heap,
+            n_spectra_per_heap,
             heap_timestamp_step,
         )

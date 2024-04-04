@@ -146,7 +146,6 @@ instance on ``host2``::
     user@host1:~/katgpucbf/src/tools$ spead2_net_raw ./fsim --interface <100GbE NIC IP> --ibv \
                                       --array-size 4 --channels 4096 \
                                       --channels-per-substream 512 \
-                                      --spectra-per-heap 256 \
                                       239.10.10.10+1:7148
     .
     .
@@ -159,7 +158,7 @@ instance on ``host2``::
                                         --dst-interface <100GbE interface name or IP address> \
                                         --src-ibv --dst-ibv \
                                         --adc-sample-rate 1712e6 --array-size 4 \
-                                        --channels 4096 --spectra-per-heap 256 \
+                                        --channels 4096 \
                                         --channels-per-substream 512 \
                                         --samples-between-spectra 8192 \
                                         --katcp-port 7150 \
