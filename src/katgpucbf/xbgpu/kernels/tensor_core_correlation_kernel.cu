@@ -665,7 +665,7 @@ template <bool add> __device__ void doCorrelate(Visibilities visibilities, const
 
 extern "C" __global__
 __launch_bounds__(NR_WARPS * 32, NR_RECEIVERS_PER_BLOCK == 32 ? 4 : 2)
-void correlate(Visibilities *visibilities, const Samples *samples, unsigned batchOffset)
+void correlate(Visibilities *visibilities, const Samples *samples, unsigned firstBlock, unsigned nrBlocks, unsigned nrBlocksPerZ)
 {
   const bool add = true;
   // the following hack is necessary to run the correlator in the OpenCL environment,
@@ -674,13 +674,17 @@ void correlate(Visibilities *visibilities, const Samples *samples, unsigned batc
   __shared__ char rawbuffer[sizeof(union shared) - 16] __attribute__((aligned(16)));
   union shared &u = (union shared &) rawbuffer;
 
-  unsigned batch = batchOffset + blockIdx.z;
-  visibilities += blockIdx.z;
+  unsigned z = blockIdx.z;
+  visibilities += z;  // Give each z a different accumulator, to avoid race conditions
+
+  unsigned blockOffset = z * nrBlocksPerZ;
+  nrBlocks = min(nrBlocks - blockOffset, nrBlocksPerZ);
+  firstBlock += blockOffset;
 
   if (add)
-    doCorrelate<true>(*visibilities, samples, batch * NR_BLOCKS_PER_BATCH, NR_BLOCKS_PER_BATCH, u);
+    doCorrelate<true>(*visibilities, samples, firstBlock, nrBlocks, u);
   else
-    doCorrelate<false>(*visibilities, samples, batch * NR_BLOCKS_PER_BATCH, NR_BLOCKS_PER_BATCH, u);
+    doCorrelate<false>(*visibilities, samples, firstBlock, nrBlocks, u);
 }
 
 
@@ -704,7 +708,7 @@ __device__ bool saturate(long *x)
 // TODO: generalise to other values of NR_BITS
 extern "C" __global__
 __launch_bounds__(NR_WARPS * 32)
-void reduce(int2 * __restrict__ out, unsigned int * __restrict__ out_saturated, const long2 * __restrict__ in, unsigned batches)
+void reduce(int2 * __restrict__ out, unsigned int * __restrict__ out_saturated, const long2 * __restrict__ in, unsigned buffers)
 {
   namespace cg = cooperative_groups;
   const unsigned int stride = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
@@ -712,7 +716,7 @@ void reduce(int2 * __restrict__ out, unsigned int * __restrict__ out_saturated, 
   if (idx >= stride)
     return;
   long2 sum = make_long2(0, 0);
-  for (unsigned i = 0; i < batches; i++) {
+  for (unsigned i = 0; i < buffers; i++) {
     long2 value = in[i * stride + idx];
     sum.x += value.x;
     sum.y += value.y;
