@@ -30,7 +30,7 @@ def main():
         "--channels-per-substream", type=int, default=16, help="Channels processed by one engine [%(default)s]"
     )
     parser.add_argument("--spectra-per-heap", type=int, default=256, help="Spectra in each frame [%(default)s]")
-    parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=5, help="Frames per chunk [%(default)s]")
+    parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=32, help="Frames per chunk [%(default)s]")
     parser.add_argument("--passes", type=int, default=10000, help="Number of times to repeat the test [%(default)s]")
     args = parser.parse_args()
 
