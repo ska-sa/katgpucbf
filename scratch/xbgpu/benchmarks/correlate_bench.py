@@ -20,8 +20,7 @@ import argparse
 
 import katsdpsigproc.accel
 
-from katgpucbf.curand_helpers import RandomStateBuilder
-from katgpucbf.xbgpu.beamform import BeamformTemplate
+from katgpucbf.xbgpu.correlation import CorrelationTemplate
 
 
 def main():
@@ -32,32 +31,17 @@ def main():
     )
     parser.add_argument("--spectra-per-heap", type=int, default=256, help="Spectra in each frame [%(default)s]")
     parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=5, help="Frames per chunk [%(default)s]")
-    parser.add_argument("--beams", type=int, default=4, help="Number of dual-pol beams [%(default)s]")
     parser.add_argument("--passes", type=int, default=10000, help="Number of times to repeat the test [%(default)s]")
     args = parser.parse_args()
 
     ctx = katsdpsigproc.accel.create_some_context()
     command_queue = ctx.create_command_queue()
-    template = BeamformTemplate(ctx, [0, 1] * args.beams)
-    fn = template.instantiate(
-        command_queue,
-        n_frames=args.heaps_per_fengine_per_chunk,
-        n_ants=args.array_size,
-        n_channels=args.channels_per_substream,
-        n_spectra_per_frame=args.spectra_per_heap,
-    )
-
-    builder = RandomStateBuilder(ctx)
-    slot = fn.slots["rand_states"]
-    fn.bind(rand_states=builder.make_states(slot.shape, seed=1234567, sequence_first=0))
+    template = CorrelationTemplate(ctx, args.array_size, args.channels_per_substream, args.spectra_per_heap, 8)
+    fn = template.instantiate(command_queue, args.heaps_per_fengine_per_chunk)
 
     fn.ensure_all_bound()
-    # Set non-trivial weights so the whole thing isn't just zero
-    h_weights = fn.buffer("weights").empty_like()
-    h_weights.fill(1)
-    fn.buffer("weights").set(command_queue, h_weights)
-    fn.buffer("delays").zero(command_queue)
-    fn.buffer("in").zero(command_queue)
+    fn.buffer("in_samples").zero(command_queue)
+    fn.zero_visibilities()
 
     fn()  # Warmup pass
     command_queue.finish()
