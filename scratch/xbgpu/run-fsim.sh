@@ -34,5 +34,5 @@ exec spead2_net_raw ../../src/tools/fsim \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --channels ${channels:-32768} \
     --channels-per-substream ${channels_per_substream:-512} \
-    --jones-per-heap ${jones_per_heap:-1048576} \
+    --jones-per-batch ${jones_per_batch:-1048576} \
     $mcast

@@ -188,17 +188,17 @@ class TestBSend:
                 np.testing.assert_equal(items["bf_raw"].value, data[j, i, ...])
 
     @pytest.mark.combinations(
-        "num_engines, num_channels, num_jones_per_heap",
+        "num_engines, num_channels, num_jones_per_batch",
         [4, 128, 512],
         test_parameters.num_channels,
-        test_parameters.num_jones_per_heap,
+        test_parameters.num_jones_per_batch,
     )
     async def test_send_simple(
         self,
         context: AbstractContext,
         num_engines: int,
         num_channels: int,
-        num_jones_per_heap: int,
+        num_jones_per_batch: int,
         outputs: Sequence[BOutput],
         time_converter: TimeConverter,
         sensors: SensorSet,
@@ -217,8 +217,8 @@ class TestBSend:
             Total number of engines required to process this array configuration.
         num_channels
             Total number of channels processed by a (theoretical) F-engine.
-        num_jones_per_heap
-            Total number of packed complex samples in every received heap.
+        num_jones_per_batch
+            Total number of Jones vectors in every batch sent by the F-engine.
         outputs, time_converter, sensors
             Fixtures.
         """
@@ -228,7 +228,7 @@ class TestBSend:
         engine_id = 3
 
         n_channels_per_substream = num_channels // num_engines
-        n_spectra_per_heap = num_jones_per_heap // n_channels_per_substream
+        n_spectra_per_heap = num_jones_per_batch // num_channels
         # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
         heap_timestamp_step = num_channels * 2 * n_spectra_per_heap
         channel_offset = n_channels_per_substream * engine_id

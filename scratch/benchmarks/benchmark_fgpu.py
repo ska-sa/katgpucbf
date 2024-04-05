@@ -152,8 +152,8 @@ def fgpu_factory(
         "channels": args.channels,
         "dst": f"239.102.{200 + index}.0+{args.xb - 1}:7148",
     }
-    if args.jones_per_heap is not None:
-        wideband_kwargs["jones_per_heap"] = args.jones_per_heap
+    if args.jones_per_batch is not None:
+        wideband_kwargs["jones_per_batch"] = args.jones_per_batch
     wideband_arg = ",".join(f"{key}={value}" for key, value in wideband_kwargs.items())
     command = (
         "docker run "
@@ -185,6 +185,8 @@ def fgpu_factory(
             "centre_frequency": adc_sample_rate / 4,
             "dst": f"239.102.{216 + index}.0+{args.xb // args.narrowband_decimation - 1}:7148",
         }
+        if args.jones_per_batch is not None:
+            narrowband_kwargs["jones_per_batch"] = args.jones_per_batch
         narrowband_arg = ",".join(f"{key}={value}" for key, value in narrowband_kwargs.items())
         command += f"--narrowband={narrowband_arg} "
     for arg in ["array_size", "dig_sample_bits"]:
@@ -431,10 +433,10 @@ async def main():  # noqa: D103
         help="The number of antennas in the array.",
     )
     parser.add_argument(
-        "--jones-per-heap",
+        "--jones-per-batch",
         type=int,
         metavar="SAMPLES",
-        help="Jones vectors in each output heap",
+        help="Jones vectors in each output batch",
     )
     parser.add_argument(
         "--dig-heap-samples",

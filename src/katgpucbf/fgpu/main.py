@@ -38,7 +38,7 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from .. import (
-    DEFAULT_JONES_PER_HEAP,
+    DEFAULT_JONES_PER_BATCH,
     DEFAULT_KATCP_HOST,
     DEFAULT_KATCP_PORT,
     DEFAULT_PACKET_PAYLOAD_BYTES,
@@ -110,7 +110,7 @@ class OutputDict(TypedDict, total=False):
 
     name: str
     channels: int
-    jones_per_heap: int
+    jones_per_batch: int
     dst: list[Endpoint]
     taps: int
     w_cutoff: float
@@ -154,7 +154,7 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
                         raise ValueError(f"{key} specified twice")
                     case "name":
                         kws[key] = data
-                    case "channels" | "taps" | "jones_per_heap":
+                    case "channels" | "taps" | "jones_per_batch":
                         kws[key] = int(data)
                     case "w_cutoff":
                         kws[key] = float(data)
@@ -190,8 +190,8 @@ def parse_wideband(value: str) -> WidebandOutput:
         kws = {
             "taps": DEFAULT_TAPS,
             "w_cutoff": DEFAULT_W_CUTOFF,
-            "jones_per_heap": DEFAULT_JONES_PER_HEAP,
-            **kws,  # type: ignore[misc]
+            "jones_per_batch": DEFAULT_JONES_PER_BATCH,
+            **kws,
         }
         return WidebandOutput(**kws)
     except ValueError as exc:
@@ -233,7 +233,7 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
         kws = {
             "taps": DEFAULT_TAPS,
             "w_cutoff": DEFAULT_W_CUTOFF,
-            "jones_per_heap": DEFAULT_JONES_PER_HEAP,
+            "jones_per_batch": DEFAULT_JONES_PER_BATCH,
             "weight_pass": DEFAULT_WEIGHT_PASS,
             "ddc_taps": DEFAULT_DDC_TAPS_RATIO * kws["decimation"],
             **kws,
@@ -383,11 +383,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="The number of antennas in the array. [%(default)s]",
     )
     parser.add_argument(
-        "--jones-per-heap",
+        "--jones-per-batch",
         type=int,
-        default=DEFAULT_JONES_PER_HEAP,
+        default=DEFAULT_JONES_PER_BATCH,
         metavar="SAMPLES",
-        help="Jones vectors in each output heap [%(default)s]",
+        help="Jones vectors in each output batch [%(default)s]",
     )
     parser.add_argument(
         "--src-chunk-samples",
@@ -402,7 +402,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=2**23,
         metavar="VECTORS",
         help="Number of Jones vectors in output chunks. If not a multiple of "
-        "len(dst)*jones-per-heap, it will be rounded up to the next multiple. [%(default)s]",
+        "jones-per-batch, it will be rounded up to the next multiple. [%(default)s]",
     )
     parser.add_argument(
         "--max-delay-diff",
@@ -492,8 +492,8 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
     else:
         monitor = NullMonitor()
 
-    chunk_jones_lcm = math.lcm(*(output.jones_per_heap * len(output.dst) for output in args.outputs))
-    chunk_jones = accel.roundup(args.dst_chunk_jones, chunk_jones_lcm)
+    batch_jones_lcm = math.lcm(*(output.jones_per_batch for output in args.outputs))
+    chunk_jones = accel.roundup(args.dst_chunk_jones, batch_jones_lcm)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,

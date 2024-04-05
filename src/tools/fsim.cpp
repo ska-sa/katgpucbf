@@ -79,7 +79,7 @@ struct options
     int n_ants = 64;
     int n_chans_per_output_stream = 512;
     int n_chans_total = 32768;
-    int n_jones_per_heap = 1 << 20;
+    int n_jones_per_batch = 1 << 20;
     size_t packet_payload_size_bytes = 8192;
     bool run_once = false;
     bool ibv = false;
@@ -133,8 +133,8 @@ static options parse_options(int argc, const char **argv)
                        "Number of channels out of the FFT. (Normally half of FFT size)");
     desc.add_options()("channels-per-substream", make_opt(opts.n_chans_per_output_stream),
                        "Each F-Engine output substream transmits a subset of the FFT channels");
-    desc.add_options()("jones-per-heap", make_opt(opts.n_jones_per_heap),
-                       "Number of Jones vectors in each output heap");
+    desc.add_options()("jones-per-batch", make_opt(opts.n_jones_per_batch),
+                       "Number of Jones vectors in each output batch");
     desc.add_options()("dst-packet-payload", make_opt(opts.packet_payload_size_bytes),
                        "The number of payload bytes per packet");
     desc.add_options()("ibv", make_opt(opts.ibv), "Use ibverbs acceleration");
@@ -173,11 +173,11 @@ static options parse_options(int argc, const char **argv)
      * contains many smaller packets. Each packet also contains other SPEAD
      * data and is thus slightly larger than the payload size.
      */
+    opts.n_spectra_per_heap = opts.n_jones_per_batch / opts.n_chans;
     opts.heap_size_bytes =
-        opts.n_jones_per_heap * N_POLS * COMPLEXITY * SAMPLE_BITS / 8;
+        opts.n_chans_per_output_stream * opts.n_spectra_per_heap * N_POLS * COMPLEXITY * SAMPLE_BITS / 8;
     // Round up when dividing
     opts.packets_per_heap = (opts.heap_size_bytes + opts.packet_payload_size_bytes - 1) / opts.packet_payload_size_bytes;
-    opts.n_spectra_per_heap = opts.n_jones_per_heap / opts.n_chans_per_output_stream;
     opts.timestamp_step =
         opts.n_chans_total * 2 * opts.n_spectra_per_heap; // The *2 is due to the spectrum being cut in half due
                                                           // to symmetric properties of the fourier transform
