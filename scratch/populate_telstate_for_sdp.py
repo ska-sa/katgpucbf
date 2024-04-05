@@ -49,10 +49,7 @@ class SensorConverter:
         if telstate_name is None:
             telstate_name = sensor_name.replace("-", "_")
         full_sensor_name = f"{self.stream}-{sensor_name}"
-        reply, informs = await self.client.request("sensor-value", full_sensor_name)
-        if len(informs) != 1:
-            raise RuntimeError(f"Expected 1 sensor value for {full_sensor_name}, received {len(informs)}")
-        value = aiokatcp.decode(katcp_type, informs[0].arguments[4])
+        value = await self.client.sensor_value(full_sensor_name, katcp_type)
         if convert is not None:
             value = convert(value)
         self.set(telstate_name, value)

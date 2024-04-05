@@ -16,9 +16,6 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Any
-
-import aiokatcp
 import numpy as np
 import prometheus_client
 from numpy.typing import NDArray
@@ -94,31 +91,6 @@ class PromDiff:
             raise ValueError(f"Metric {name}{labels} did not exist at start")
         else:
             return after
-
-
-async def get_sensor(client: aiokatcp.Client, name: str) -> Any:
-    """Get the value of a sensor.
-
-    .. todo:
-
-       This should probably be implemented in aiokatcp.
-    """
-    # This is not a complete list of sensor types. Extend as necessary.
-    sensor_types = {
-        b"integer": int,
-        b"float": float,
-        b"boolean": bool,
-        b"discrete": str,  # Gets the string name of the enum
-        b"string": str,  # Allows passing through arbitrary values even if not UTF-8
-    }
-
-    _reply, informs = await client.request("sensor-list", name)
-    assert len(informs) == 1
-    sensor_type = sensor_types.get(informs[0].arguments[3], bytes)
-    _reply, informs = await client.request("sensor-value", name)
-    assert len(informs) == 1
-    assert informs[0].arguments[3] in {b"nominal", b"warn", b"error"}
-    return aiokatcp.decode(sensor_type, informs[0].arguments[4])
 
 
 def unpackbits(data: NDArray[np.uint8], sample_bits: int = DIG_SAMPLE_BITS) -> np.ndarray:

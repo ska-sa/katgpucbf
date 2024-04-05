@@ -19,7 +19,7 @@
 import matplotlib.figure
 import numpy as np
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl, get_sensor_val
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import POTLocator, Reporter
 
 
@@ -41,7 +41,7 @@ async def test_consistency(
 
     pdf_report.step("Configure the D-sim with Gaussian noise.")
     amplitude = 0.2
-    max_period = await get_sensor_val(cbf.dsim_clients[0], "max-period")
+    max_period = await cbf.dsim_clients[0].sensor_value("max-period", int)
     period = receiver.n_samples_between_spectra * receiver.n_spectra_per_heap
     period = min(period, max_period)
     await cbf.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;", period)

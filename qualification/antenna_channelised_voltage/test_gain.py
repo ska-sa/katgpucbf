@@ -23,7 +23,7 @@ import pytest
 from numpy.typing import NDArray
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl, get_sensor_val
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import Reporter
 
 
@@ -54,7 +54,7 @@ async def test_gains(
     scale = 0.02
     signals = f"common=wgn({scale}, 1); common; common;"
     # Compute repeat period guaranteed to divide into accumulation length.
-    max_period = await get_sensor_val(cbf.dsim_clients[0], "max-period")
+    max_period = await cbf.dsim_clients[0].sensor_value("max-period", int)
     period = receiver.n_samples_between_spectra * receiver.n_spectra_per_heap
     period = min(period, max_period)
     pdf_report.detail(f"Set white Gaussian noise with scale {scale}, period {period} samples.")

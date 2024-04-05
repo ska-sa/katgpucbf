@@ -38,7 +38,7 @@ from katgpucbf.xbgpu.engine import BPipeline, RxQueueItem, XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args, parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
-from .. import PromDiff, get_sensor
+from .. import PromDiff
 from . import test_parameters
 from .test_recv import gen_heap
 
@@ -1118,8 +1118,7 @@ class TestEngine:
             counter += 1
             if counter == count:
                 await client.request(*request)
-                _, informs = await client.request("sensor-value", "steady-state-timestamp")
-                timestamp.append(int(informs[0].arguments[4]))
+                timestamp.append(await client.sensor_value("steady-state-timestamp", int))
             return await orig_get_rx_item(self)
 
         monkeypatch.setattr(BPipeline, "_get_rx_item", get_rx_item)
@@ -1152,7 +1151,7 @@ class TestEngine:
         request_factory: Callable[[str, int], tuple],
     ):
         """Test that the steady-state-timestamp sensor works."""
-        assert (await get_sensor(client, "steady-state-timestamp")) == 0
+        assert (await client.sensor_value("steady-state-timestamp")) == 0
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
