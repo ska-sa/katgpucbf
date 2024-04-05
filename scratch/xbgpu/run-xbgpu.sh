@@ -14,19 +14,29 @@ spectra_per_heap=$((jones_per_batch / channels))
 samples_between_spectra=${samples_between_spectra:-$((channels*2))}
 heap_accumulation_threshold=$(python -c "print(round($int_time * $adc_sample_rate / $samples_between_spectra / $spectra_per_heap))")
 
+index="$1"
 nproc=$(nproc)
-step=$(($nproc / 4))
-affinity="$(($1 * step))"
+step=$((nproc / 4))
+affinity="$((index * step))"
 rx_affinity=$affinity
 rx_comp=$rx_affinity
-tx_affinity=$(($affinity + 1))
+tx_affinity=$((affinity + 1))
 tx_comp=$tx_affinity
 other_affinity=$tx_affinity
-src_mcast="239.10.10.$((10 + $1)):7148"
-dst_mcast="239.10.11.$((10 + $1)):7148"
-channel_offset=$(($channels_per_substream * $1))
-katcp_port="$((7140 + $1))"
-prom_port="$((7150 + $1))"
+src_mcast="239.10.10.$((10 + index)):7148"
+dst_mcast="239.10.11.$((10 + index)):7148"
+channel_offset=$((channels_per_substream * index))
+katcp_port="$((7140 + index))"
+prom_port="$((7150 + index))"
+
+declare -a beam_args
+beams=${beams:-4}
+i=0
+while [ "$i" -lt "$beams" ]; do
+    beam_args+=("--beam=name=beam_${i}x,pol=0,dst=239.10.$((12 + index)).$((i * 2)):7148")
+    beam_args+=("--beam=name=beam_${i}y,pol=1,dst=239.10.$((12 + index)).$((i * 2 + 1)):7148")
+    i="$((i + 1))"
+done
 
 case "$1" in
     0|1)
@@ -65,14 +75,7 @@ exec schedrr spead2_net_raw numactl -C $other_affinity xbgpu \
     --dst-interface $iface \
     --src-ibv --dst-ibv \
     --corrprod=name=bcp1,heap_accumulation_threshold=${heap_accumulation_threshold},dst=$dst_mcast \
-    --beam=name=beam_0x,pol=0,dst=239.10.12.$((0 + $1 * 8)):7148 \
-    --beam=name=beam_0y,pol=1,dst=239.10.12.$((1 + $1 * 8)):7148 \
-    --beam=name=beam_1x,pol=0,dst=239.10.12.$((2 + $1 * 8)):7148 \
-    --beam=name=beam_1y,pol=1,dst=239.10.12.$((3 + $1 * 8)):7148 \
-    --beam=name=beam_2x,pol=0,dst=239.10.12.$((4 + $1 * 8)):7148 \
-    --beam=name=beam_2y,pol=1,dst=239.10.12.$((5 + $1 * 8)):7148 \
-    --beam=name=beam_3x,pol=0,dst=239.10.12.$((6 + $1 * 8)):7148 \
-    --beam=name=beam_3y,pol=1,dst=239.10.12.$((7 + $1 * 8)):7148 \
+    "${beam_args[@]}" \
     --adc-sample-rate ${adc_sample_rate} \
     --array-size ${array_size:-64} \
     --jones-per-batch ${jones_per_batch} \
