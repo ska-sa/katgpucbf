@@ -264,13 +264,19 @@ Accumulations, Dumps and Output Data
 The input data is accumulated before being output. For every output heap,
 multiple input heaps are received.
 
-A heap from a single F-Engine consists of a set number of spectra indicated by
-the :option:`!--spectra-per-heap` flag, where the spectra are time samples. Each of
-these time samples is part of a different spectrum, meaning that the timestamp
-difference per sample is equal to the value of :option:`!--samples-between-spectra`.
-The timestamp difference between two consecutive heaps from the same F-Engine is equal to:
+A heap from a single F-Engine consists of a set number of spectra, referred to as
+``spectra_per_heap``, where the spectra are time samples.
+Each of these time samples is part of a different spectrum, meaning that the
+timestamp difference per sample is equal to the value of
+:option:`!--samples-between-spectra`.  The timestamp difference between two
+consecutive heaps from the same F-Engine is equal to:
 
   `heap_timestamp_step = spectra_per_heap * samples_between_spectra`.
+
+The value of ``spectra_per_heap`` is not set explicitly on the command line,
+but rather inferred from the :option:`!--jones-per-batch` argument. The latter
+is the product of ``spectra_per_heap`` and the stream's channel count (and
+thus, the number of Jones vectors in an F-engine output batch).
 
 A :dfn:`batch` of heaps is a collection of heaps from different F-Engines with the same
 timestamp. A :dfn:`chunk` consists of multiple consecutive batches (the number is given
