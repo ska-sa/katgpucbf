@@ -63,7 +63,7 @@ extern "C++" {
 #define NR_BASELINES		 (NR_RECEIVERS * (NR_RECEIVERS + 1) / 2)
 #define ALIGN(A,N)		 (((A)+(N)-1)/(N)*(N))
 
-#define NR_BLOCKS_PER_BATCH	 (128 / (NR_BITS))
+#define NR_TIMES_PER_BLOCK	 (128 / (NR_BITS))
 #define NR_RECEIVERS_PER_TCM_X	 ((NR_BITS) == 4 ? 2 : 4)
 #define NR_RECEIVERS_PER_TCM_Y	 8
 #define NR_RECEIVERS_PER_BLOCK_X (NR_RECEIVERS_PER_BLOCK == 64 ? 32 : NR_RECEIVERS_PER_BLOCK)
@@ -82,10 +82,10 @@ extern "C++" {
 #error unsupported NR_RECEIVERS_PER_BLOCK
 #endif
 
-#if NR_SAMPLES_PER_CHANNEL % NR_BLOCKS_PER_BATCH != 0
-#error NR_SAMPLES_PER_CHANNEL should be a multiple of NR_BLOCKS_PER_BATCH
+#if NR_SAMPLES_PER_CHANNEL % NR_TIMES_PER_BLOCK != 0
+#error NR_SAMPLES_PER_CHANNEL should be a multiple of NR_TIMES_PER_BLOCK
 #endif
-#define NR_TIMES_PER_BATCH (NR_SAMPLES_PER_CHANNEL / NR_BLOCKS_PER_BATCH)
+#define NR_BLOCKS_PER_BATCH (NR_SAMPLES_PER_CHANNEL / NR_TIMES_PER_BLOCK)
 
 #define MIN(A,B) ((A)<(B)?(A):(B))
 
@@ -169,7 +169,7 @@ inline __device__ Visibility operator += (Visibility &a, Visibility b)
 }
 
 
-typedef Sample Samples[NR_RECEIVERS][NR_CHANNELS][NR_TIMES_PER_BATCH][NR_BLOCKS_PER_BATCH][NR_POLARIZATIONS];
+typedef Sample Samples[NR_RECEIVERS][NR_CHANNELS][NR_BLOCKS_PER_BATCH][NR_TIMES_PER_BLOCK][NR_POLARIZATIONS];
 
 #if !defined CUSTOM_STORE_VISIBILITY
 typedef Visibility Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
@@ -227,14 +227,14 @@ __device__ inline int4 conj_perm(int4 v)
 template <unsigned nrReceiversPerBlock = NR_RECEIVERS_PER_BLOCK> struct SharedData
 {
 #if NR_BITS == 4
-  typedef char        Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_BLOCKS_PER_BATCH][1];
-  typedef char        Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_BLOCKS_PER_BATCH + 16][1];
+  typedef char        Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK][1];
+  typedef char        Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_TIMES_PER_BLOCK + 16][1];
 #elif NR_BITS == 8
-  typedef signed char Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_BLOCKS_PER_BATCH][COMPLEX];
-  typedef signed char Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_BLOCKS_PER_BATCH + 8][COMPLEX];
+  typedef signed char Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK][COMPLEX];
+  typedef signed char Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_TIMES_PER_BLOCK + 8][COMPLEX];
 #elif NR_BITS == 16
-  typedef __half      Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_BLOCKS_PER_BATCH][COMPLEX];
-  typedef __half      Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_BLOCKS_PER_BATCH + 4][COMPLEX];
+  typedef __half      Asamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][NR_TIMES_PER_BLOCK][COMPLEX];
+  typedef __half      Bsamples[NR_SHARED_BUFFERS][nrReceiversPerBlock][NR_POLARIZATIONS][COMPLEX][NR_TIMES_PER_BLOCK + 4][COMPLEX];
 #endif
 };
 
@@ -251,8 +251,8 @@ template <typename T> struct FetchData
   {
     if (skipLoadCheck || firstReceiver + loadRecv < NR_RECEIVERS)
     {
-      unsigned outerTime = time / NR_TIMES_PER_BATCH;
-      unsigned innerTime = time % NR_TIMES_PER_BATCH;
+      unsigned outerTime = time / NR_BLOCKS_PER_BATCH;
+      unsigned innerTime = time % NR_BLOCKS_PER_BATCH;
       data = * (T *) &samples[outerTime][firstReceiver + loadRecv][channel][innerTime][loadTime][0];
       //memcpy(&data, &samples[outerTime][firstReceiver + loadRecv][channel][innerTime][loadTime][0], sizeof(T));
     }
@@ -455,7 +455,7 @@ template <bool add, bool fullTriangle> __device__ void doCorrelateTriangle(Visib
     __syncthreads();
 
 #pragma unroll
-    for (unsigned minorTime = 0; minorTime < NR_BLOCKS_PER_BATCH; minorTime += ((NR_BITS) == 4 ? 32 : 8)) {
+    for (unsigned minorTime = 0; minorTime < NR_TIMES_PER_BLOCK; minorTime += ((NR_BITS) == 4 ? 32 : 8)) {
       Afrag aFrag;
       Bfrag bFrag[nrFragmentsX];
 
@@ -563,7 +563,7 @@ template <bool add, unsigned nrFragmentsY, unsigned nrFragmentsX, bool skipLoadY
     __syncthreads();
 
 #pragma unroll
-    for (unsigned minorTime = 0; minorTime < NR_BLOCKS_PER_BATCH; minorTime += ((NR_BITS) == 4 ? 32 : 8)) {
+    for (unsigned minorTime = 0; minorTime < NR_TIMES_PER_BLOCK; minorTime += ((NR_BITS) == 4 ? 32 : 8)) {
       Afrag aFrag;
       Bfrag bFrag[nrFragmentsX];
 
