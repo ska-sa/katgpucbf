@@ -173,7 +173,7 @@ static options parse_options(int argc, const char **argv)
      * contains many smaller packets. Each packet also contains other SPEAD
      * data and is thus slightly larger than the payload size.
      */
-    opts.n_spectra_per_heap = opts.n_jones_per_batch / opts.n_chans;
+    opts.n_spectra_per_heap = opts.n_jones_per_batch / opts.n_chans_total;
     opts.heap_size_bytes =
         opts.n_chans_per_output_stream * opts.n_spectra_per_heap * N_POLS * COMPLEXITY * SAMPLE_BITS / 8;
     // Round up when dividing
