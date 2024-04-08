@@ -63,6 +63,7 @@ repos:
             # Note: actual pandas version is 2.1.4, but pandas-stubs doesn't
             # have a release for that at the time of writing.
             'pandas-stubs==2.1.1.230928',
+            'prometheus-client==0.19.0',
             'pyparsing==3.0.9',
             'pytest==7.4.3',
             'redis==5.0.1',  # Indirect dependency of katsdptelstate
