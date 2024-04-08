@@ -41,7 +41,7 @@ class POTLocator(matplotlib.ticker.Locator):
     def __init__(self, nbins: int = 10) -> None:
         self.set_params(nbins=nbins)
 
-    def set_params(self, nbins: int | None) -> None:  # noqa: D102
+    def set_params(self, nbins: int | None = None) -> None:  # noqa: D102
         if nbins is not None:
             self._nbins = nbins
 
