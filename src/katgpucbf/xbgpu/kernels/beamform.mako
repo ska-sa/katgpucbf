@@ -60,6 +60,7 @@ DEVICE_FN float dither(GLOBAL curandStateXORWOW_t *state)
 // Each thread computes all beams for one (channel, time)
 KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     GLOBAL char2 * RESTRICT out,             // shape frame, beam, channel, time
+    GLOBAL unsigned int * RESTRICT out_saturated,    // shape beam
     GLOBAL const char4 * RESTRICT in,        // shape frame, antenna, channel, time, pol
     GLOBAL const cplx * RESTRICT weights,    // shape antenna, beam, tightly packed
     GLOBAL const float * RESTRICT delays,    // shape antenna, beam, tightly packed
@@ -78,17 +79,21 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
      * [BATCH_ANTENNAS][BATCH_BEAMS] but some parts of the code index
      * it as a linear array.
      */
-    LOCAL_DECL cplx l_weights[BATCH_ANTENNAS * BATCH_BEAMS];
+    LOCAL_DECL union {
+        cplx l_weights[BATCH_ANTENNAS * BATCH_BEAMS];
+        // The | 1 pads the inner dimension to an odd length, to reduce bank conflicts
+        bool l_saturated[BATCH_BEAMS][BLOCK_SPECTRA | 1];
+    } u;
     const int beam_pols[N_BEAMS] = { ${ ", ".join(str(p) for p in beam_pols) } };
-    int lid = get_local_id(0);
-    int spectrum = get_global_id(0);
-    int channel = get_global_id(1);
-    int frame = get_global_id(2);
+    const int lid = get_local_id(0);
+    const int spectrum = get_global_id(0);
+    const int channel = get_global_id(1);
+    const int frame = get_global_id(2);
     /* Whether this thread works on actual input/output values. Some work
      * items will hang off the end of the data but need to keep running to
      * participate in the coefficient calculations.
      */
-    bool valid = (spectrum < n_spectra);
+    const bool valid = (spectrum < n_spectra);
     // Point to the first input/output handled by this work item
     in += frame * in_frame_stride + channel * in_stride + spectrum;
     out += frame * out_frame_stride + channel * out_stride + spectrum;
@@ -125,7 +130,7 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
                 float cd = channel * delays[addr];
                 cplx rot;
                 sincospif(cd, &rot.y, &rot.x);
-                l_weights[i] = cmul(w, rot);
+                u.l_weights[i] = cmul(w, rot);
             }
             BARRIER(); // Complete all weight calculations before using them
 
@@ -147,25 +152,46 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
                     {
                         int beam = b_batch + i;
                         int pol = beam_pols[beam];
-                        accum[i] = cmad(l_weights[a * b_batch_size + i], sample_pols[pol], accum[i]);
+                        accum[i] = cmad(u.l_weights[a * b_batch_size + i], sample_pols[pol], accum[i]);
                     }
                 }
             }
             BARRIER();  // protect against next loop iteration overwriting l_weights
         }
 
+        // Write accumulators to output
         if (valid)
         {
-            // Write accumulators to output
             for (int i = 0; i < b_batch_size; i++)
             {
-                int re, im;
                 int beam = i + b_batch;
-                // TODO: report saturation flags somewhere
-                quant_8bit(accum[i].x + dither(rand_state), &re);
-                quant_8bit(accum[i].y + dither(rand_state), &im);
+                int re, im;
+                bool saturated =
+                    quant_8bit(accum[i].x + dither(rand_state), &re)
+                    | quant_8bit(accum[i].y + dither(rand_state), &im);
                 out[out_beam_stride * beam] = make_char2(re, im);
+                u.l_saturated[i][lid] = saturated;
             }
         }
+        else
+        {
+            for (int i = 0; i < b_batch_size; i++)
+                u.l_saturated[i][lid] = 0;
+        }
+
+        BARRIER();  // separate writes and reads of l_saturated
+
+        /* Sum and write out saturation counts. Each beam's counts
+         * are summed serially by one thread.
+         */
+        for (int i = lid; i < BATCH_BEAMS; i += BLOCK_SPECTRA)
+        {
+            int beam = i + b_batch;
+            unsigned int saturated = 0;
+            for (int j = 0; j < BLOCK_SPECTRA; j++)
+                saturated += u.l_saturated[i][j];
+            atomicAdd(&out_saturated[beam], saturated);
+        }
+        BARRIER(); // switching back to using u.l_weights for the next loop
     }
 }

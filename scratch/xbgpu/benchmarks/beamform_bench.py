@@ -38,13 +38,12 @@ def main():
 
     ctx = katsdpsigproc.accel.create_some_context()
     command_queue = ctx.create_command_queue()
-    template = BeamformTemplate(ctx, [0, 1] * args.beams)
+    template = BeamformTemplate(ctx, [0, 1] * args.beams, n_spectra_per_frame=args.spectra_per_heap)
     fn = template.instantiate(
         command_queue,
         n_frames=args.heaps_per_fengine_per_chunk,
         n_ants=args.array_size,
         n_channels=args.channels_per_substream,
-        n_spectra_per_frame=args.spectra_per_heap,
     )
 
     builder = RandomStateBuilder(ctx)

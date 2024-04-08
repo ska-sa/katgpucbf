@@ -304,13 +304,16 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
     ) -> None:
         super().__init__(outputs, name, engine, context)
 
-        template = BeamformTemplate(context, [output.pol for output in outputs])
+        template = BeamformTemplate(
+            context,
+            [output.pol for output in outputs],
+            n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
+        )
         self._beamform = template.instantiate(
             self._proc_command_queue,
             n_frames=engine.heaps_per_fengine_per_chunk,
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_per_substream,
-            n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
         )
         allocator = accel.DeviceAllocator(context=context)
         assert isinstance(context, katsdpsigproc.cuda.Context)
