@@ -38,7 +38,7 @@ repos:
         # check the benchmarks/ directory because that code is more complex.
         exclude: 'setup\.py|scratch/(?!benchmarks)'
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v1.7.1'
+    rev: 'v1.9.0'
     hooks:
       - id: mypy
         # Passing filenames to mypy can do odd things. See
