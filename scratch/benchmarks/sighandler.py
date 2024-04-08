@@ -36,4 +36,6 @@ def add_sigint_handler() -> None:
         task.cancel()
 
     loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGINT, handler, asyncio.current_task())
+    task = asyncio.current_task()
+    assert task is not None
+    loop.add_signal_handler(signal.SIGINT, handler, task)
