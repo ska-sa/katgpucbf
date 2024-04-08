@@ -79,7 +79,7 @@ async def test_linearity(
     title = "Power relative to input CW level"
     xticks = np.arange(len(cw_scales))
     fig = Figure()
-    ax = fig.subplots()
+    ax = fig.add_subplot()
     ax.plot(20 * np.log10(cw_scales), label="Reference")
     with np.errstate(divide="ignore"):  # Avoid warnings when the value is zero
         ax.plot(20 * np.log10(linear_test_result), label="Measured")
