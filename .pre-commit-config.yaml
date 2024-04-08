@@ -72,6 +72,7 @@ repos:
             # Note: actual docutils version is 0.20.1, but types-docutils
             # doesn't have a release for that yet.
             'types-docutils==0.20.0.3',
+            'types-setuptools==65.6.0.3',  # Indirect dependency
             'types-six==1.16.0',
         ]
   - repo: https://github.com/jazzband/pip-tools
