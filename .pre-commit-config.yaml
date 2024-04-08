@@ -58,6 +58,7 @@ repos:
             'dask==2023.12.0',
             'katsdpsigproc==1.8.1',
             'katsdptelstate==0.13',
+            'matplotlib==3.8.2',
             'numpy==1.26.2',
             # Note: actual pandas version is 2.1.4, but pandas-stubs doesn't
             # have a release for that at the time of writing.
