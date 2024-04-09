@@ -214,8 +214,8 @@ class TestKatcpRequests:
 
         for pol in range(N_POLS):
             sensor_reading = await engine_client.sensor_value(f"wideband.input{pol}.delay", str)
-            sensor_values = sensor_reading[1:-1].split(",")[1:]  # Drop the timestamp
-            sensor_values = (float(field.strip()) for field in sensor_values)
+            sensor_values_str = sensor_reading[1:-1].split(",")[1:]  # Drop the timestamp
+            sensor_values = (float(field.strip()) for field in sensor_values_str)
 
             for actual_value, expected_value in zip(sensor_values, parse_delay_string(correct_delay_strings[pol])):
                 assert actual_value == pytest.approx(expected=expected_value)
