@@ -184,7 +184,7 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
         /* Sum and write out saturation counts. Each beam's counts
          * are summed serially by one thread.
          */
-        for (int i = lid; i < BATCH_BEAMS; i += BLOCK_SPECTRA)
+        for (int i = lid; i < b_batch_size; i += BLOCK_SPECTRA)
         {
             int beam = i + b_batch;
             unsigned int saturated = 0;
