@@ -133,20 +133,21 @@ class XTxQueueItem(QueueItem):
 class BTxQueueItem(QueueItem):
     """Transmit queue item for the beamformer pipeline.
 
-    The `buffer_device`, `weights` and `delays` must have the same shape and
-    type as the ``in``, ``weights`` and ``delays`` slots in
-    :class:`.Beamform`.
+    The `out`, `saturated`, `rand_states`, `weights` and `delays` must have the
+    same shape and dtype as the corresponding slots in :class:`.Beamform`.
     """
 
     def __init__(
         self,
-        buffer_device: accel.DeviceArray,
+        out: accel.DeviceArray,
+        saturated: accel.DeviceArray,
         rand_states: accel.DeviceArray,
         weights: MappedArray,
         delays: MappedArray,
         timestamp: int = 0,
     ) -> None:
-        self.buffer_device = buffer_device
+        self.out = out
+        self.saturated = saturated
         self.rand_states = rand_states
         self.weights = weights
         self.delays = delays
@@ -319,7 +320,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         assert isinstance(context, katsdpsigproc.cuda.Context)
         builder = RandomStateBuilder(context)
         for i in range(self.n_tx_items):
-            buffer_device = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
+            out = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
+            saturated = self._beamform.slots["saturated"].allocate(allocator=allocator, bind=False)
             assert isinstance(self._beamform.slots["rand_states"], accel.IOSlot)
             # sequence_first and sequence_step are chosen to ensure unique
             # sequence numbers across all BTxItems in all instances of the
@@ -332,13 +334,9 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 sequence_first=i * engine.n_channels_total + engine.channel_offset_value,
                 sequence_step=self.n_tx_items * engine.n_channels_total,
             )
-            # TODO: bring it back once support is inplemented
-            # saturated = accel.DeviceArray(
-            #     context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32
-            # )
             weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
-            tx_item = BTxQueueItem(buffer_device, rand_states, weights, delays)
+            tx_item = BTxQueueItem(out, saturated, rand_states, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
         # These are the original weights, delays and gains as provided by the
         # user, rather than the processed values passed to the kernel.
@@ -483,7 +481,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             self._beamform.bind(
                 **{
                     "in": rx_item.buffer_device,
-                    "out": tx_item.buffer_device,
+                    "out": tx_item.out,
+                    "saturated": tx_item.saturated,
                     "weights": tx_item.weights.device,
                     "delays": tx_item.delays.device,
                     "rand_states": tx_item.rand_states,
@@ -518,10 +517,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
             chunk = await self.send_stream.get_free_chunk()
 
-            item.buffer_device.get_async(self._download_command_queue, chunk.data)
-            # TODO: re-enable once supported
-            # item.saturated.get_async(self._download_command_queue, chunk.saturated)
-            chunk.saturated.fill(0)
+            item.out.get_async(self._download_command_queue, chunk.data)
+            item.saturated.get_async(self._download_command_queue, chunk.saturated)
 
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])

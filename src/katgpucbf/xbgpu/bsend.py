@@ -68,9 +68,6 @@ class Frame:
     data
         Payload data for the frame with shape (n_beams,
         n_channels_per_substream, spectra_per_heap, COMPLEX).
-    saturated
-        Total number of complex samples that saturated during requantisation,
-        with shape (n_beams,).
     channel_offset
         The first frequency channel processed.
     """
@@ -79,14 +76,12 @@ class Frame:
         self,
         timestamp: np.ndarray,
         data: np.ndarray,
-        saturated: np.ndarray,
         *,
         channel_offset: int,
     ) -> None:
         self.heaps: list[spead2.send.Heap] = []
         self.data = data
-        self.saturated = saturated
-        n_substreams = saturated.shape[0]
+        n_substreams = data.shape[0]
         for i in range(n_substreams):
             heap = spead2.send.Heap(flavour=FLAVOUR)
             heap.repeat_pointers = True
@@ -116,7 +111,7 @@ class Chunk:
         n_beams, n_channels_per_substream, n_spectra_per_heap, COMPLEX) and
         dtype :const:`SEND_DTYPE`.
     saturated
-        Storage for saturation counts, with shape (n_frames, n_beams) and dtype
+        Storage for saturation counts, with shape (n_beams,) and dtype
         uint32.
     channel_offset
         The first frequency channel processed.
@@ -150,7 +145,6 @@ class Chunk:
             Frame(
                 self._timestamps[i, ...],
                 data[i],
-                saturated[i],
                 channel_offset=channel_offset,
             )
             for i in range(n_frames)
@@ -353,11 +347,7 @@ class BSend:
         for _ in range(n_tx_items):
             chunk = Chunk(
                 accel.HostArray(send_shape, SEND_DTYPE, context=context),
-                accel.HostArray(
-                    (frames_per_chunk, n_beams),
-                    np.uint32,
-                    context=context,
-                ),
+                accel.HostArray((n_beams,), np.uint32, context=context),
                 channel_offset=channel_offset,
                 timestamp_step=timestamp_step,
             )
