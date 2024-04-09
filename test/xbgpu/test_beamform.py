@@ -36,17 +36,27 @@ def quant(x):
 @numba.njit
 def beamform_host(
     in_: np.ndarray, weights: np.ndarray, delays: np.ndarray, beam_pols: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Implement the beamforming operation on the CPU.
 
     The input arrays have the same shape and meaning as in :mod:`katgpucbf.xbgpu.beamform`.
+
+    Returns
+    -------
+    data
+        The expected output values (with no dithering)
+    saturated_low
+        Lower bound on saturation count
+    saturated_high
+        Upper bound on saturation count
     """
     n_frames = in_.shape[0]
     n_channels = in_.shape[2]
     n_times = in_.shape[3]
     n_beams = len(beam_pols)
     out = np.zeros((n_frames, n_beams, n_channels, n_times, COMPLEX), np.int8)
-    saturated = np.zeros(n_beams, np.uint32)
+    saturated_low = np.zeros(n_beams, np.uint32)
+    saturated_high = np.zeros(n_beams, np.uint32)
     for frame in range(n_frames):
         for channel in range(n_channels):
             in_c = in_[frame, :, channel, ..., 0] + np.complex64(1j) * in_[frame, :, channel, ..., 1]
@@ -60,9 +70,11 @@ def beamform_host(
                     accum = np.dot(in_c[:, time, p].copy(), w)
                     out[frame, beam, channel, time, 0] = quant(accum.real)
                     out[frame, beam, channel, time, 1] = quant(accum.imag)
-                    if accum.real < -127.0 or accum.real > 127.0 or accum.imag < -127.0 or accum.imag > 127.0:
-                        saturated[beam] += 1
-    return out, saturated
+                    if abs(accum.real) > 126.5 or abs(accum.imag) > 126.5:
+                        saturated_high[beam] += 1
+                        if abs(accum.real) >= 127.5 or abs(accum.imag) >= 127.5:
+                            saturated_low[beam] += 1
+    return out, saturated_low, saturated_high
 
 
 @pytest.mark.combinations(
@@ -117,7 +129,7 @@ def test_beamform(
     h_delays[:] = rng.uniform(-100.0 / n_channels, 100.0 / n_channels, h_delays.shape)
     h_out.fill(0)
     h_saturated.fill(0)
-    e_out, e_saturated = beamform_host(h_in, h_weights, h_delays, np.array(beam_pols))
+    e_out, e_saturated_low, e_saturated_high = beamform_host(h_in, h_weights, h_delays, np.array(beam_pols))
 
     fn.buffer("out").zero(command_queue)
     fn.buffer("saturated").zero(command_queue)
@@ -129,8 +141,8 @@ def test_beamform(
     fn.buffer("saturated").get(command_queue, h_saturated)
 
     np.testing.assert_allclose(h_out, e_out, atol=1)
-    # Dithering means we won't be exact on this.
-    np.testing.assert_allclose(h_saturated, e_saturated, rtol=1e-2)
+    assert (e_saturated_low <= h_saturated).all()
+    assert (h_saturated <= e_saturated_high).all()
     # Ensure that the scale factor on the weights causes some clamping, but
     # not too much. But only do it for larger test cases; in small tests cases
     # it is hard to guarantee this.
