@@ -185,7 +185,7 @@ def generate_expected_beams(
     quant_gains: np.ndarray,
     channel_spacing: float,
     centre_channel: int,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """Calculate the expected beamformer output.
 
     It calculates the results according to what is expected from the specific
@@ -218,8 +218,16 @@ def generate_expected_beams(
     centre_channel
         Index of the centre channel of the whole stream, relative to the first
         channel processed by this engine.
+
+    Returns
+    -------
+    out
+        Expected output data
+    saturated
+        Saturation count per beam
     """
     out = np.empty((len(beam_pols), num_batches, channels, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
+    saturated = np.zeros((len(beam_pols),), np.uint32)
     accum = np.zeros((len(beam_pols), num_batches, channels), np.complex64)
     sample = np.empty((N_POLS, COMPLEX), np.int8)
     sample_fp = np.empty(N_POLS, np.complex64)
@@ -243,8 +251,10 @@ def generate_expected_beams(
                 sample[0, 1] = np.fmin(np.fmax(np.rint(value.imag), -127), 127)
                 # Copy to all spectra in the batch
                 out[beam, batch, channel] = sample[0]
+                if abs(value.real) > 127 or abs(value.imag) > 127:
+                    saturated[beam] += n_spectra_per_heap
 
-    return out
+    return out, saturated
 
 
 def cancel_delays(n_ants: int) -> tuple[str, ...]:
@@ -359,6 +369,7 @@ def verify_beam_sensors(
     weights: np.ndarray,
     quant_gains: np.ndarray,
     delays: np.ndarray,
+    saturation: np.ndarray,
 ) -> None:
     """Verify katcp sensors and Prometheus counters for BPipeline data.
 
@@ -389,6 +400,9 @@ def verify_beam_sensors(
         The beam weights, quantiser-gains and delays applied to each input of
         the beam data product. These are real floating-point values generated
         for the unit test.
+    saturation
+        Expected per-beam saturationcounts. These are approximate because the
+        dithering is not modelled.
     """
     # Get the number of total heaps transmitted by each beam output
     n_beam_heaps_sent = beam_results_shape[1]
@@ -400,16 +414,15 @@ def verify_beam_sensors(
     for i, beam_output in enumerate(beam_outputs):
         # The assert statements are mainly to force mypy to realise the
         # prom_diff values obtained are the expected data type
-        prom_output_b_heaps_total = prom_diff.get_sample_diff("output_b_heaps_total", {"stream": beam_output.name})
-        assert prom_output_b_heaps_total is not None, "output_b_heaps counter is None"
-        prom_output_b_bytes_total = prom_diff.get_sample_diff("output_b_bytes_total", {"stream": beam_output.name})
-        assert prom_output_b_bytes_total is not None, "output_b_bytes counter is None"
-        prom_output_b_samples_total = prom_diff.get_sample_diff("output_b_samples_total", {"stream": beam_output.name})
-        assert prom_output_b_samples_total is not None, "output_b_samples counter is None"
-        assert prom_output_b_heaps_total == n_beam_heaps_sent
-        assert prom_output_b_bytes_total == n_beam_heaps_sent * heap_bytes
-        assert prom_output_b_samples_total == n_beam_heaps_sent * heap_samples
-        # TODO: NGC-1173 Add check for `output_b_clipped_samples`
+        def prom_get(name: str) -> float:
+            diff = prom_diff.get_sample_diff(name, {"stream": beam_output.name})  # noqa: B023
+            assert diff is not None, f"{name} is None"
+            return diff
+
+        assert prom_get("output_b_heaps_total") == n_beam_heaps_sent
+        assert prom_get("output_b_bytes_total") == n_beam_heaps_sent * heap_bytes
+        assert prom_get("output_b_samples_total") == n_beam_heaps_sent * heap_samples
+        assert prom_get("output_b_clipped_samples_total") == pytest.approx(saturation[i], rel=0.05)
 
         assert first_timestamp < last_timestamp, (
             "Timestamp before katcp requests is not less than timestamp after data"
@@ -1001,7 +1014,7 @@ class TestEngine:
         )
 
         channel_spacing = xbengine.bandwidth_hz / xbengine.n_channels_total
-        expected_beams = generate_expected_beams(
+        expected_beams, expected_beam_saturation = generate_expected_beams(
             batch_start_index,
             batch_end_index - batch_start_index,
             n_channels_per_substream,
@@ -1039,6 +1052,7 @@ class TestEngine:
             weights=weights,
             quant_gains=quant_gains,
             delays=delays,
+            saturation=expected_beam_saturation,
         )
 
     @DEFAULT_PARAMETERS

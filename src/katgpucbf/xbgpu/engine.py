@@ -478,6 +478,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 tx_item.weights_version = self._weights_version
 
             # Queue GPU work
+            tx_item.saturated.zero(self._proc_command_queue)
             self._beamform.bind(
                 **{
                     "in": rx_item.buffer_device,

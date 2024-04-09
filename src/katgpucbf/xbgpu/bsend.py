@@ -172,6 +172,7 @@ class Chunk:
         data_shape: tuple[int, int, int],
         data_dtype: np.dtype,
         output_names: Sequence[str],
+        saturated: np.ndarray,
         future: asyncio.Future,
     ) -> None:
         """Increment beam stream Prometheus counters.
@@ -192,6 +193,8 @@ class Chunk:
         output_names
             List of beam stream names that are enabled for transmission for
             this `future`.
+        saturated
+            Saturation count for the chunk for each stream in `output_names`.
         future
             Future returned by the spead2 stream's `async_send_heaps`.
 
@@ -202,12 +205,13 @@ class Chunk:
         if not future.cancelled() and future.exception() is None:
             byte_count = np.prod(data_shape) * data_dtype.itemsize * n_frames_sent
             sample_count = np.prod(data_shape[:-1]) * n_frames_sent
-            for output_name in output_names:
+            for i, output_name in enumerate(output_names):
                 output_heaps_counter.labels(output_name).inc(n_frames_sent)
                 # Multiply across dimensions to get total bytes
                 output_bytes_counter.labels(output_name).inc(byte_count)
                 # Multiply across the first two dimensions to get complex sample count
                 output_samples_counter.labels(output_name).inc(sample_count)
+                output_clip_counter.labels(output_name).inc(int(saturated[i]))
 
     def send(
         self,
@@ -254,9 +258,10 @@ class Chunk:
                 functools.partial(
                     self._inc_counters,
                     len(send_futures),  # Increment counters for as many calls to async_send_heaps
-                    frame.data.shape[1:],  # Get rid of 'beam' dimension
-                    frame.data.dtype,
+                    self.data.shape[2:],  # Get rid of 'frame' and 'beam' dimensions
+                    self.data.dtype,
                     enabled_stream_names,
+                    self.saturated[send_stream.tx_enabled],
                 )
             )
         else:
