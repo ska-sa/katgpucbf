@@ -67,7 +67,7 @@ async def test_consistency(
 
     pdf_report.step("Plot spectrum")
     fig = matplotlib.figure.Figure()
-    ax = fig.subplots()
+    ax = fig.add_subplot()
     ax.plot(10 * np.log10(data[0][:, 0, 0, 0] / (2**31 - 1)))
     ax.set_title("Power")
     ax.set_xlabel("Channel")

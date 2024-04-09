@@ -119,7 +119,7 @@ async def test_channel_shape(
         (np.arange(-0.5, 0.55, 0.1), -1.5, "Channel response (zoomed)"),
     ]:
         fig = Figure()
-        ax = fig.subplots()
+        ax = fig.add_subplot()
         ax.plot(x, db_plot)
         ax.set_title(title)
         ax.set_xlabel("Channel")

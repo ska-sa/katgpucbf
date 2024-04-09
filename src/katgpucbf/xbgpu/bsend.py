@@ -206,8 +206,10 @@ class Chunk:
             (NGC-1172) Handle missing data transmission for Prometheus counters.
         """
         if not future.cancelled() and future.exception() is None:
-            byte_count = np.prod(data_shape) * data_dtype.itemsize * n_frames_sent
-            sample_count = np.prod(data_shape[:-1]) * n_frames_sent
+            # int casts are because np.prod returns np.int64 which is
+            # incompatible with the type annotations for Prometheus.
+            byte_count = int(np.prod(data_shape)) * data_dtype.itemsize * n_frames_sent
+            sample_count = int(np.prod(data_shape[:-1])) * n_frames_sent
             for output_name in output_names:
                 output_heaps_counter.labels(output_name).inc(n_frames_sent)
                 # Multiply across dimensions to get total bytes
