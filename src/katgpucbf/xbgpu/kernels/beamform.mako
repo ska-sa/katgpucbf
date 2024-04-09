@@ -25,7 +25,7 @@ extern "C++"  // PyCUDA wraps the whole file in extern "C"
 
 <%
 n_beams = len(beam_pols)
-batch_beams = min(32, n_beams)
+batch_beams = min(16, n_beams)
 %>
 
 #define N_BEAMS ${n_beams}
