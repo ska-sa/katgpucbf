@@ -244,7 +244,7 @@ partd==1.4.1
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   dask
-pillow==10.2.0
+pillow==10.3.0
     # via matplotlib
 pluggy==1.3.0
     # via

@@ -76,7 +76,7 @@ def test_beamform(
     n_antennas: int,
 ) -> None:
     """Test :class:`.Beamform` by comparing it to a CPU implementation."""
-    beam_pols = [0, 1, 0, 1, 1]
+    beam_pols = [0, 1, 0, 1, 1] + [0, 1] * 20
     n_beams = len(beam_pols)
 
     template = BeamformTemplate(context, beam_pols)

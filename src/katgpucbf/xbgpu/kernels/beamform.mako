@@ -23,11 +23,18 @@ extern "C++"  // PyCUDA wraps the whole file in extern "C"
 <%include file="/kernels/complex.mako"/>
 <%include file="/kernels/quant.mako"/>
 
-#define N_BEAMS ${len(beam_pols)}
+<%
+n_beams = len(beam_pols)
+batch_beams = min(32, n_beams)
+%>
+
+#define N_BEAMS ${n_beams}
 // Number of spectra processed in each work group
 #define BLOCK_SPECTRA ${block_spectra}
 // Number of antennas whose data is loaded and processed at a time
 #define BATCH_ANTENNAS 16
+// Number of beams processed at a time
+#define BATCH_BEAMS ${batch_beams}
 
 /// Generate a random value in (-0.5, 0.5)
 DEVICE_FN float dither(GLOBAL curandStateXORWOW_t *state)
@@ -68,12 +75,11 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
 )
 {
     /* Local storage for computed weights. The logical shape is
-     * [BATCH_ANTENNAS][N_BEAMS] but some parts of the code index
+     * [BATCH_ANTENNAS][BATCH_BEAMS] but some parts of the code index
      * it as a linear array.
      */
-    LOCAL_DECL cplx l_weights[BATCH_ANTENNAS * N_BEAMS];
+    LOCAL_DECL cplx l_weights[BATCH_ANTENNAS * BATCH_BEAMS];
     const int beam_pols[N_BEAMS] = { ${ ", ".join(str(p) for p in beam_pols) } };
-
     int lid = get_local_id(0);
     int spectrum = get_global_id(0);
     int channel = get_global_id(1);
@@ -88,64 +94,78 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     out += frame * out_frame_stride + channel * out_stride + spectrum;
     rand_state += (frame * get_num_groups(1) + channel) * n_spectra + spectrum;
 
-    // Zero out the accumulators
-    cplx accum[N_BEAMS];
-    for (int i = 0; i < N_BEAMS; i++)
-        accum[i] = make_float2(0.0f, 0.0f);
-
-    for (int a_batch = 0; a_batch < n_ants; a_batch += BATCH_ANTENNAS)
+    /* It's critical that this loop is unrolled, so that b_batch_size is known at
+     * compile time.
+     */
+#pragma unroll
+    for (int b_batch = 0; b_batch < N_BEAMS; b_batch += BATCH_BEAMS)
     {
-        int batch_size = min(BATCH_ANTENNAS, n_ants - a_batch);
-        /* Precompute the weights for all beams for this antenna batch.
-         * The work items collectively iterate over the interval
-         * [0, N_BEAMS * batch_size).
-         */
-        for (int i = lid; i < N_BEAMS * batch_size; i += BLOCK_SPECTRA)
+        const int b_batch_size = min(BATCH_BEAMS, N_BEAMS - b_batch);
+        const char4 *batch_in = in;
+
+        // Zero out the accumulators
+        cplx accum[BATCH_BEAMS];
+        for (int i = 0; i < BATCH_BEAMS; i++)
+            accum[i] = make_float2(0.0f, 0.0f);
+
+        for (int a_batch = 0; a_batch < n_ants; a_batch += BATCH_ANTENNAS)
         {
-            // Address into the global memory
-            int addr = a_batch * N_BEAMS + i;
-            cplx w = weights[addr];
-            float cd = channel * delays[addr];
-            cplx rot;
-            sincospif(cd, &rot.y, &rot.x);
-            l_weights[i] = cmul(w, rot);
+            int a_batch_size = min(BATCH_ANTENNAS, n_ants - a_batch);
+            /* Precompute the weights for this batch.
+             * The work items collectively iterate over the interval
+             * [0, b_batch_size * a_batch_size).
+             */
+            for (int i = lid; i < b_batch_size * a_batch_size; i += BLOCK_SPECTRA)
+            {
+                int beam = b_batch + i % b_batch_size;
+                int ant = a_batch + i / b_batch_size;
+                // Address into the global memory
+                int addr = ant * N_BEAMS + beam;
+                cplx w = weights[addr];
+                float cd = channel * delays[addr];
+                cplx rot;
+                sincospif(cd, &rot.y, &rot.x);
+                l_weights[i] = cmul(w, rot);
+            }
+            BARRIER(); // Complete all weight calculations before using them
+
+            if (valid)
+            {
+                for (int a = 0; a < a_batch_size; a++)
+                {
+                    char4 sample = *batch_in;
+                    // Convert to float, and split the polarisations into an
+                    // array.
+                    cplx sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
+                    batch_in += in_antenna_stride;
+
+                    /* It's critical that this loop gets unrolled, so that `pol` is
+                     * known at compile time.
+                     */
+#pragma unroll
+                    for (int i = 0; i < b_batch_size; i++)
+                    {
+                        int beam = b_batch + i;
+                        int pol = beam_pols[beam];
+                        accum[i] = cmad(l_weights[a * b_batch_size + i], sample_pols[pol], accum[i]);
+                    }
+                }
+            }
+            BARRIER();  // protect against next loop iteration overwriting l_weights
         }
-        BARRIER(); // Complete all weight calculations before using them
 
         if (valid)
         {
-            for (int a = 0; a < batch_size; a++)
+            // Write accumulators to output
+            for (int i = 0; i < b_batch_size; i++)
             {
-                char4 sample = *in;
-                // Convert to float, and split the polarisations into an
-                // array.
-                cplx sample_pols[2] = {make_float2(sample.x, sample.y), make_float2(sample.z, sample.w)};
-                in += in_antenna_stride;
-
-                /* It's critical that this loop gets unrolled, so that `pol` is
-                 * known at compile time.
-                 */
-#pragma unroll
-                for (int i = 0; i < N_BEAMS; i++)
-                {
-                    int pol = beam_pols[i];
-                    accum[i] = cmad(l_weights[a * N_BEAMS + i], sample_pols[pol], accum[i]);
-                }
+                int re, im;
+                int beam = i + b_batch;
+                // TODO: report saturation flags somewhere
+                quant_8bit(accum[i].x + dither(rand_state), &re);
+                quant_8bit(accum[i].y + dither(rand_state), &im);
+                out[out_beam_stride * beam] = make_char2(re, im);
             }
         }
-        BARRIER();  // protect against next loop iteration overwriting l_weights
-    }
-
-    if (!valid)
-        return;
-
-    // Write accumulators to output
-    for (int i = 0; i < N_BEAMS; i++)
-    {
-        int re, im;
-        // TODO: report saturation flags somewhere
-        quant_8bit(accum[i].x + dither(rand_state), &re);
-        quant_8bit(accum[i].y + dither(rand_state), &im);
-        out[out_beam_stride * i] = make_char2(re, im);
     }
 }
