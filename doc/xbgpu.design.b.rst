@@ -52,9 +52,19 @@ sizes have two advantages:
    small, and there is not enough work to keep all the work items busy, making
    the coefficient computation less efficient.
 
-The design above works well for small numbers of beams, but the register usage
-scales with the number of beams. Supporting significantly more beams would
-require rework to process beams in smaller batches.
+Higher beam counts
+^^^^^^^^^^^^^^^^^^
+The design above works well for small numbers of beams (up to about 64
+single-pol beams), but the register usage scales with the number of beams and
+eventually the registers spill to memory, causing very poor performance.
+
+To handle more beams, the kernel batches over beams, just as it does over
+antennas. The beam batch loop becomes an outer loop, with the rest of the
+kernel operating as before but only on a single batch.
+
+This does mean that the inputs are loaded multiple times, but caches help
+significantly here, and the kernel tends to be be more compute-bound in this
+domain.
 
 Dithering
 ^^^^^^^^^
