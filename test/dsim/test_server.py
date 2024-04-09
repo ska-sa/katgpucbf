@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, 2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -31,7 +31,6 @@ from katgpucbf.dsim.signal import parse_signals
 from katgpucbf.send import DescriptorSender
 from katgpucbf.spead import DIGITISER_STATUS_SATURATION_COUNT_SHIFT, DIGITISER_STATUS_SATURATION_FLAG_BIT
 
-from .. import get_sensor
 from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
 
 
@@ -71,12 +70,12 @@ async def katcp_client(katcp_server: DeviceServer) -> AsyncGenerator[aiokatcp.Cl
 
 async def test_sensors(katcp_server: DeviceServer, katcp_client: aiokatcp.Client) -> None:
     """Test the initial sensor values."""
-    assert await get_sensor(katcp_client, "signals-orig") == "cw(0.2, 123); cw(0.3, 456);"
-    assert await get_sensor(katcp_client, "signals") == "cw(0.2, 123); cw(0.3, 456);"
-    assert await get_sensor(katcp_client, "adc-sample-rate") == ADC_SAMPLE_RATE
-    assert await get_sensor(katcp_client, "sample-bits") == DIG_SAMPLE_BITS
-    assert await get_sensor(katcp_client, "max-period") == DIG_HEAP_SAMPLES * SIGNAL_HEAPS
-    assert await get_sensor(katcp_client, "period") == SIGNAL_HEAPS
+    assert await katcp_client.sensor_value("signals-orig", str) == "cw(0.2, 123); cw(0.3, 456);"
+    assert await katcp_client.sensor_value("signals", str) == "cw(0.2, 123); cw(0.3, 456);"
+    assert await katcp_client.sensor_value("adc-sample-rate") == ADC_SAMPLE_RATE
+    assert await katcp_client.sensor_value("sample-bits") == DIG_SAMPLE_BITS
+    assert await katcp_client.sensor_value("max-period") == DIG_HEAP_SAMPLES * SIGNAL_HEAPS
+    assert await katcp_client.sensor_value("period") == SIGNAL_HEAPS
 
 
 @pytest.mark.parametrize("period", [8192, None])
@@ -98,8 +97,7 @@ async def test_signals(
         args.append(period)
     reply, _ = await katcp_client.request("signals", *args)
     assert reply == [b"1234567"]
-    _, informs = await katcp_client.request("sensor-value", "steady-state-timestamp")
-    assert informs[0].arguments[4] == b"1234567"
+    assert await katcp_client.sensor_value("steady-state-timestamp", int) == 1234567
     set_heaps.assert_called_once_with(heap_sets[0])
     # Check that pol 0 is now indeed all zeros (and pol 1 is not).
     payload = heap_sets[0].data["payload"]
@@ -118,9 +116,9 @@ async def test_signals(
         # saturation flag consistency test is not vacuous.
         assert not np.all(status.isel(pol=1).data & (1 << DIGITISER_STATUS_SATURATION_FLAG_BIT))
     # Check that sensors were updated
-    assert await get_sensor(katcp_client, "signals-orig") == signals_str
-    assert await get_sensor(katcp_client, "period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
-    assert parse_signals(await get_sensor(katcp_client, "signals")) == parse_signals(signals_str)
+    assert await katcp_client.sensor_value("signals-orig", str) == signals_str
+    assert await katcp_client.sensor_value("period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
+    assert parse_signals(await katcp_client.sensor_value("signals", str)) == parse_signals(signals_str)
 
 
 @pytest.mark.parametrize(

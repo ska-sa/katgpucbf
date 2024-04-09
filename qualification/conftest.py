@@ -38,7 +38,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, TiedArrayChannelisedVoltageReceiver, get_sensor_val
+from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
 from .host_config import HostConfigQuerier
 from .reporter import Reporter
 
@@ -486,9 +486,9 @@ async def _report_cbf_config(
             "git_version": await git_version_futures[task_name],
         }
     tasks["product_controller"] = {
-        "host": await get_sensor_val(master_controller_client, f"{cbf.name}.host"),
+        "host": await master_controller_client.sensor_value(f"{cbf.name}.host", str),
         "interfaces": {},
-        "version": await get_sensor_val(master_controller_client, f"{cbf.name}.version"),
+        "version": await master_controller_client.sensor_value(f"{cbf.name}.version", str),
         "git_version": await _get_git_version_conn(cbf.product_controller_client),
     }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -49,10 +49,7 @@ class SensorConverter:
         if telstate_name is None:
             telstate_name = sensor_name.replace("-", "_")
         full_sensor_name = f"{self.stream}-{sensor_name}"
-        reply, informs = await self.client.request("sensor-value", full_sensor_name)
-        if len(informs) != 1:
-            raise RuntimeError(f"Expected 1 sensor value for {full_sensor_name}, received {len(informs)}")
-        value = aiokatcp.decode(katcp_type, informs[0].arguments[4])
+        value = await self.client.sensor_value(full_sensor_name, katcp_type)
         if convert is not None:
             value = convert(value)
         self.set(telstate_name, value)

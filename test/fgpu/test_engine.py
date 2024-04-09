@@ -1065,8 +1065,7 @@ class TestEngine:
                 counter += 1
                 if counter == 12:
                     await engine_client.request(*request)
-                    _, informs = await engine_client.request("sensor-value", "steady-state-timestamp")
-                    timestamp.append(int(informs[0].arguments[4]))
+                    timestamp.append(await engine_client.sensor_value("steady-state-timestamp", int))
             return await orig_fill_in(self)
 
         orig_fill_in = Pipeline._fill_in

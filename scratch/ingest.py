@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -21,7 +21,7 @@ import ast
 import asyncio
 import logging
 import sys
-from typing import List, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple
 
 import aiokatcp
 import matplotlib
@@ -47,28 +47,11 @@ TIMESTAMP = 0x1600
 FREQUENCY = 0x4103
 
 
-async def get_sensor_val(client: aiokatcp.Client, sensor_name: str) -> Union[int, float, str]:
-    """Get the value of a katcp sensor.
-
-    If the sensor value can't be cast as an int or a float (in that order), the
-    value will get returned as a string. This simple implementation ignores the
-    actual type advertised by the server.
-    """
-    _reply, informs = await client.request("sensor-value", sensor_name)
-
-    expected_types = [int, float, str]
-    for t in expected_types:
-        try:
-            return aiokatcp.decode(t, informs[0].arguments[4])
-        except ValueError:
-            continue
-
-
 async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
     """Get the katcp address for a named product controller from the master."""
     client = await aiokatcp.Client.connect(*mc_endpoint)
     async with client:
-        return endpoint_parser(None)(await get_sensor_val(client, f"{product_name}.katcp-address"))
+        return endpoint_parser(None)(str(await client.sensor_value(f"{product_name}.katcp-address", aiokatcp.Address)))
 
 
 async def get_subordinate_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
@@ -202,30 +185,32 @@ async def async_main(args: argparse.Namespace) -> None:
 
     async with client:
 
-        async def sensor_val(name):
+        async def sensor_val(name, sensor_type=None):
             if args.corr2:
                 name = CORR2_SENSOR_REMAP.get(name, name.replace(".", "-"))
-            return await get_sensor_val(client, name)
+            return await client.sensor_value(name, sensor_type)
 
         # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
         # But we can cast Endpoints to tuples, which it does know.
         multicast_endpoints = [
             tuple(endpoint)
-            for endpoint in endpoint_list_parser(7148)(await sensor_val("baseline-correlation-products.destination"))
+            for endpoint in endpoint_list_parser(7148)(
+                await sensor_val("baseline-correlation-products.destination", str)
+            )
         ]
 
         # We need these parameters for various useful reasons.
-        n_bls = await sensor_val("baseline-correlation-products.n-bls")
-        n_chans = await sensor_val("baseline-correlation-products.n-chans")
-        n_chans_per_substream = await sensor_val("baseline-correlation-products.n-chans-per-substream")
-        n_bits_per_sample = await sensor_val("baseline-correlation-products.xeng-out-bits-per-sample")
-        n_spectra_per_acc = await sensor_val("baseline-correlation-products.n-accs")
-        n_samples_between_spectra = await sensor_val("antenna-channelised-voltage.n-samples-between-spectra")
-        adc_sample_rate = await sensor_val("antenna-channelised-voltage.adc-sample-rate")
-        int_time = await sensor_val("baseline-correlation-products.int-time")
+        n_bls = await sensor_val("baseline-correlation-products.n-bls", int)
+        n_chans = await sensor_val("baseline-correlation-products.n-chans", int)
+        n_chans_per_substream = await sensor_val("baseline-correlation-products.n-chans-per-substream", int)
+        n_bits_per_sample = await sensor_val("baseline-correlation-products.xeng-out-bits-per-sample", int)
+        n_spectra_per_acc = await sensor_val("baseline-correlation-products.n-accs", int)
+        n_samples_between_spectra = await sensor_val("antenna-channelised-voltage.n-samples-between-spectra", int)
+        adc_sample_rate = await sensor_val("antenna-channelised-voltage.adc-sample-rate", float)
+        int_time = await sensor_val("baseline-correlation-products.int-time", float)
 
         # I quite like this trick. It gives us a list of tuples.
-        bls_ordering = ast.literal_eval(await sensor_val("baseline-correlation-products.bls-ordering"))
+        bls_ordering = ast.literal_eval(await sensor_val("baseline-correlation-products.bls-ordering", str))
 
     bls_subset = get_bls_subset(args.baseline, bls_ordering)
 
