@@ -49,7 +49,7 @@ def test_assert_failure(pdf_report: Reporter) -> None:
 def test_figure(pdf_report: Reporter) -> None:
     """Plot a figure."""
     fig = matplotlib.figure.Figure()
-    ax = fig.subplots()
+    ax = fig.add_subplot()
     ax.set_xlabel("X axis")
     ax.set_ylabel("Y axis")
     ax.set_title("Caption")

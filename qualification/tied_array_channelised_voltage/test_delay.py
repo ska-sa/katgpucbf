@@ -17,9 +17,11 @@
 """Delay test."""
 
 import time
+from typing import Sequence, cast
 
 import numpy as np
 import pytest
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from pytest_check import check
 
@@ -186,7 +188,8 @@ async def test_delay(
 
         corr_phase = np.angle(corr)
         fig = Figure(tight_layout=True)
-        ax, ax_err = fig.subplots(2)
+        # matplotlib's typing doesn't specialise for Nx1 case
+        ax, ax_err = cast(Sequence[Axes], fig.subplots(2))
         x = range(receiver.n_chans)
         delta = wrap_angle(corr_phase - expected_phase)
         max_error_deg = np.max(np.abs(np.rad2deg(delta)))

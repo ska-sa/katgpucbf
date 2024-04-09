@@ -141,7 +141,7 @@ async def test_channelisation_and_sfdr(
     db_plot = hdr_data_db[selected_plot_idx, :]
 
     fig = Figure()
-    ax = fig.subplots()
+    ax = fig.add_subplot()
     ax.plot(x, db_plot)
     ax.set_title(title)
     ax.set_xlabel("Channel")
@@ -170,7 +170,7 @@ async def test_channelisation_and_sfdr(
     x = np.linspace(-zoom_plot_range, zoom_plot_range, zoom_plot_range * 2 + 1)
 
     fig = Figure()
-    ax = fig.subplots()
+    ax = fig.add_subplot()
     ax.stem(x, db_plot[plot_channel - zoom_plot_range : plot_channel + zoom_plot_range + 1], bottom=ymin)
     ax.set_title(title)
     ax.set_xlabel("Channel")

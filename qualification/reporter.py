@@ -19,7 +19,7 @@ import base64
 import io
 import logging
 import time
-from typing import Any
+from typing import Any, Sequence
 
 import matplotlib.figure
 import matplotlib.ticker
@@ -41,15 +41,16 @@ class POTLocator(matplotlib.ticker.Locator):
     def __init__(self, nbins: int = 10) -> None:
         self.set_params(nbins=nbins)
 
-    def set_params(self, nbins: int | None) -> None:  # noqa: D102
+    def set_params(self, nbins: int | None = None) -> None:  # noqa: D102
         if nbins is not None:
             self._nbins = nbins
 
-    def __call__(self) -> np.ndarray:  # noqa: D102
+    def __call__(self) -> Sequence[float]:  # noqa: D102
+        assert self.axis is not None
         vmin, vmax = self.axis.get_view_interval()
         return self.tick_values(vmin, vmax)
 
-    def tick_values(self, vmin: float, vmax: float) -> np.ndarray:  # noqa: D102
+    def tick_values(self, vmin: float, vmax: float) -> Sequence[float]:  # noqa: D102
         vmin, vmax = matplotlib.transforms.nonsingular(vmin, vmax, expander=1e-13, tiny=1e-14)
         step = 2 ** np.ceil(np.log2((vmax - vmin) / self._nbins))
         # Note: MultipleLocator uses a private helper class to ensure that
@@ -129,7 +130,7 @@ class Reporter:
         data = []
         for ax in figure.axes:
             for line in ax.get_lines():
-                data.append(line.get_xydata().tolist())
+                data.append(np.asarray(line.get_xydata()).tolist())
         content = io.BytesIO()
         figure.savefig(content, format="pdf", backend="pdf")
         # The .decode converts from bytes to str

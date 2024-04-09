@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -36,4 +36,6 @@ def add_sigint_handler() -> None:
         task.cancel()
 
     loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGINT, handler, asyncio.current_task())
+    task = asyncio.current_task()
+    assert task is not None
+    loop.add_signal_handler(signal.SIGINT, handler, task)
