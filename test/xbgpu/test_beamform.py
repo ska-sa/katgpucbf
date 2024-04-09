@@ -34,7 +34,9 @@ def quant(x):
 
 
 @numba.njit
-def beamform_host(in_: np.ndarray, weights: np.ndarray, delays: np.ndarray, beam_pols: np.ndarray) -> np.ndarray:
+def beamform_host(
+    in_: np.ndarray, weights: np.ndarray, delays: np.ndarray, beam_pols: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     """Implement the beamforming operation on the CPU.
 
     The input arrays have the same shape and meaning as in :mod:`katgpucbf.xbgpu.beamform`.
