@@ -17,40 +17,7 @@
 """
 Simulate channelised data from the MeerKAT F-Engines destined for one or more XB-Engines.
 
-When there are N antennas, the XB-Engine receives channels from N
-F-Engines. This simulator simulates this behaviour by interleaving packets with
-differently-populated fields designed to mimic the different antennas. One
-caveat to this simulator is that the data is perfectly interleaved and ordered.
-It does not simulate the messier environment that occurs when running multiple
-real F-Engines all transmitting along different paths.
-
-This simulator uses the spead2 library to transmit the F-Engine data. spead2
-uses ibverbs to accelerate packet transmission. By default the ``cap_net_raw``
-capability is required to use ibverbs.
-
-The minimum command to run the fsim is:
-
-.. code::
-
-    spead2_net_raw fsim --ibv --interface <interface_name> <multicast_address>[+y]:<port>
-
-where
-
-- `<interface_name>` is the name of the network interface on which to transmit the data;
-- `<multicast_address>` is the multicast address to which all packets are sent.
-  The optional `[+y]` argument will create additional multicast streams with
-  the same parameters each on a different multicast addresses consecutivly
-  after the base address. ``<port>`` is the UDP port to transmit data to.
-
-The data rate per multicast address is
-adc_rate * N_POLS * SAMPLE_BITS * antennas * (channels_per_substream /
-channels). With the default arguments, this is
-1712000000 * 2 * 8 * 80 * (512/32768) = 34.24 Gbps.
-
-.. todo::
-
-   Describe the generated data and how it is expected to look after
-   correlation. This should become its own document.
+Refer to :ref:`feng-packet-sim` for more information.
 """
 
 import argparse
