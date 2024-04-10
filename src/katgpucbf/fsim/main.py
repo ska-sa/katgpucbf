@@ -290,6 +290,7 @@ class Sender:
             timestamp += self.timestamp_step
             if run_once:
                 break
+        await asyncio.gather(*futures)
 
 
 async def async_main() -> None:
