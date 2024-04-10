@@ -83,16 +83,19 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
     )
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
-    parser.add_argument("--array-size", default=80, help="Number of antennas in the array")
-    parser.add_argument("--channels", default=32768, help="Total number of channels in the array [%(default)]")
+    parser.add_argument("--array-size", type=int, default=80, help="Number of antennas in the array")
     parser.add_argument(
-        "--channels-per-substream", default=512, help="Number of channels sent by this fsim [%(default)]"
+        "--channels", type=int, default=32768, help="Total number of channels in the array [%(default)]"
+    )
+    parser.add_argument(
+        "--channels-per-substream", type=int, default=512, help="Number of channels sent by this fsim [%(default)]"
     )
     parser.add_argument(
         "--samples-between-spectra", type=int, help="Number of digitiser samples between spectra [2*channels]"
     )
     parser.add_argument(
         "--jones-per-batch",
+        type=int,
         default=DEFAULT_JONES_PER_BATCH,
         help="Number of antenna-channelised-voltage Jones vectors in each F-engine batch [%(default)s]",
     )
