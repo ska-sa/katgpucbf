@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -21,8 +21,7 @@
 # run.
 array_size = [1, 3, 4, 19, 33, 64, 80]
 
-# This is always set to 256 for the MeerKAT case.
-num_spectra_per_heap = [256]
+num_jones_per_batch = [2**20]
 
 # Number of FFT channels out of the F-Engine
 num_channels = [1024, 8192, 32768]

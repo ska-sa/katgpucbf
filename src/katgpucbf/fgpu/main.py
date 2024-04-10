@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -38,6 +38,7 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from .. import (
+    DEFAULT_JONES_PER_BATCH,
     DEFAULT_KATCP_HOST,
     DEFAULT_KATCP_PORT,
     DEFAULT_PACKET_PAYLOAD_BYTES,
@@ -109,6 +110,7 @@ class OutputDict(TypedDict, total=False):
 
     name: str
     channels: int
+    jones_per_batch: int
     dst: list[Endpoint]
     taps: int
     w_cutoff: float
@@ -152,7 +154,7 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
                         raise ValueError(f"{key} specified twice")
                     case "name":
                         kws[key] = data
-                    case "channels" | "taps":
+                    case "channels" | "taps" | "jones_per_batch":
                         kws[key] = int(data)
                     case "w_cutoff":
                         kws[key] = float(data)
@@ -185,10 +187,15 @@ def parse_wideband(value: str) -> WidebandOutput:
     try:
         kws: WidebandOutputDict = {}
         _parse_stream(value, kws, field_callback)
-        kws = {"taps": DEFAULT_TAPS, "w_cutoff": DEFAULT_W_CUTOFF, **kws}  # type: ignore
+        kws = {
+            "taps": DEFAULT_TAPS,
+            "w_cutoff": DEFAULT_W_CUTOFF,
+            "jones_per_batch": DEFAULT_JONES_PER_BATCH,
+            **kws,
+        }
+        return WidebandOutput(**kws)
     except ValueError as exc:
         raise ValueError(f"--wideband: {exc}") from exc
-    return WidebandOutput(**kws)
 
 
 def parse_narrowband(value: str) -> NarrowbandOutput:
@@ -226,13 +233,14 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
         kws = {
             "taps": DEFAULT_TAPS,
             "w_cutoff": DEFAULT_W_CUTOFF,
+            "jones_per_batch": DEFAULT_JONES_PER_BATCH,
             "weight_pass": DEFAULT_WEIGHT_PASS,
             "ddc_taps": DEFAULT_DDC_TAPS_RATIO * kws["decimation"],
-            **kws,  # type: ignore[misc]
+            **kws,
         }
+        return NarrowbandOutput(**kws)
     except ValueError as exc:
         raise ValueError(f"--narrowband: {exc}") from exc
-    return NarrowbandOutput(**kws)
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
@@ -375,11 +383,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="The number of antennas in the array. [%(default)s]",
     )
     parser.add_argument(
-        "--spectra-per-heap",
+        "--jones-per-batch",
         type=int,
-        default=256,
-        metavar="SPECTRA",
-        help="Spectra in each output heap [%(default)s]",
+        default=DEFAULT_JONES_PER_BATCH,
+        metavar="SAMPLES",
+        help="Jones vectors in each output batch [%(default)s]",
     )
     parser.add_argument(
         "--src-chunk-samples",
@@ -394,7 +402,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=2**23,
         metavar="VECTORS",
         help="Number of Jones vectors in output chunks. If not a multiple of "
-        "channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",
+        "jones-per-batch, it will be rounded up to the next multiple. [%(default)s]",
     )
     parser.add_argument(
         "--max-delay-diff",
@@ -484,8 +492,8 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
     else:
         monitor = NullMonitor()
 
-    channels_lcm = math.lcm(*(output.channels for output in args.outputs))
-    chunk_jones = accel.roundup(args.dst_chunk_jones, channels_lcm * args.spectra_per_heap)
+    batch_jones_lcm = math.lcm(*(output.jones_per_batch for output in args.outputs))
+    chunk_jones = accel.roundup(args.dst_chunk_jones, batch_jones_lcm)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -511,7 +519,6 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         num_ants=args.array_size,
         chunk_samples=args.src_chunk_samples,
         chunk_jones=chunk_jones,
-        spectra_per_heap=args.spectra_per_heap,
         dig_sample_bits=args.dig_sample_bits,
         dst_sample_bits=args.dst_sample_bits,
         max_delay_diff=args.max_delay_diff,
