@@ -11,7 +11,5 @@
 .coverage
 htmlcov
 scratch/fgpu/memcpy_loop
-src/tools/dsim
-src/tools/fsim
 Dockerfile
 .dockerignore
