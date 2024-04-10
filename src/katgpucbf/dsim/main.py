@@ -97,7 +97,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Destination addresses (one per polarisation)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(arglist)
     if args.period <= 0:
         parser.error("--period must be positive")
 

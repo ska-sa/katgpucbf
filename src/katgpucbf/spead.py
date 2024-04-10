@@ -18,6 +18,7 @@
 
 from typing import Any
 
+import numpy as np
 import spead2
 
 DIGITISER_ID_ID = 0x3101
@@ -44,6 +45,8 @@ DEFAULT_PORT = 7148
 
 #: Format for immediate items
 IMMEDIATE_FORMAT = [("u", FLAVOUR.heap_address_bits)]
+#: dtype for items that need to be immediate yet passed by reference
+IMMEDIATE_DTYPE = np.dtype(">u8")
 
 
 def make_immediate(id: int, value: Any) -> spead2.Item:

@@ -29,7 +29,16 @@ from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import COMPLEX, N_POLS
-from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
+from ..spead import (
+    FENG_ID_ID,
+    FENG_RAW_ID,
+    FLAVOUR,
+    FREQUENCY_ID,
+    IMMEDIATE_DTYPE,
+    IMMEDIATE_FORMAT,
+    TIMESTAMP_ID,
+    make_immediate,
+)
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
@@ -160,7 +169,7 @@ class Chunk:
         self.cleanup: Callable[[], None] | None = None
         self._timestamp_step = n_spectra_per_heap * spectra_samples
         #: Storage for timestamps in the SPEAD heaps.
-        self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
+        self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(IMMEDIATE_DTYPE)
         # The ... in indexing causes numpy to give a 0d array view, rather than
         # a scalar.
         self._frames = [

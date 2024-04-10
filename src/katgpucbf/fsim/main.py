@@ -1,0 +1,312 @@
+################################################################################
+# Copyright (c) 2024, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""
+Simulate channelised data from the MeerKAT F-Engines destined for one or more XB-Engines.
+
+When there are N antennas, the XB-Engine receives channels from N
+F-Engines. This simulator simulates this behaviour by interleaving packets with
+differently-populated fields designed to mimic the different antennas. One
+caveat to this simulator is that the data is perfectly interleaved and ordered.
+It does not simulate the messier environment that occurs when running multiple
+real F-Engines all transmitting along different paths.
+
+This simulator uses the spead2 library to transmit the F-Engine data. spead2
+uses ibverbs to accelerate packet transmission. By default the ``cap_net_raw``
+capability is required to use ibverbs.
+
+The minimum command to run the fsim is:
+
+.. code::
+
+    spead2_net_raw fsim --ibv --interface <interface_name> <multicast_address>[+y]:<port>
+
+where
+
+- `<interface_name>` is the name of the network interface on which to transmit the data;
+- `<multicast_address>` is the multicast address to which all packets are sent.
+  The optional `[+y]` argument will create additional multicast streams with
+  the same parameters each on a different multicast addresses consecutivly
+  after the base address. ``<port>`` is the UDP port to transmit data to.
+
+The data rate per multicast address is
+adc_rate * N_POLS * SAMPLE_BITS * antennas * (channels_per_substream /
+channels). With the default arguments, this is
+1712000000 * 2 * 8 * 80 * (512/32768) = 34.24 Gbps.
+
+.. todo::
+
+   Describe the generated data and how it is expected to look after
+   correlation. This should become its own document.
+"""
+
+import argparse
+import asyncio
+import itertools
+import os
+from typing import Sequence
+
+import katsdpservices
+import numpy as np
+import prometheus_async
+import spead2.send.asyncio
+from katsdptelstate.endpoint import endpoint_list_parser
+from numba import njit
+
+from .. import COMPLEX, DEFAULT_JONES_PER_BATCH, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, spead
+from ..fgpu.send import PREAMBLE_SIZE
+from ..utils import comma_split
+
+DTYPE = np.dtype(np.int8)
+#: Number of heaps in time to keep in flight
+QUEUE_DEPTH = 8
+
+
+def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse the command-line arguments."""
+    parser = argparse.ArgumentParser(prog="fsim")
+
+    parser.add_argument(
+        "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
+    )
+    parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
+    parser.add_argument("--array-size", default=80, help="Number of antennas in the array")
+    parser.add_argument("--channels", default=32768, help="Total number of channels in the array [%(default)]")
+    parser.add_argument(
+        "--channels-per-substream", default=512, help="Number of channels sent by this fsim [%(default)]"
+    )
+    parser.add_argument(
+        "--samples-between-spectra", type=int, help="Number of digitiser samples between spectra [2*channels]"
+    )
+    parser.add_argument(
+        "--jones-per-batch",
+        default=DEFAULT_JONES_PER_BATCH,
+        help="Number of antenna-channelised-voltage Jones vectors in each F-engine batch [%(default)s]",
+    )
+    parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
+    parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
+    parser.add_argument(
+        "--dst-packet-payload",
+        type=int,
+        default=DEFAULT_PACKET_PAYLOAD_BYTES,
+        metavar="BYTES",
+        help="Size for output packets (voltage payload only) [%(default)s]",
+    )
+    parser.add_argument(
+        "--affinity", type=comma_split(int), default=[-1], help="Core affinity for the sending thread [not bound]"
+    )
+    parser.add_argument(
+        "--main-affinity", type=int, default=-1, help="Core affinity for the main Python thread [not bound]"
+    )
+    parser.add_argument(
+        "--prometheus-port",
+        type=int,
+        help="Network port on which to serve Prometheus metrics [none]",
+    )
+    parser.add_argument("--run-once", action="store_true", help="Transmit a single collection of heaps before exiting")
+    parser.add_argument(
+        "dest",
+        type=endpoint_list_parser(spead.DEFAULT_PORT),
+        metavar="X.X.X.X[+N]:PORT",
+        help="Destination addresses (one per polarisation)",
+    )
+    args = parser.parse_args()
+
+    if args.samples_between_spectra is None:
+        args.samples_between_spectra = 2 * args.channels
+    if args.jones_per_batch % args.channels != 0:
+        parser.error("--jones-per-batch must be divisible by --channels")
+
+    return args
+
+
+@njit
+def make_heap_payload(
+    out: np.ndarray,
+    heap_index: int,
+    feng_id: int,
+    n_ants: int,
+) -> None:
+    """Create the simulated payload data for a heap.
+
+    A pattern is chosen that will hopefully be easy to verify at the receiver
+    graphically. On each F-Engine, the signal amplitude will increase linearly
+    over time for each channel. Each channel will have a different starting
+    amplitude but the rate of increase will be the same for all channels.
+
+    Each F-Engine will have the same same signal amplitude for the same
+    timestamp, but the signal phase will be different. The signal phase remains
+    constant across all channels in a single F-Engine. By examining the signal
+    phase it can be verified that correct feng_id is attached to the correct
+    data.
+
+    These samples need to be stored as 8 bit samples. As such, the amplitude is
+    wrapped each time it reaches 127. 127 is used as the amplitude when
+    multiplied by the phase can reach -127. The full range of values is
+    covered.
+
+    This current format is not fixed and it is likely that it will be adjusted
+    to be suited for different verification needs.
+
+    Parameters
+    ----------
+    out
+        Output array, with shape (n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX)
+    heap_index
+        Heap index on time axis
+    feng_id
+        Heap index on antenna axis
+    n_ants
+        Number of antennas in the array
+    """
+    n_channels_per_substream = out.shape[0]
+    n_spectra_per_heap = out.shape[1]
+    initial_offset = heap_index * n_spectra_per_heap
+    sample_angle = 2.0 * np.pi / (n_ants * N_POLS) * (feng_id * N_POLS + np.arange(2))
+    for c in range(n_channels_per_substream):
+        for t in range(n_spectra_per_heap):
+            sample_amplitude = (initial_offset + c * 10 + t) % 127
+            for p in range(N_POLS):
+                out[c][t][p][0] = sample_amplitude * np.cos(sample_angle[p])
+                out[c][t][p][1] = sample_amplitude * np.sin(sample_angle[p])
+
+
+def make_heap(
+    timestamp: np.ndarray, feng_id: int, channel_offset: int, payload: np.ndarray
+) -> spead2.send.HeapReference:
+    """Create a heap to transmit.
+
+    The `timestamp` must be a zero-dimensional array of dtype ``>u8``. It will
+    be transmitted by reference, so it can be updated in place to change the
+    stored timestamp.
+    """
+    # The heap setup should be equivalent to katgpucbf.fgpu.send.Frame
+    heap = spead2.send.Heap(flavour=spead.FLAVOUR)
+    heap.repeat_pointers = True
+    heap.add_item(spead.make_immediate(spead.TIMESTAMP_ID, timestamp))
+    heap.add_item(spead.make_immediate(spead.FENG_ID_ID, feng_id))
+    heap.add_item(spead.make_immediate(spead.FREQUENCY_ID, channel_offset))
+    heap.add_item(spead2.Item(spead.FENG_RAW_ID, "", "", shape=payload.shape, dtype=payload.dtype, value=payload))
+    return spead2.send.HeapReference(heap)
+
+
+def make_stream(args: argparse.Namespace, idx: int, data: np.ndarray) -> "spead2.send.asyncio.AsyncStream":
+    """Create a SPEAD stream for a single destination.
+
+    Parameters
+    ----------
+    args
+        Command-line arguments
+    idx
+        Index into the destinations to use
+    data
+        All payload data for this destination
+    """
+    overhead = 1 + PREAMBLE_SIZE / args.dst_packet_payload
+    # Data rate for the entire array, excluding packet overhead
+    full_rate = args.adc_sample_rate * N_POLS * DTYPE.itemsize * args.array_size
+    rate = full_rate * args.channels_per_substream / args.channels * overhead
+    print(f"Rate for {args.dest[idx]}: {rate * 8e-9:.3f} Gbps")
+    config = spead2.send.StreamConfig(
+        max_packet_size=args.dst_packet_payload + PREAMBLE_SIZE,
+        rate=rate,
+        max_heaps=QUEUE_DEPTH * args.array_size,
+    )
+    interface_address = katsdpservices.get_interface_address(args.interface)
+    affinity = args.affinity[idx % len(args.affinity)]
+    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
+    endpoints = [(args.dest[idx].host, args.dest[idx].port)]
+    if args.ibv:
+        udp_ibv_config = spead2.send.UdpIbvConfig(
+            endpoints=endpoints,
+            interface_address=interface_address,
+            ttl=args.ttl,
+            memory_regions=[data],
+        )
+        return spead2.send.asyncio.UdpIbvStream(thread_pool, config, udp_ibv_config)
+    else:
+        return spead2.send.asyncio.UdpStream(thread_pool, endpoints, config, args.ttl, interface_address)
+
+
+class Sender:
+    """Manage sending data to a single XB-engine."""
+
+    def __init__(self, args: argparse.Namespace, idx: int) -> None:
+        n_spectra_per_heap = args.jones_per_batch // args.channels
+        self.data = np.empty(
+            (
+                QUEUE_DEPTH,
+                args.array_size,
+                args.channels_per_substream,
+                n_spectra_per_heap,
+                N_POLS,
+                COMPLEX,
+            ),
+            DTYPE,
+        )
+        self.timestamp_step = args.samples_between_spectra * n_spectra_per_heap
+        self.timestamps = np.empty(QUEUE_DEPTH, spead.IMMEDIATE_DTYPE)
+        self.frames: list[spead2.send.HeapReferenceList] = []
+        for i in range(QUEUE_DEPTH):
+            frame_heaps = []
+            for j in range(args.array_size):
+                payload = self.data[i, j]
+                make_heap_payload(payload, i, j, args.array_size)
+                # The ... makes numpy return a 0d array instead of a scalar
+                frame_heaps.append(
+                    make_heap(
+                        self.timestamps[i, ...], j, channel_offset=idx * args.channels_per_substream, payload=payload
+                    )
+                )
+            self.frames.append(spead2.send.HeapReferenceList(frame_heaps))
+        self.stream = make_stream(args, idx, self.data)
+
+    async def run(self, run_once: bool) -> None:
+        """Send heaps until cancelled."""
+        futures: list[asyncio.Future[int]] = [asyncio.get_running_loop().create_future() for _ in range(QUEUE_DEPTH)]
+        for i in range(QUEUE_DEPTH):
+            futures[i].set_result(0)  # Make the future ready
+        timestamp = 0
+        for idx in itertools.cycle(range(QUEUE_DEPTH)):
+            await futures[idx]  # Wait for previous transmission of this frame
+            self.timestamps[idx] = timestamp
+            futures[idx] = self.stream.async_send_heaps(self.frames[idx], spead2.send.GroupMode.ROUND_ROBIN)
+            timestamp += self.timestamp_step
+            if run_once:
+                break
+
+
+async def async_main() -> None:
+    """Run main program."""
+    args = parse_args()
+
+    if args.prometheus_port is not None:
+        await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
+
+    senders = [Sender(args, i) for i in range(len(args.dest))]
+    if args.main_affinity >= 0:
+        os.sched_setaffinity(0, [args.main_affinity])
+    await asyncio.gather(*(sender.run(args.run_once) for sender in senders))
+
+
+def main() -> None:
+    """Run main program."""
+    katsdpservices.setup_logging()
+    asyncio.run(async_main())
+
+
+if __name__ == "__main__":
+    main()
