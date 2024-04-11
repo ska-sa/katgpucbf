@@ -28,7 +28,7 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf import COMPLEX
-from katgpucbf.spead import BF_RAW_ID, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.spead import BEAM_ANTS_ID, BF_RAW_ID, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu.bsend import SEND_DTYPE, BSend
 from katgpucbf.xbgpu.output import BOutput
@@ -119,6 +119,11 @@ class TestBSend:
             # Populate the buffer with dummy data.
             chunk.data[:] = data[i, ...]
 
+            # Fill chunk.present_ants counts otherwise no heaps will be sent
+            # Any value > 0 will do, we aren't too concerned about handling
+            # missing data in this test.
+            chunk.present_ants.fill(1)
+
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
             chunk.timestamp = i * FRAMES_PER_CHUNK * heap_timestamp_step
@@ -177,11 +182,13 @@ class TestBSend:
             for j in range(TX_HEAPS_PER_SUBSTREAM):
                 heap = await stream.get()
                 items = ig.update(heap)
-                assert set(items.keys()) == {"timestamp", "frequency", "bf_raw"}
+                assert set(items.keys()) == {"timestamp", "frequency", "beam_ants", "bf_raw"}
                 assert items["timestamp"].id == TIMESTAMP_ID
                 assert items["timestamp"].value == j * heap_timestamp_step
                 assert items["frequency"].id == FREQUENCY_ID
                 assert items["frequency"].value == channel_offset
+                assert items["beam_ants"].id == BEAM_ANTS_ID
+                assert items["beam_ants"].value == 1
                 assert items["bf_raw"].id == BF_RAW_ID
                 assert items["bf_raw"].value.shape == (n_channels_per_substream, n_spectra_per_heap, COMPLEX)
                 assert items["bf_raw"].value.dtype == np.int8

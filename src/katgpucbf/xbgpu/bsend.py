@@ -32,7 +32,7 @@ from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
-from ..spead import BF_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
+from ..spead import BEAM_ANTS_ID, BF_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 from .output import BOutput
@@ -75,6 +75,8 @@ class Frame:
         with shape (n_beams,).
     channel_offset
         The first frequency channel processed.
+    present_ants
+        The number of antennas present in the Frame's input data.
     """
 
     def __init__(
@@ -84,6 +86,7 @@ class Frame:
         saturated: np.ndarray,
         *,
         channel_offset: int,
+        present_ants: int,
     ) -> None:
         self.heaps: list[spead2.send.Heap] = []
         self.data = data
@@ -94,6 +97,7 @@ class Frame:
             heap.repeat_pointers = True
             heap.add_item(make_immediate(FREQUENCY_ID, channel_offset))
             heap.add_item(make_immediate(TIMESTAMP_ID, timestamp))
+            heap.add_item(make_immediate(BEAM_ANTS_ID, present_ants))
             heap.add_item(
                 spead2.Item(
                     BF_RAW_ID,
@@ -144,6 +148,7 @@ class Chunk:
         self._timestamp_step = timestamp_step
         self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
 
+        self._present_ants = np.zeros(shape=(n_frames,), dtype=">u8")
         # NOTE: The future indicates when it is safe to modify the chunk,
         # i.e. it is not being transmitted. At construction there is nothing to
         # wait for, so we mark it ready.
@@ -156,9 +161,28 @@ class Chunk:
                 data[i],
                 saturated[i],
                 channel_offset=channel_offset,
+                # TODO: Fix the type annotation here
+                # Maybe I don't need the ellipses for dimensions?
+                present_ants=self._present_ants[i, ...],  # type: ignore
             )
             for i in range(n_frames)
         ]
+
+    @property
+    def present_ants(self) -> np.ndarray:
+        """
+        Number of antennas present in the current beam sums.
+
+        This is a count for each :class:`Frame` in the chunk. Setting this
+        property updates the immediate SPEAD item in the heap. Much like
+        :attr:`timestamp`, this should only be done when :attr:`future`
+        is done.
+        """
+        return self._present_ants
+
+    @present_ants.setter
+    def present_ants(self, value: np.ndarray) -> None:
+        self._present_ants[:] = value
 
     @property
     def timestamp(self) -> int:
@@ -204,10 +228,6 @@ class Chunk:
             this `future`.
         future
             Future returned by the spead2 stream's `async_send_heaps`.
-
-        .. todo::
-
-            (NGC-1172) Handle missing data transmission for Prometheus counters.
         """
         if not future.cancelled() and future.exception() is None:
             # int casts are because np.prod returns np.int64 which is
@@ -241,7 +261,13 @@ class Chunk:
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         if n_enabled > 0:
             send_futures: list[asyncio.Future] = []
-            for frame in self._frames:
+            for frame, antenna_presence in zip(self._frames, self._present_ants):
+                if antenna_presence == 0:
+                    # No antennas were present in the received batch of heaps
+                    # This check takes priority as we do not transmit frames
+                    # that did not have any input data. The updating of the
+                    # frame's :class:`HeapReferenceList` is not time-critical.
+                    continue
                 if frame.tx_enabled_version != send_stream.tx_enabled_version:
                     frame.tx_heaps = spead2.send.HeapReferenceList(
                         [
@@ -256,11 +282,6 @@ class Chunk:
                 )
 
             self.future = asyncio.gather(*send_futures)
-            # NOTE: Adding done-callback to all gathered futures as we currently
-            # transmit data for all frames, regardless of whether incoming data
-            # is missing.
-            # TODO: NGC-1172 update this to only increment for frames that *did
-            # not* have data missing on the input.
             enabled_stream_names = [
                 output_name for output_name, enabled in zip(send_stream.output_names, send_stream.tx_enabled) if enabled
             ]
@@ -410,6 +431,13 @@ class BSend:
             TIMESTAMP_ID,
             "timestamp",
             "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+            shape=[],
+            format=IMMEDIATE_FORMAT,
+        )
+        item_group.add_item(
+            BEAM_ANTS_ID,
+            "beam_ants",
+            "Count of present antennas in the beam sum.",
             shape=[],
             format=IMMEDIATE_FORMAT,
         )

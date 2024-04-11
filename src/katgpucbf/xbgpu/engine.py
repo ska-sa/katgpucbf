@@ -135,24 +135,38 @@ class BTxQueueItem(QueueItem):
 
     The `buffer_device`, `weights` and `delays` must have the same shape and
     type as the ``in``, ``weights`` and ``delays`` slots in
-    :class:`.Beamform`.
+    :class:`.Beamform`. The TxQueueitem between the gpu-proc and sender loops
+    needs to carry a record of which antennas have missed data in the current
+    :class:`recv.Chunk` of data. This is used to determine whether any beam
+    data has been affected, and have their data flagged accordingly.
+
+    .. todo::
+
+        Potentially create (yet another) base class for B- and XTxQueueItems.
     """
 
     def __init__(
         self,
         buffer_device: accel.DeviceArray,
         rand_states: accel.DeviceArray,
+        present: np.ndarray,
         weights: MappedArray,
         delays: MappedArray,
         timestamp: int = 0,
     ) -> None:
         self.buffer_device = buffer_device
         self.rand_states = rand_states
+        self.present = present
         self.weights = weights
         self.delays = delays
         #: Version of weights and delays (for comparison to BPipeline._weights_version)
         self.weights_version = -1
         super().__init__(timestamp)
+
+    def reset(self, timestamp: int = 0) -> None:
+        """Reset the timestamp and the present antenna tracker."""
+        super().reset(timestamp=timestamp)
+        self.present.fill(True)
 
 
 class Pipeline(Generic[_O, _T]):
@@ -329,13 +343,14 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 sequence_first=i * engine.n_channels_total + engine.channel_offset_value,
                 sequence_step=self.n_tx_items * engine.n_channels_total,
             )
+            present = np.zeros(shape=(engine.heaps_per_fengine_per_chunk, engine.n_ants), dtype=bool)
             # TODO: bring it back once support is inplemented
             # saturated = accel.DeviceArray(
             #     context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32
             # )
             weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
-            tx_item = BTxQueueItem(buffer_device, rand_states, weights, delays)
+            tx_item = BTxQueueItem(buffer_device, rand_states, present, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
         # These are the original weights, delays and gains as provided by the
         # user, rather than the processed values passed to the kernel.
@@ -488,6 +503,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             )
             self._beamform()
 
+            tx_item.present[:] = rx_item.present.copy()
+
             tx_item.add_marker(self._proc_command_queue)
             self._tx_item_queue.put_nowait(tx_item)
 
@@ -504,6 +521,20 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         # NOTE: This function passes the entire downloaded data to
         # chunk.send, which then takes care of directing data to each beam's
         # output destination.
+
+        def get_present_antenna_counts(batch_presence: np.ndarray) -> np.ndarray:
+            """Tally antenna presence for each batch of heaps in a :class:`recv.Chunk`."""
+            presence_counts = np.zeros(shape=(batch_presence.shape[0],), dtype=int)
+            for i, antenna_presence in enumerate(batch_presence):
+                present_flags, counts_array = np.unique(antenna_presence, return_counts=True)
+                # The `antenna_presence` might be entirely False
+                if present_flags.any():
+                    # We have at least one antenna present in the batch
+                    # The counts_array holds counts for False *then* True entries,
+                    # unless there are no False/only True entries.
+                    presence_counts[i] = counts_array[-1]
+
+            return presence_counts
 
         while True:
             item = await self._tx_item_queue.get()
@@ -523,6 +554,9 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
+            # TODO: NGC-1172 Maybe change this to update chunk.present_ants in-place
+            # Might be an unnecessary overhead to have an intermediate buffer
+            chunk.present_ants = get_present_antenna_counts(item.present)
             chunk.timestamp = item.timestamp
             # TODO: Update beng-clip-cnt sensor, regardless of whether data
             # is being transmitted

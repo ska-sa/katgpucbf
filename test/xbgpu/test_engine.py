@@ -27,7 +27,6 @@ import spead2.recv.asyncio
 import spead2.send
 import spead2.send.asyncio
 from katsdpsigproc.abc import AbstractContext
-from katsdpsigproc.accel import roundup
 from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
@@ -557,6 +556,7 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
+        missing_antennas: AbstractSet[int] = frozenset(),
     ) -> tuple[list[np.ndarray], np.ndarray]:
         """Send a contiguous stream of data to the engine and retrieve the results.
 
@@ -680,16 +680,8 @@ class TestEngine:
             f"of HEAPS_PER_FENGINE_PER_CHUNK ({HEAPS_PER_FENGINE_PER_CHUNK})"
         )
 
-        # NOTE: Update `batch_indices` to end on a multiple of
-        # `HEAPS_PER_FENGINE_PER_CHUNK`, but only for the beam_outputs because
-        # they currently send `HEAPS_PER_FENGINE_PER_CHUNK` heaps all the time.
-        # This does not mean the final heap (for each beam_output) has sane
-        # data in it. In fact, ensure you verify data for values in
-        # `batch_indices`.
-        n_beam_heaps = roundup(len(batch_indices), HEAPS_PER_FENGINE_PER_CHUNK)
-        beam_batch_indices = range(batch_indices[0], batch_indices[0] + n_beam_heaps)
         beam_results = np.zeros(
-            (len(beam_outputs), n_beam_heaps, n_channels_per_substream, n_spectra_per_heap, COMPLEX),
+            (len(beam_outputs), len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
             bsend.SEND_DTYPE,
         )
         for i in range(len(beam_outputs)):
@@ -701,15 +693,16 @@ class TestEngine:
             items = ig_recv.update(heap)
             assert len(list(items.values())) == 0, "This heap contains item values not just the expected descriptors."
 
-            for j, index in enumerate(beam_batch_indices):
+            for j, index in enumerate(batch_indices):
                 heap = await stream.get()
                 while (updated_items := set(ig_recv.update(heap))) == set():
                     # Test has gone on long enough that we've received another descriptor
                     heap = await stream.get()
 
-                assert updated_items == {"frequency", "timestamp", "bf_raw"}
+                assert updated_items == {"frequency", "timestamp", "beam_ants", "bf_raw"}
                 assert ig_recv["timestamp"].value == index * timestamp_step
                 assert ig_recv["frequency"].value == frequency
+                assert ig_recv["beam_ants"].value == n_ants - len(missing_antennas)
                 beam_results[i, j, ...] = ig_recv["bf_raw"].value
 
         return corrprod_results, beam_results
@@ -954,6 +947,7 @@ class TestEngine:
                 n_channels_per_substream=n_channels_per_substream,
                 frequency=frequency,
                 n_spectra_per_heap=n_spectra_per_heap,
+                missing_antennas=missing_antennas,
             )
             last_timestamp = batch_end_index * timestamp_step
 
@@ -1022,10 +1016,6 @@ class TestEngine:
         # assert_allclose converts to float, which bloats memory usage.
         # To keep it manageable, compare a batch at a time.
         for i in range(expected_beams.shape[0]):
-            # NOTE: As per the explanation at the end of `_send_data`, we
-            # only verify data in the range of `batch_indices` for each
-            # `beam_result` as any heaps sent afterwards are sent by default
-            # - not because they are expected to have sane data in them.
             for j in range(expected_beams.shape[1]):
                 np.testing.assert_allclose(expected_beams[i, j], beam_results[i, j], atol=1)
 
