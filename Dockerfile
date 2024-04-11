@@ -81,6 +81,8 @@ RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
 # Jenkins image has a clean environment to start from).
+WORKDIR /tmp/katgpucbf
+COPY requirements.txt .
 RUN pip install --no-deps -c /tmp/katgpucbf/requirements.txt pycuda && \
     pip uninstall -y pycuda
 
@@ -131,7 +133,7 @@ RUN pip install --no-deps --root=/install-root .
 # Separate stage to build C tools. This is in a separate build stage
 # so that changes to the package don't invalidate the build cache for this.
 
-FROM build-base as build-cxx
+FROM build-base as build-c
 
 WORKDIR /tmp/tools
 RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-runtime/schedrr.c && \
