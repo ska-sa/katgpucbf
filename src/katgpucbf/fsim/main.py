@@ -36,8 +36,18 @@ from katsdptelstate.endpoint import endpoint_list_parser
 from numba import njit
 from prometheus_client import Counter, Gauge
 
-from .. import COMPLEX, DEFAULT_JONES_PER_BATCH, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, spead
-from ..fgpu.send import PREAMBLE_SIZE
+from .. import (
+    BYTE_BITS,
+    COMPLEX,
+    DEFAULT_JONES_PER_BATCH,
+    DEFAULT_PACKET_PAYLOAD_BYTES,
+    DEFAULT_TTL,
+    N_POLS,
+    SPEAD_DESCRIPTOR_INTERVAL_S,
+    spead,
+)
+from ..fgpu.send import PREAMBLE_SIZE, make_descriptor_heap
+from ..send import DescriptorSender
 from ..utils import TimeConverter, add_gc_stats, comma_split
 from . import METRIC_NAMESPACE
 
@@ -202,7 +212,7 @@ def make_stream(args: argparse.Namespace, idx: int, data: np.ndarray) -> "spead2
     config = spead2.send.StreamConfig(
         max_packet_size=args.dst_packet_payload + PREAMBLE_SIZE,
         rate=rate,
-        max_heaps=QUEUE_DEPTH * args.array_size,
+        max_heaps=QUEUE_DEPTH * args.array_size + 1,  # + 1 for descriptor heaps
     )
     interface_address = katsdpservices.get_interface_address(args.interface)
     affinity = args.affinity[idx % len(args.affinity)]
@@ -257,6 +267,11 @@ class Sender:
         self.frame_bytes = self.data[0].nbytes
         # Actual sync epoch will be filled in by run().
         self.time_converter = TimeConverter(0.0, args.adc_sample_rate)
+        self.descriptor_heap = make_descriptor_heap(
+            channels_per_substream=args.channels_per_substream,
+            spectra_per_heap=n_spectra_per_heap,
+            sample_bits=DTYPE.itemsize * BYTE_BITS,
+        )
 
     def _update_metrics(self, end_timestamp: int, future: asyncio.Future) -> None:
         end_time = self.time_converter.adc_to_unix(end_timestamp)
@@ -291,10 +306,18 @@ async def async_main() -> None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
     senders = [Sender(args, i) for i in range(len(args.dest))]
+    descriptor_senders = [
+        DescriptorSender(sender.stream, sender.descriptor_heap, SPEAD_DESCRIPTOR_INTERVAL_S) for sender in senders
+    ]
+    descriptor_tasks = [asyncio.create_task(sender.run()) for sender in descriptor_senders]
+
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
     sync_epoch = time.time()
     await asyncio.gather(*(sender.run(sync_epoch, args.run_once) for sender in senders))
+    for sender in descriptor_senders:
+        sender.halt()
+    await asyncio.gather(*descriptor_tasks)
 
 
 def main() -> None:
