@@ -59,7 +59,9 @@ SEND_DTYPE = np.dtype(np.int8)
 class Frame:
     """Hold all data for heaps with a single timestamp.
 
-    It does not own its memory - the backing store is in :class:`Chunk`.
+    It does not own its memory - the backing store is in :class:`Chunk`. It keeps
+    a cached :class:`spead2.send.HeapReferenceList` with the heaps of the enabled
+    beams, along with a version counter that is used to invalidate it.
 
     Parameters
     ----------
@@ -103,6 +105,8 @@ class Frame:
                 )
             )
             self.heaps.append(heap)
+        self.tx_enabled_version = -1
+        self.tx_heaps = spead2.send.HeapReferenceList([])
 
 
 class Chunk:
@@ -238,15 +242,17 @@ class Chunk:
         if n_enabled > 0:
             send_futures: list[asyncio.Future] = []
             for frame in self._frames:
-                # TODO (NGC-1232): building this list every time may be too expensive.
-                # Consider caching it and invalidating when streams are enabled/disabled.
-                heaps_to_send = [
-                    spead2.send.HeapReference(heap, substream_index=i, rate=rate)
-                    for i, (heap, enabled) in enumerate(zip(frame.heaps, send_stream.tx_enabled))
-                    if enabled
-                ]
+                if frame.tx_enabled_version != send_stream.tx_enabled_version:
+                    frame.tx_heaps = spead2.send.HeapReferenceList(
+                        [
+                            spead2.send.HeapReference(heap, substream_index=i, rate=rate)
+                            for i, (heap, enabled) in enumerate(zip(frame.heaps, send_stream.tx_enabled))
+                            if enabled
+                        ]
+                    )
+                    frame.tx_enabled_version = send_stream.tx_enabled_version
                 send_futures.append(
-                    send_stream.stream.async_send_heaps(heaps_to_send, mode=spead2.send.GroupMode.ROUND_ROBIN)
+                    send_stream.stream.async_send_heaps(frame.tx_heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
 
             self.future = asyncio.gather(*send_futures)
@@ -345,6 +351,7 @@ class BSend:
             raise ValueError("channel_offset must be an integer multiple of n_channels_per_substream")
 
         self.tx_enabled = [tx_enabled] * len(outputs)
+        self.tx_enabled_version = 0
         n_beams = len(outputs)
         self.output_names = [output.name for output in outputs]
 
@@ -432,6 +439,7 @@ class BSend:
             disabled.
         """
         self.tx_enabled[stream_id] = enable
+        self.tx_enabled_version += 1
 
     async def get_free_chunk(self) -> Chunk:
         """Obtain a :class:`.Chunk` for transmission.
