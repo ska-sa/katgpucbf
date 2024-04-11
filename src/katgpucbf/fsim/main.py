@@ -102,7 +102,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="X.X.X.X[+N]:PORT",
         help="Destination addresses (one per polarisation)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(arglist)
 
     if args.samples_between_spectra is None:
         args.samples_between_spectra = 2 * args.channels
