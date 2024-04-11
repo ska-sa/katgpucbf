@@ -22,8 +22,10 @@ Refer to :ref:`feng-packet-sim` for more information.
 
 import argparse
 import asyncio
+import functools
 import itertools
 import os
+import time
 from typing import Sequence
 
 import katsdpservices
@@ -32,14 +34,21 @@ import prometheus_async
 import spead2.send.asyncio
 from katsdptelstate.endpoint import endpoint_list_parser
 from numba import njit
+from prometheus_client import Counter, Gauge
 
 from .. import COMPLEX, DEFAULT_JONES_PER_BATCH, DEFAULT_PACKET_PAYLOAD_BYTES, DEFAULT_TTL, N_POLS, spead
 from ..fgpu.send import PREAMBLE_SIZE
-from ..utils import comma_split
+from ..utils import TimeConverter, add_gc_stats, comma_split
+from . import METRIC_NAMESPACE
 
 DTYPE = np.dtype(np.int8)
 #: Number of heaps in time to keep in flight
 QUEUE_DEPTH = 8
+output_heaps_counter = Counter("output_heaps", "number of heaps transmitted", namespace=METRIC_NAMESPACE)
+output_bytes_counter = Counter("output_bytes", "number of payload bytes transmitted", namespace=METRIC_NAMESPACE)
+time_error_gauge = Gauge(
+    "time_error_s", "elapsed time minus expected elapsed time", ["stream"], namespace=METRIC_NAMESPACE
+)
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
@@ -243,9 +252,21 @@ class Sender:
                 )
             self.frames.append(spead2.send.HeapReferenceList(frame_heaps))
         self.stream = make_stream(args, idx, self.data)
+        self.time_error_gauge = time_error_gauge.labels(str(idx))
+        self.frame_heaps = args.array_size
+        self.frame_bytes = self.data[0].nbytes
+        # Actual sync epoch will be filled in by run().
+        self.time_converter = TimeConverter(0.0, args.adc_sample_rate)
 
-    async def run(self, run_once: bool) -> None:
+    def _update_metrics(self, end_timestamp: int, future: asyncio.Future) -> None:
+        end_time = self.time_converter.adc_to_unix(end_timestamp)
+        self.time_error_gauge.set(time.time() - end_time)
+        output_heaps_counter.inc(self.frame_heaps)
+        output_bytes_counter.inc(self.frame_bytes)
+
+    async def run(self, sync_epoch: float, run_once: bool) -> None:
         """Send heaps until cancelled."""
+        self.time_converter.sync_epoch = sync_epoch
         futures: list[asyncio.Future[int]] = [asyncio.get_running_loop().create_future() for _ in range(QUEUE_DEPTH)]
         for i in range(QUEUE_DEPTH):
             futures[i].set_result(0)  # Make the future ready
@@ -257,12 +278,14 @@ class Sender:
             timestamp += self.timestamp_step
             if run_once:
                 break
+            futures[idx].add_done_callback(functools.partial(self._update_metrics, timestamp))
         await asyncio.gather(*futures)
 
 
 async def async_main() -> None:
     """Run main program."""
     args = parse_args()
+    add_gc_stats()
 
     if args.prometheus_port is not None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
@@ -270,7 +293,8 @@ async def async_main() -> None:
     senders = [Sender(args, i) for i in range(len(args.dest))]
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
-    await asyncio.gather(*(sender.run(args.run_once) for sender in senders))
+    sync_epoch = time.time()
+    await asyncio.gather(*(sender.run(sync_epoch, args.run_once) for sender in senders))
 
 
 def main() -> None:
