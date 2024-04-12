@@ -30,8 +30,8 @@
 def COMMIT_ID = 'unknown'
 pipeline {
   agent {
-    label 'qualification-katgpucbf'
     dockerfile {
+      label 'qualification-katgpucbf'
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
       /* Use the Jenkins-specific stage of the Dockerfile as the image for
