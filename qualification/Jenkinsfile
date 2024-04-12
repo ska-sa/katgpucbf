@@ -30,6 +30,7 @@
 def COMMIT_ID = 'unknown'
 pipeline {
   agent {
+    label 'qualification-katgpucbf'
     dockerfile {
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 

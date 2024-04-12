@@ -28,6 +28,7 @@
 
 pipeline {
   agent {
+    label 'katgpucbf'
     dockerfile {
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
