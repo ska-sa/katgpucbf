@@ -35,6 +35,8 @@ from .. import COMPLEX, N_POLS
 
 #: Minimum CUDA compute capability needed for the kernel (with 8-bit samples)
 MIN_COMPUTE_CAPABILITY = (7, 2)
+#: Magic value indicating missing data
+MISSING = np.array([-(2**31), 1], dtype=np.int32)
 
 
 def device_filter(device: AbstractDevice) -> bool:
@@ -177,7 +179,10 @@ class Correlation(accel.Operation):
 
     Calling this object does not directly update the output. Instead, it
     updates an intermediate buffer (called ``mid_visibilities``). To produce
-    the output, call :meth:`reduce`.
+    the output, call :meth:`reduce`. This function can also flag data that
+    was missing during the accumulation, by writing a special value. This
+    is controlled by the ``present_baselines`` slot, which has one boolean
+    entry per baseline (antenna pair).
 
     Currently only 8-bit input mode is supported.
     """
@@ -220,6 +225,7 @@ class Correlation(accel.Operation):
         self.slots["mid_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions, dtype=np.int64)
         self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
         self.slots["out_saturated"] = accel.IOSlot(dimensions=(), dtype=np.uint32)
+        self.slots["present_baselines"] = accel.IOSlot(dimensions=(self.template.n_baselines,), dtype=np.uint8)
         if n_batches * self.template.n_channels * self.template.n_baselines * N_POLS * N_POLS >= 2**31:
             # Can probably go higher, but rather keep it low to reduce the risk
             # of indexing bugs.
@@ -268,6 +274,7 @@ class Correlation(accel.Operation):
         mid_visibilities_buffer = self.buffer("mid_visibilities")
         out_visibilities_buffer = self.buffer("out_visibilities")
         out_saturated_buffer = self.buffer("out_saturated")
+        present_baselines_buffer = self.buffer("present_baselines")
         wgs = 128  # TODO: could be tuned. But this kernel costs a tiny amount
         out_saturated_buffer.zero(self.command_queue)
         self.command_queue.enqueue_kernel(
@@ -276,6 +283,7 @@ class Correlation(accel.Operation):
                 out_visibilities_buffer.buffer,
                 out_saturated_buffer.buffer,
                 mid_visibilities_buffer.buffer,
+                present_baselines_buffer.buffer,
                 np.uint32(mid_visibilities_buffer.shape[0]),
             ],
             global_size=(accel.roundup(int(np.prod(out_visibilities_buffer.shape)), wgs), 1, 1),
