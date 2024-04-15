@@ -24,7 +24,7 @@ import signal
 import time
 import weakref
 from collections import Counter
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 import aiokatcp
 import numpy as np
@@ -104,6 +104,43 @@ def parse_source(value: str) -> list[tuple[str, int]] | str:
         return [(ep.host, ep.port) for ep in endpoints]
     except ValueError:
         return value
+
+
+def comma_split(
+    base_type: Callable[[str], _T], count: int | None = None, allow_single=False
+) -> Callable[[str], list[_T]]:
+    """Return a function to split a comma-delimited str into a list of type _T.
+
+    This function is used to parse lists of CPU core numbers, which come from
+    the command-line as comma-separated strings, but are obviously more useful
+    as a list of ints. It's generic enough that it could process lists of other
+    types as well though if necessary.
+
+    Parameters
+    ----------
+    base_type
+        The base type of thing you expect in the list, e.g. `int`, `float`.
+    count
+        How many of them you expect to be in the list. `None` means the list
+        could be any length.
+    allow_single
+        If true (defaults to false), allow a single value to be used when
+        `count` is greater than 1. In this case, it will be repeated `count`
+        times.
+    """
+
+    def func(value: str) -> list[_T]:  # noqa: D102
+        parts = value.split(",")
+        if parts == [""]:
+            parts = []
+        n = len(parts)
+        if count is not None and n == 1 and allow_single:
+            parts = parts * count
+        elif count is not None and n != count:
+            raise ValueError(f"Expected {count} comma-separated fields, received {n}")
+        return [base_type(part) for part in parts]
+
+    return func
 
 
 class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[aiokatcp.DeviceStatus]):

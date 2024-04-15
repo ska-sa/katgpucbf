@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,6 +18,7 @@
 
 from typing import Any
 
+import numpy as np
 import spead2
 
 DIGITISER_ID_ID = 0x3101
@@ -44,6 +45,8 @@ DEFAULT_PORT = 7148
 
 #: Format for immediate items
 IMMEDIATE_FORMAT = [("u", FLAVOUR.heap_address_bits)]
+#: dtype for items that need to be immediate yet passed by reference
+IMMEDIATE_DTYPE = np.dtype(">u8")
 
 
 def make_immediate(id: int, value: Any) -> spead2.Item:

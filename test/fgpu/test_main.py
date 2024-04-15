@@ -25,43 +25,10 @@ from katgpucbf.fgpu.main import (
     DEFAULT_TAPS,
     DEFAULT_W_CUTOFF,
     DEFAULT_WEIGHT_PASS,
-    comma_split,
     parse_args,
     parse_narrowband,
 )
 from katgpucbf.fgpu.output import NarrowbandOutput, WidebandOutput
-
-
-class TestCommaSplit:
-    """Test :func:`.comma_split`."""
-
-    def test_basic(self) -> None:
-        """Test normal usage, without optional features."""
-        assert comma_split(int)("3,5") == [3, 5]
-        assert comma_split(int)("3") == [3]
-        assert comma_split(int)("") == []
-
-    def test_bad_value(self) -> None:
-        """Test with a value that isn't valid for the element type."""
-        with pytest.raises(ValueError, match="invalid literal for int"):
-            assert comma_split(int)("3,hello")
-
-    def test_fixed_count(self) -> None:
-        """Test with a value for `count`."""
-        splitter = comma_split(int, 2)
-        assert splitter("3,5") == [3, 5]
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
-            splitter("3,5,7")
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 1"):
-            splitter("3")
-
-    def test_allow_single(self) -> None:
-        """Test with `allow_single`."""
-        splitter = comma_split(int, 2, allow_single=True)
-        assert splitter("3,5") == [3, 5]
-        assert splitter("3") == [3, 3]
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
-            splitter("3,5,7")
 
 
 class TestParseNarrowband:

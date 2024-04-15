@@ -84,7 +84,7 @@ function spead_proto.dissector(buffer, pinfo, tree)
 end
 
 udp_table = DissectorTable.get("udp.port")
--- We've commonly used these two ports, 7148 is the usual one, 7149 is used
--- by src/tools/fsim. Adjust according to your needs.
+-- We've commonly used these two ports, 7148 is the usual one.
+-- Adjust according to your needs.
 udp_table:add(7148, spead_proto)
 udp_table:add(7149, spead_proto)

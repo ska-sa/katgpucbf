@@ -32,7 +32,7 @@ from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
-from ..spead import BF_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
+from ..spead import BF_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_DTYPE, IMMEDIATE_FORMAT, TIMESTAMP_ID, make_immediate
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 from .output import BOutput
@@ -142,7 +142,7 @@ class Chunk:
 
         self._timestamp = 0
         self._timestamp_step = timestamp_step
-        self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(">u8")
+        self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(IMMEDIATE_DTYPE)
 
         # NOTE: The future indicates when it is safe to modify the chunk,
         # i.e. it is not being transmitted. At construction there is nothing to
