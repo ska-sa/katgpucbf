@@ -69,9 +69,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
     )
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
-    parser.add_argument("--array-size", type=int, default=80, help="Number of antennas in the array")
     parser.add_argument(
-        "--channels", type=int, default=32768, help="Total number of channels in the array [%(default)s]"
+        "--array-size", type=int, default=80, help="Number of antennas in the simulated array [%(default)s]"
+    )
+    parser.add_argument(
+        "--channels", type=int, default=32768, help="Total number of channels in the simulated array [%(default)s]"
     )
     parser.add_argument(
         "--channels-per-substream", type=int, default=512, help="Number of channels sent by this fsim [%(default)s]"

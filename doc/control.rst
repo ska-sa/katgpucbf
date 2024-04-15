@@ -142,7 +142,7 @@ commands in separate terminals on two separate servers. This will launch a
 single :ref:`feng-packet-sim` on ``host1`` and a single :program:`xbgpu`
 instance on ``host2``::
 
-    [Connect to host1, navigate to the location of the fsim and build it using 'make']
+    [Connect to host1 and activate the local virtual environment]
     (katgpucbf) user@host1:~/katgpucbf$ spead2_net_raw fsim --interface <interface name> --ibv \
                                         --array-size 4 --channels 4096 \
                                         --channels-per-substream 1024 \
