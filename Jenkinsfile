@@ -29,6 +29,7 @@
 pipeline {
   agent {
     dockerfile {
+      label 'katgpucbf'
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
       /* Use the Jenkins-specific stage of the Dockerfile as the image for
