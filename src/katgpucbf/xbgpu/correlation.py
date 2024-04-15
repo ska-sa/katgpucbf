@@ -316,28 +316,3 @@ class Correlation(accel.Operation):
         if ant1 > ant2:
             raise ValueError("It is required that ant2 >= ant1 in all cases")
         return ant2 * (ant2 + 1) // 2 + ant1
-
-    @staticmethod
-    def get_baselines_for_missing_ants(present_ants: np.ndarray, n_ants: int) -> list[int]:
-        """Get all baselines for ants indicated as missing in `present_ants`.
-
-        Parameters
-        ----------
-        present_ants
-            Boolean array indicating whether an antenna had data present or not
-            during an accumulation period.
-        n_ants
-            The number of antennas used for this correlator configuration.
-
-        Returns
-        -------
-        baseline_list
-            List of baselines whose indices match the missing antennas.
-        """
-        baseline_list = []
-        for a2 in range(n_ants):
-            for a1 in range(a2 + 1):
-                if not present_ants[a1] or not present_ants[a2]:
-                    baseline_list.append(Correlation.get_baseline_index(a1, a2))
-
-        return baseline_list
