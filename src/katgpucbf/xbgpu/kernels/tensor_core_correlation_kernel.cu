@@ -689,16 +689,17 @@ void correlate(Visibilities *visibilities, const Samples *samples, unsigned firs
 
 
 // Clamp x to [-INT_MAX, INT_MAX] and return true if it was clamped
-__device__ bool saturate(long *x)
+__device__ bool saturate(long x, int *out)
 {
-  if (*x < -INT_MAX) {
-    *x = -INT_MAX;
+  if (x < -INT_MAX) {
+    *out = -INT_MAX;
     return true;
   }
-  if (*x > INT_MAX) {
-    *x = INT_MAX;
+  if (x > INT_MAX) {
+    *out = INT_MAX;
     return true;
   }
+  *out = (int) x;
   return false;
 }
 
@@ -708,21 +709,34 @@ __device__ bool saturate(long *x)
 // TODO: generalise to other values of NR_BITS
 extern "C" __global__
 __launch_bounds__(NR_WARPS * 32)
-void reduce(int2 * __restrict__ out, unsigned int * __restrict__ out_saturated, const long2 * __restrict__ in, unsigned buffers)
+void reduce(
+  int2 * __restrict__ out,
+  unsigned int * __restrict__ out_saturated,
+  const long2 * __restrict__ in,
+  const unsigned char * __restrict__ present_baselines,
+  unsigned buffers)
 {
   namespace cg = cooperative_groups;
   const unsigned int stride = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
   const unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= stride)
     return;
-  long2 sum = make_long2(0, 0);
-  for (unsigned i = 0; i < buffers; i++) {
-    long2 value = in[i * stride + idx];
-    sum.x += value.x;
-    sum.y += value.y;
+  const unsigned int baseline = (idx / 4) % NR_BASELINES;
+  int2 out_sum;
+  unsigned int saturated;
+  if (present_baselines[baseline]) {
+    long2 sum = make_long2(0, 0);
+    for (unsigned i = 0; i < buffers; i++) {
+      long2 value = in[i * stride + idx];
+      sum.x += value.x;
+      sum.y += value.y;
+    }
+    // Apply saturation (note: | not || to avoid short-circuiting)
+    saturated = saturate(sum.x, &out_sum.x) | saturate(sum.y, &out_sum.y);
+  } else {
+    out_sum = make_int2(INT_MIN, 1); // special marker for missing data
+    saturated = 0;
   }
-  // Apply saturation (note: | not || to avoid short-circuiting)
-  unsigned int saturated = saturate(&sum.x) | saturate(&sum.y);
   /* Do some in-kernel reduction of the saturation count to reduce the number
    * of atomic operations. Ideally this would be done for the whole thread
    * block rather than just warp, but CUDA doesn't yet make that a one-liner,
@@ -730,7 +744,7 @@ void reduce(int2 * __restrict__ out, unsigned int * __restrict__ out_saturated, 
    */
   auto group = cg::tiled_partition<32>(cg::this_thread_block());
   saturated = cg::reduce(group, saturated, cg::plus<unsigned int>());
-  out[idx] = make_complex((int) sum.x, (int) sum.y);
+  out[idx] = make_complex(out_sum.x, out_sum.y);
   if (group.thread_rank() == 0)
     atomicAdd(out_saturated, saturated);
 }
