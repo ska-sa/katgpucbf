@@ -1,10 +1,8 @@
 *.egg-info
 *.eggs
-*.o
 .coverage
 .env
 .venv
-.vscode/
 /build
 /htmlcov
 __pycache__

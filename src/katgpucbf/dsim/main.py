@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -97,7 +97,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Destination addresses (one per polarisation)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(arglist)
     if args.period <= 0:
         parser.error("--period must be positive")
 

@@ -29,6 +29,7 @@
 pipeline {
   agent {
     dockerfile {
+      label 'katgpucbf'
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
       /* Use the Jenkins-specific stage of the Dockerfile as the image for
@@ -70,16 +71,6 @@ pipeline {
 
     stage('Parallel stage') {
       parallel {
-        stage('Compile C++ tools') {
-          steps {
-            // Make and compile tools.
-            dir('src/tools') {
-              sh 'make clean'
-              sh 'make -j'
-            }
-          }
-        }
-
         stage('Compile and test memcpy_loop') {
           steps {
             dir('scratch') {

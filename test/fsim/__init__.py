@@ -1,5 +1,7 @@
+# noqa: D104
+
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -13,18 +15,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
-CXX = g++
-CXXFLAGS = $(shell pkg-config --cflags spead2) -std=c++17 -Wall -Wextra -g -O3 -pthread
-LDFLAGS = $(shell pkg-config --static --libs spead2) -lboost_program_options
-TARGETS = fsim
-
-all: $(TARGETS)
-
-%: %.cpp
-	$(CXX) -o $@ $< $(CXXFLAGS) $(LDFLAGS)
-
-clean:
-	rm -f $(TARGETS) *.o
-
-.PHONY: all clean

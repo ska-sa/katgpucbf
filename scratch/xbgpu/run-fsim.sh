@@ -2,24 +2,17 @@
 
 set -e -u
 
-function interface_ipv4_addr()
-{
-    ip -4 -o addr show $1 | awk '/inet /{split($4, a, "/"); print a[1]}'
-}
-
 # Load variables for machine-specific config
 . ../config/$(hostname -s).sh
 
-iface_ip1=$(interface_ipv4_addr $iface1)
-iface_ip2=$(interface_ipv4_addr $iface2)
 mcast="239.10.10.$((10 + $1 * 2))+1:7148"
 
 case "$1" in
     0)
-        iface_ip=$iface_ip1
+        iface=$iface1
         ;;
     1)
-        iface_ip=$iface_ip2
+        iface=$iface2
         ;;
     *)
         echo "Pass 0-1" 1>&2
@@ -27,10 +20,10 @@ case "$1" in
         ;;
 esac
 
-exec spead2_net_raw ../../src/tools/fsim \
-    --interface $iface_ip \
+exec spead2_net_raw fsim \
+    --interface $iface \
     --ibv \
-    --array-size ${array_size:-64} \
+    --array-size ${array_size:-80} \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --channels ${channels:-32768} \
     --channels-per-substream ${channels_per_substream:-512} \

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -103,7 +103,7 @@ class HeapSet:
         heaps = []
         substream_offset = list(itertools.accumulate(n_substreams, initial=0))
         digitiser_id_items = [spead.make_immediate(spead.DIGITISER_ID_ID, dig_id) for dig_id in digitiser_id]
-        digitiser_status = np.zeros((n_pols, n), dtype=">u8")
+        digitiser_status = np.zeros((n_pols, n), dtype=spead.IMMEDIATE_DTYPE)
         for i in range(n):
             # The ... in indexing causes numpy to give a 0d array view, rather than
             # a scalar.
@@ -299,7 +299,10 @@ class Sender:
         # Prepare initial timestamps
         first_end_timestamp = first_timestamp + self.heap_set.data.sizes["time"] * self.heap_samples
         self.heap_set.data["timestamps"][:] = np.arange(
-            first_timestamp, first_end_timestamp, self.heap_samples, dtype=">u8"
+            first_timestamp,
+            first_end_timestamp,
+            self.heap_samples,
+            dtype=spead.IMMEDIATE_DTYPE,
         )
         while self._running:
             for i, part in enumerate(self.heap_set.parts):

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -33,6 +33,9 @@ class DescriptorSender:
     makes it possible to stagger different senders so that their descriptors
     do not all arrive at a common receiver at the same time.
 
+    The descriptors are sent with zero rate, which means they will not affect
+    the timing of other packets in the same stream.
+
     Parameters
     ----------
     stream
@@ -61,7 +64,7 @@ class DescriptorSender:
     ) -> None:
         self._stream = stream
         self._heap_reference_list = spead2.send.HeapReferenceList(
-            [spead2.send.HeapReference(descriptors, substream_index=i) for i in substreams]
+            [spead2.send.HeapReference(descriptors, substream_index=i, rate=0.0) for i in substreams]
         )
         self._interval = interval
         self._first_interval = interval if first_interval is None else first_interval

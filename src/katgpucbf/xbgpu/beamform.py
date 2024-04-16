@@ -62,9 +62,14 @@ class BeamformTemplate:
         n_ants: int,
         n_channels: int,
         n_spectra_per_frame: int,
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
     ) -> "Beamform":
         """Generate a :class:`Beamform` object based on the template."""
-        return Beamform(self, command_queue, n_frames, n_ants, n_channels, n_spectra_per_frame)
+        return Beamform(
+            self, command_queue, n_frames, n_ants, n_channels, n_spectra_per_frame, seed, sequence_first, sequence_step
+        )
 
 
 class Beamform(accel.Operation):
@@ -89,7 +94,8 @@ class Beamform(accel.Operation):
         that this will not apply any rotation to the first channel
         in the data; any such rotation needs to be baked into **weights**.
     **rand_states** : n_frames × n_channels × n_spectra_per_frame, curandStateXORWOW_t (packed)
-        Independent random states for generating dither values
+        Independent random states for generating dither values. This is set
+        up by the constructor and should not normally need to be touched.
 
     Parameters
     ----------
@@ -105,6 +111,8 @@ class Beamform(accel.Operation):
         Number of frequency channels
     n_spectra_per_frame
         Number of samples in time axis for each frame (fine time dimension)
+    seed, sequence_first, sequence_step
+        See :class:`.RandomStateBuilder`.
     """
 
     def __init__(
@@ -115,12 +123,16 @@ class Beamform(accel.Operation):
         n_ants: int,
         n_channels: int,
         n_spectra_per_frame: int,
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
     ) -> None:
         super().__init__(command_queue)
         self.template = template
         pol_dim = accel.Dimension(N_POLS, exact=True)
         complex_dim = accel.Dimension(COMPLEX, exact=True)
         n_beams = len(template.beam_pols)
+        builder = RandomStateBuilder(command_queue.context)
         self.slots["in"] = accel.IOSlot(
             (n_frames, n_ants, n_channels, n_spectra_per_frame, pol_dim, complex_dim), np.int8
         )
@@ -134,8 +146,15 @@ class Beamform(accel.Operation):
                 accel.Dimension(n_channels, exact=True),
                 accel.Dimension(n_spectra_per_frame, exact=True),
             ),
-            RandomStateBuilder(command_queue.context).dtype,
+            builder.dtype,
         )
+        rand_states = builder.make_states(
+            (n_frames, n_channels, n_spectra_per_frame),
+            seed=seed,
+            sequence_first=sequence_first,
+            sequence_step=sequence_step,
+        )
+        self.bind(rand_states=rand_states)
 
     def _run(self) -> None:
         in_buffer = self.buffer("in")

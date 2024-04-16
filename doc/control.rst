@@ -142,11 +142,11 @@ commands in separate terminals on two separate servers. This will launch a
 single :ref:`feng-packet-sim` on ``host1`` and a single :program:`xbgpu`
 instance on ``host2``::
 
-    [Connect to host1, navigate to the location of the fsim and build it using 'make']
-    user@host1:~/katgpucbf/src/tools$ spead2_net_raw ./fsim --interface <100GbE NIC IP> --ibv \
-                                      --array-size 4 --channels 4096 \
-                                      --channels-per-substream 512 \
-                                      239.10.10.10+1:7148
+    [Connect to host1 and activate the local virtual environment]
+    (katgpucbf) user@host1:~/katgpucbf$ spead2_net_raw fsim --interface <interface name> --ibv \
+                                        --array-size 4 --channels 4096 \
+                                        --channels-per-substream 1024 \
+                                        239.10.10.10+1:7148
     .
     .
     .
@@ -154,12 +154,12 @@ instance on ``host2``::
     (katgpucbf) user@host2:~/katgpucbf$ spead2_net_raw numactl -C 1 xbgpu \
                                         --src-affinity 0 --src-comp-vector 0 \
                                         --dst-affinity 1 --dst-comp-vector 1 \
-                                        --src-interface <100GbE interface name or IP address> \
-                                        --dst-interface <100GbE interface name or IP address> \
+                                        --src-interface <interface name> \
+                                        --dst-interface <interface name> \
                                         --src-ibv --dst-ibv \
                                         --adc-sample-rate 1712e6 --array-size 4 \
                                         --channels 4096 \
-                                        --channels-per-substream 512 \
+                                        --channels-per-substream 1024 \
                                         --samples-between-spectra 8192 \
                                         --katcp-port 7150 \
                                         239.10.10.10:7148 239.10.11.10:7148
@@ -176,7 +176,7 @@ the :program:`xbgpu` instance.
 
 Pinning thread affinities
 """""""""""""""""""""""""
-.. todo:: ``NGC_730``
+.. todo:: ``NGC-730``
   Update ``run-{dsim, fpgu, xbgpu}.sh`` scripts to standardise over usage
   of either ``numactl`` or ``taskset``.
 

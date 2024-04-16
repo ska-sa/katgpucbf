@@ -9,6 +9,7 @@ Subpackages
 
    katgpucbf.dsim
    katgpucbf.fgpu
+   katgpucbf.fsim
    katgpucbf.xbgpu
 
 Submodules
@@ -17,6 +18,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   katgpucbf.curand_helpers
    katgpucbf.mapped_array
    katgpucbf.meerkat
    katgpucbf.monitor
