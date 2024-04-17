@@ -66,6 +66,7 @@ from .correlation import CorrelationTemplate
 from .output import BOutput, Output, XOutput
 from .xsend import XSend, incomplete_accum_counter
 from .xsend import make_stream as make_xstream
+from .xsend import skipped_accum_counter
 
 logger = logging.getLogger(__name__)
 _O = TypeVar("_O", bound=Output)
@@ -864,60 +865,65 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
                 break
             await item.async_wait_for_events()
 
-            heap = await self.send_stream.get_free_heap()
+            if not np.any(item.present_ants):
+                # All Antennas have missed data at some point, avoid sending altogether
+                logger.warning("All Antennas had a break in data during this accumulation")
+                skipped_accum_counter.labels(self.output.name).inc(1)
+            else:
+                heap = await self.send_stream.get_free_heap()
 
-            # NOTE: We do not expect the time between dumps to be the same each
-            # time as the time.time() function checks the wall time now, not
-            # the actual time between timestamps. The difference between dump
-            # timestamps is expected to be constant.
-            new_time_s = time.time()
-            time_difference_between_heaps_s = new_time_s - old_time_s
+                # NOTE: We do not expect the time between dumps to be the same each
+                # time as the time.time() function checks the wall time now, not
+                # the actual time between timestamps. The difference between dump
+                # timestamps is expected to be constant.
+                new_time_s = time.time()
+                time_difference_between_heaps_s = new_time_s - old_time_s
 
-            logger.debug(
-                "Current output heap timestamp: %#x, difference between timestamps: %#x, "
-                "wall time between dumps %.2f s",
-                item.timestamp,
-                item.timestamp - old_timestamp,
-                time_difference_between_heaps_s,
-            )
-
-            # NOTE: As the output packets are rate limited in
-            # such a way to match the dump rate, receiving data too quickly
-            # will result in data bottlenecking at the sender, the pipeline
-            # eventually stalling and the input buffer overflowing.
-            if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
-                logger.warning(
-                    "Time between output heaps: %.2f which is less the expected %.2f. "
-                    "If this warning occurs too often, the pipeline will stall "
-                    "because the rate limited sender will not keep up with the input rate.",
+                logger.debug(
+                    "Current output heap timestamp: %#x, difference between timestamps: %#x, "
+                    "wall time between dumps %.2f s",
+                    item.timestamp,
+                    item.timestamp - old_timestamp,
                     time_difference_between_heaps_s,
-                    self.dump_interval_s,
                 )
 
-            old_time_s = new_time_s
-            old_timestamp = item.timestamp
+                # NOTE: As the output packets are rate limited in
+                # such a way to match the dump rate, receiving data too quickly
+                # will result in data bottlenecking at the sender, the pipeline
+                # eventually stalling and the input buffer overflowing.
+                if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
+                    logger.warning(
+                        "Time between output heaps: %.2f which is less the expected %.2f. "
+                        "If this warning occurs too often, the pipeline will stall "
+                        "because the rate limited sender will not keep up with the input rate.",
+                        time_difference_between_heaps_s,
+                        self.dump_interval_s,
+                    )
 
-            item.buffer_device.get_async(self._download_command_queue, heap.buffer)
-            item.saturated.get_async(self._download_command_queue, heap.saturated)
-            event = self._download_command_queue.enqueue_marker()
-            await katsdpsigproc.resource.async_wait_for_events([event])
+                old_time_s = new_time_s
+                old_timestamp = item.timestamp
 
-            if not np.all(item.present_ants):
-                incomplete_accum_counter.labels(self.output.name).inc(1)
-                if not np.any(item.present_ants):
-                    logger.warning("All Antennas had a break in data during this accumulation")
+                item.buffer_device.get_async(self._download_command_queue, heap.buffer)
+                item.saturated.get_async(self._download_command_queue, heap.saturated)
+                event = self._download_command_queue.enqueue_marker()
+                await katsdpsigproc.resource.async_wait_for_events([event])
 
-            heap.timestamp = item.timestamp
-            if self.send_stream.tx_enabled:
-                # Convert timestamp for the *end* of the heap (not the start)
-                # to a UNIX time for the sensor update. NB: this should be done
-                # *before* send_heap, because that gives away ownership of the
-                # heap.
-                end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
-                end_timestamp = self.engine.time_converter.adc_to_unix(end_adc_timestamp)
-                clip_cnt_sensor = self.engine.sensors[f"{self.output.name}.xeng-clip-cnt"]
-                clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
-            self.send_stream.send_heap(heap)
+                if not np.all(item.present_ants):
+                    incomplete_accum_counter.labels(self.output.name).inc(1)
+                    if not np.any(item.present_ants):
+                        logger.warning("All Antennas had a break in data during this accumulation")
+
+                heap.timestamp = item.timestamp
+                if self.send_stream.tx_enabled:
+                    # Convert timestamp for the *end* of the heap (not the start)
+                    # to a UNIX time for the sensor update. NB: this should be done
+                    # *before* send_heap, because that gives away ownership of the
+                    # heap.
+                    end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
+                    end_timestamp = self.engine.time_converter.adc_to_unix(end_adc_timestamp)
+                    clip_cnt_sensor = self.engine.sensors[f"{self.output.name}.xeng-clip-cnt"]
+                    clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
+                self.send_stream.send_heap(heap)
 
             await self._tx_free_item_queue.put(item)
 

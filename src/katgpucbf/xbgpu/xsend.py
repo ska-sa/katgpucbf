@@ -47,9 +47,15 @@ output_clipped_visibilities_counter = Counter(
     ["stream"],
     namespace=METRIC_NAMESPACE,
 )
+skipped_accum_counter = Counter(
+    "output_x_skipped_accs",
+    "skipped output accumulations because input data was entirely incomplete",
+    ["stream"],
+    namespace=METRIC_NAMESPACE,
+)
 incomplete_accum_counter = Counter(
     "output_x_incomplete_accs",
-    "incomplete output accumulations because input data was incomplete",
+    "incomplete output accumulations because input data was partially incomplete",
     ["stream"],
     namespace=METRIC_NAMESPACE,
 )
@@ -141,6 +147,7 @@ def make_stream(
     output_bytes_counter.labels(output_name)
     output_visibilities_counter.labels(output_name)
     output_clipped_visibilities_counter.labels(output_name)
+    skipped_accum_counter.labels(output_name)
     incomplete_accum_counter.labels(output_name)
     return stream
 
