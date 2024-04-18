@@ -118,7 +118,7 @@ hiredis==2.2.3
     #   katsdptelstate
 httmock==1.4.0
     # via prometheus-api-client
-idna==3.6
+idna==3.7
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt

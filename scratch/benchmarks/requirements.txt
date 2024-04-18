@@ -44,7 +44,7 @@ frozenlist==1.4.0
     #   -c scratch/benchmarks/../../requirements.txt
     #   aiohttp
     #   aiosignal
-idna==3.6
+idna==3.7
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
