@@ -154,6 +154,15 @@ class DeviceServer(aiokatcp.DeviceServer):
                 default=sample_bits,
             )
         )
+        # The value of sync-time is initialised later by main.py
+        self.sensors.add(
+            aiokatcp.Sensor(
+                float,
+                "sync-time",
+                "The UNIX time corresponding to timestamp 0",
+                "s",
+            )
+        )
 
     async def on_stop(self) -> None:  # noqa: D102
         self.sender.halt()
