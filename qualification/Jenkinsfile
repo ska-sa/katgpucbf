@@ -142,11 +142,11 @@ pipeline {
       to: '$DEFAULT_RECIPIENTS'
 
       script {
-        ARRAYS = sh(script: 'katcpcmd lab5.sdp.kat.ac.za:5001 product-list', returnStdout: true).trim()
+        ARRAYS = sh(script: 'katcpcmd cbf-mc.cbf.mkat.karoo.kat.ac.za:5001 product-list', returnStdout: true).trim()
         echo "Currently Running Arrays: ${ARRAYS}"
         if (ARRAYS.contains("jenkins_qualification_cbf")) {
           echo "Destroying jenkins_qualification_cbf"
-          sh 'katcpcmd lab5.sdp.kat.ac.za:5001 product-deconfigure jenkins_qualification_cbf 1'
+          sh 'katcpcmd cbf-mc.cbf.mkat.karoo.kat.ac.za:5001 product-deconfigure jenkins_qualification_cbf 1'
         }
       }
     }
