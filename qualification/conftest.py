@@ -311,7 +311,7 @@ async def _cbf_config_and_description(
     narrowband_decimation: int,
 ) -> tuple[dict, dict]:
     config: dict = {
-        "version": "3.5",
+        "version": "4.0",
         "config": {},
         "inputs": {},
         "outputs": {},
