@@ -84,7 +84,7 @@ exec schedrr spead2_net_raw numactl -C $other_affinity xbgpu \
     --channels-per-substream $channels_per_substream \
     --samples-between-spectra $samples_between_spectra \
     --channel-offset-value $channel_offset \
-    --sync-epoch 0 \
+    --sync-time 0 \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
     --tx-enabled \

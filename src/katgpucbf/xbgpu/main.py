@@ -298,7 +298,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "and still be accepted. [%(default)s]",
     )
     parser.add_argument(
-        "--sync-epoch",
+        "--sync-time",
         type=float,
         required=True,
         help="UNIX time at which digitisers were synced.",
@@ -407,7 +407,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         n_samples_between_spectra=args.samples_between_spectra,
         n_spectra_per_heap=args.jones_per_batch // args.channels,
         sample_bits=args.sample_bits,
-        sync_epoch=args.sync_epoch,
+        sync_time=args.sync_time,
         channel_offset_value=args.channel_offset_value,
         outputs=args.outputs,
         src=args.src,

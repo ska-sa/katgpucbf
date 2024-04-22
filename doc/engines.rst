@@ -76,10 +76,9 @@ Stream Group
 
 Timestamp
     Timestamps are expressed in units of ADC (analogue-to-digital converter)
-    samples, measured from a configurable "sync epoch" (also known as the "sync
-    time"). When a timestamp is associated with a collection of data, it
-    generally reflects the timestamp of the *first* ADC sample that forms part
-    of that data.
+    samples, measured from a configurable "sync time". When a timestamp is
+    associated with a collection of data, it generally reflects the timestamp
+    of the *first* ADC sample that forms part of that data.
 
 Operation
 ---------

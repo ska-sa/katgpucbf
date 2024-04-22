@@ -267,7 +267,7 @@ class Sender:
         self.time_error_gauge = time_error_gauge.labels(str(idx))
         self.frame_heaps = args.array_size
         self.frame_bytes = self.data[0].nbytes
-        # Actual sync epoch will be filled in by run().
+        # Actual sync time will be filled in by run().
         self.time_converter = TimeConverter(0.0, args.adc_sample_rate)
         self.descriptor_heap = make_descriptor_heap(
             channels_per_substream=args.channels_per_substream,
@@ -281,9 +281,9 @@ class Sender:
         output_heaps_counter.inc(self.frame_heaps)
         output_bytes_counter.inc(self.frame_bytes)
 
-    async def run(self, sync_epoch: float, run_once: bool) -> None:
+    async def run(self, sync_time: float, run_once: bool) -> None:
         """Send heaps until cancelled."""
-        self.time_converter.sync_epoch = sync_epoch
+        self.time_converter.sync_time = sync_time
         futures: list[asyncio.Future[int]] = [asyncio.get_running_loop().create_future() for _ in range(QUEUE_DEPTH)]
         for i in range(QUEUE_DEPTH):
             futures[i].set_result(0)  # Make the future ready
@@ -315,8 +315,8 @@ async def async_main() -> None:
 
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
-    sync_epoch = time.time()
-    await asyncio.gather(*(sender.run(sync_epoch, args.run_once) for sender in senders))
+    sync_time = time.time()
+    await asyncio.gather(*(sender.run(sync_time, args.run_once) for sender in senders))
     for sender in descriptor_senders:
         sender.halt()
     await asyncio.gather(*descriptor_tasks)

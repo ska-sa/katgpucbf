@@ -323,7 +323,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_per_substream,
             n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
-            seed=int(engine.time_converter.sync_epoch),
+            seed=int(engine.time_converter.sync_time),
             sequence_first=engine.channel_offset_value,
             sequence_step=engine.n_channels_total,
         )
@@ -950,7 +950,7 @@ class XBEngine(DeviceServer):
         The number of time samples received per frequency channel.
     sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
-    sync_epoch
+    sync_time
         UNIX time corresponding to timestamp zero
     channel_offset_value
         The index of the first channel in the subset of channels processed by
@@ -1020,7 +1020,7 @@ class XBEngine(DeviceServer):
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
-        sync_epoch: float,
+        sync_time: float,
         channel_offset_value: int,
         outputs: list[Output],
         src: list[tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
@@ -1051,7 +1051,7 @@ class XBEngine(DeviceServer):
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
         self.bandwidth_hz = bandwidth_hz
-        self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
+        self.time_converter = TimeConverter(sync_time, adc_sample_rate_hz)
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
         self.n_channels_per_substream = n_channels_per_substream
