@@ -391,7 +391,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--gain", type=float, default=1.0, help="Initial eq gains [%(default)s]")
     parser.add_argument(
-        "--sync-epoch",
+        "--sync-time",
         type=float,
         required=True,
         help="UNIX time at which digitisers were synced.",
@@ -486,7 +486,7 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         dst_sample_bits=args.dst_sample_bits,
         max_delay_diff=args.max_delay_diff,
         gain=args.gain,
-        sync_epoch=args.sync_epoch,
+        sync_time=args.sync_time,
         mask_timestamp=args.mask_timestamp,
         use_vkgdr=args.use_vkgdr,
         use_peerdirect=args.use_peerdirect,

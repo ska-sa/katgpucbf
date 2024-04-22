@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 pytestmark = [pytest.mark.cuda_only]
 # Command-line arguments
-SYNC_EPOCH = 1632561921
+SYNC_TIME = 1632561921
 CHANNELS = 1024
 JONES_PER_BATCH = 262144
 # Lower than the default to make tests quicker
@@ -228,7 +228,7 @@ class TestEngine:
             "--katcp-port=0",
             "--src-interface=lo",
             "--dst-interface=lo",
-            f"--sync-epoch={SYNC_EPOCH}",
+            f"--sync-time={SYNC_TIME}",
             f"--src-chunk-samples={CHUNK_SAMPLES}",
             f"--dst-chunk-jones={CHUNK_JONES}",
             f"--max-delay-diff={MAX_DELAY_DIFF}",
@@ -255,7 +255,7 @@ class TestEngine:
         assert engine_server._src_interface == ["127.0.0.1"]
         # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
         assert engine_server._pipelines[0].output.channels == CHANNELS
-        assert engine_server.time_converter.sync_epoch == SYNC_EPOCH
+        assert engine_server.time_converter.sync_time == SYNC_TIME
         assert engine_server._srcs == [(f"239.10.10.{i}", 7149) for i in range(16)]
         # TODO: same problem for `dst` itself.
 
@@ -483,7 +483,7 @@ class TestEngine:
         phase = -2.0 * np.pi * sky_centre_frequency * -delay_s
         phase_correction = -phase
         coeffs = [f"{d},0.0:{p},0.0" for d, p in zip(delay_s, phase_correction)]
-        await engine_client.request("delays", output.name, SYNC_EPOCH, *coeffs)
+        await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
 
         # Use constant-magnitude gains to avoid throwing off the magnitudes
         rng = np.random.default_rng(123)
@@ -493,7 +493,7 @@ class TestEngine:
             await engine_client.request("gain", output.name, pol, *(str(gain) for gain in gains[:, pol]))
 
         # Don't send the first chunk, to avoid complications with the step
-        # change in the delay at SYNC_EPOCH.
+        # change in the delay at SYNC_TIME.
         src_layout = engine_server.src_layout
         heap_samples = output.spectra_samples * output.spectra_per_heap
         first_timestamp = roundup(src_layout.chunk_samples, heap_samples)
@@ -647,7 +647,7 @@ class TestEngine:
         phase_rate_per_sample = np.array([30, 32.5]) / n_samples
         phase_rate = phase_rate_per_sample * ADC_SAMPLE_RATE
         coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate)]
-        await engine_client.request("delays", output.name, SYNC_EPOCH, *coeffs)
+        await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
 
         first_timestamp = roundup(100 * src_layout.chunk_samples, output.spectra_samples * output.spectra_per_heap)
         end_delay = round(min(delay_rate) * n_samples)
@@ -729,7 +729,7 @@ class TestEngine:
         update_phases = [1.0, 0.2, -0.2, -2.0, 0.0]
         for time, phase in zip(update_times, update_phases):
             coeffs = f"0.0,0.0:{phase},0.0"
-            await engine_client.request("delays", output.name, SYNC_EPOCH + time / ADC_SAMPLE_RATE, coeffs, coeffs)
+            await engine_client.request("delays", output.name, SYNC_TIME + time / ADC_SAMPLE_RATE, coeffs, coeffs)
 
         out_data, timestamps = await self._send_data(
             mock_recv_stream,
@@ -781,11 +781,11 @@ class TestEngine:
         """
         delay_s = delay_samples / ADC_SAMPLE_RATE
         coeffs = ["0.0,0.0:0.0,0.0", f"{delay_s},0.0:0.0,0.0"]
-        await engine_client.request("delays", output.name, SYNC_EPOCH, *coeffs)
+        await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
 
         src_layout = engine_server.src_layout
         # Don't send the first chunk, to avoid complications with the step
-        # change in the delay at SYNC_EPOCH.
+        # change in the delay at SYNC_TIME.
         heap_samples = output.spectra_samples * output.spectra_per_heap
         first_timestamp = roundup(src_layout.chunk_samples, heap_samples)
         n_samples = 20 * src_layout.chunk_samples
@@ -956,7 +956,7 @@ class TestEngine:
             output,
             dig_data,
         )
-        time_converter = TimeConverter(SYNC_EPOCH, ADC_SAMPLE_RATE)
+        time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
         expected_timestamps = [time_converter.adc_to_unix(t * 524288) for t in range(1, 10)]
         assert sensor_update_dict[sensors[0].name] == [
             aiokatcp.Reading(t, aiokatcp.Sensor.Status.NOMINAL, 5000) for t in expected_timestamps
@@ -994,7 +994,7 @@ class TestEngine:
             output,
             dig_data,
         )
-        time_converter = TimeConverter(SYNC_EPOCH, ADC_SAMPLE_RATE)
+        time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
         expected_timestamps = [time_converter.adc_to_unix(t * 524288) for t in range(1, 10)]
         for pol in range(N_POLS):
             assert sensor_update_dict[sensors[pol].name] == [
@@ -1044,11 +1044,11 @@ class TestEngine:
 
         sensor = engine_server.sensors[f"{output.name}.input{tone_pol}.feng-clip-cnt"]
         assert sensor.reading == aiokatcp.Reading(
-            SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE, aiokatcp.Sensor.Status.NOMINAL, len(timestamps)
+            SYNC_TIME + last_timestamp / ADC_SAMPLE_RATE, aiokatcp.Sensor.Status.NOMINAL, len(timestamps)
         )
         sensor = engine_server.sensors[f"{output.name}.input{1 - tone_pol}.feng-clip-cnt"]
         assert sensor.reading == aiokatcp.Reading(
-            SYNC_EPOCH + last_timestamp / ADC_SAMPLE_RATE, aiokatcp.Sensor.Status.NOMINAL, 0
+            SYNC_TIME + last_timestamp / ADC_SAMPLE_RATE, aiokatcp.Sensor.Status.NOMINAL, 0
         )
 
     def _patch_fill_in(self, monkeypatch, engine_client: aiokatcp.Client, output: Output, *request) -> list[int]:
@@ -1124,7 +1124,7 @@ class TestEngine:
         dig_data = self._make_tone(np.arange(n_samples), tone, 0)
 
         timestamp_list = self._patch_fill_in(
-            monkeypatch, engine_client, output, "delays", output.name, SYNC_EPOCH, "0,0:3,0", "0,0:3,0"
+            monkeypatch, engine_client, output, "delays", output.name, SYNC_TIME, "0,0:3,0", "0,0:3,0"
         )
         out_data, timestamps = await self._send_data(
             mock_recv_stream,
