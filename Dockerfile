@@ -76,27 +76,13 @@ RUN python -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-# jinja2, packaging, pycparser and meson are installed in order to compile the
-# C++ bindings of spead2
-RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4 jinja2 packaging pycparser meson
-
-# Install spead2 C++ bindings. We use requirements.txt just to get the
-# version, so that when we want to update we only have to do it in one place.
-WORKDIR /tmp/katgpucbf
-COPY requirements.txt .
-WORKDIR /tmp
-RUN SPEAD2_VERSION=$(grep ^spead2== katgpucbf/requirements.txt | cut -d= -f3) && \
-    wget "https://github.com/ska-sa/spead2/releases/download/v$SPEAD2_VERSION/spead2-$SPEAD2_VERSION.tar.gz" && \
-    tar -zxf "spead2-$SPEAD2_VERSION.tar.gz" && \
-    cd "spead2-$SPEAD2_VERSION" && \
-    meson setup -Dtools=disabled -Dibv=enabled -Dmlx5dv=enabled build && \
-    cd build && \
-    meson compile && \
-    meson install
+RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4
 
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
 # Jenkins image has a clean environment to start from).
+WORKDIR /tmp/katgpucbf
+COPY requirements.txt .
 RUN pip install --no-deps -c /tmp/katgpucbf/requirements.txt pycuda && \
     pip uninstall -y pycuda
 
@@ -144,19 +130,12 @@ RUN pip install --no-deps --root=/install-root .
 
 #######################################################################
 
-# Separate stage to build the C++ tools. This is in a separate build stage
-# so that changes to either the C++ code or the Python code don't invalidate
-# the build cache for the other.
+# Separate stage to build C tools. This is in a separate build stage
+# so that changes to the package don't invalidate the build cache for this.
 
-FROM build-base as build-cxx
+FROM build-base as build-c
 
-# Build utilities.
-# We use make clean to ensure that an existing build from the build context
-# won't accidentally get used instead.
 WORKDIR /tmp/tools
-COPY src/tools .
-RUN make clean && make -j fsim
-
 RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-runtime/schedrr.c && \
     gcc -Wall -O2 -o schedrr schedrr.c
 
@@ -169,8 +148,6 @@ LABEL maintainer="MeerKAT CBF team <cbf@ska.ac.za>"
 
 # curl is needed for running under katsdpcontroller
 # numactl allows CPU and memory affinity to be controlled.
-# libboost-program-options is for spead2's C++ command-line tools - not
-# strictly needed but useful for debugging.
 # netbase provides /etc/protocols, which libpcap depends on in some cases.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     python3 \
@@ -179,21 +156,17 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     python-is-python3 \
     curl \
     numactl \
-    libboost-program-options1.74.0 \
-    libboost-system1.74.0 \
     libibverbs1 \
     librdmacm1 \
     ibverbs-providers \
-    libpcap0.8 \
     libcap2 \
     libcap2-bin \
     netbase
 
 ENV PATH=/venv/bin:$PATH KATSDPSIGPROC_TUNE_MATCH=nearest
 
-COPY --link --from=build-cxx /tmp/tools/schedrr /usr/local/bin
+COPY --link --from=build-c /tmp/tools/schedrr /usr/local/bin
 RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
 COPY --link --from=build-py-requirements /venv /venv
-COPY --link --from=build-cxx /tmp/tools/fsim /usr/local/bin
 COPY --link docker/tuning.db /root/.cache/katsdpsigproc/tuning.db
 COPY --link --from=build-py /install-root/venv /venv

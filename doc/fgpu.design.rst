@@ -372,7 +372,7 @@ The remaining steps are to
  1. Compute the real Fourier transform from several complex-to-complex
     transforms (see the previous section).
  2. Apply gains and fine delays.
- 3. Do a partial transpose, so that *spectra-per-heap* (256 by default) spectra
+ 3. Do a partial transpose, so that *spectra-per-heap* spectra
     are stored contiguously for each channel (the Nyquist frequencies are also
     discarded at this point).
  4. Convert to integer.

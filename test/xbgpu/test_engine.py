@@ -38,7 +38,7 @@ from katgpucbf.xbgpu.engine import BPipeline, RxQueueItem, XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args, parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
-from .. import PromDiff, get_sensor
+from .. import PromDiff
 from . import test_parameters
 from .test_recv import gen_heap
 
@@ -52,8 +52,8 @@ SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 # Mark that can be applied to a test that just needs one set of parameters
 DEFAULT_PARAMETERS = pytest.mark.parametrize(
-    "n_ants, n_channels_total, n_spectra_per_heap, heap_accumulation_threshold",
-    [(4, 1024, 256, [300, 300])],
+    "n_ants, n_channels_total, n_jones_per_batch, heap_accumulation_threshold",
+    [(4, 1024, 262144, [300, 300])],
 )
 
 
@@ -745,6 +745,10 @@ class TestEngine:
         return n_channels_total // n_engines
 
     @pytest.fixture
+    def n_spectra_per_heap(self, n_channels_total: int, n_jones_per_batch: int) -> int:  # noqa: D102
+        return n_jones_per_batch // n_channels_total
+
+    @pytest.fixture
     def n_samples_between_spectra(self, n_channels_total: int) -> int:  # noqa: D102
         # NOTE: Multiply by 8 to account for a decimation factor in the
         # Narrowband case. It is also included to ensure we don't rely on the
@@ -759,7 +763,7 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_samples_between_spectra: int,
-        n_spectra_per_heap: int,
+        n_jones_per_batch: int,
         corrprod_args: list[str],
         beam_args: list[str],
     ) -> list[str]:
@@ -772,7 +776,7 @@ class TestEngine:
             f"--channels-per-substream={n_channels_per_substream}",
             f"--samples-between-spectra={n_samples_between_spectra}",
             f"--channel-offset-value={frequency}",
-            f"--spectra-per-heap={n_spectra_per_heap}",
+            f"--jones-per-batch={n_jones_per_batch}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             "--sync-epoch=1234567890",
             "--src-interface=lo",
@@ -813,10 +817,10 @@ class TestEngine:
         await client.wait_closed()
 
     @pytest.mark.combinations(
-        "n_ants, n_channels_total, n_spectra_per_heap, missing_antenna, heap_accumulation_threshold",
+        "n_ants, n_channels_total, n_jones_per_batch, missing_antenna, heap_accumulation_threshold",
         test_parameters.array_size,
         test_parameters.num_channels,
-        test_parameters.num_spectra_per_heap,
+        test_parameters.num_jones_per_batch,
         [None, 0, 3],
         [(3, 7), (4, 8), (5, 9)],
         filter=valid_end_to_end_combination,
@@ -1138,8 +1142,7 @@ class TestEngine:
             counter += 1
             if counter == count:
                 await client.request(*request)
-                _, informs = await client.request("sensor-value", "steady-state-timestamp")
-                timestamp.append(int(informs[0].arguments[4]))
+                timestamp.append(await client.sensor_value("steady-state-timestamp", int))
             return await orig_get_rx_item(self)
 
         monkeypatch.setattr(BPipeline, "_get_rx_item", get_rx_item)
@@ -1172,7 +1175,7 @@ class TestEngine:
         request_factory: Callable[[str, int], tuple],
     ):
         """Test that the steady-state-timestamp sensor works."""
-        assert (await get_sensor(client, "steady-state-timestamp")) == 0
+        assert (await client.sensor_value("steady-state-timestamp")) == 0
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 

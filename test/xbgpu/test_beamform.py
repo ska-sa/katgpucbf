@@ -16,14 +16,12 @@
 
 """Test the :mod:`katgpucbf.xbgpu.beamform` module."""
 
-import katsdpsigproc
 import numba
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.curand_helpers import RandomStateBuilder
 from katgpucbf.xbgpu.beamform import BeamformTemplate
 
 
@@ -97,13 +95,7 @@ def test_beamform(
     n_beams = len(beam_pols)
 
     template = BeamformTemplate(context, beam_pols, n_times)
-    fn = template.instantiate(command_queue, n_frames, n_antennas, n_channels)
-
-    # Initialise the random states
-    assert isinstance(context, katsdpsigproc.cuda.Context)
-    assert isinstance(fn.slots["rand_states"], katsdpsigproc.accel.IOSlot)  # keep mypy happy
-    builder = RandomStateBuilder(context)
-    fn.bind(rand_states=builder.make_states(fn.slots["rand_states"].shape, seed=321, sequence_first=0))
+    fn = template.instantiate(command_queue, n_frames, n_antennas, n_channels, seed=321, sequence_first=0)
 
     fn.ensure_all_bound()
     h_in = fn.buffer("in").empty_like()

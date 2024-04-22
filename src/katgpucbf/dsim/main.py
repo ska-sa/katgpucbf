@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -97,7 +97,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Destination addresses (one per polarisation)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(arglist)
     if args.period <= 0:
         parser.error("--period must be positive")
 
@@ -239,16 +239,17 @@ async def async_main() -> None:
     # a separate process for the signal service that shouldn't inherit this.
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
+
+    if args.sync_time is None:
+        args.sync_time = time.time()
+    server.sensors["sync-time"].value = args.sync_time
     await server.start()
 
     add_signal_handlers(server)
     add_gc_stats()
 
-    now = time.time()
-    if args.sync_time is None:
-        args.sync_time = now
     time_converter = TimeConverter(args.sync_time, args.adc_sample_rate)
-    timestamp = first_timestamp(time_converter, now, args.max_period)
+    timestamp = first_timestamp(time_converter, time.time(), args.max_period)
     start_time = time_converter.adc_to_unix(timestamp)
 
     logger.info("First timestamp will be %#x", timestamp)

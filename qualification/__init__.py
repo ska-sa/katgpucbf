@@ -58,23 +58,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
 
 
-async def get_sensor_val(client: aiokatcp.Client, sensor_name: str):
-    """Get the value of a katcp sensor.
-
-    If the sensor value can't be cast as an int or a float (in that order), the
-    value will get returned as a string. This simple implementation ignores the
-    actual type advertised by the server.
-    """
-    _reply, informs = await client.request("sensor-value", sensor_name)
-
-    expected_types = [int, float, str]
-    for t in expected_types:
-        try:
-            return aiokatcp.decode(t, informs[0].arguments[4])
-        except ValueError:
-            continue
-
-
 @dataclass
 class CBFRemoteControl:
     """A container class for katcp clients needed by qualification tests."""

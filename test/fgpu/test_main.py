@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -21,46 +21,14 @@ from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf.fgpu.main import (
     DEFAULT_DDC_TAPS_RATIO,
+    DEFAULT_JONES_PER_BATCH,
     DEFAULT_TAPS,
     DEFAULT_W_CUTOFF,
     DEFAULT_WEIGHT_PASS,
-    comma_split,
     parse_args,
     parse_narrowband,
 )
 from katgpucbf.fgpu.output import NarrowbandOutput, WidebandOutput
-
-
-class TestCommaSplit:
-    """Test :func:`.comma_split`."""
-
-    def test_basic(self) -> None:
-        """Test normal usage, without optional features."""
-        assert comma_split(int)("3,5") == [3, 5]
-        assert comma_split(int)("3") == [3]
-        assert comma_split(int)("") == []
-
-    def test_bad_value(self) -> None:
-        """Test with a value that isn't valid for the element type."""
-        with pytest.raises(ValueError, match="invalid literal for int"):
-            assert comma_split(int)("3,hello")
-
-    def test_fixed_count(self) -> None:
-        """Test with a value for `count`."""
-        splitter = comma_split(int, 2)
-        assert splitter("3,5") == [3, 5]
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
-            splitter("3,5,7")
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 1"):
-            splitter("3")
-
-    def test_allow_single(self) -> None:
-        """Test with `allow_single`."""
-        splitter = comma_split(int, 2, allow_single=True)
-        assert splitter("3,5") == [3, 5]
-        assert splitter("3") == [3, 3]
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
-            splitter("3,5,7")
 
 
 class TestParseNarrowband:
@@ -80,13 +48,14 @@ class TestParseNarrowband:
             taps=DEFAULT_TAPS,
             ddc_taps=DEFAULT_DDC_TAPS_RATIO * 8,
             w_cutoff=DEFAULT_W_CUTOFF,
+            jones_per_batch=DEFAULT_JONES_PER_BATCH,
         )
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
         assert parse_narrowband(
             "name=foo,channels=1024,centre_frequency=400e6,decimation=8,taps=8,"
-            "w_cutoff=0.5,dst=239.1.2.3+1:7148,ddc_taps=128,weight_pass=0.3"
+            "w_cutoff=0.5,dst=239.1.2.3+1:7148,ddc_taps=128,weight_pass=0.3,jones_per_batch=262144"
         ) == NarrowbandOutput(
             name="foo",
             channels=1024,
@@ -97,6 +66,7 @@ class TestParseNarrowband:
             dst=[Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
             ddc_taps=128,
             weight_pass=0.3,
+            jones_per_batch=262144,
         )
 
     @pytest.mark.parametrize(
@@ -130,11 +100,11 @@ class TestParseArgs:
             "--dst-interface=lo",
             "--adc-sample-rate=1712000000.0",
             "--sync-epoch=0",
-            "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9",
+            "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9,jones_per_batch=262144",
             (
                 "--narrowband=name=nb0,dst=239.1.0.0+1,channels=32768,"
                 "centre_frequency=400e6,decimation=8,taps=4,w_cutoff=0.8,"
-                "ddc_taps=64,weight_pass=0.3"
+                "ddc_taps=64,weight_pass=0.3,jones_per_batch=524288"
             ),
             "--narrowband=name=nb1,dst=239.2.0.0+0:7149,channels=8192,centre_frequency=300e6,decimation=16",
             "239.0.1.0+15:7148",
@@ -147,6 +117,7 @@ class TestParseArgs:
                 channels=1024,
                 taps=64,
                 w_cutoff=0.9,
+                jones_per_batch=262144,
             ),
             NarrowbandOutput(
                 name="nb0",
@@ -158,6 +129,7 @@ class TestParseArgs:
                 w_cutoff=0.8,
                 ddc_taps=64,
                 weight_pass=0.3,
+                jones_per_batch=524288,
             ),
             NarrowbandOutput(
                 name="nb1",
@@ -169,5 +141,6 @@ class TestParseArgs:
                 w_cutoff=DEFAULT_W_CUTOFF,
                 ddc_taps=DEFAULT_DDC_TAPS_RATIO * 16,
                 weight_pass=DEFAULT_WEIGHT_PASS,
+                jones_per_batch=DEFAULT_JONES_PER_BATCH,
             ),
         ]

@@ -51,7 +51,6 @@ from .. import (
     __version__,
 )
 from .. import recv as base_recv
-from ..curand_helpers import RandomStateBuilder
 from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
@@ -63,13 +62,12 @@ from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DE
 from .beamform import BeamformTemplate
 from .bsend import BSend
 from .bsend import make_stream as make_bstream
-from .correlation import Correlation, CorrelationTemplate
+from .correlation import CorrelationTemplate
 from .output import BOutput, Output, XOutput
 from .xsend import XSend, incomplete_accum_counter
 from .xsend import make_stream as make_xstream
 
 logger = logging.getLogger(__name__)
-MISSING = np.array([-(2**31), 1], dtype=np.int32)
 _O = TypeVar("_O", bound=Output)
 _T = TypeVar("_T", bound=QueueItem)
 
@@ -116,11 +114,13 @@ class XTxQueueItem(QueueItem):
         buffer_device: accel.DeviceArray,
         saturated: accel.DeviceArray,
         present_ants: np.ndarray,
+        present_baselines: MappedArray,
         timestamp: int = 0,
     ) -> None:
         self.buffer_device = buffer_device
         self.saturated = saturated
         self.present_ants = present_ants
+        self.present_baselines = present_baselines
         super().__init__(timestamp)
 
     def reset(self, timestamp: int = 0) -> None:
@@ -128,6 +128,20 @@ class XTxQueueItem(QueueItem):
         super().reset(timestamp=timestamp)
         self.present_ants.fill(True)  # Assume they're fine until told otherwise
         self.batches = 0
+
+    def update_present_baselines(self) -> None:
+        """Recompute present_baselines from present_ants."""
+        # See Correlation.get_baseline_index for the ordering.
+        # We do a column of the triangle at a time for efficiency.
+        n_ants = len(self.present_ants)
+        offset = 0
+        for i in range(n_ants):
+            section = self.present_baselines.host[offset : offset + i + 1]
+            if self.present_ants[i]:
+                section[:] = self.present_ants[: i + 1]
+            else:
+                section[:] = 0
+            offset += len(section)
 
 
 class BTxQueueItem(QueueItem):
@@ -141,14 +155,12 @@ class BTxQueueItem(QueueItem):
         self,
         out: accel.DeviceArray,
         saturated: accel.DeviceArray,
-        rand_states: accel.DeviceArray,
         weights: MappedArray,
         delays: MappedArray,
         timestamp: int = 0,
     ) -> None:
         self.out = out
         self.saturated = saturated
-        self.rand_states = rand_states
         self.weights = weights
         self.delays = delays
         #: Version of weights and delays (for comparison to BPipeline._weights_version)
@@ -315,29 +327,19 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             n_frames=engine.heaps_per_fengine_per_chunk,
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_per_substream,
+            seed=int(engine.time_converter.sync_epoch),
+            sequence_first=engine.channel_offset_value,
+            sequence_step=engine.n_channels_total,
         )
         allocator = accel.DeviceAllocator(context=context)
-        assert isinstance(context, katsdpsigproc.cuda.Context)
-        builder = RandomStateBuilder(context)
-        for i in range(self.n_tx_items):
+        for _ in range(self.n_tx_items):
             out = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
             saturated = self._beamform.slots["saturated"].allocate(allocator=allocator, bind=False)
-            assert isinstance(self._beamform.slots["rand_states"], accel.IOSlot)
-            # sequence_first and sequence_step are chosen to ensure unique
-            # sequence numbers across all BTxItems in all instances of the
-            # engine.
-            # The seed uses the sync epoch so that it's reproducible while still
-            # changing over time.
-            rand_states = builder.make_states(
-                self._beamform.slots["rand_states"].shape,
-                seed=int(engine.time_converter.sync_epoch),
-                sequence_first=i * engine.n_channels_total + engine.channel_offset_value,
-                sequence_step=self.n_tx_items * engine.n_channels_total,
-            )
             weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
-            tx_item = BTxQueueItem(out, saturated, rand_states, weights, delays)
+            tx_item = BTxQueueItem(out, saturated, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
+
         # These are the original weights, delays and gains as provided by the
         # user, rather than the processed values passed to the kernel.
         self._weights = np.ones((len(outputs), engine.n_ants), np.float64)
@@ -486,7 +488,6 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                     "saturated": tx_item.saturated,
                     "weights": tx_item.weights.device,
                     "delays": tx_item.delays.device,
-                    "rand_states": tx_item.rand_states,
                 }
             )
             self._beamform()
@@ -592,6 +593,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
         output: XOutput,
         engine: "XBEngine",
         context: AbstractContext,
+        vkgdr_handle: vkgdr.Vkgdr,
         init_tx_enabled: bool,
         name: str = DEFAULT_XPIPELINE_NAME,
     ) -> None:
@@ -621,7 +623,10 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
             buffer_device = self.correlation.slots["out_visibilities"].allocate(allocator, bind=False)
             saturated = self.correlation.slots["out_saturated"].allocate(allocator, bind=False)
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
-            tx_item = XTxQueueItem(buffer_device, saturated, present_ants)
+            present_baselines = MappedArray.from_slot(
+                vkgdr_handle, context, self.correlation.slots["present_baselines"]
+            )
+            tx_item = XTxQueueItem(buffer_device, saturated, present_ants, present_baselines)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         self.send_stream = XSend(
@@ -707,6 +712,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
         # Update the sync sensor (converting np.bool_ to Python bool)
         self.engine.sensors[f"{self.output.name}.rx.synchronised"].value = bool(tx_item.present_ants.all())
 
+        tx_item.update_present_baselines()
         self.correlation.reduce()
         tx_item.add_marker(self._proc_command_queue)
         self._tx_item_queue.put_nowait(tx_item)
@@ -716,7 +722,11 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
         tx_item = await self._tx_free_item_queue.get()
         await tx_item.async_wait_for_events()
         tx_item.reset(next_accum * self.timestamp_increment_per_accumulation)
-        self.correlation.bind(out_visibilities=tx_item.buffer_device, out_saturated=tx_item.saturated)
+        self.correlation.bind(
+            out_visibilities=tx_item.buffer_device,
+            out_saturated=tx_item.saturated,
+            present_baselines=tx_item.present_baselines.device,
+        )
         self.correlation.zero_visibilities()
         return tx_item
 
@@ -744,7 +754,11 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
 
         # Indicate that the timestamp still needs to be filled in.
         tx_item.timestamp = -1
-        self.correlation.bind(out_visibilities=tx_item.buffer_device, out_saturated=tx_item.saturated)
+        self.correlation.bind(
+            out_visibilities=tx_item.buffer_device,
+            out_saturated=tx_item.saturated,
+            present_baselines=tx_item.present_baselines.device,
+        )
         self.correlation.zero_visibilities()
         while True:
             # Get item from the receiver function.
@@ -855,21 +869,10 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
-            if not np.any(item.present_ants):
-                # All Antennas have missed data at some point, mark the entire dump missing
-                logger.warning("All Antennas had a break in data during this accumulation")
-                heap.buffer[...] = MISSING
+            if not np.all(item.present_ants):
                 incomplete_accum_counter.labels(self.output.name).inc(1)
-            elif not item.present_ants.all():
-                affected_baselines = Correlation.get_baselines_for_missing_ants(item.present_ants, self.engine.n_ants)
-                for affected_baseline in affected_baselines:
-                    # Multiply by four as each baseline (antenna pair) has four
-                    # associated correlation components (polarisation pairs).
-                    affected_baseline_index = affected_baseline * 4
-                    heap.buffer[:, affected_baseline_index : affected_baseline_index + 4, :] = MISSING
-
-                incomplete_accum_counter.labels(self.output.name).inc(1)
-            # else: No F-Engines had a break in data for this accumulation
+                if not np.any(item.present_ants):
+                    logger.warning("All Antennas had a break in data during this accumulation")
 
             heap.timestamp = item.timestamp
             if self.send_stream.tx_enabled:
@@ -1125,18 +1128,18 @@ class XBEngine(DeviceServer):
         # RxQueueItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
 
+        with context:
+            # We could quite easily make do with non-coherent mappings and
+            # explicit flushing, but since NVIDIA currently only provides
+            # host-coherent memory, this is a simpler option.
+            vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
+
         self._pipelines: list[Pipeline] = []
         x_outputs = [output for output in outputs if isinstance(output, XOutput)]
         b_outputs = [output for output in outputs if isinstance(output, BOutput)]
-        self._pipelines = [XPipeline(x_output, self, context, tx_enabled) for x_output in x_outputs]
+        self._pipelines = [XPipeline(x_output, self, context, vkgdr_handle, tx_enabled) for x_output in x_outputs]
         if b_outputs:
-            with context:
-                # We could quite easily make do with non-coherent mappings and
-                # explicit flushing, but since NVIDIA currently only provides
-                # host-coherent memory, this is a simpler option.
-                vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
             self._pipelines.append(BPipeline(b_outputs, self, context, vkgdr_handle, tx_enabled))
-
         self._upload_command_queue = context.create_command_queue()
 
         # This queue is extended in the monitor class, allowing for the

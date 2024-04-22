@@ -18,10 +18,10 @@
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
-from katsdpsigproc.accel import DeviceArray
+from katsdpsigproc.accel import DeviceArray, roundup
 from numba import njit, prange
 
-from katgpucbf.xbgpu.correlation import Correlation, CorrelationTemplate, device_filter
+from katgpucbf.xbgpu.correlation import MISSING, Correlation, CorrelationTemplate, device_filter
 
 from . import test_parameters
 
@@ -93,28 +93,30 @@ def fill_random(rng: np.random.Generator, buf: DeviceArray, command_queue: Abstr
 
 
 @pytest.mark.combinations(
-    "num_ants, num_channels, num_spectra_per_heap",
+    "num_ants, num_channels, num_jones_per_batch",
     test_parameters.array_size,
     test_parameters.num_channels,
-    test_parameters.num_spectra_per_heap,
+    test_parameters.num_jones_per_batch,
 )
 def test_correlator(
     context: AbstractContext,
     command_queue: AbstractCommandQueue,
     num_ants: int,
-    num_spectra_per_heap: int,
+    num_jones_per_batch: int,
     num_channels: int,
 ) -> None:
     """Test the Tensor Core correlation kernel for correctness."""
     n_chans_per_stream = num_channels // num_ants
     n_batches = 7
+    # The kernel requires it to be a multiple of 16
+    n_spectra_per_heap = roundup(num_jones_per_batch // num_channels, 16)
     batch_ranges = [(1, 5), (3, 4), (0, 7)]
 
     template = CorrelationTemplate(
         context,
         n_ants=num_ants,
         n_channels=n_chans_per_stream,
-        n_spectra_per_heap=num_spectra_per_heap,
+        n_spectra_per_heap=n_spectra_per_heap,
         input_sample_bits=8,
     )
 
@@ -123,7 +125,6 @@ def test_correlator(
 
     buf_samples_device = correlation.buffer("in_samples")
     buf_samples_host = buf_samples_device.empty_like()
-
     rng = np.random.default_rng(seed=2021)
     buf_samples_host[:] = rng.integers(
         # The Tensor Core correlator can't manage the maximum negative value,
@@ -136,6 +137,10 @@ def test_correlator(
         endpoint=True,  # We don't need to exclude the maximum positive value though.
     )
 
+    present_baselines_device = correlation.buffer("present_baselines")
+    present_baselines_host = present_baselines_device.empty_like()
+    present_baselines_host[:] = rng.choice(2, size=(present_baselines_host.shape), p=[0.1, 0.9])
+
     buf_visibilities_device = correlation.buffer("out_visibilities")
     buf_visibilities_host = buf_visibilities_device.empty_like()
     # Fill the buffers with garbage, to ensure that the result does not depend
@@ -144,12 +149,18 @@ def test_correlator(
     fill_random(rng, buf_visibilities_device, command_queue)
 
     # Calculate expected values
-    calculated_visibilities_host = np.zeros(buf_visibilities_host.shape, buf_visibilities_host.dtype)
+    calculated_visibilities_host = np.zeros(buf_visibilities_host.shape, np.int64)
     for first_batch, last_batch in batch_ranges:
         calculated_visibilities_host += correlate_host(buf_samples_host[first_batch:last_batch])
+    calculated_visibilities_host = np.clip(
+        calculated_visibilities_host, -np.iinfo(np.int32).max, np.iinfo(np.int32).max
+    )
+    # Flag missing data
+    calculated_visibilities_host[:, np.repeat(present_baselines_host == 0, 4)] = MISSING
 
     # Calculate using the kernel
     buf_samples_device.set(command_queue, buf_samples_host)
+    present_baselines_device.set(command_queue, present_baselines_host)
     correlation.zero_visibilities()
     for first_batch, last_batch in batch_ranges:
         correlation.first_batch = first_batch
@@ -175,6 +186,11 @@ def test_saturation(context: AbstractContext, command_queue: AbstractCommandQueu
     rng = np.random.default_rng(seed=2021)
     buf_samples_host[:] = rng.choice(np.array([-high, high], dtype=in_dtype), size=buf_samples_host.shape)
     buf_samples_device.set(command_queue, buf_samples_host)
+
+    present_baselines_device = correlation.buffer("present_baselines")
+    present_baselines_host = present_baselines_device.empty_like()
+    present_baselines_host[:] = rng.choice(2, size=(present_baselines_host.shape), p=[0.1, 0.9])
+    present_baselines_device.set(command_queue, present_baselines_host)
 
     buf_visibilities_device = correlation.buffer("out_visibilities")
     out_dtype = buf_visibilities_device.dtype
@@ -202,7 +218,11 @@ def test_saturation(context: AbstractContext, command_queue: AbstractCommandQueu
     assert np.sum(expected > np.iinfo(out_dtype).max) > 0
     assert np.sum(np.all(np.abs(expected) < np.iinfo(out_dtype).max, axis=-1)) > 0
 
+    # Temporarily set missing values to 0 rather than MISSING so that they
+    # aren't counted as saturated.
+    expected[:, np.repeat(present_baselines_host == 0, 4)] = 0
     expected_sat = np.sum(np.any(np.abs(expected) > np.iinfo(out_dtype).max, axis=-1))
     expected = np.clip(expected, -np.iinfo(out_dtype).max, np.iinfo(out_dtype).max)
+    expected[:, np.repeat(present_baselines_host == 0, 4)] = MISSING
     np.testing.assert_equal(buf_visibilities_host, expected)
     assert buf_saturated_host[()] == expected_sat

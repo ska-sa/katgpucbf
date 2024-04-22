@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -29,9 +29,21 @@ class Output(ABC):
 
     name: str
     channels: int
+    jones_per_batch: int
     taps: int
     w_cutoff: float
     dst: list[Endpoint]
+
+    def __post_init__(self) -> None:
+        if self.channels % len(self.dst) != 0:
+            raise ValueError("channels must be a multiple of the number of destinations")
+        if self.jones_per_batch % self.channels != 0:
+            raise ValueError("jones_per_batch must be a multiple of channels")
+
+    @property
+    def spectra_per_heap(self) -> int:
+        """Number of spectra in each output heap."""
+        return self.jones_per_batch // self.channels
 
     @property
     @abstractmethod
@@ -117,6 +129,7 @@ class NarrowbandOutput(Output):
     weight_pass: float
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if self.decimation % 2 != 0:
             raise ValueError("decimation factor must be even")
 

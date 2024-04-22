@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -38,6 +38,7 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from .. import (
+    DEFAULT_JONES_PER_BATCH,
     DEFAULT_KATCP_HOST,
     DEFAULT_KATCP_PORT,
     DEFAULT_PACKET_PAYLOAD_BYTES,
@@ -47,7 +48,7 @@ from .. import (
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import add_gc_stats, add_signal_handlers, parse_source
+from ..utils import add_gc_stats, add_signal_handlers, comma_split, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
 from .output import NarrowbandOutput, WidebandOutput
@@ -62,43 +63,6 @@ DEFAULT_DDC_TAPS_RATIO = 12
 DEFAULT_WEIGHT_PASS = 0.005
 
 
-def comma_split(
-    base_type: Callable[[str], _T], count: int | None = None, allow_single=False
-) -> Callable[[str], list[_T]]:
-    """Return a function to split a comma-delimited str into a list of type _T.
-
-    This function is used to parse lists of CPU core numbers, which come from
-    the command-line as comma-separated strings, but are obviously more useful
-    as a list of ints. It's generic enough that it could process lists of other
-    types as well though if necessary.
-
-    Parameters
-    ----------
-    base_type
-        The base type of thing you expect in the list, e.g. `int`, `float`.
-    count
-        How many of them you expect to be in the list. `None` means the list
-        could be any length.
-    allow_single
-        If true (defaults to false), allow a single value to be used when
-        `count` is greater than 1. In this case, it will be repeated `count`
-        times.
-    """
-
-    def func(value: str) -> list[_T]:  # noqa: D102
-        parts = value.split(",")
-        if parts == [""]:
-            parts = []
-        n = len(parts)
-        if count is not None and n == 1 and allow_single:
-            parts = parts * count
-        elif count is not None and n != count:
-            raise ValueError(f"Expected {count} comma-separated fields, received {n}")
-        return [base_type(part) for part in parts]
-
-    return func
-
-
 class OutputDict(TypedDict, total=False):
     """Configuration options for an output stream.
 
@@ -109,6 +73,7 @@ class OutputDict(TypedDict, total=False):
 
     name: str
     channels: int
+    jones_per_batch: int
     dst: list[Endpoint]
     taps: int
     w_cutoff: float
@@ -152,7 +117,7 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
                         raise ValueError(f"{key} specified twice")
                     case "name":
                         kws[key] = data
-                    case "channels" | "taps":
+                    case "channels" | "taps" | "jones_per_batch":
                         kws[key] = int(data)
                     case "w_cutoff":
                         kws[key] = float(data)
@@ -185,10 +150,15 @@ def parse_wideband(value: str) -> WidebandOutput:
     try:
         kws: WidebandOutputDict = {}
         _parse_stream(value, kws, field_callback)
-        kws = {"taps": DEFAULT_TAPS, "w_cutoff": DEFAULT_W_CUTOFF, **kws}  # type: ignore
+        kws = {
+            "taps": DEFAULT_TAPS,
+            "w_cutoff": DEFAULT_W_CUTOFF,
+            "jones_per_batch": DEFAULT_JONES_PER_BATCH,
+            **kws,
+        }
+        return WidebandOutput(**kws)
     except ValueError as exc:
         raise ValueError(f"--wideband: {exc}") from exc
-    return WidebandOutput(**kws)
 
 
 def parse_narrowband(value: str) -> NarrowbandOutput:
@@ -226,13 +196,14 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
         kws = {
             "taps": DEFAULT_TAPS,
             "w_cutoff": DEFAULT_W_CUTOFF,
+            "jones_per_batch": DEFAULT_JONES_PER_BATCH,
             "weight_pass": DEFAULT_WEIGHT_PASS,
             "ddc_taps": DEFAULT_DDC_TAPS_RATIO * kws["decimation"],
-            **kws,  # type: ignore[misc]
+            **kws,
         }
+        return NarrowbandOutput(**kws)
     except ValueError as exc:
         raise ValueError(f"--narrowband: {exc}") from exc
-    return NarrowbandOutput(**kws)
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
@@ -375,11 +346,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="The number of antennas in the array. [%(default)s]",
     )
     parser.add_argument(
-        "--spectra-per-heap",
+        "--jones-per-batch",
         type=int,
-        default=256,
-        metavar="SPECTRA",
-        help="Spectra in each output heap [%(default)s]",
+        default=DEFAULT_JONES_PER_BATCH,
+        metavar="SAMPLES",
+        help="Jones vectors in each output batch [%(default)s]",
     )
     parser.add_argument(
         "--src-chunk-samples",
@@ -394,7 +365,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=2**23,
         metavar="VECTORS",
         help="Number of Jones vectors in output chunks. If not a multiple of "
-        "channels*spectra-per-heap, it will be rounded up to the next multiple. [%(default)s]",
+        "jones-per-batch, it will be rounded up to the next multiple. [%(default)s]",
     )
     parser.add_argument(
         "--max-delay-diff",
@@ -421,7 +392,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gain", type=float, default=1.0, help="Initial eq gains [%(default)s]")
     parser.add_argument(
         "--sync-epoch",
-        type=int,  # AFAIK, the digitisers sync on PPS signals, so it makes sense for this to be an int.
+        type=float,
         required=True,
         help="UNIX time at which digitisers were synced.",
     )
@@ -484,8 +455,8 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
     else:
         monitor = NullMonitor()
 
-    channels_lcm = math.lcm(*(output.channels for output in args.outputs))
-    chunk_jones = accel.roundup(args.dst_chunk_jones, channels_lcm * args.spectra_per_heap)
+    batch_jones_lcm = math.lcm(*(output.jones_per_batch for output in args.outputs))
+    chunk_jones = accel.roundup(args.dst_chunk_jones, batch_jones_lcm)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
@@ -511,12 +482,11 @@ def make_engine(ctx: AbstractContext, args: argparse.Namespace) -> tuple[Engine,
         num_ants=args.array_size,
         chunk_samples=args.src_chunk_samples,
         chunk_jones=chunk_jones,
-        spectra_per_heap=args.spectra_per_heap,
         dig_sample_bits=args.dig_sample_bits,
         dst_sample_bits=args.dst_sample_bits,
         max_delay_diff=args.max_delay_diff,
         gain=args.gain,
-        sync_epoch=float(args.sync_epoch),  # CLI arg is an int, but SDP can handle a float downstream.
+        sync_epoch=args.sync_epoch,
         mask_timestamp=args.mask_timestamp,
         use_vkgdr=args.use_vkgdr,
         use_peerdirect=args.use_peerdirect,

@@ -1,7 +1,7 @@
 # noqa: D104
 
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, 2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -39,6 +39,7 @@ DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
 DEFAULT_TTL: Final = 4  #: Default TTL for spead multicast transmission
 DEFAULT_KATCP_HOST: Final = ""  # All interfaces
 DEFAULT_KATCP_PORT: Final = 7147
+DEFAULT_JONES_PER_BATCH: Final = 2**20
 DIG_HEAP_SAMPLES: Final = 4096
 DIG_SAMPLE_BITS: Final = 10
 #: Minimum update period (in seconds) for katcp sensors where the underlying

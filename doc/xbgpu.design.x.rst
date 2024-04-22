@@ -67,10 +67,10 @@ Parameters and constants
 - 8 means the real and imaginary components are signed bytes.
 - 16 means half-precision float.
 
-:c:macro:`N_SAMPLES_PER_CHANNEL` is the number of samples in time processed in
+:c:macro:`NR_SAMPLES_PER_CHANNEL` is the number of samples in time processed in
 a single call to the kernel. These are divided into groups of
-:c:macro:`N_TIMES_PER_BLOCK`, which is the number loaded into shared memory at
-a time before computing with them. Changing :c:macro:`N_TIMES_PER_BLOCK` would
+:c:macro:`NR_TIMES_PER_BLOCK`, which is the number loaded into shared memory at
+a time before computing with them. Changing :c:macro:`NR_TIMES_PER_BLOCK` would
 require substantial changes to the loading code: the fetches are hard-coded to
 use a certain number of bits of the thread ID to index this dimension.
 Increasing it significantly (e.g., to match the 256 that is native to MeerKAT)
@@ -264,20 +264,41 @@ Accumulations, Dumps and Output Data
 The input data is accumulated before being output. For every output heap,
 multiple input heaps are received.
 
-A heap from a single F-Engine consists of a set number of spectra indicated by
-the :option:`!--spectra-per-heap` flag, where the spectra are time samples. Each of
-these time samples is part of a different spectrum, meaning that the timestamp
-difference per sample is equal to the value of :option:`!--samples-between-spectra`.
-The timestamp difference between two consecutive heaps from the same F-Engine is equal to:
+A heap from a single F-Engine consists of a set number of spectra, referred to as
+``spectra_per_heap``, where the spectra are time samples.
+Each of these time samples is part of a different spectrum, meaning that the
+timestamp difference per sample is equal to the value of
+:option:`!--samples-between-spectra`.  The timestamp difference between two
+consecutive heaps from the same F-Engine is equal to:
 
   `heap_timestamp_step = spectra_per_heap * samples_between_spectra`.
+
+The value of ``spectra_per_heap`` is not set explicitly on the command line,
+but rather inferred from the :option:`!--jones-per-batch` argument. The latter
+is the product of ``spectra_per_heap`` and the stream's channel count (and
+thus, the number of Jones vectors in an F-engine output batch).
 
 A :dfn:`batch` of heaps is a collection of heaps from different F-Engines with the same
 timestamp. A :dfn:`chunk` consists of multiple consecutive batches (the number is given
 by the option :option:`!--heaps-per-fengine-per-chunk`). Correlation generally occurs on
-a chunk at a time, accumulating results, with the batches of the chunk being
-processed in parallel.  To avoid race conditions in accumulation, there are
-multiple accumulators, and batch *i* of a chunk uses accumulator *i*.
+a chunk at a time, accumulating results. The correlation kernel is modified in
+several ways to support this:
+
+- The :cpp:class:`!FetchData` class splits the time index into a batch index
+  and an offset within the batch, so that the rest of the code can be
+  oblivious to batches, and just work in time "blocks"
+  (:c:macro:`NR_TIMES_PER_BLOCK` spectra).
+
+- The various functions take a runtime range of blocks to process.
+
+- To provide more parallelism (important when each engine is processing only a
+  few channels), the grid has an extra Z dimension. The time
+  blocks to be processed are divided amongst the values of ``blockIdx.z``.
+  There is a trade-off here: one wants to serially accumulate over as many
+  blocks as possible to reduce the final global memory traffic for writing
+  back results. To avoid race conditions in accumulation, each value of
+  ``blockIdx.z`` uses a separate global-memory accumulator.
+
 An accumulation period is called an :dfn:`accumulation` and the data output
 from that accumulation is normally called a :dfn:`dump` — the terms are used
 interchangeably. Once all the data for a dump has been correlated, the separate

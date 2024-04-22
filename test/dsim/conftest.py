@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, 2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -24,7 +24,7 @@ import pytest
 import spead2.recv.asyncio
 import spead2.send.asyncio
 
-from katgpucbf import BYTE_BITS, DEFAULT_TTL, DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
+from katgpucbf import BYTE_BITS, DEFAULT_TTL, DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S, spead
 from katgpucbf.dsim import descriptors, send
 from katgpucbf.send import DescriptorSender
 
@@ -83,7 +83,7 @@ def send_stream(inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asy
 @pytest.fixture
 def timestamps() -> np.ndarray:
     """Timestamp array for building heap sets."""
-    return np.zeros(SIGNAL_HEAPS, ">u8")
+    return np.zeros(SIGNAL_HEAPS, spead.IMMEDIATE_DTYPE)
 
 
 @pytest.fixture

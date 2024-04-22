@@ -31,7 +31,7 @@ from pytest_check import check
 from katgpucbf import BYTE_BITS, N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl, get_sensor_val
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import POTLocator, Reporter
 from . import compute_tone_gain
 
@@ -422,7 +422,7 @@ async def _test_delay_phase_rate(
 
     pdf_report.step("Set input signals and delays.")
     signal = "common = nodither(wgn(0.05, 1)); common; common;"
-    max_period = await get_sensor_val(cbf.dsim_clients[0], "max-period")
+    max_period = await cbf.dsim_clients[0].sensor_value("max-period", int)
     # Choose a period that makes all accumulations the same, so that we can
     # compare accumulations without extraneous noise.
     period = math.gcd(max_period, receiver.n_samples_between_spectra * receiver.n_spectra_per_acc)

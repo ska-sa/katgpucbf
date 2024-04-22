@@ -31,6 +31,7 @@ def COMMIT_ID = 'unknown'
 pipeline {
   agent {
     dockerfile {
+      label 'qualification-katgpucbf'
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
       /* Use the Jenkins-specific stage of the Dockerfile as the image for
@@ -84,7 +85,7 @@ pipeline {
           * tests and mark the build as unstable.
           */
          sh '''
-           spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification\
+           pytest -v -c qualification/pytest-jenkins.ini qualification\
            --suppress-tests-failed-exit-code \
            --image-override katgpucbf:${katgpucbf_image} \
            --image-override katsdpcontroller:${katsdpcontroller_image} \
@@ -141,11 +142,11 @@ pipeline {
       to: '$DEFAULT_RECIPIENTS'
 
       script {
-        ARRAYS = sh(script: 'katcpcmd lab5.sdp.kat.ac.za:5001 product-list', returnStdout: true).trim()
+        ARRAYS = sh(script: 'katcpcmd cbf-mc.cbf.mkat.karoo.kat.ac.za:5001 product-list', returnStdout: true).trim()
         echo "Currently Running Arrays: ${ARRAYS}"
         if (ARRAYS.contains("jenkins_qualification_cbf")) {
           echo "Destroying jenkins_qualification_cbf"
-          sh 'katcpcmd lab5.sdp.kat.ac.za:5001 product-deconfigure jenkins_qualification_cbf 1'
+          sh 'katcpcmd cbf-mc.cbf.mkat.karoo.kat.ac.za:5001 product-deconfigure jenkins_qualification_cbf 1'
         }
       }
     }
