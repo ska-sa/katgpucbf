@@ -85,7 +85,8 @@ class Frame:
     channel_offset
         The first frequency channel processed.
     present_ants
-        The number of antennas present in the Frame's input data.
+        Zero-dimensional array of dtype ``>u8`` holding the number of antennas
+        present in the Frame's input data.
     """
 
     def __init__(
@@ -95,7 +96,7 @@ class Frame:
         saturated: np.ndarray,
         *,
         channel_offset: int,
-        present_ants: int,
+        present_ants: np.ndarray,
     ) -> None:
         self.heaps: list[spead2.send.Heap] = []
         self.data = data
@@ -170,9 +171,7 @@ class Chunk:
                 data[i],
                 saturated[i],
                 channel_offset=channel_offset,
-                # TODO: Fix the type annotation here
-                # Maybe I don't need the ellipses for dimensions?
-                present_ants=self._present_ants[i, ...],  # type: ignore
+                present_ants=self._present_ants[i, ...],
             )
             for i in range(n_frames)
         ]
@@ -183,7 +182,7 @@ class Chunk:
         Number of antennas present in the current beam sums.
 
         This is a count for each :class:`Frame` in the chunk. Setting this
-        property updates the immediate SPEAD item in the heap. Much like
+        property updates the immediate SPEAD items in the heaps. Much like
         :attr:`timestamp`, this should only be done when :attr:`future`
         is done.
         """
