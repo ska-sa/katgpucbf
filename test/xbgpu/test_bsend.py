@@ -119,10 +119,11 @@ class TestBSend:
             # Populate the buffer with dummy data.
             chunk.data[:] = data[i, ...]
 
-            # Fill chunk.present_ants counts otherwise no heaps will be sent
-            # Any value > 0 will do, we aren't too concerned about handling
-            # missing data in this test.
-            chunk.present_ants.fill(1)
+            # NOTE: This is actually an ndarray with shape (FRAMES_PER_CHUNK,)
+            # Each entry holds a count for number of antennas that were present
+            # in the received heap. Any value > 0 will allow a Frame to be
+            # transmitted.
+            chunk.present_ants[:] = [j % FRAMES_PER_CHUNK for j in range(FRAMES_PER_CHUNK)]
 
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
@@ -180,6 +181,9 @@ class TestBSend:
 
             # Check the data heaps
             for j in range(TX_HEAPS_PER_SUBSTREAM):
+                if j % FRAMES_PER_CHUNK == 0:
+                    # See `_send_data` for logic dictating antenna presence
+                    continue
                 heap = await stream.get()
                 items = ig.update(heap)
                 assert set(items.keys()) == {"timestamp", "frequency", "beam_ants", "bf_raw"}
@@ -188,7 +192,7 @@ class TestBSend:
                 assert items["frequency"].id == FREQUENCY_ID
                 assert items["frequency"].value == channel_offset
                 assert items["beam_ants"].id == BEAM_ANTS_ID
-                assert items["beam_ants"].value == 1
+                assert items["beam_ants"].value == j % FRAMES_PER_CHUNK
                 assert items["bf_raw"].id == BF_RAW_ID
                 assert items["bf_raw"].value.shape == (n_channels_per_substream, n_spectra_per_heap, COMPLEX)
                 assert items["bf_raw"].value.dtype == np.int8
