@@ -778,7 +778,7 @@ class TestEngine:
             f"--channel-offset-value={frequency}",
             f"--jones-per-batch={n_jones_per_batch}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
-            "--sync-epoch=1234567890",
+            "--sync-time=1234567890",
             "--src-interface=lo",
             "--dst-interface=lo",
             "--tx-enabled",

@@ -99,7 +99,7 @@ class TestParseArgs:
             "--src-interface=lo",
             "--dst-interface=lo",
             "--adc-sample-rate=1712000000.0",
-            "--sync-epoch=0",
+            "--sync-time=0",
             "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9,jones_per_batch=262144",
             (
                 "--narrowband=name=nb0,dst=239.1.0.0+1,channels=32768,"

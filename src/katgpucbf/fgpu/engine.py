@@ -1111,7 +1111,7 @@ class Engine(aiokatcp.DeviceServer):
         Maximum supported difference between delays across polarisations (in samples).
     gain
         Initial eq gain for all channels.
-    sync_epoch
+    sync_time
         UNIX time at which the digitisers were synced.
     mask_timestamp
         Mask off bottom bits of timestamp (workaround for broken digitiser).
@@ -1161,7 +1161,7 @@ class Engine(aiokatcp.DeviceServer):
         dst_sample_bits: int,
         max_delay_diff: int,
         gain: complex,
-        sync_epoch: float,
+        sync_time: float,
         mask_timestamp: bool,
         use_vkgdr: bool,
         use_peerdirect: bool,
@@ -1192,7 +1192,7 @@ class Engine(aiokatcp.DeviceServer):
         self.n_ants = num_ants
         self.chunk_jones = chunk_jones
         self.default_gain = gain
-        self.time_converter = TimeConverter(sync_epoch, adc_sample_rate)
+        self.time_converter = TimeConverter(sync_time, adc_sample_rate)
         self.monitor = monitor
         self.use_vkgdr = use_vkgdr
         self.use_peerdirect = use_peerdirect
@@ -1601,7 +1601,7 @@ class Engine(aiokatcp.DeviceServer):
         # then we'd need to compensate for that here.
         start_sample_count = round(self.time_converter.unix_to_adc(start_time))
         if start_sample_count < 0:
-            raise aiokatcp.FailReply("Start time cannot be prior to the sync epoch")
+            raise aiokatcp.FailReply("Start time cannot be prior to the sync time")
 
         # Collect them in a temporary until they're all validated
         new_linear_models = []

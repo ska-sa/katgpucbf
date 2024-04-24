@@ -6,7 +6,7 @@
 #
 aioconsole==0.7.0
     # via aiomonitor
-aiohttp==3.9.3
+aiohttp==3.9.5
     # via
     #   aiomonitor
     #   prometheus-async

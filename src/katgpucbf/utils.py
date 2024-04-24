@@ -350,7 +350,7 @@ class TimeConverter:
 
     Parameters
     ----------
-    sync_epoch
+    sync_time
         UNIX timestamp corresponding to ADC timestamp 0
     adc_sample_rate
         Number of ADC samples per second
@@ -360,17 +360,17 @@ class TimeConverter:
        This does not yet handle leap-seconds correctly.
     """
 
-    def __init__(self, sync_epoch: float, adc_sample_rate: float) -> None:
-        self.sync_epoch = sync_epoch
+    def __init__(self, sync_time: float, adc_sample_rate: float) -> None:
+        self.sync_time = sync_time
         self.adc_sample_rate = adc_sample_rate
 
     def unix_to_adc(self, timestamp: float) -> float:
         """Convert a UNIX timestamp to an ADC sample count."""
-        return (timestamp - self.sync_epoch) * self.adc_sample_rate
+        return (timestamp - self.sync_time) * self.adc_sample_rate
 
     def adc_to_unix(self, samples: float) -> float:
         """Convert an ADC sample count to a UNIX timstamp."""
-        return samples / self.adc_sample_rate + self.sync_epoch
+        return samples / self.adc_sample_rate + self.sync_time
 
 
 def gaussian_dtype(bits: int) -> np.dtype:
