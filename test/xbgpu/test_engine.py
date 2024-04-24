@@ -16,6 +16,7 @@
 
 """Unit tests for XBEngine module."""
 
+from collections import Counter
 from logging import WARNING
 from typing import AbstractSet, Any, AsyncGenerator, Callable, Final, Sequence
 
@@ -166,8 +167,7 @@ def generate_expected_corrprods(
 
 @njit
 def generate_expected_beams(
-    batch_start_idx: int,
-    num_batches: int,
+    batch_indices: np.ndarray,
     channels: int,
     antennas: int,
     n_spectra_per_heap: int,
@@ -186,10 +186,8 @@ def generate_expected_beams(
 
     Parameters
     ----------
-    batch_start_idx
-        First batch index to output.
-    num_batches
-        Number of consecutive batches to emit.
+    batch_indices
+        Array of indices used to create batches of data for XBEngine stimulus.
     channels
         Number of channels.
     antennas
@@ -212,30 +210,34 @@ def generate_expected_beams(
         Index of the centre channel of the whole stream, relative to the first
         channel processed by this engine.
     """
-    out = np.empty((len(beam_pols), num_batches, channels, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
-    accum = np.zeros((len(beam_pols), num_batches, channels), np.complex64)
+    out = np.empty((len(beam_pols), len(batch_indices), channels, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
+    accum = np.zeros((len(beam_pols), len(batch_indices), channels), np.complex64)
     sample = np.empty((N_POLS, COMPLEX), np.int8)
     sample_fp = np.empty(N_POLS, np.complex64)
-    for batch in range(num_batches):
+    for batch_index in batch_indices:
+        # np.where returns a tuple with matches in row and column indices.
+        # `batch_index` is a flat list, so we only expect matches for row
+        # indices - and a single match, at that.
+        batch_id = np.where(batch_indices == batch_index)[0][0]
         for channel in range(channels):
             # Compute scale factor for turning a delay into a phase
             delay_to_phase = -2 * np.pi * channel_spacing * (channel - centre_channel)
             for antenna in range(antennas):
                 if antenna == missing_antenna:
                     continue
-                feng_sample(batch + batch_start_idx, channel, antenna, sample)
+                feng_sample(batch_index, channel, antenna, sample)
                 sample_fp[0] = sample[0, 0] + np.complex64(1j) * sample[0, 1]
                 sample_fp[1] = sample[1, 0] + np.complex64(1j) * sample[1, 1]
                 for beam, pol in enumerate(beam_pols):
                     phase = delay_to_phase * delays[beam, antenna, 0] + delays[beam, antenna, 1]
                     rotation = np.exp(1j * phase)
-                    accum[beam, batch, channel] += sample_fp[pol] * weights[beam, antenna] * rotation
+                    accum[beam, batch_id, channel] += sample_fp[pol] * weights[beam, antenna] * rotation
             for beam in range(len(beam_pols)):
-                value = accum[beam, batch, channel] * quant_gains[beam]
+                value = accum[beam, batch_id, channel] * quant_gains[beam]
                 sample[0, 0] = np.fmin(np.fmax(np.rint(value.real), -127), 127)
                 sample[0, 1] = np.fmin(np.fmax(np.rint(value.imag), -127), 127)
                 # Copy to all spectra in the batch
-                out[beam, batch, channel] = sample[0]
+                out[beam, batch_id, channel] = sample[0]
 
     return out
 
@@ -266,7 +268,7 @@ def verify_corrprod_data(
     *,
     corrprod_outputs: list[XOutput],
     corrprod_results: list[np.ndarray],
-    batch_index_tuples: list[tuple[int, int]],
+    batch_indices: list[int],
     n_ants: int,
     n_channels_per_substream: int,
     n_spectra_per_heap: int,
@@ -281,31 +283,28 @@ def verify_corrprod_data(
     corrprod_results
         List of arrays of all GPU-generated data from
         :class:`TestEngine._send_data`.
-    batch_index_tuples
-        A list of batch start and end indices used to generate stimulus
-        data for the XBEngine. See :class:`TestEngine.test_engine_end_to_end`
-        for more details.
+    batch_indices
+        A list batch indices used to generate stimulus data for the XBEngine.
+        See :class:`TestEngine.test_engine_end_to_end` for more details.
     """
     for i, corrprod_output in enumerate(corrprod_outputs):
-        # Or assert if incomplete_accs_total == incomplete_accums_counter * len(xbengine._pipelines)
         # We need a separate acc_index tracker as `corrprod_results` holds
         # data for *all* accumulations processed, in the order processed.
         acc_index = 0
-        for batch_start_index, batch_end_index in batch_index_tuples:
+        for batch_index in batch_indices[:: corrprod_output.heap_accumulation_threshold]:
             # We know the XPipeline avoids sending data where all antennas
             # were absent, so we can be confident there are a whole number
             # of accumulations in the `corrprod_results`.
-            for batch_index in range(batch_start_index, batch_end_index, corrprod_output.heap_accumulation_threshold):
-                expected_output = generate_expected_corrprods(
-                    batch_index,
-                    corrprod_output.heap_accumulation_threshold,
-                    n_channels_per_substream,
-                    n_ants,
-                    n_spectra_per_heap,
-                    missing_antenna,
-                )
-                np.testing.assert_equal(expected_output, corrprod_results[i][acc_index])
-                acc_index += 1
+            expected_output = generate_expected_corrprods(
+                batch_index,
+                corrprod_output.heap_accumulation_threshold,
+                n_channels_per_substream,
+                n_ants,
+                n_spectra_per_heap,
+                missing_antenna,
+            )
+            np.testing.assert_equal(expected_output, corrprod_results[i][acc_index])
+            acc_index += 1
 
 
 def verify_corrprod_sensors(
@@ -384,6 +383,7 @@ def verify_corrprod_sensors(
         else:
             expected_nominal_updates = n_accumulations_completed
 
+        # TODO: NGC-1308 Update this to check the order of sensor updates, not just the count
         assert (
             actual_sensor_updates[xsync_sensor_name].count((False, aiokatcp.Sensor.Status.ERROR))
             == expected_error_updates
@@ -392,6 +392,7 @@ def verify_corrprod_sensors(
             actual_sensor_updates[xsync_sensor_name].count((True, aiokatcp.Sensor.Status.NOMINAL))
             == expected_nominal_updates
         )
+        assert len(actual_sensor_updates[xsync_sensor_name]) == expected_error_updates + expected_nominal_updates
 
 
 def verify_beam_sensors(
@@ -646,20 +647,17 @@ class TestEngine:
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
-        acc_indices: list[set[int]] = [set() for _ in corrprod_outputs]
+        acc_counts: list[Counter] = [Counter() for _ in corrprod_outputs]
         for batch_index in batch_indices:
             for i, corrprod_output in enumerate(corrprod_outputs):
                 acc_index = batch_index // corrprod_output.heap_accumulation_threshold
-                acc_indices[i].add(acc_index)
+                acc_counts[i][acc_index] += 1
             heaps = heap_factory(batch_index)
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
-
-        # NOTE: The first accumulations are expected to be dropped entirely as
-        # they are incomplete. Remove their corresponding accumulation indices
-        # from the list as these indices are used when verifying data output by
-        # the XPipelines - i.e. data for corresponding timestamps will not exist.
-        for i, corrprod_output in enumerate(corrprod_outputs):
-            acc_indices[i].remove(batch_indices[0] // corrprod_output.heap_accumulation_threshold)
+        acc_indices = [
+            [acc_index for acc_index, count in counts.items() if count == corrprod_output.heap_accumulation_threshold]
+            for counts, corrprod_output in zip(acc_counts, corrprod_outputs)
+        ]
 
         for queue in mock_recv_streams:
             queue.stop()
@@ -713,6 +711,7 @@ class TestEngine:
                     f"{hex(accumulation_index * timestamp_step * corrprod_output.heap_accumulation_threshold)}, "
                     f"actual: {hex(ig_recv['timestamp'].value)}."
                 )
+
                 assert ig_recv["frequency"].value == frequency, (
                     "Output channel offset not correct. "
                     f"Expected: {frequency}, "
@@ -856,7 +855,7 @@ class TestEngine:
         corrprod_outputs: list[XOutput],
         beam_outputs: list[BOutput],
         missing_antenna: int | None,
-        caplog,
+        caplog: pytest.LogCaptureFixture,
     ):
         """
         End-to-end test for the XBEngine.
@@ -984,9 +983,6 @@ class TestEngine:
             batch_end_index2 = batch_start_index2 + n_heaps
             test_batch_indices2 = list(range(batch_start_index2, batch_end_index2))
 
-            # Save a neat handle on the start and end batch indices to be used
-            # during data verification.
-            batch_index_tuples = [(batch_start_index1, batch_end_index1), (batch_start_index2, batch_end_index2)]
             test_batch_indices = test_batch_indices1 + test_batch_indices2
 
             for i, output in enumerate(beam_outputs):
@@ -1019,7 +1015,14 @@ class TestEngine:
 
         # The first warnings in the list should be from each of the XPipelines,
         # the rest are warnings related to timestamps between output heaps.
-        assert caplog.record_tuples[: len(corrprod_outputs)] == [
+        def record_tuple_filter(record_tuple: tuple[str, int, str]) -> bool:
+            if record_tuple[-1] == "All Antennas had a break in data during this accumulation":
+                return True
+            return False
+
+        accum_warning_record_tuples = filter(record_tuple_filter, caplog.record_tuples)
+        # TODO: NGC-1308 Update this check to not be a subset of the warnings filtered
+        assert list(accum_warning_record_tuples)[: len(corrprod_outputs)] == [
             (
                 "katgpucbf.xbgpu.engine",
                 WARNING,
@@ -1030,7 +1033,9 @@ class TestEngine:
         verify_corrprod_data(
             corrprod_outputs=corrprod_outputs,
             corrprod_results=corrprod_results,
-            batch_index_tuples=batch_index_tuples,
+            # Use the batch indices that start *after* the first
+            # purposefully-empty accumulation
+            batch_indices=test_batch_indices[HEAPS_PER_FENGINE_PER_CHUNK:],
             n_ants=n_ants,
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
@@ -1049,32 +1054,24 @@ class TestEngine:
         )
 
         channel_spacing = xbengine.bandwidth_hz / xbengine.n_channels_total
-        for batch_start_index, batch_end_index in batch_index_tuples:
-            expected_beams = generate_expected_beams(
-                batch_start_index,
-                batch_end_index - batch_start_index,
-                n_channels_per_substream,
-                n_ants,
-                n_spectra_per_heap,
-                missing_antenna,
-                np.array([beam_output.pol for beam_output in beam_outputs]),
-                weights=weights,
-                delays=delays,
-                quant_gains=quant_gains,
-                channel_spacing=channel_spacing,
-                centre_channel=n_channels_total // 2 - frequency,
-            )
-            # assert_allclose converts to float, which bloats memory usage.
-            # To keep it manageable, compare a batch at a time.
-            # `beam_results` holds data for all outputs received in
-            # the order processed. This means the second set of data
-            # sent after the artifical gap in time is received/stored
-            # in sequence.
-            batch_start = test_batch_indices.index(batch_start_index)
-            for j in range(len(beam_outputs)):
-                for batch_index in range(batch_start_index, batch_end_index):
-                    k = test_batch_indices.index(batch_index)
-                    np.testing.assert_allclose(expected_beams[j, k - batch_start], beam_results[j, k], atol=1)
+        expected_beams = generate_expected_beams(
+            np.asarray(test_batch_indices),
+            n_channels_per_substream,
+            n_ants,
+            n_spectra_per_heap,
+            missing_antenna,
+            np.array([beam_output.pol for beam_output in beam_outputs]),
+            weights=weights,
+            delays=delays,
+            quant_gains=quant_gains,
+            channel_spacing=channel_spacing,
+            centre_channel=n_channels_total // 2 - frequency,
+        )
+        # assert_allclose converts to float, which bloats memory usage.
+        # To keep it manageable, compare a batch at a time.
+        for i in range(len(beam_outputs)):
+            for j in range(len(test_batch_indices)):
+                np.testing.assert_allclose(expected_beams[i, j], beam_results[i, j], atol=1)
 
         # `beam_results` holds results for each heap transmitted by a
         # `beam_output` for all `beam_outputs`. We can reuse its dimensions in

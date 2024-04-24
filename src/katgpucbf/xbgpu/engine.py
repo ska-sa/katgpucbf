@@ -779,6 +779,9 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
                 # Update the present ants tracker one last time
                 assert rx_item is not None
                 tx_item.present_ants[:] &= rx_item.present[first_batch:last_batch, :].all(axis=0)
+                # TODO: NGC-1308 Update the usage of tx_item.batches to check
+                # against rx_item.present, i.e. whether it's actually received
+                # any data for this batch.
                 tx_item.batches += last_batch - first_batch
                 self.correlation.first_batch = last_batch
 
