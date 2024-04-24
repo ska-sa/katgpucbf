@@ -54,7 +54,7 @@ from .engine import Engine
 from .output import NarrowbandOutput, WidebandOutput
 
 _T = TypeVar("_T")
-_OD = TypeVar("_OD", bound="OutputDict")
+_OD = TypeVar("_OD", bound="_OutputDict")
 logger = logging.getLogger(__name__)
 DEFAULT_TAPS = 16
 DEFAULT_W_CUTOFF = 1.0
@@ -63,7 +63,7 @@ DEFAULT_DDC_TAPS_RATIO = 12
 DEFAULT_WEIGHT_PASS = 0.005
 
 
-class OutputDict(TypedDict, total=False):
+class _OutputDict(TypedDict, total=False):
     """Configuration options for an output stream.
 
     Unlike :class:`WidebandOutput` or :class:`NarrowbandOutput`, all the fields
@@ -79,19 +79,19 @@ class OutputDict(TypedDict, total=False):
     w_cutoff: float
 
 
-class WidebandOutputDict(OutputDict, total=False):
+class _WidebandOutputDict(_OutputDict, total=False):
     """Configuration options for a wideband output.
 
-    See :class:`OutputDict` for further information.
+    See :class:`_OutputDict` for further information.
     """
 
     pass
 
 
-class NarrowbandOutputDict(OutputDict, total=False):
+class _NarrowbandOutputDict(_OutputDict, total=False):
     """Configuration options for a narrowband output.
 
-    See :class:`OutputDict` for further information.
+    See :class:`_OutputDict` for further information.
     """
 
     centre_frequency: float
@@ -144,11 +144,11 @@ def parse_wideband(value: str) -> WidebandOutput:
     - dst
     """
 
-    def field_callback(kws: WidebandOutputDict, key: str, data: str) -> None:
+    def field_callback(kws: _WidebandOutputDict, key: str, data: str) -> None:
         raise ValueError(f"unknown key {key}")
 
     try:
-        kws: WidebandOutputDict = {}
+        kws: _WidebandOutputDict = {}
         _parse_stream(value, kws, field_callback)
         kws = {
             "taps": DEFAULT_TAPS,
@@ -175,7 +175,7 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
     - dst
     """
 
-    def field_callback(kws: NarrowbandOutputDict, key: str, data: str) -> None:
+    def field_callback(kws: _NarrowbandOutputDict, key: str, data: str) -> None:
         match key:
             case "centre_frequency" | "weight_pass":
                 kws[key] = float(data)
@@ -185,7 +185,7 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
                 raise ValueError(f"unknown key {key}")
 
     try:
-        kws: NarrowbandOutputDict = {}
+        kws: _NarrowbandOutputDict = {}
         _parse_stream(value, kws, field_callback)
         for key in ["centre_frequency", "decimation"]:
             if key not in kws:
@@ -421,7 +421,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     if args.src_ibv and len(args.src_affinity) != len(args.src_comp_vector):
         parser.error("--src-comp-vector must have same length as --src-affinity")
 
-    # Convert from *OutputDict to *Output
+    # Convert from _*OutputDict to *Output
     used_names = set()
     args.outputs = []
     for output_group in [args.wideband, args.narrowband]:
