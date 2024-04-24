@@ -51,7 +51,7 @@ async def test_gains(
     receiver = receive_baseline_correlation_products
 
     pdf_report.step("Inject white noise with fixed seed.")
-    scale = 0.02
+    scale = 0.03
     signals = f"common=wgn({scale}, 1); common; common;"
     # Compute repeat period guaranteed to divide into accumulation length.
     max_period = await cbf.dsim_clients[0].sensor_value("max-period", int)

@@ -362,8 +362,13 @@ async def _cbf_config_and_description(
         # Pick a centre frequency that is not going to be a multiple of the
         # channel width (to test the most general case), but which is a
         # multiple of the dsim frequency resolution (to avoid rounding the
-        # frequency of injected tones).
-        centre_frequency = adc_sample_rate * (23456789 / 2**27)
+        # frequency of injected tones) and of the narrowband heap rate (so that
+        # the phase of the mixer is the same at the start of each heap - needed
+        # for baseline_correlation_products/test_consistency.py). The dsim
+        # frequency resolution is 1/2**27 samples, while the largest
+        # narrowband heap rate is 1/2**24 (jones-per-batch=2**20 and
+        # narrowband factor 8).
+        centre_frequency = adc_sample_rate * (3456789 / 2**24)
         config["outputs"]["antenna-channelised-voltage"]["narrowband"] = {
             "decimation_factor": narrowband_decimation,
             "centre_frequency": centre_frequency,
