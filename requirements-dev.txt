@@ -284,8 +284,9 @@ pyparsing==3.0.9
     #   katgpucbf (setup.cfg)
 pyproject-hooks==1.0.0
     # via build
-pytest==7.4.3
+pytest==8.0.2
     # via
+    #   -r requirements-dev.in
     #   katgpucbf (setup.cfg)
     #   pytest-asyncio
     #   pytest-cov
