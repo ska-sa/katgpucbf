@@ -426,7 +426,6 @@ def verify_beam_sensors(
         assert prom_get("output_b_heaps_total") == n_beam_heaps_sent
         assert prom_get("output_b_bytes_total") == n_beam_heaps_sent * heap_bytes
         assert prom_get("output_b_samples_total") == n_beam_heaps_sent * heap_samples
-        print(saturated_low[i], prom_get("output_b_clipped_samples_total"), saturated_high[i])
         assert saturated_low[i] <= prom_get("output_b_clipped_samples_total") <= saturated_high[i]
 
         assert first_timestamp < last_timestamp, (
