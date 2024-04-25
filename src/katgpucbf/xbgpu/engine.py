@@ -526,8 +526,6 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             await katsdpsigproc.resource.async_wait_for_events([event])
 
             chunk.timestamp = item.timestamp
-            # TODO: Update beng-clip-cnt sensor, regardless of whether data
-            # is being transmitted
             self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
             self._tx_free_item_queue.put_nowait(item)
 
