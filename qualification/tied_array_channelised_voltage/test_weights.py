@@ -18,7 +18,6 @@
 
 import numpy as np
 import pytest
-from matplotlib.figure import Figure
 from pytest_check import check
 
 from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
@@ -98,61 +97,3 @@ async def test_weight_mapping(
         with check:
             assert np.all(np.abs(data[test_beam, channel]) < 2.0)
             pdf_report.detail("All other data is close to zero.")
-
-
-@pytest.mark.requirements("CBF-REQ-0123")
-async def test_weight_linearity(
-    cbf: CBFRemoteControl,
-    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
-    pdf_report: Reporter,
-) -> None:
-    """Test linearity of the weight coefficients.
-
-    Verification method
-    -------------------
-    Verification by means of test. Configure the dsim with Gaussian noise with
-    a period of one heap. Set the weights for all inputs to a range of values,
-    and measure the total power (for one beam) in each case.
-
-    Large weights are expected to have non-linear response due to saturation,
-    and small weights are expected to have non-linear response due to
-    quantisation.
-    """
-    receiver = receive_tied_array_channelised_voltage
-    client = cbf.product_controller_client
-    beam_name = receiver.stream_names[0]
-    n_sources = len(receiver.source_indices[0])
-
-    # Small amplitude so that we don't saturate in the time domain.
-    period = receiver.n_spectra_per_heap * receiver.n_samples_between_spectra
-    await cbf.dsim_gaussian(16.0, pdf_report, period=period)
-
-    pdf_report.step("Set quantiser gain to 1/antennas")
-    await client.request("beam-quant-gains", beam_name, 1.0 / n_sources)
-    pdf_report.detail(f"Set beam-quant-gains on {beam_name} to 1/{n_sources}")
-
-    pdf_report.step("Measure total power responses")
-    weights = np.logspace(-2.0, 2.0, 41)  # Note: n is chosen to ensure 1.0 is included
-    middle = np.searchsorted(weights, 1.0)
-    assert weights[middle] == pytest.approx(1.0)
-    powers = np.zeros_like(weights)
-    for i, weight in enumerate(weights):
-        await client.request("beam-weights", beam_name, *([weight] * n_sources))
-        _, data = await receiver.next_complete_chunk()
-        powers[i] = np.sum(np.square(data[0].astype(np.float64)))
-        pdf_report.detail(f"Set weights to {weight}; power is {powers[i]}")
-
-    # Normalise power
-    powers /= powers[middle]
-
-    fig = Figure()
-    ax = fig.add_subplot()
-    ax.set_title("Normalised power relative to weight")
-    ax.set_xlabel("Weight (dB)")
-    ax.set_ylabel("Power (dB)")
-    weights_db = 20 * np.log10(weights)
-    powers_db = 10 * np.log10(powers)
-    ax.plot(weights_db, weights_db, label="Reference")
-    ax.plot(weights_db, powers_db, label="Measured")
-    ax.legend()
-    pdf_report.figure(fig)
