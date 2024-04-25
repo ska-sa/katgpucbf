@@ -286,7 +286,6 @@ pyproject-hooks==1.0.0
     # via build
 pytest==8.0.2
     # via
-    #   -r requirements-dev.in
     #   katgpucbf (setup.cfg)
     #   pytest-asyncio
     #   pytest-cov

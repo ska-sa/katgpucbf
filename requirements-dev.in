@@ -2,6 +2,5 @@
 ipython
 pip-tools>=6.6.0
 pre-commit
-pytest>=8.0.0
 pytest-cov
 pytest-xdist  # Allows for pytest to launch multiple threads
