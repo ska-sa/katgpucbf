@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -36,13 +36,13 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     decimation = 8
     ddc_taps = 128
     pfb_taps = 4
-    spectra_per_heap = 256
+    spectra_per_heap = 32
     subsampling = decimation
-    nb_spectra = 256
+    nb_spectra = 64
 
-    if mode == "wide":
+    if mode == "wideband":
         narrowband: compute.NarrowbandConfig | None = None
-        spectra = 1280
+        spectra = 160
         internal_channels = channels
     else:
         narrowband = compute.NarrowbandConfig(
