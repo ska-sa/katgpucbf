@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -47,9 +47,15 @@ output_clipped_visibilities_counter = Counter(
     ["stream"],
     namespace=METRIC_NAMESPACE,
 )
+skipped_accum_counter = Counter(
+    "output_x_skipped_accs",
+    "skipped output accumulations because input data was entirely incomplete",
+    ["stream"],
+    namespace=METRIC_NAMESPACE,
+)
 incomplete_accum_counter = Counter(
     "output_x_incomplete_accs",
-    "incomplete output accumulations because input data was incomplete",
+    "incomplete output accumulations because input data was partially incomplete",
     ["stream"],
     namespace=METRIC_NAMESPACE,
 )
@@ -141,6 +147,7 @@ def make_stream(
     output_bytes_counter.labels(output_name)
     output_visibilities_counter.labels(output_name)
     output_clipped_visibilities_counter.labels(output_name)
+    skipped_accum_counter.labels(output_name)
     incomplete_accum_counter.labels(output_name)
     return stream
 

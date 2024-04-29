@@ -66,6 +66,7 @@ from .correlation import CorrelationTemplate
 from .output import BOutput, Output, XOutput
 from .xsend import XSend, incomplete_accum_counter
 from .xsend import make_stream as make_xstream
+from .xsend import skipped_accum_counter
 
 logger = logging.getLogger(__name__)
 _O = TypeVar("_O", bound=Output)
@@ -148,24 +149,58 @@ class BTxQueueItem(QueueItem):
     """Transmit queue item for the beamformer pipeline.
 
     The `out`, `saturated`, `rand_states`, `weights` and `delays` must have the
-    same shape and dtype as the corresponding slots in :class:`.Beamform`.
+    same shape and dtype as the corresponding slots in :class:`.Beamform`. This
+    class needs to carry a record of which antennas have missed data in the
+    current :class:`~katgpucbf.recv.Chunk` of data. This is used to determine
+    whether any beam data has been affected, and have their data flagged
+    accordingly.
+
+    Parameters
+    ----------
+    out
+        An int8 type :class:`~katsdpsigproc.accel.DeviceArray` with shape
+        (frames, ants, channels, spectra_per_frame, N_POLS, COMPLEX).
+    saturated
+        An uint32 type :class:`~katsdpsigproc.accel.DeviceArray` with shape
+        (n_beams,).
+    present
+        A boolean array with shape (heaps_per_fengine_per_chunk, n_ants).
+    weights
+        An np.complex64 :class:`~katgpucbf.mapped_array.MappedArray` with
+        shape (n_ants, n_beams).
+    delays
+        An np.float32 :class:`~katgpucbf.mapped_array.MappedArray` with shape
+        (n_ants, n_beams).
+    timestamp
+        ADC sample count of the received Chunk.
+
+    .. todo::
+
+        Potentially create (yet another) base class for B- and XTxQueueItems.
     """
 
     def __init__(
         self,
         out: accel.DeviceArray,
         saturated: accel.DeviceArray,
+        present: np.ndarray,
         weights: MappedArray,
         delays: MappedArray,
         timestamp: int = 0,
     ) -> None:
         self.out = out
         self.saturated = saturated
+        self.present = present
         self.weights = weights
         self.delays = delays
         #: Version of weights and delays (for comparison to BPipeline._weights_version)
         self.weights_version = -1
         super().__init__(timestamp)
+
+    def reset(self, timestamp: int = 0) -> None:
+        """Reset the timestamp and the present antenna tracker."""
+        super().reset(timestamp=timestamp)
+        self.present.fill(True)
 
 
 class Pipeline(Generic[_O, _T]):
@@ -335,9 +370,10 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         for _ in range(self.n_tx_items):
             out = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
             saturated = self._beamform.slots["saturated"].allocate(allocator=allocator, bind=False)
+            present = np.zeros(shape=(engine.heaps_per_fengine_per_chunk, engine.n_ants), dtype=bool)
             weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
-            tx_item = BTxQueueItem(out, saturated, weights, delays)
+            tx_item = BTxQueueItem(out, saturated, present, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         # These are the original weights, delays and gains as provided by the
@@ -492,6 +528,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             )
             self._beamform()
 
+            tx_item.present[:] = rx_item.present
+
             tx_item.add_marker(self._proc_command_queue)
             self._tx_item_queue.put_nowait(tx_item)
 
@@ -508,7 +546,6 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         # NOTE: This function passes the entire downloaded data to
         # chunk.send, which then takes care of directing data to each beam's
         # output destination.
-
         while True:
             item = await self._tx_item_queue.get()
             if item is None:
@@ -525,6 +562,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
+            np.sum(item.present, axis=1, dtype=np.uint64, out=chunk.present_ants)
             chunk.timestamp = item.timestamp
             # TODO: Update beng-clip-cnt sensor, regardless of whether data
             # is being transmitted
@@ -746,6 +784,9 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
                 # Update the present ants tracker one last time
                 assert rx_item is not None
                 tx_item.present_ants[:] &= rx_item.present[first_batch:last_batch, :].all(axis=0)
+                # TODO: NGC-1308 Update the usage of tx_item.batches to check
+                # against rx_item.present, i.e. whether it's actually received
+                # any data for this batch.
                 tx_item.batches += last_batch - first_batch
                 self.correlation.first_batch = last_batch
 
@@ -831,60 +872,65 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
                 break
             await item.async_wait_for_events()
 
-            heap = await self.send_stream.get_free_heap()
+            if not np.any(item.present_ants):
+                # All Antennas have missed data at some point, avoid sending altogether
+                logger.warning("All Antennas had a break in data during this accumulation")
+                skipped_accum_counter.labels(self.output.name).inc(1)
+            else:
+                heap = await self.send_stream.get_free_heap()
 
-            # NOTE: We do not expect the time between dumps to be the same each
-            # time as the time.time() function checks the wall time now, not
-            # the actual time between timestamps. The difference between dump
-            # timestamps is expected to be constant.
-            new_time_s = time.time()
-            time_difference_between_heaps_s = new_time_s - old_time_s
+                # NOTE: We do not expect the time between dumps to be the same each
+                # time as the time.time() function checks the wall time now, not
+                # the actual time between timestamps. The difference between dump
+                # timestamps is expected to be constant.
+                new_time_s = time.time()
+                time_difference_between_heaps_s = new_time_s - old_time_s
 
-            logger.debug(
-                "Current output heap timestamp: %#x, difference between timestamps: %#x, "
-                "wall time between dumps %.2f s",
-                item.timestamp,
-                item.timestamp - old_timestamp,
-                time_difference_between_heaps_s,
-            )
-
-            # NOTE: As the output packets are rate limited in
-            # such a way to match the dump rate, receiving data too quickly
-            # will result in data bottlenecking at the sender, the pipeline
-            # eventually stalling and the input buffer overflowing.
-            if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
-                logger.warning(
-                    "Time between output heaps: %.2f which is less the expected %.2f. "
-                    "If this warning occurs too often, the pipeline will stall "
-                    "because the rate limited sender will not keep up with the input rate.",
+                logger.debug(
+                    "Current output heap timestamp: %#x, difference between timestamps: %#x, "
+                    "wall time between dumps %.2f s",
+                    item.timestamp,
+                    item.timestamp - old_timestamp,
                     time_difference_between_heaps_s,
-                    self.dump_interval_s,
                 )
 
-            old_time_s = new_time_s
-            old_timestamp = item.timestamp
+                # NOTE: As the output packets are rate limited in
+                # such a way to match the dump rate, receiving data too quickly
+                # will result in data bottlenecking at the sender, the pipeline
+                # eventually stalling and the input buffer overflowing.
+                if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
+                    logger.warning(
+                        "Time between output heaps: %.2f which is less the expected %.2f. "
+                        "If this warning occurs too often, the pipeline will stall "
+                        "because the rate limited sender will not keep up with the input rate.",
+                        time_difference_between_heaps_s,
+                        self.dump_interval_s,
+                    )
 
-            item.buffer_device.get_async(self._download_command_queue, heap.buffer)
-            item.saturated.get_async(self._download_command_queue, heap.saturated)
-            event = self._download_command_queue.enqueue_marker()
-            await katsdpsigproc.resource.async_wait_for_events([event])
+                old_time_s = new_time_s
+                old_timestamp = item.timestamp
 
-            if not np.all(item.present_ants):
-                incomplete_accum_counter.labels(self.output.name).inc(1)
-                if not np.any(item.present_ants):
-                    logger.warning("All Antennas had a break in data during this accumulation")
+                item.buffer_device.get_async(self._download_command_queue, heap.buffer)
+                item.saturated.get_async(self._download_command_queue, heap.saturated)
+                event = self._download_command_queue.enqueue_marker()
+                await katsdpsigproc.resource.async_wait_for_events([event])
 
-            heap.timestamp = item.timestamp
-            if self.send_stream.tx_enabled:
-                # Convert timestamp for the *end* of the heap (not the start)
-                # to a UNIX time for the sensor update. NB: this should be done
-                # *before* send_heap, because that gives away ownership of the
-                # heap.
-                end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
-                end_timestamp = self.engine.time_converter.adc_to_unix(end_adc_timestamp)
-                clip_cnt_sensor = self.engine.sensors[f"{self.output.name}.xeng-clip-cnt"]
-                clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
-            self.send_stream.send_heap(heap)
+                if not np.all(item.present_ants):
+                    incomplete_accum_counter.labels(self.output.name).inc(1)
+                    if not np.any(item.present_ants):
+                        logger.warning("All Antennas had a break in data during this accumulation")
+
+                heap.timestamp = item.timestamp
+                if self.send_stream.tx_enabled:
+                    # Convert timestamp for the *end* of the heap (not the start)
+                    # to a UNIX time for the sensor update. NB: this should be done
+                    # *before* send_heap, because that gives away ownership of the
+                    # heap.
+                    end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
+                    end_timestamp = self.engine.time_converter.adc_to_unix(end_adc_timestamp)
+                    clip_cnt_sensor = self.engine.sensors[f"{self.output.name}.xeng-clip-cnt"]
+                    clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
+                self.send_stream.send_heap(heap)
 
             await self._tx_free_item_queue.put(item)
 
@@ -1244,6 +1290,13 @@ class XBEngine(DeviceServer):
             item.timestamp = chunk.timestamp
             # Need to reshape chunk.present to get Heaps in one dimension
             item.present[:] = chunk.present.reshape(item.present.shape)
+            # Zero data affected by missing antennas
+            # TODO: NGC-1311 Update this once the region-based zeroing
+            # feature is implemented in katsdpsigproc.
+            for heap in range(self.heaps_per_fengine_per_chunk):
+                for antenna in range(self.n_ants):
+                    if not item.present[heap, antenna]:
+                        chunk.data[heap, antenna, ...] = 0
             # Initiate transfer from received chunk to rx_item buffer.
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_marker(self._upload_command_queue)

@@ -28,7 +28,7 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf import COMPLEX
-from katgpucbf.spead import BF_RAW_ID, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.spead import BEAM_ANTS_ID, BF_RAW_ID, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu.bsend import SEND_DTYPE, BSend
 from katgpucbf.xbgpu.output import BOutput
@@ -79,7 +79,10 @@ class TestBSend:
         """Send a fixed number of heaps.
 
         More specifically, in addition to a descriptor heap per substream, send
-        `N_TX_ITEMS` Chunks, each of which contain `FRAMES_PER_CHUNK` heaps.
+        `N_TX_ITEMS` Chunks, each of which contain `FRAMES_PER_CHUNK` heaps. The
+        first Frame of each Chunk is dropped as per the formulation of the
+        Chunk's `present_ants` attribute. This is done in order to simulate and
+        test handling data missing at the receiver.
 
         Parameters
         ----------
@@ -118,6 +121,12 @@ class TestBSend:
 
             # Populate the buffer with dummy data.
             chunk.data[:] = data[i, ...]
+
+            # NOTE: This is actually an ndarray with shape (FRAMES_PER_CHUNK,)
+            # Each entry holds a count for number of antennas that were present
+            # in the received heap. Any value > 0 will allow a Frame to be
+            # transmitted.
+            chunk.present_ants[:] = np.arange(FRAMES_PER_CHUNK)
 
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
@@ -175,13 +184,18 @@ class TestBSend:
 
             # Check the data heaps
             for j in range(TX_HEAPS_PER_SUBSTREAM):
+                if j % FRAMES_PER_CHUNK == 0:
+                    # See `_send_data` for logic dictating antenna presence
+                    continue
                 heap = await stream.get()
                 items = ig.update(heap)
-                assert set(items.keys()) == {"timestamp", "frequency", "bf_raw"}
+                assert set(items.keys()) == {"timestamp", "frequency", "beam_ants", "bf_raw"}
                 assert items["timestamp"].id == TIMESTAMP_ID
                 assert items["timestamp"].value == j * heap_timestamp_step
                 assert items["frequency"].id == FREQUENCY_ID
                 assert items["frequency"].value == channel_offset
+                assert items["beam_ants"].id == BEAM_ANTS_ID
+                assert items["beam_ants"].value == j % FRAMES_PER_CHUNK
                 assert items["bf_raw"].id == BF_RAW_ID
                 assert items["bf_raw"].value.shape == (n_channels_per_substream, n_spectra_per_heap, COMPLEX)
                 assert items["bf_raw"].value.dtype == np.int8
