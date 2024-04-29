@@ -291,11 +291,11 @@ def verify_corrprod_data(
         Unit test fixtures in :class:`TestEngine`.
     corrprod_results
         List of arrays of all GPU-generated data from
-        :class:`TestEngine._send_data`.
+        :meth:`TestEngine._send_data`.
     acc_indices
         Accumulation indices used to generate stimulus data for each
         corrprod_output. This is a list of lists, with the outer index matching
-        `corrprod_outputs`. See :class:`TestEngine.test_engine_end_to_end` for
+        `corrprod_outputs`. See :meth:`TestEngine.test_engine_end_to_end` for
         more details.
     """
     for i, (corrprod_output, acc_index_list) in enumerate(zip(corrprod_outputs, acc_indices)):
@@ -658,7 +658,7 @@ class TestEngine:
         beam_results
             Beamformer output, with shape (n_beams, n_frames,
             n_channels_per_substream, n_spectra_per_heap, COMPLEX).
-        accumulation_indices
+        acc_indices
             List of accumulation indices for each corrprod_output.
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
