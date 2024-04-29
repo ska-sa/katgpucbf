@@ -223,11 +223,7 @@ def generate_expected_beams(
     accum = np.zeros((len(beam_pols), len(batch_indices), channels), np.complex64)
     sample = np.empty((N_POLS, COMPLEX), np.int8)
     sample_fp = np.empty(N_POLS, np.complex64)
-    for batch_index in batch_indices:
-        # np.where returns a tuple with matches in row and column indices.
-        # `batch_index` is a flat list, so we only expect matches for row
-        # indices - and a single match, at that.
-        batch_id = np.where(batch_indices == batch_index)[0][0]
+    for batch_id, batch_index in enumerate(batch_indices):
         for channel in range(channels):
             # Compute scale factor for turning a delay into a phase
             delay_to_phase = -2 * np.pi * channel_spacing * (channel - centre_channel)
@@ -297,8 +293,8 @@ def verify_corrprod_data(
         List of arrays of all GPU-generated data from
         :class:`TestEngine._send_data`.
     batch_indices
-        A list batch indices used to generate stimulus data for the XBEngine.
-        See :class:`TestEngine.test_engine_end_to_end` for more details.
+        Batch indices used to generate stimulus data for the XBEngine. See
+        :class:`TestEngine.test_engine_end_to_end` for more details.
     """
     for i, corrprod_output in enumerate(corrprod_outputs):
         # We need a separate acc_index tracker as `corrprod_results` holds
@@ -379,7 +375,7 @@ def verify_corrprod_sensors(
         # Verify sensor updates while we're here
         xsync_sensor_name = f"{xpipeline.output.name}.rx.synchronised"
         # As per the explanation in :func:`~send_data`, the first accumulation
-        # is expected to be incomplete. We also accommodate for any other
+        # is expected to be incomplete. We also accommodate any other
         # incomplete accumulations due to the method of sending data.
         # The assert statement is to force mypy to realise the prom_diff value
         # obtained can be cast to int.
@@ -498,9 +494,7 @@ def verify_beam_sensors(
 
 class AccumWarningFilter(Filter):
     def filter(self, record: LogRecord) -> bool:
-        if record.message == "All Antennas had a break in data during this accumulation":
-            return True
-        return False
+        return record.message == "All Antennas had a break in data during this accumulation"
 
 
 class TestEngine:

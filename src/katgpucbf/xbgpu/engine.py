@@ -157,9 +157,12 @@ class BTxQueueItem(QueueItem):
 
     Parameters
     ----------
-    buffer_device
+    out
         An int8 type :class:`~katsdpsigproc.accel.DeviceArray` with shape
         (frames, ants, channels, spectra_per_frame, N_POLS, COMPLEX).
+    saturated
+        An uint32 type :class:`~aktsdpsigproc.accel.DeviceArray` with shape
+        (n_beams,).
     present
         A boolean array with shape (heaps_per_fengine_per_chunk, n_ants).
     weights
@@ -559,7 +562,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
-            np.sum(item.present, axis=1, dtype=np.int64, out=chunk.present_ants)
+            np.sum(item.present, axis=1, dtype=np.uint64, out=chunk.present_ants)
             chunk.timestamp = item.timestamp
             # TODO: Update beng-clip-cnt sensor, regardless of whether data
             # is being transmitted

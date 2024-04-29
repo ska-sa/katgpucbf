@@ -79,7 +79,10 @@ class TestBSend:
         """Send a fixed number of heaps.
 
         More specifically, in addition to a descriptor heap per substream, send
-        `N_TX_ITEMS` Chunks, each of which contain `FRAMES_PER_CHUNK` heaps.
+        `N_TX_ITEMS` Chunks, each of which contain `FRAMES_PER_CHUNK` heaps. The
+        first Frame of each Chunk is dropped as per the formulation of the
+        Chunk's `present_ants` attribute. This is done in order to simulate and
+        test handling data missing at the receiver.
 
         Parameters
         ----------
@@ -123,7 +126,7 @@ class TestBSend:
             # Each entry holds a count for number of antennas that were present
             # in the received heap. Any value > 0 will allow a Frame to be
             # transmitted.
-            chunk.present_ants[:] = [j % FRAMES_PER_CHUNK for j in range(FRAMES_PER_CHUNK)]
+            chunk.present_ants[:] = np.arange(FRAMES_PER_CHUNK)
 
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
