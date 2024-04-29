@@ -6,7 +6,7 @@
 #
 aioconsole==0.7.0
     # via aiomonitor
-aiohttp==3.9.3
+aiohttp==3.9.5
     # via
     #   aiomonitor
     #   prometheus-async
@@ -53,7 +53,7 @@ fsspec==2023.12.1
     # via dask
 hiredis==2.2.3
     # via katsdptelstate
-idna==3.6
+idna==3.7
     # via yarl
 importlib-metadata==7.0.0
     # via dask

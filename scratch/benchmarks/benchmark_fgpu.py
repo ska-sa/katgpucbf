@@ -171,7 +171,7 @@ def fgpu_factory(
         f"--adc-sample-rate={adc_sample_rate} "
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
-        f"--sync-epoch={sync_time} "
+        f"--sync-time={sync_time} "
         f"--feng-id={index} "
         f"{'--use-vkgdr --max-delay-diff=65536' if args.use_vkgdr else ''} "
         f"--wideband={wideband_arg} "

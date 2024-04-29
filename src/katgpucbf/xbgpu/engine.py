@@ -148,12 +148,12 @@ class XTxQueueItem(QueueItem):
 class BTxQueueItem(QueueItem):
     """Transmit queue item for the beamformer pipeline.
 
-    The `buffer_device`, `weights` and `delays` must have the same shape and
-    type as the ``in``, ``weights`` and ``delays`` slots in :class:`.Beamform`.
-    This class needs to carry a record of which antennas have missed data in
-    the current :class:`~katgpucbf.recv.Chunk` of data. This is used to
-    determine whether any beam data has been affected, and have their data
-    flagged accordingly.
+    The `out`, `saturated`, `rand_states`, `weights` and `delays` must have the
+    same shape and dtype as the corresponding slots in :class:`.Beamform`. This
+    class needs to carry a record of which antennas have missed data in the
+    current :class:`~katgpucbf.recv.Chunk` of data. This is used to determine
+    whether any beam data has been affected, and have their data flagged
+    accordingly.
 
     Parameters
     ----------
@@ -178,13 +178,15 @@ class BTxQueueItem(QueueItem):
 
     def __init__(
         self,
-        buffer_device: accel.DeviceArray,
+        out: accel.DeviceArray,
+        saturated: accel.DeviceArray,
         present: np.ndarray,
         weights: MappedArray,
         delays: MappedArray,
         timestamp: int = 0,
     ) -> None:
-        self.buffer_device = buffer_device
+        self.out = out
+        self.saturated = saturated
         self.present = present
         self.weights = weights
         self.delays = delays
@@ -347,28 +349,28 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
     ) -> None:
         super().__init__(outputs, name, engine, context)
 
-        template = BeamformTemplate(context, [output.pol for output in outputs])
+        template = BeamformTemplate(
+            context,
+            [output.pol for output in outputs],
+            n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
+        )
         self._beamform = template.instantiate(
             self._proc_command_queue,
             n_frames=engine.heaps_per_fengine_per_chunk,
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_per_substream,
-            n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
-            seed=int(engine.time_converter.sync_epoch),
+            seed=int(engine.time_converter.sync_time),
             sequence_first=engine.channel_offset_value,
             sequence_step=engine.n_channels_total,
         )
         allocator = accel.DeviceAllocator(context=context)
         for _ in range(self.n_tx_items):
-            buffer_device = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
+            out = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
+            saturated = self._beamform.slots["saturated"].allocate(allocator=allocator, bind=False)
             present = np.zeros(shape=(engine.heaps_per_fengine_per_chunk, engine.n_ants), dtype=bool)
-            # TODO: bring it back once support is inplemented
-            # saturated = accel.DeviceArray(
-            #     context, shape=(engine.heaps_per_fengine_per_chunk, n_beams), dtype=np.uint32
-            # )
             weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
-            tx_item = BTxQueueItem(buffer_device, present, weights, delays)
+            tx_item = BTxQueueItem(out, saturated, present, weights, delays)
             self._tx_free_item_queue.put_nowait(tx_item)
 
         # These are the original weights, delays and gains as provided by the
@@ -511,10 +513,12 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 tx_item.weights_version = self._weights_version
 
             # Queue GPU work
+            tx_item.saturated.zero(self._proc_command_queue)
             self._beamform.bind(
                 **{
                     "in": rx_item.buffer_device,
-                    "out": tx_item.buffer_device,
+                    "out": tx_item.out,
+                    "saturated": tx_item.saturated,
                     "weights": tx_item.weights.device,
                     "delays": tx_item.delays.device,
                 }
@@ -549,10 +553,8 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
             chunk = await self.send_stream.get_free_chunk()
 
-            item.buffer_device.get_async(self._download_command_queue, chunk.data)
-            # TODO: re-enable once supported
-            # item.saturated.get_async(self._download_command_queue, chunk.saturated)
-            chunk.saturated.fill(0)
+            item.out.get_async(self._download_command_queue, chunk.data)
+            item.saturated.get_async(self._download_command_queue, chunk.saturated)
 
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
@@ -992,7 +994,7 @@ class XBEngine(DeviceServer):
         The number of time samples received per frequency channel.
     sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
-    sync_epoch
+    sync_time
         UNIX time corresponding to timestamp zero
     channel_offset_value
         The index of the first channel in the subset of channels processed by
@@ -1062,7 +1064,7 @@ class XBEngine(DeviceServer):
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
         sample_bits: int,
-        sync_epoch: float,
+        sync_time: float,
         channel_offset_value: int,
         outputs: list[Output],
         src: list[tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
@@ -1093,7 +1095,7 @@ class XBEngine(DeviceServer):
         # Array configuration parameters
         self.adc_sample_rate_hz = adc_sample_rate_hz
         self.bandwidth_hz = bandwidth_hz
-        self.time_converter = TimeConverter(sync_epoch, adc_sample_rate_hz)
+        self.time_converter = TimeConverter(sync_time, adc_sample_rate_hz)
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
         self.n_channels_per_substream = n_channels_per_substream
@@ -1285,6 +1287,13 @@ class XBEngine(DeviceServer):
             item.timestamp = chunk.timestamp
             # Need to reshape chunk.present to get Heaps in one dimension
             item.present[:] = chunk.present.reshape(item.present.shape)
+            # Zero data affected by missing antennas
+            # TODO: NGC-1311 Update this once the region-based zeroing
+            # feature is implemented in katsdpsigproc.
+            for heap in range(self.heaps_per_fengine_per_chunk):
+                for antenna in range(self.n_ants):
+                    if not item.present[heap, antenna]:
+                        chunk.data[heap, antenna, ...] = 0
             # Initiate transfer from received chunk to rx_item buffer.
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_marker(self._upload_command_queue)

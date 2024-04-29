@@ -58,6 +58,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="ADDRESS",
         help="Starting IP address for external digitisers",
     )
+    parser.add_argument("--sync-time", type=float, help="Digitiser sync time [current time]")
     parser.add_argument("--band", default="l", choices=BANDS.keys(), help="Band ID [%(default)s]")
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
@@ -93,6 +94,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.narrowband_centre_frequency = args.adc_sample_rate / 4
     if args.digitisers is None:
         args.digitisers = args.antennas
+    if args.digitiser_address is not None and args.sync_time is None:
+        parser.error("--sync-time is required when specifying --digitiser-address")
     return args
 
 
@@ -119,9 +122,12 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
                     "centre_frequency": args.centre_frequency,
                     "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
                 }
+                if args.sync_time is not None:
+                    config["outputs"][name]["sync_time"] = args.sync_time
             else:
                 config["inputs"][name] = {
                     "type": "dig.baseband_voltage",
+                    "sync_time": args.sync_time,
                     "band": args.band,
                     "adc_sample_rate": args.adc_sample_rate,
                     "centre_frequency": args.centre_frequency,
@@ -204,7 +210,7 @@ def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
 def generate_config(args: argparse.Namespace) -> dict:
     """Produce the configuration dict from the parsed command-line arguments."""
     config: dict = {
-        "version": "3.5",
+        "version": "4.0",
         "config": {},
         "inputs": {},
         "outputs": {},

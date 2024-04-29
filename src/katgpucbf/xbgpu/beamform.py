@@ -34,15 +34,19 @@ class BeamformTemplate:
     ----------
     context
         The GPU context that we'll operate in.
-    pols
+    beam_pols
         One entry per single-polarisation output beam. Each entry is either
         0 or 1, to indicate which input polarisation to use in the beam.
+    n_spectra_per_frame
+        Number of samples in time axis for each frame (fine time dimension)
+        - see :class:`Beamform`.
     """
 
-    def __init__(self, context: AbstractContext, beam_pols: Sequence[int]) -> None:
-        # TODO: tune these. And maybe adapt to input shape?
-        self.block_spectra = 128
+    def __init__(self, context: AbstractContext, beam_pols: Sequence[int], n_spectra_per_frame: int) -> None:
+        # TODO: tune these.
+        self.block_spectra = min(128, n_spectra_per_frame)
         self.beam_pols = beam_pols
+        self.n_spectra_per_frame = n_spectra_per_frame
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
                 context,
@@ -61,15 +65,12 @@ class BeamformTemplate:
         n_frames: int,
         n_ants: int,
         n_channels: int,
-        n_spectra_per_frame: int,
         seed: int,
         sequence_first: int,
         sequence_step: int = 1,
     ) -> "Beamform":
         """Generate a :class:`Beamform` object based on the template."""
-        return Beamform(
-            self, command_queue, n_frames, n_ants, n_channels, n_spectra_per_frame, seed, sequence_first, sequence_step
-        )
+        return Beamform(self, command_queue, n_frames, n_ants, n_channels, seed, sequence_first, sequence_step)
 
 
 class Beamform(accel.Operation):
@@ -85,6 +86,9 @@ class Beamform(accel.Operation):
         Complex (Gaussian integer) input channelised voltages
     **out** : n_frames × n_beams × n_channels × n_spectra_per_frame × COMPLEX, int8
         Complex (Gaussian integer) output channelised voltages
+    **saturated**: n_beams, uint32
+        Number of saturated output values, per beam. This value is *incremented*
+        by the kernel, so should be explicitly zeroed first if desired.
     **weights** : n_ants × n_beams, complex64
         Complex scale factor to apply to each antenna for each beam
     **delays** : n_ants × n_beams, float32
@@ -109,8 +113,6 @@ class Beamform(accel.Operation):
         Number of antennas
     n_channels
         Number of frequency channels
-    n_spectra_per_frame
-        Number of samples in time axis for each frame (fine time dimension)
     seed, sequence_first, sequence_step
         See :class:`.RandomStateBuilder`.
     """
@@ -122,7 +124,6 @@ class Beamform(accel.Operation):
         n_frames: int,
         n_ants: int,
         n_channels: int,
-        n_spectra_per_frame: int,
         seed: int,
         sequence_first: int,
         sequence_step: int = 1,
@@ -132,11 +133,13 @@ class Beamform(accel.Operation):
         pol_dim = accel.Dimension(N_POLS, exact=True)
         complex_dim = accel.Dimension(COMPLEX, exact=True)
         n_beams = len(template.beam_pols)
+        n_spectra_per_frame = template.n_spectra_per_frame
         builder = RandomStateBuilder(command_queue.context)
         self.slots["in"] = accel.IOSlot(
             (n_frames, n_ants, n_channels, n_spectra_per_frame, pol_dim, complex_dim), np.int8
         )
         self.slots["out"] = accel.IOSlot((n_frames, n_beams, n_channels, n_spectra_per_frame, complex_dim), np.int8)
+        self.slots["saturated"] = accel.IOSlot((n_beams,), np.uint32)
         weights_dims = (n_ants, accel.Dimension(n_beams, exact=True))
         self.slots["weights"] = accel.IOSlot(weights_dims, np.complex64)
         self.slots["delays"] = accel.IOSlot(weights_dims, np.float32)
@@ -163,6 +166,7 @@ class Beamform(accel.Operation):
             self.template.kernel,
             [
                 out_buffer.buffer,
+                self.buffer("saturated").buffer,
                 in_buffer.buffer,
                 self.buffer("weights").buffer,
                 self.buffer("delays").buffer,

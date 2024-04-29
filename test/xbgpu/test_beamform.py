@@ -32,16 +32,29 @@ def quant(x):
 
 
 @numba.njit
-def beamform_host(in_: np.ndarray, weights: np.ndarray, delays: np.ndarray, beam_pols: np.ndarray) -> np.ndarray:
+def beamform_host(
+    in_: np.ndarray, weights: np.ndarray, delays: np.ndarray, beam_pols: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Implement the beamforming operation on the CPU.
 
     The input arrays have the same shape and meaning as in :mod:`katgpucbf.xbgpu.beamform`.
+
+    Returns
+    -------
+    data
+        The expected output values (with no dithering)
+    saturated_low
+        Lower bound on saturation count
+    saturated_high
+        Upper bound on saturation count
     """
     n_frames = in_.shape[0]
     n_channels = in_.shape[2]
     n_times = in_.shape[3]
     n_beams = len(beam_pols)
     out = np.zeros((n_frames, n_beams, n_channels, n_times, COMPLEX), np.int8)
+    saturated_low = np.zeros(n_beams, np.uint32)
+    saturated_high = np.zeros(n_beams, np.uint32)
     for frame in range(n_frames):
         for channel in range(n_channels):
             in_c = in_[frame, :, channel, ..., 0] + np.complex64(1j) * in_[frame, :, channel, ..., 1]
@@ -55,7 +68,11 @@ def beamform_host(in_: np.ndarray, weights: np.ndarray, delays: np.ndarray, beam
                     accum = np.dot(in_c[:, time, p].copy(), w)
                     out[frame, beam, channel, time, 0] = quant(accum.real)
                     out[frame, beam, channel, time, 1] = quant(accum.imag)
-    return out
+                    if abs(accum.real) > 126.5 or abs(accum.imag) > 126.5:
+                        saturated_high[beam] += 1
+                        if abs(accum.real) >= 127.5 or abs(accum.imag) >= 127.5:
+                            saturated_low[beam] += 1
+    return out, saturated_low, saturated_high
 
 
 @pytest.mark.combinations(
@@ -77,16 +94,18 @@ def test_beamform(
     beam_pols = [0, 1, 0, 1, 1] + [0, 1] * 20
     n_beams = len(beam_pols)
 
-    template = BeamformTemplate(context, beam_pols)
-    fn = template.instantiate(command_queue, n_frames, n_antennas, n_channels, n_times, seed=321, sequence_first=0)
+    template = BeamformTemplate(context, beam_pols, n_times)
+    fn = template.instantiate(command_queue, n_frames, n_antennas, n_channels, seed=321, sequence_first=0)
 
     fn.ensure_all_bound()
     h_in = fn.buffer("in").empty_like()
     h_out = fn.buffer("out").empty_like()
+    h_saturated = fn.buffer("saturated").empty_like()
     h_weights = fn.buffer("weights").empty_like()
     h_delays = fn.buffer("delays").empty_like()
     assert h_in.shape == (n_frames, n_antennas, n_channels, n_times, N_POLS, COMPLEX)
     assert h_out.shape == (n_frames, n_beams, n_channels, n_times, COMPLEX)
+    assert h_saturated.shape == (n_beams,)
     assert h_weights.shape == (n_antennas, n_beams)
     assert h_delays.shape == (n_antennas, n_beams)
 
@@ -101,16 +120,21 @@ def test_beamform(
     # across the whole band, but not an excessive number of times.
     h_delays[:] = rng.uniform(-100.0 / n_channels, 100.0 / n_channels, h_delays.shape)
     h_out.fill(0)
-    expected = beamform_host(h_in, h_weights, h_delays, np.array(beam_pols))
+    h_saturated.fill(0)
+    e_out, e_saturated_low, e_saturated_high = beamform_host(h_in, h_weights, h_delays, np.array(beam_pols))
 
     fn.buffer("out").zero(command_queue)
+    fn.buffer("saturated").zero(command_queue)
     fn.buffer("in").set(command_queue, h_in)
     fn.buffer("weights").set(command_queue, h_weights)
     fn.buffer("delays").set(command_queue, h_delays)
     fn()
     fn.buffer("out").get(command_queue, h_out)
+    fn.buffer("saturated").get(command_queue, h_saturated)
 
-    np.testing.assert_allclose(h_out, expected, atol=1)
+    np.testing.assert_allclose(h_out, e_out, atol=1)
+    assert (e_saturated_low <= h_saturated).all()
+    assert (h_saturated <= e_saturated_high).all()
     # Ensure that the scale factor on the weights causes some clamping, but
     # not too much. But only do it for larger test cases; in small tests cases
     # it is hard to guarantee this.

@@ -79,9 +79,6 @@ class Frame:
     data
         Payload data for the frame with shape (n_beams,
         n_channels_per_substream, spectra_per_heap, COMPLEX).
-    saturated
-        Total number of complex samples that saturated during requantisation,
-        with shape (n_beams,).
     channel_offset
         The first frequency channel processed.
     present_ants
@@ -93,15 +90,13 @@ class Frame:
         self,
         timestamp: np.ndarray,
         data: np.ndarray,
-        saturated: np.ndarray,
         *,
         channel_offset: int,
         present_ants: np.ndarray,
     ) -> None:
         self.heaps: list[spead2.send.Heap] = []
         self.data = data
-        self.saturated = saturated
-        n_substreams = saturated.shape[0]
+        n_substreams = data.shape[0]
         for i in range(n_substreams):
             heap = spead2.send.Heap(flavour=FLAVOUR)
             heap.repeat_pointers = True
@@ -134,7 +129,7 @@ class Chunk:
         n_beams, n_channels_per_substream, n_spectra_per_heap, COMPLEX) and
         dtype :const:`SEND_DTYPE`.
     saturated
-        Storage for saturation counts, with shape (n_frames, n_beams) and dtype
+        Storage for saturation counts, with shape (n_beams,) and dtype
         uint32.
     channel_offset
         The first frequency channel processed.
@@ -169,7 +164,6 @@ class Chunk:
             Frame(
                 self._timestamps[i, ...],
                 data[i],
-                saturated[i],
                 channel_offset=channel_offset,
                 present_ants=self._present_ants[i, ...],
             )
@@ -214,6 +208,7 @@ class Chunk:
         data_shape: tuple[int, int, int],
         data_dtype: np.dtype,
         output_names: Sequence[str],
+        saturated: np.ndarray,
         future: asyncio.Future,
     ) -> None:
         """Increment beam stream Prometheus counters.
@@ -234,6 +229,8 @@ class Chunk:
         output_names
             List of beam stream names that are enabled for transmission for
             this `future`.
+        saturated
+            Saturation count for the chunk for each stream in `output_names`.
         future
             Future returned by the spead2 stream's `async_send_heaps`.
         """
@@ -242,12 +239,13 @@ class Chunk:
             # incompatible with the type annotations for Prometheus.
             byte_count = int(np.prod(data_shape)) * data_dtype.itemsize * n_frames_sent
             sample_count = int(np.prod(data_shape[:-1])) * n_frames_sent
-            for output_name in output_names:
+            for i, output_name in enumerate(output_names):
                 output_heaps_counter.labels(output_name).inc(n_frames_sent)
                 # Multiply across dimensions to get total bytes
                 output_bytes_counter.labels(output_name).inc(byte_count)
                 # Multiply across the first two dimensions to get complex sample count
                 output_samples_counter.labels(output_name).inc(sample_count)
+                output_clip_counter.labels(output_name).inc(int(saturated[i]))
 
     def send(
         self,
@@ -260,10 +258,6 @@ class Chunk:
 
         This method returns immediately and sends the data asynchronously. Before
         modifying the chunk, first await :attr:`future`.
-
-        .. todo::
-
-            (NGC-1173): Update counter and sensor with chunk.saturation
         """
         n_enabled = sum(send_stream.tx_enabled)
         rate = send_stream.bytes_per_second_per_beam * n_enabled
@@ -297,9 +291,10 @@ class Chunk:
                 functools.partial(
                     self._inc_counters,
                     len(send_futures),  # Increment counters for as many calls to async_send_heaps
-                    frame.data.shape[1:],  # Get rid of 'beam' dimension
-                    frame.data.dtype,
+                    self.data.shape[2:],  # Get rid of 'frame' and 'beam' dimensions
+                    self.data.dtype,
                     enabled_stream_names,
+                    self.saturated[send_stream.tx_enabled],
                 )
             )
         else:
@@ -391,11 +386,7 @@ class BSend:
         for _ in range(n_tx_items):
             chunk = Chunk(
                 accel.HostArray(send_shape, SEND_DTYPE, context=context),
-                accel.HostArray(
-                    (frames_per_chunk, n_beams),
-                    np.uint32,
-                    context=context,
-                ),
+                accel.HostArray((n_beams,), np.uint32, context=context),
                 channel_offset=channel_offset,
                 timestamp_step=timestamp_step,
             )

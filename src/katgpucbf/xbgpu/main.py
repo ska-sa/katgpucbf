@@ -60,11 +60,11 @@ from ..utils import add_gc_stats, add_signal_handlers, parse_source
 from .correlation import device_filter
 from .output import BOutput, XOutput
 
-_OD = TypeVar("_OD", bound="OutputDict")
+_OD = TypeVar("_OD", bound="_OutputDict")
 logger = logging.getLogger(__name__)
 
 
-class OutputDict(TypedDict, total=False):
+class _OutputDict(TypedDict, total=False):
     """Configuration options for an output stream.
 
     Unlike :class:`BOutput` or :class:`XOutput`, all the fields are optional,
@@ -76,19 +76,19 @@ class OutputDict(TypedDict, total=False):
     dst: Endpoint
 
 
-class BOutputDict(OutputDict, total=False):
+class _BOutputDict(_OutputDict, total=False):
     """Configuration options for a beam output.
 
-    See :class:`OutputDict` for further information.
+    See :class:`_OutputDict` for further information.
     """
 
     pol: int
 
 
-class XOutputDict(OutputDict, total=False):
+class _XOutputDict(_OutputDict, total=False):
     """Configuration options for a baseline-correlation output.
 
-    See :class:`OutputDict` for further information.
+    See :class:`_OutputDict` for further information.
     """
 
     heap_accumulation_threshold: int
@@ -134,7 +134,7 @@ def parse_beam(value: str) -> BOutput:
     - pol
     """
 
-    def _field_callback(kws: BOutputDict, key: str, data: str) -> None:
+    def _field_callback(kws: _BOutputDict, key: str, data: str) -> None:
         match key:
             case "pol":
                 kws[key] = int(data)
@@ -144,7 +144,7 @@ def parse_beam(value: str) -> BOutput:
                 raise ValueError(f"unknown key {key}")
 
     try:
-        kws: BOutputDict = {}
+        kws: _BOutputDict = {}
         _parse_stream(value, kws, _field_callback)
         if "pol" not in kws:
             raise ValueError("pol is missing")
@@ -165,7 +165,7 @@ def parse_corrprod(value: str) -> XOutput:
     - heap_accumulation_threshold
     """
 
-    def _field_callback(kws: XOutputDict, key: str, data: str) -> None:
+    def _field_callback(kws: _XOutputDict, key: str, data: str) -> None:
         match key:
             case "heap_accumulation_threshold":
                 kws[key] = int(data)
@@ -173,7 +173,7 @@ def parse_corrprod(value: str) -> XOutput:
                 raise ValueError(f"unknown key {key}")
 
     try:
-        kws: XOutputDict = {}
+        kws: _XOutputDict = {}
         _parse_stream(value, kws, _field_callback)
         if "heap_accumulation_threshold" not in kws:
             raise ValueError("heap_accumulation_threshold is missing")
@@ -298,7 +298,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "and still be accepted. [%(default)s]",
     )
     parser.add_argument(
-        "--sync-epoch",
+        "--sync-time",
         type=float,
         required=True,
         help="UNIX time at which digitisers were synced.",
@@ -407,7 +407,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         n_samples_between_spectra=args.samples_between_spectra,
         n_spectra_per_heap=args.jones_per_batch // args.channels,
         sample_bits=args.sample_bits,
-        sync_epoch=args.sync_epoch,
+        sync_time=args.sync_time,
         channel_offset_value=args.channel_offset_value,
         outputs=args.outputs,
         src=args.src,

@@ -30,7 +30,7 @@ from katgpucbf.fgpu.engine import Engine
 pytestmark = [pytest.mark.cuda_only]
 
 CHANNELS = 4096
-SYNC_EPOCH = 1632561921
+SYNC_TIME = 1632561921
 GAIN = 0.125  # Exactly representable to avoid some rounding issues
 
 
@@ -60,7 +60,7 @@ class TestKatcpRequests:
             "--katcp-port=0",
             "--src-interface=lo",
             "--dst-interface=lo",
-            f"--sync-epoch={SYNC_EPOCH}",
+            f"--sync-time={SYNC_TIME}",
             f"--gain={GAIN}",
             "--adc-sample-rate=1.712e9",
             f"--wideband=name=wideband,dst=239.10.11.0+15:7149,channels={CHANNELS}",
@@ -201,7 +201,7 @@ class TestKatcpRequests:
             phase, phase_rate = (float(value) for value in phase_str.split(","))
             return delay, delay_rate, wrap_angle(phase), phase_rate
 
-        start_time = SYNC_EPOCH
+        start_time = SYNC_TIME
         await engine_client.request(
             "delays", "wideband", start_time, correct_delay_strings[0], correct_delay_strings[1]
         )
@@ -237,7 +237,7 @@ class TestKatcpRequests:
 
         We test for various combinations of malformations of the delay string.
         """
-        start_time = SYNC_EPOCH + 10
+        start_time = SYNC_TIME + 10
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request(
                 "delays", "wideband", start_time, malformed_delay_string, malformed_delay_string
@@ -250,15 +250,15 @@ class TestKatcpRequests:
             await engine_client.request("delays", "wideband", "3.76,0.12:7.322,1.91")
         with pytest.raises(aiokatcp.FailReply):
             # Only one of the two models
-            await engine_client.request("delays", "wideband", SYNC_EPOCH, "3.76,0.12:7.322,1.91")
+            await engine_client.request("delays", "wideband", SYNC_TIME, "3.76,0.12:7.322,1.91")
 
     async def test_delay_model_update_too_many_arguments(self, engine_client: aiokatcp.Client) -> None:
         """Test that a delay request with too many arguments is rejected."""
         coeffs = "3.76,0.12:7.322,1.91"
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("delays", "wideband", SYNC_EPOCH, coeffs, coeffs, coeffs)
+            await engine_client.request("delays", "wideband", SYNC_TIME, coeffs, coeffs, coeffs)
 
-    async def test_delay_model_update_before_sync_epoch(self, engine_client: aiokatcp.Client) -> None:
-        """Test that a delay model loaded prior to the sync epoch is rejected."""
+    async def test_delay_model_update_before_sync_time(self, engine_client: aiokatcp.Client) -> None:
+        """Test that a delay model loaded prior to the sync time is rejected."""
         with pytest.raises(aiokatcp.FailReply):
-            await engine_client.request("delays", "wideband", SYNC_EPOCH - 1.0, "0,0:0,0", "0,0:0,0")
+            await engine_client.request("delays", "wideband", SYNC_TIME - 1.0, "0,0:0,0", "0,0:0,0")

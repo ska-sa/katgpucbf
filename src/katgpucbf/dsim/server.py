@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -152,6 +152,15 @@ class DeviceServer(aiokatcp.DeviceServer):
                 "Number of bits in each output sample",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 default=sample_bits,
+            )
+        )
+        # The value of sync-time is initialised later by main.py
+        self.sensors.add(
+            aiokatcp.Sensor(
+                float,
+                "sync-time",
+                "The UNIX time corresponding to timestamp 0",
+                "s",
             )
         )
 
