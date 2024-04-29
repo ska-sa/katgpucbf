@@ -277,7 +277,7 @@ def verify_corrprod_data(
     *,
     corrprod_outputs: list[XOutput],
     corrprod_results: list[np.ndarray],
-    batch_indices: list[int],
+    acc_indices: list[list[int]],
     n_ants: int,
     n_channels_per_substream: int,
     n_spectra_per_heap: int,
@@ -292,28 +292,24 @@ def verify_corrprod_data(
     corrprod_results
         List of arrays of all GPU-generated data from
         :class:`TestEngine._send_data`.
-    batch_indices
-        Batch indices used to generate stimulus data for the XBEngine. See
-        :class:`TestEngine.test_engine_end_to_end` for more details.
+    acc_indices
+        Accumulation indices used to generate stimulus data for the XBEngine.
+        See :class:`TestEngine.test_engine_end_to_end` for more details.
     """
-    for i, corrprod_output in enumerate(corrprod_outputs):
-        # We need a separate acc_index tracker as `corrprod_results` holds
-        # data for *all* accumulations processed, in the order processed.
-        acc_index = 0
-        for batch_index in batch_indices[:: corrprod_output.heap_accumulation_threshold]:
+    for i, (corrprod_output, acc_index_list) in enumerate(zip(corrprod_outputs, acc_indices)):
+        for j, acc_index in enumerate(acc_index_list):
             # We know the XPipeline avoids sending data where all antennas
             # were absent, so we can be confident there are a whole number
             # of accumulations in the `corrprod_results`.
             expected_output = generate_expected_corrprods(
-                batch_index,
+                acc_index * corrprod_output.heap_accumulation_threshold,
                 corrprod_output.heap_accumulation_threshold,
                 n_channels_per_substream,
                 n_ants,
                 n_spectra_per_heap,
                 missing_antenna,
             )
-            np.testing.assert_equal(expected_output, corrprod_results[i][acc_index])
-            acc_index += 1
+            np.testing.assert_equal(expected_output, corrprod_results[i][j])
 
 
 def verify_corrprod_sensors(
@@ -624,7 +620,7 @@ class TestEngine:
         frequency: int,
         n_spectra_per_heap: int,
         missing_antennas: AbstractSet[int] = frozenset(),
-    ) -> tuple[list[np.ndarray], np.ndarray]:
+    ) -> tuple[list[np.ndarray], np.ndarray, list[list[int]]]:
         """Send a stream of data to the engine and retrieve the results.
 
         Each full accumulation (for each corrprod-output) requires
@@ -660,6 +656,8 @@ class TestEngine:
         beam_results
             Beamformer output, with shape (n_beams, n_frames,
             n_channels_per_substream, n_spectra_per_heap, COMPLEX).
+        accumulation_indices
+            List of accumulation indices for each corrprod_output.
         """
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
@@ -684,14 +682,14 @@ class TestEngine:
         corrprod_results = [
             np.zeros(
                 shape=(
-                    len(acc_index_set),  # n_accumulations for this XPipeline
+                    len(acc_index_list),  # n_accumulations for this XPipeline
                     n_channels_per_substream,
                     n_baselines,
                     COMPLEX,
                 ),
                 dtype=np.int32,
             )
-            for acc_index_set in acc_indices
+            for acc_index_list in acc_indices
         ]
 
         out_config = spead2.recv.StreamConfig(max_heaps=100)
@@ -763,7 +761,7 @@ class TestEngine:
                 assert ig_recv["beam_ants"].value == n_ants - len(missing_antennas)
                 beam_results[i, j, ...] = ig_recv["bf_raw"].value
 
-        return corrprod_results, beam_results
+        return corrprod_results, beam_results, acc_indices
 
     @pytest.fixture
     def n_engines(self, n_ants: int) -> int:
@@ -1016,7 +1014,7 @@ class TestEngine:
                 await client.request("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]])
 
             with caplog.filtering(AccumWarningFilter()):
-                corrprod_results, beam_results = await self._send_data(
+                corrprod_results, beam_results, acc_indices = await self._send_data(
                     mock_recv_streams,
                     mock_send_stream,
                     corrprod_outputs=corrprod_outputs,
@@ -1044,9 +1042,7 @@ class TestEngine:
         verify_corrprod_data(
             corrprod_outputs=corrprod_outputs,
             corrprod_results=corrprod_results,
-            # Use the batch indices that start *after* the first
-            # purposefully-empty accumulation
-            batch_indices=test_batch_indices[HEAPS_PER_FENGINE_PER_CHUNK:],
+            acc_indices=acc_indices,
             n_ants=n_ants,
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
@@ -1227,7 +1223,7 @@ class TestEngine:
         request = request_factory(beam_outputs[0].name, n_ants)
         timestamp_list = self._patch_get_rx_item(monkeypatch, 4, client, *request)
         n_batches = heap_accumulation_threshold[0]
-        _, data = await self._send_data(
+        _, data, _ = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
             corrprod_outputs,
