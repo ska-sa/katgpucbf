@@ -17,7 +17,7 @@
 """Unit tests for XBEngine module."""
 
 from collections import Counter
-from logging import WARNING
+from logging import WARNING, Filter, LogRecord
 from typing import AbstractSet, Any, AsyncGenerator, Callable, Final, Sequence
 
 import aiokatcp
@@ -494,6 +494,13 @@ def verify_beam_sensors(
         assert actual_sensor_updates[f"{beam_output.name}.delay"] == [
             (f"({first_timestamp}, {delay_updates_str})", aiokatcp.Sensor.Status.NOMINAL)
         ]
+
+
+class AccumWarningFilter(Filter):
+    def filter(self, record: LogRecord) -> bool:
+        if record.message == "All Antennas had a break in data during this accumulation":
+            return True
+        return False
 
 
 class TestEngine:
@@ -1014,32 +1021,25 @@ class TestEngine:
                 await client.request("beam-quant-gains", output.name, quant_gains[i])
                 await client.request("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]])
 
-            corrprod_results, beam_results = await self._send_data(
-                mock_recv_streams,
-                mock_send_stream,
-                corrprod_outputs=corrprod_outputs,
-                beam_outputs=beam_outputs,
-                batch_indices=test_batch_indices,
-                heap_factory=heap_factory,
-                timestamp_step=timestamp_step,
-                n_ants=n_ants,
-                n_channels_per_substream=n_channels_per_substream,
-                frequency=frequency,
-                n_spectra_per_heap=n_spectra_per_heap,
-                missing_antennas=missing_antennas,
-            )
+            with caplog.filtering(AccumWarningFilter()):
+                corrprod_results, beam_results = await self._send_data(
+                    mock_recv_streams,
+                    mock_send_stream,
+                    corrprod_outputs=corrprod_outputs,
+                    beam_outputs=beam_outputs,
+                    batch_indices=test_batch_indices,
+                    heap_factory=heap_factory,
+                    timestamp_step=timestamp_step,
+                    n_ants=n_ants,
+                    n_channels_per_substream=n_channels_per_substream,
+                    frequency=frequency,
+                    n_spectra_per_heap=n_spectra_per_heap,
+                    missing_antennas=missing_antennas,
+                )
             last_timestamp = batch_end_index2 * timestamp_step
 
-        # The first warnings in the list should be from each of the XPipelines,
-        # the rest are warnings related to timestamps between output heaps.
-        def record_tuple_filter(record_tuple: tuple[str, int, str]) -> bool:
-            if record_tuple[-1] == "All Antennas had a break in data during this accumulation":
-                return True
-            return False
-
-        accum_warning_record_tuples = filter(record_tuple_filter, caplog.record_tuples)
         # TODO: NGC-1308 Update this check to not be a subset of the warnings filtered
-        assert list(accum_warning_record_tuples)[: len(corrprod_outputs)] == [
+        assert caplog.record_tuples[: len(corrprod_outputs)] == [
             (
                 "katgpucbf.xbgpu.engine",
                 WARNING,
