@@ -293,8 +293,10 @@ def verify_corrprod_data(
         List of arrays of all GPU-generated data from
         :class:`TestEngine._send_data`.
     acc_indices
-        Accumulation indices used to generate stimulus data for the XBEngine.
-        See :class:`TestEngine.test_engine_end_to_end` for more details.
+        Accumulation indices used to generate stimulus data for each
+        corrprod_output. This is a list of lists, with the outer index matching
+        `corrprod_outputs`. See :class:`TestEngine.test_engine_end_to_end` for
+        more details.
     """
     for i, (corrprod_output, acc_index_list) in enumerate(zip(corrprod_outputs, acc_indices)):
         for j, acc_index in enumerate(acc_index_list):

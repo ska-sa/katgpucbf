@@ -161,7 +161,7 @@ class BTxQueueItem(QueueItem):
         An int8 type :class:`~katsdpsigproc.accel.DeviceArray` with shape
         (frames, ants, channels, spectra_per_frame, N_POLS, COMPLEX).
     saturated
-        An uint32 type :class:`~aktsdpsigproc.accel.DeviceArray` with shape
+        An uint32 type :class:`~katsdpsigproc.accel.DeviceArray` with shape
         (n_beams,).
     present
         A boolean array with shape (heaps_per_fengine_per_chunk, n_ants).
