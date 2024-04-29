@@ -30,6 +30,7 @@ ADC_SAMPLES_ID = 0x3300  # Digitiser data
 XENG_RAW_ID = 0x1800
 TIMESTAMP_ID = 0x1600
 BF_RAW_ID = 0x5000
+BEAM_ANTS_ID = 0x5004
 MAX_PACKET_SIZE = 8872
 
 #: Bit position in digitiser_status SPEAD item for ADC saturation flag

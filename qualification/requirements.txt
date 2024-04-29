@@ -281,7 +281,7 @@ pyparsing==3.0.9
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
     #   matplotlib
-pytest==7.4.3
+pytest==8.0.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (setup.cfg)
