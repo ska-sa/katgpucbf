@@ -436,7 +436,7 @@ class BSend:
         item_group.add_item(
             BEAM_ANTS_ID,
             "beam_ants",
-            "Count of present antennas in the beam sum.",
+            "Count of antennas included in the beam sum.",
             shape=[],
             format=IMMEDIATE_FORMAT,
         )
