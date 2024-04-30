@@ -168,7 +168,9 @@ class CBFRemoteControl:
         reply, _ = await self.dsim_clients[dsim_idx].request("time")
         return aiokatcp.decode(float, reply[0])
 
-    async def dsim_gaussian(self, amplitude: float, pdf_report: Reporter | None = None, *, dsim_idx: int = 0) -> None:
+    async def dsim_gaussian(
+        self, amplitude: float, pdf_report: Reporter | None = None, *, dsim_idx: int = 0, period: int | None = None
+    ) -> None:
         """Configure a dsim with Gaussian noise.
 
         The identical signal is produced on both polarisations.
@@ -181,14 +183,22 @@ class CBFRemoteControl:
             Reporter to which this process will be reported
         dsim_idx
             Index of the dsim to set
+        period
+            If specified, override the period of the dsim signal
         """
         if pdf_report is not None:
             pdf_report.step("Configure the D-sim with Gaussian noise.")
         dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
         amplitude /= dig_max  # Convert to be relative to full-scale
-        await self.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
+        signal = f"common=nodither(wgn({amplitude}));common;common;"
+        if period is None:
+            await self.dsim_clients[0].request("signals", signal)
+            suffix = ""
+        else:
+            await self.dsim_clients[0].request("signals", signal, period)
+            suffix = f" and period={period} samples"
         if pdf_report is not None:
-            pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
+            pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}{suffix}.")
 
 
 class XBReceiver:
