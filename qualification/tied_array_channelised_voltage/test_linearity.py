@@ -40,8 +40,8 @@ async def _test_linearity(
     beam_name = receiver.stream_names[0]
     n_sources = len(receiver.source_indices[0])
 
-    # Small amplitude so that we don't saturate in the time domain.
     period = receiver.n_spectra_per_heap * receiver.n_samples_between_spectra
+    # Small amplitude so that we don't saturate in the time domain.
     await cbf.dsim_gaussian(16.0, pdf_report, period=period)
 
     pdf_report.step(f"Set {fixed} to 1/antennas")
@@ -56,7 +56,8 @@ async def _test_linearity(
     for i, scale in enumerate(scales):
         await set_variable(client, beam_name, scale)
         _, data = await receiver.next_complete_chunk()
-        powers[i] = np.sum(np.square(data[0].astype(np.float64)))
+        data = data[0]  # Use only the first beam
+        powers[i] = np.sum(np.square(data.astype(np.float64)))
         pdf_report.detail(f"Set {variable} to {scale}; power is {powers[i]}")
 
     # Normalise power
