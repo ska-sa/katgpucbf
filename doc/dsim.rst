@@ -61,6 +61,12 @@ final semi-colon. The following functions are available:
     currently no way to directly control phase, although the ``delay``
     function below gives limited control.
 
+:samp:`comb({amplitude}, {frequency})`
+    A comb of impulses, each one sample wide with the given amplitude. Note
+    that if the frequency doesn't correspond to an integer number of samples,
+    these will not be precisely periodic as each impulse time will be rounded
+    to the nearest sample.
+
 :samp:`wgn({std} [, {entropy}])`
     White Gaussian noise with given standard deviation. Optionally, one may
     provide a non-negative integer seed in `entropy` to give reproducible
@@ -76,8 +82,8 @@ final semi-colon. The following functions are available:
     (DC).
 
 The output magnitude is limited to the range -1 to 1, so typically the
-`amplitude` for ``cw`` should be at most 1, and the `std` for ``wgn`` should
-be much less than 1.
+`amplitude` for ``cw`` and ``comb`` should be at most 1, and the `std` for
+``wgn`` should be much less than 1.
 
 Operators
 ^^^^^^^^^
@@ -137,10 +143,11 @@ signal, and then replayed over and over. The length of this window is
 determined by the :option:`!--signal-heaps` command-line option.
 This has a few implications:
 
-1. The frequency resolution is limited by the inverse of the window length.
-   For example, a sinusoidal signal must have an integer number of cycles per
-   window, which means that the frequency is rounded to a multiple of
-   :math:`\frac{\text{adc-sample-rate}}{\text{signal-heaps}\times \text{heap-samples}}`.
+1. The frequency resolution for ``cw`` and ``comb`` is limited by the inverse
+   of the window length.  For example, a sinusoidal signal must have an integer
+   number of cycles per window, which means that the frequency is rounded to a
+   multiple of :math:`\frac{\text{adc-sample-rate}}{\text{signal-heaps}\times
+   \text{heap-samples}}`.
 
 2. Noise is correlated in time, and when averaging over long periods of time
    (longer than the window), the standard deviation does not decrease with the
