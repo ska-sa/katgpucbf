@@ -207,8 +207,11 @@ class Chunk:
         n_frames_sent: int,
         data_shape: tuple[int, int, int],
         data_dtype: np.dtype,
+        enabled: Sequence[bool],
         output_names: Sequence[str],
         saturated: np.ndarray,
+        sensors: SensorSet,
+        sensor_timestamp: float,
         future: asyncio.Future,
     ) -> None:
         """Increment beam stream Prometheus counters.
@@ -226,26 +229,37 @@ class Chunk:
             format of (n_channels_per_substream, samples_per_spectra, COMPLEX).
         data_dtype
             The `np.dtype` of the beam data transmitted.
+        enabled
+            Boolean flag array indicating which streams are enabled for transmission.
         output_names
-            List of beam stream names that are enabled for transmission for
-            this `future`.
+            List of beam stream names
         saturated
             Saturation count for the chunk for each stream in `output_names`.
+        sensors
+            Server's katcp sensors.
+        sensor_timestamp
+            Timestamp (UNIX time) to use for sensor update.
         future
             Future returned by the spead2 stream's `async_send_heaps`.
         """
-        if not future.cancelled() and future.exception() is None:
-            # int casts are because np.prod returns np.int64 which is
-            # incompatible with the type annotations for Prometheus.
-            byte_count = int(np.prod(data_shape)) * data_dtype.itemsize * n_frames_sent
-            sample_count = int(np.prod(data_shape[:-1])) * n_frames_sent
-            for i, output_name in enumerate(output_names):
+        if future.cancelled() or future.exception() is not None:
+            # Don't update output counters if we didn't successfully transmit the data.
+            n_frames_sent = 0
+        # int casts are because np.prod returns np.int64 which is
+        # incompatible with the type annotations for Prometheus.
+        # Multiply across dimensions to get total bytes
+        byte_count = int(np.prod(data_shape)) * data_dtype.itemsize * n_frames_sent
+        # Multiply across the first two dimensions to get complex sample count
+        sample_count = int(np.prod(data_shape[:-1])) * n_frames_sent
+        for i, output_name in enumerate(output_names):
+            clipped = int(saturated[i])
+            sensor = sensors[f"{output_name}.beng-clip-cnt"]
+            sensor.set_value(sensor.value + clipped, timestamp=sensor_timestamp)
+            if enabled[i] and n_frames_sent != 0:
                 output_heaps_counter.labels(output_name).inc(n_frames_sent)
-                # Multiply across dimensions to get total bytes
                 output_bytes_counter.labels(output_name).inc(byte_count)
-                # Multiply across the first two dimensions to get complex sample count
                 output_samples_counter.labels(output_name).inc(sample_count)
-                output_clip_counter.labels(output_name).inc(int(saturated[i]))
+                output_clip_counter.labels(output_name).inc(clipped)
 
     def send(
         self,
@@ -261,8 +275,8 @@ class Chunk:
         """
         n_enabled = sum(send_stream.tx_enabled)
         rate = send_stream.bytes_per_second_per_beam * n_enabled
+        send_futures: list[asyncio.Future] = []
         if n_enabled > 0:
-            send_futures: list[asyncio.Future] = []
             for frame, antenna_presence in zip(self._frames, self._present_ants):
                 if antenna_presence == 0:
                     # No antennas were present in the received batch of heaps
@@ -284,22 +298,25 @@ class Chunk:
                 )
 
             self.future = asyncio.gather(*send_futures)
-            enabled_stream_names = [
-                output_name for output_name, enabled in zip(send_stream.output_names, send_stream.tx_enabled) if enabled
-            ]
-            self.future.add_done_callback(
-                functools.partial(
-                    self._inc_counters,
-                    len(send_futures),  # Increment counters for as many calls to async_send_heaps
-                    self.data.shape[2:],  # Get rid of 'frame' and 'beam' dimensions
-                    self.data.dtype,
-                    enabled_stream_names,
-                    self.saturated[send_stream.tx_enabled],
-                )
-            )
         else:
             # TODO: Is it necessary to handle this case?
             self.future = asyncio.create_task(send_stream.stream.async_flush())
+
+        end_timestamp_adc = self._timestamp + self._timestamp_step * len(self._frames)
+        end_timestamp_unix = time_converter.adc_to_unix(end_timestamp_adc)
+        self.future.add_done_callback(
+            functools.partial(
+                self._inc_counters,
+                len(send_futures),  # Increment counters for as many calls to async_send_heaps
+                self.data.shape[2:],  # Get rid of 'frame' and 'beam' dimensions
+                self.data.dtype,
+                send_stream.tx_enabled,
+                send_stream.output_names,
+                self.saturated.copy(),  # Copy since the original may get overwritten
+                sensors,
+                end_timestamp_unix,
+            )
+        )
         return self.future
 
 

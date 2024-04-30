@@ -470,6 +470,12 @@ def verify_beam_sensors(
         assert prom_get("output_b_samples_total") == n_beam_heaps_sent * heap_samples
         assert saturated_low[i] <= prom_get("output_b_clipped_samples_total") <= saturated_high[i]
 
+        # Check that sensor value matches Prometheus
+        assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == (
+            prom_get("output_b_clipped_samples_total"),
+            aiokatcp.Sensor.Status.NOMINAL,
+        )
+
         assert first_timestamp < last_timestamp, (
             "Timestamp before katcp requests is not less than timestamp after data"
             f"has been processed: {first_timestamp} >= {last_timestamp}"
@@ -923,7 +929,7 @@ class TestEngine:
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates as
         # they happen in the XBEngine
-        dynamic_bsensor_names = ["delay", "quantiser-gain", "weight"]
+        dynamic_bsensor_names = ["delay", "quantiser-gain", "weight", "beng-clip-cnt"]
         actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]] = {
             f"{beam_output.name}.{dynamic_bsensor_name}": list()
             for beam_output in beam_outputs
@@ -1150,14 +1156,10 @@ class TestEngine:
 
             await xbengine.stop()
 
-        assert (
-            prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": "bcp1"})
-            == n_channels_per_substream * n_baselines
-        )
-        assert (
-            prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"})
-            == n_channels_per_substream * n_baselines
-        )
+        n_vis = n_channels_per_substream * n_baselines
+        assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": "bcp1"}) == n_vis
+        assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"}) == n_vis
+        assert xbengine.sensors["bcp1.xeng-clip-cnt"].value == n_vis
 
     def _patch_get_rx_item(
         self, monkeypatch: pytest.MonkeyPatch, count: int, client: aiokatcp.Client, *request
