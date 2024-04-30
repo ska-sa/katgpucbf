@@ -68,7 +68,6 @@ async def test_channels(
         beam_data = data[i]
         # Sum over polarisation and real/imag, but not channel
         power = np.sum(np.square(beam_data.astype(np.float64)), axis=(1, 2))
-        np.save(f"{beam}.npy", power)
         # Detect tones. Assume anything over 50% of max is a tone.
         max_power = np.max(power)
         tones = list(np.where(power > 0.5 * max_power)[0])
