@@ -1157,9 +1157,13 @@ class TestEngine:
             await xbengine.stop()
 
         n_vis = n_channels_per_substream * n_baselines
-        assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": "bcp1"}) == n_vis
-        assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": "bcp1"}) == n_vis
-        assert xbengine.sensors["bcp1.xeng-clip-cnt"].value == n_vis
+        for corrprod_output in corrprod_outputs:
+            assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": corrprod_output.name}) == n_vis
+            assert (
+                prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": corrprod_output.name})
+                == n_vis
+            )
+            assert xbengine.sensors[f"{corrprod_output.name}.xeng-clip-cnt"].value == n_vis
 
     def _patch_get_rx_item(
         self, monkeypatch: pytest.MonkeyPatch, count: int, client: aiokatcp.Client, *request
