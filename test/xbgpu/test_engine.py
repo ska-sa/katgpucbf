@@ -470,7 +470,7 @@ def verify_beam_sensors(
         assert prom_get("output_b_samples_total") == n_beam_heaps_sent * heap_samples
         assert saturated_low[i] <= prom_get("output_b_clipped_samples_total") <= saturated_high[i]
 
-        # Check that sensor updates match Prometheus updates
+        # Check that sensor value matches Prometheus
         assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == (
             prom_get("output_b_clipped_samples_total"),
             aiokatcp.Sensor.Status.NOMINAL,

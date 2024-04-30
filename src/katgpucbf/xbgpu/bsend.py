@@ -236,9 +236,9 @@ class Chunk:
         saturated
             Saturation count for the chunk for each stream in `output_names`.
         sensors
-            Server's katcp sensors
+            Server's katcp sensors.
         sensor_timestamp
-            Timestamp (UNIX time) to use for sensor update
+            Timestamp (UNIX time) to use for sensor update.
         future
             Future returned by the spead2 stream's `async_send_heaps`.
         """
@@ -252,7 +252,7 @@ class Chunk:
         # Multiply across the first two dimensions to get complex sample count
         sample_count = int(np.prod(data_shape[:-1])) * n_frames_sent
         for i, output_name in enumerate(output_names):
-            clipped = int(saturated[i])  # Convert from numpy type to plain Python type
+            clipped = int(saturated[i])
             sensor = sensors[f"{output_name}.beng-clip-cnt"]
             sensor.set_value(sensor.value + clipped, timestamp=sensor_timestamp)
             if enabled[i] and n_frames_sent != 0:
