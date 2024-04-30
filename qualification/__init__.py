@@ -49,7 +49,7 @@ from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
 from katgpucbf import COMPLEX, DIG_SAMPLE_BITS
-from katgpucbf.spead import DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
+from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
 from .reporter import Reporter
@@ -296,9 +296,9 @@ class XBReceiver:
                 logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
             elif not np.all(chunk.present):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)
-            elif chunk.data.dtype == np.dtype(np.int32) and np.any(chunk.data == -(2**31)):
-                # TODO: need a way to determine missing antennas in
-                # tied-array-channelised-voltage data.
+            elif (chunk.data.dtype == np.dtype(np.int32) and np.any(chunk.data == -(2**31))) or (
+                chunk.extra is not None and np.min(chunk.extra) < self.n_ants
+            ):
                 logger.debug("Chunk with missing antenna(s) (%d)", chunk.chunk_id)
             else:
                 yield timestamp, chunk
@@ -435,6 +435,7 @@ def _create_receive_stream_group(
     use_ibv: bool,
     stream_config: spead2.recv.StreamConfig,
     max_chunks: int,
+    max_heap_extra: int,
     chunk_place: Callable,  # Actual type comes from ctypes.CFUNCTYPE, but it doesn't have a static name
     chunk_factory: Callable[[spead2.recv.ChunkRingPair], katgpucbf.recv.Chunk],
 ) -> spead2.recv.ChunkStreamRingGroup:
@@ -456,11 +457,13 @@ def _create_receive_stream_group(
         Maximum number of chunks to have under construction at once. Some
         additional chunks are allocated to account for those in the data ringbuffer
         or being processed.
+    max_heap_extra
+        Maximum bytes to be written to the extra field per heap.
     chunk_place
         Chunk placement callback (compatible with
         :class:`scipy.LowLevelCallable`). It will receive the `frequency`,
-        `timestamp` and heap length items. It must also accept a user data
-        pointer, which will point to the stream index (indexing into
+        `timestamp`, `beam_ants` and heap length items. It must also accept a
+        user data pointer, which will point to the stream index (indexing into
         `multicast_endpoints`) as an int64.
     chunk_factory
         Factory function to initialise the chunks.
@@ -478,12 +481,13 @@ def _create_receive_stream_group(
         chunk.recycle()
 
     # Needed for placing the individual heaps within the chunk.
-    items = [FREQUENCY_ID, TIMESTAMP_ID, spead2.HEAP_LENGTH_ID]
+    items = [FREQUENCY_ID, TIMESTAMP_ID, BEAM_ANTS_ID, spead2.HEAP_LENGTH_ID]
     for i, endpoints in enumerate(multicast_endpoints):
         user_data = np.array([i], np.int64)
         chunk_stream_config = spead2.recv.ChunkStreamConfig(
             items=items,
             max_chunks=max_chunks,
+            max_heap_extra=max_heap_extra,
             place=scipy.LowLevelCallable(
                 chunk_place,
                 signature="void (void *, size_t, void *)",
@@ -529,10 +533,10 @@ def create_baseline_correlation_product_receive_stream(
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t, types.CPointer(types.int64)), nopython=True)
     def chunk_place(data_ptr, data_size, user_data_ptr):
         data = numba.carray(data_ptr, 1)
-        items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
+        items = numba.carray(intp_to_voidptr(data[0].items), 4, dtype=np.int64)
         channel_offset = items[0]
         timestamp = items[1]
-        payload_size = items[2]
+        payload_size = items[3]
         # If the payload size doesn't match, discard the heap (could be descriptors etc).
         if payload_size == HEAP_PAYLOAD_SIZE:
             data[0].chunk_id = timestamp // timestamp_step
@@ -552,6 +556,7 @@ def create_baseline_correlation_product_receive_stream(
         use_ibv,
         stream_config,
         max_chunks,
+        0,
         chunk_place.ctypes,
         lambda stream: katgpucbf.recv.Chunk(
             present=np.empty(HEAPS_PER_CHUNK, np.uint8),
@@ -576,21 +581,27 @@ def create_tied_array_channelised_voltage_receive_stream(
     n_beams = len(multicast_endpoints)
     expected_payload_size = n_chans_per_substream * n_spectra_per_heap * COMPLEX * n_bits_per_sample // 8
     timestamp_step = n_spectra_per_heap * n_samples_between_spectra
+    beam_ants_dtype = np.dtype(np.uint16)
+    beam_ants_itemsize = beam_ants_dtype.itemsize
 
     @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t, types.CPointer(types.int64)), nopython=True)
     def chunk_place(data_ptr, data_size, user_data_ptr):
         data = numba.carray(data_ptr, 1)
         user_data = numba.carray(user_data_ptr, 1)  # Contains the beam index
-        items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)
+        items = numba.carray(intp_to_voidptr(data[0].items), 4, dtype=np.int64)
+        extra = numba.carray(intp_to_voidptr(data[0].extra), 1, dtype=beam_ants_dtype)
         channel_offset = items[0]
         timestamp = items[1]
-        payload_size = items[2]
+        payload_size = items[3]
         beam = user_data[0]
         # If the payload size doesn't match, discard the heap (could be descriptors etc).
         if payload_size == expected_payload_size and timestamp >= 0:
             data[0].chunk_id = timestamp // timestamp_step
             data[0].heap_index = channel_offset // n_chans_per_substream + beam * n_substreams
             data[0].heap_offset = data[0].heap_index * payload_size
+            extra[0] = items[2]  # beam_ants
+            data[0].extra_size = beam_ants_itemsize
+            data[0].extra_offset = data[0].heap_index * beam_ants_itemsize
 
     stream_config = spead2.recv.StreamConfig(substreams=n_substreams, explicit_start=True)
 
@@ -604,9 +615,11 @@ def create_tied_array_channelised_voltage_receive_stream(
         use_ibv,
         stream_config,
         max_chunks,
+        beam_ants_dtype.itemsize,
         chunk_place.ctypes,
         lambda stream: katgpucbf.recv.Chunk(
             present=np.empty((n_beams, n_substreams), np.uint8),
+            extra=np.zeros((n_beams, n_substreams), beam_ants_dtype),
             data=np.empty((n_beams, n_chans, n_spectra_per_heap, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
             sink=stream,
         ),
