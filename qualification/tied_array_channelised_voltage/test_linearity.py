@@ -27,7 +27,7 @@ from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
 from ..reporter import Reporter
 
 
-async def test_linearity(
+async def _test_linearity(
     cbf: CBFRemoteControl,
     receiver: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
@@ -95,7 +95,7 @@ async def test_weight_linearity(
     """
     receiver = receive_tied_array_channelised_voltage
     n_sources = len(receiver.source_indices[0])
-    await test_linearity(
+    await _test_linearity(
         cbf,
         receiver,
         pdf_report,
@@ -126,7 +126,7 @@ async def test_gain_linearity(
     """
     receiver = receive_tied_array_channelised_voltage
     n_sources = len(receiver.source_indices[0])
-    await test_linearity(
+    await _test_linearity(
         cbf,
         receiver,
         pdf_report,
