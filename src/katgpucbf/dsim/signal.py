@@ -255,8 +255,7 @@ class CW(Signal):
         return f"cw({self.amplitude}, {self.frequency})"
 
 
-# mypy override is due to https://github.com/python/mypy/issues/5374
-@dataclass  # type: ignore
+@dataclass
 class Random(Signal):
     """Base class for randomly-generated signals.
 
