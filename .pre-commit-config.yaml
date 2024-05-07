@@ -52,7 +52,7 @@ repos:
         types_or: [python, pyi]
         additional_dependencies: [
             'aioconsole==0.7.0',
-            'aiokatcp==1.9.0',
+            'aiokatcp==1.10.0',
             'aiomonitor==0.7.0',
             'asyncssh==2.14.2',
             'dask==2023.12.0',
