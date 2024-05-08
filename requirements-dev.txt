@@ -163,7 +163,7 @@ katsdptelstate==0.13
     #   katgpucbf (setup.cfg)
 latexcodec==2.0.1
     # via pybtex
-llvmlite==0.41.1
+llvmlite==0.42.0
     # via
     #   -c requirements.txt
     #   numba
@@ -198,7 +198,7 @@ netifaces==0.11.0
     #   katsdpservices
 nodeenv==1.8.0
     # via pre-commit
-numba==0.58.1
+numba==0.59.1
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
