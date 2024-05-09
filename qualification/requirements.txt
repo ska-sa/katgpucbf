@@ -165,7 +165,7 @@ katsdptelstate==0.13
     #   katgpucbf (setup.cfg)
 kiwisolver==1.4.5
     # via matplotlib
-llvmlite==0.41.1
+llvmlite==0.42.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -206,7 +206,7 @@ netifaces==0.11.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katsdpservices
-numba==0.58.1
+numba==0.59.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
