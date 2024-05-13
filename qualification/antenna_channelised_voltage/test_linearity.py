@@ -50,7 +50,7 @@ async def test_linearity(
     )
 
     pdf_report.step("Set EQ gain.")
-    gain = receiver.compute_tone_gain(amplitude=max(cw_scales), target_voltage=110)
+    gain = receiver.compute_tone_gain(amplitude=max(cw_scales), target_voltage=100)
 
     pdf_report.detail(f"Setting gain to: {gain}")
     await cbf.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
