@@ -47,12 +47,12 @@ async def test_channels(
     pdf_report.detail(f"Using channels {channels}")
 
     pdf_report.step("Configure dsim")
-    signal = " + ".join(f"cw(0.05, {c / receiver.n_chans * receiver.bandwidth})" for c in channels)
+    amplitude = 0.05
+    signal = " + ".join(f"cw({amplitude}, {c / receiver.n_chans * receiver.bandwidth})" for c in channels)
     await cbf.dsim_clients[0].request("signals", f"common = {signal}; common; common;")
 
     pdf_report.step("Set F-engine gain")
-    # The sqrt factor is to normalise coherent gain (see compute_tone_gain).
-    gain = 1.0 / np.sqrt(receiver.n_chans * receiver.decimation_factor)
+    gain = receiver.compute_tone_gain(amplitude, 100)
     await client.request("gain-all", "antenna-channelised-voltage", gain)
     pdf_report.detail(f"Set gain to {gain} for all inputs")
 

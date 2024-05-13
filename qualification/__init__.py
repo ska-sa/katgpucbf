@@ -372,6 +372,30 @@ class XBReceiver:
                     return chunks
         raise RuntimeError(f"stream was shut down before we received {n} complete chunk(s)")
 
+    def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:
+        """Compute F-Engine gain.
+
+        Compute gain to be applied to the F-Engine to maximise output dynamic range
+        when the input is a tone (for example, for use with
+        :func:`.sample_tone_response`). The F-Engine output is 8-bit signed
+        (max 127).
+
+        Parameters
+        ----------
+        amplitude
+            Amplitude of the tones, on a scale of 0 to 1.
+        target_voltage
+            Desired magnitude of F-engine output values. The calculation uses
+            an approximation, so the actual value may be slightly higher than
+            the target. The target may also be reduced if necessary to avoid
+            saturating the X-engine output.
+        """
+        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        # The PFB is scaled for fixed incoherent gain, but we need to be concerned
+        # about coherent gain to avoid overflowing the F-engine output. Coherent gain
+        # scales approximately with sqrt(bw / chan_bw / 2).
+        return target_voltage / (amplitude * dig_max * np.sqrt(self.n_chans * self.decimation_factor / 2))
+
 
 class BaselineCorrelationProductsReceiver(XBReceiver):
     """Wrap a baseline-correlation-products stream with helper functions."""
@@ -399,6 +423,12 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
+
+    def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:  # noqa: D102
+        # We need to avoid saturating the signed 32-bit X-engine accumulation as
+        # well (2e9 is comfortably less than 2^31).
+        target_voltage = min(target_voltage, np.sqrt(2e9 / self.n_spectra_per_acc))
+        return super().compute_tone_gain(amplitude, target_voltage)
 
     if TYPE_CHECKING:
         # Just refine the return type, without any run-time implementation
