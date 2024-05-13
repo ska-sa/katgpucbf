@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -41,6 +41,7 @@ is given a dictionary mapping names to values, and returns true if that
 combination is a candidate.
 """
 
+import gc
 import itertools
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
@@ -175,3 +176,17 @@ def time_converter() -> TimeConverter:
     closely related to make tests easily readable.
     """
     return TimeConverter(1.0, 1000.0)
+
+
+@pytest.fixture(autouse=True)
+def force_gc():
+    """Force garbage collection before each test.
+
+    This is needed because cyclic garbage can keep significant GPU resources
+    tied up, and the memory allocator isn't aware of it and so doesn't try
+    to free any of it when GPU allocations fail.
+    """
+    # Multiple passes because sometimes freeing some garbage allows more
+    # garbage to be detected.
+    for _ in range(3):
+        gc.collect()
