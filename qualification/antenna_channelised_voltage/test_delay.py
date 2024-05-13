@@ -618,7 +618,7 @@ async def test_group_delay(
 
     pdf_report.step("Set F-engine gains.")
     amplitude = 0.8
-    gain = receiver.compute_tone_gain(amplitude, 110)
+    gain = receiver.compute_tone_gain(amplitude, 100)
     await client.request("gain-all", "antenna-channelised-voltage", gain)
     pdf_report.detail(f"Set gain on all channels to {gain}.")
 
@@ -657,10 +657,10 @@ async def test_group_delay(
         pdf_report.detail(f"dsim signal set to {signal}.")
 
         # First axis corresponds to the 2 signals we're comparing.
-        raw_data = np.ones((2, n_spectra, COMPLEX), np.int8)
+        raw_data = np.zeros((2, n_spectra, COMPLEX), np.int8)
         max_attempts = 5
         for attempt in range(max_attempts):
-            pdf_report.detail(f"Attempt {attempt + 1}/{max_attempts}.")
+            pdf_report.detail(f"Attempt {attempt + 1}/{max_attempts} to receive contiguous data.")
             i = 0
             async for timestamp, chunk in receiver.complete_chunks():
                 if i == 0:
@@ -705,7 +705,7 @@ async def test_group_delay(
     pdf_report.step("Compare two tones that differ as little as possible.")
     delay1, period1, std1 = await measure_once((cfreq, cfreq + dsim_resolution))
 
-    pdf_report.step("Compare two tones that differ by 2/3 channels.")
+    pdf_report.step("Compare two tones that differ by 2/3 of a channel.")
     channel_width = receiver.bandwidth / receiver.n_chans
     steps = round(channel_width / 3 / dsim_resolution)
     delay2, period2, std2 = await measure_once((cfreq - steps * dsim_resolution, cfreq + steps * dsim_resolution))
