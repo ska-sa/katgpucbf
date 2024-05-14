@@ -47,9 +47,14 @@ from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
 from typing import Any
 
+import katsdpsigproc.cuda
+import pycuda.driver
 import pytest
 import spead2
+import vkgdr
+from katsdpsigproc.abc import AbstractDevice
 
+from katgpucbf.mapped_array import make_vkgdr
 from katgpucbf.utils import TimeConverter
 
 pytest_plugins = ["katsdpsigproc.pytest_plugin"]
@@ -190,3 +195,34 @@ def force_gc():
     # garbage to be detected.
     for _ in range(3):
         gc.collect()
+
+
+@pytest.fixture(scope="session")
+def _vkgdr_handles() -> dict[pycuda.driver.Device, vkgdr.Vkgdr]:
+    """Cache of Vkgdr instances, keyed by device.
+
+    A session-scoped cache is needed because repeatedly creating and
+    freeing handles can lead to failures on some setups (libnvidia-tls is
+    unable to allocate space in the static TLS block, presumably due to
+    fragmentation). It's not possible to directly declare
+    :func:`vkgdr_handle` as session-scoped because the `device` fixture
+    is function-scoped (and it can't easily be made session-scoped because
+    it's affected by function-level marks).
+    """
+    return {}
+
+
+@pytest.fixture
+def vkgdr_handle(_vkgdr_handles: dict[pycuda.driver.Device, vkgdr.Vkgdr], device: AbstractDevice) -> vkgdr.Vkgdr:
+    """Allocate a vkgdr handle for allocating mapped arrays on `device`."""
+    assert isinstance(device, katsdpsigproc.cuda.Device)
+    # Note: we need to use pycuda_device as the hash key because
+    # currently katsdpsigproc's Device classes don't implement
+    # __eq__ / __ne__ / __hash__ and so are compared by identity, and
+    # we may be getting a fresh wrapper each time.
+    pycuda_device = device._pycuda_device
+    handle = _vkgdr_handles.get(pycuda_device)
+    if handle is None:
+        handle = make_vkgdr(device)
+        _vkgdr_handles[pycuda_device] = handle
+    return handle

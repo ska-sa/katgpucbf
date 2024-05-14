@@ -1046,6 +1046,8 @@ class XBEngine(DeviceServer):
         reporting for :class:`~asyncio.Queue` sizes and events.
     context
         Device context for katsdpsigproc. It must be a CUDA device.
+    vkgdr_handle
+        Handle to vkgdr for the same device as `context`.
     """
 
     VERSION = "katgpucbf-xbgpu-icd-0.1"
@@ -1085,6 +1087,7 @@ class XBEngine(DeviceServer):
         tx_enabled: bool,
         monitor: Monitor,
         context: AbstractContext,
+        vkgdr_handle: vkgdr.Vkgdr,
     ):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
@@ -1171,12 +1174,6 @@ class XBEngine(DeviceServer):
         # time. This keeps the pipelines synchronised to avoid running out of
         # RxQueueItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
-
-        with context:
-            # We could quite easily make do with non-coherent mappings and
-            # explicit flushing, but since NVIDIA currently only provides
-            # host-coherent memory, this is a simpler option.
-            vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
 
         self._pipelines: list[Pipeline] = []
         x_outputs = [output for output in outputs if isinstance(output, XOutput)]

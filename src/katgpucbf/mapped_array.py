@@ -18,10 +18,28 @@
 
 from dataclasses import dataclass
 
+import katsdpsigproc.cuda
 import numpy as np
 import vkgdr
 from katsdpsigproc import accel
-from katsdpsigproc.abc import AbstractContext
+from katsdpsigproc.abc import AbstractContext, AbstractDevice
+
+
+def make_vkgdr(device: AbstractDevice) -> vkgdr.Vkgdr:
+    """Create a :class:`vkgdr.Vkgdr` for a given device.
+
+    The device must be a CUDA device. The returned handle uses coherent
+    mappings, which are suitable for use with :class:`MappedArray`.
+    """
+    if not isinstance(device, katsdpsigproc.cuda.Device):
+        raise TypeError("device is not a CUDA device")
+    # This is hacky: pycuda.driver.Device doesn't have an API to get the
+    # underlying CUdevice, but its __hash__ implementation returns it.
+    raw_device = hash(device._pycuda_device)
+    # We could quite easily make do with non-coherent mappings and
+    # explicit flushing, but since NVIDIA currently only provides
+    # host-coherent memory, this is a simpler option.
+    return vkgdr.Vkgdr(raw_device, vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
 
 
 @dataclass
