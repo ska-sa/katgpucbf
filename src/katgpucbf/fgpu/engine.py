@@ -1052,7 +1052,9 @@ class Engine(aiokatcp.DeviceServer):
     katcp_port
         Network port on which to listen for KATCP C&M connections.
     context
-        The accelerator (OpenCL or CUDA) context to use for running the Engine.
+        The accelerator (CUDA) context to use for running the Engine.
+    vkgdr_handle
+        Handle to vkgdr for the same device as `context`.
     srcs
         A list of source endpoints for the incoming data, or a pcap filename.
     src_interface
@@ -1136,6 +1138,7 @@ class Engine(aiokatcp.DeviceServer):
         katcp_host: str,
         katcp_port: int,
         context: AbstractContext,
+        vkgdr_handle: vkgdr.Vkgdr,
         srcs: str | list[tuple[str, int]],
         src_interface: list[str] | None,
         src_ibv: bool,
@@ -1197,6 +1200,7 @@ class Engine(aiokatcp.DeviceServer):
         self.use_vkgdr = use_vkgdr
         self.use_peerdirect = use_peerdirect
         self.dst_sample_bits = dst_sample_bits
+        self.vkgdr_handle = vkgdr_handle
 
         # Tuning knobs not exposed via arguments
         self.n_in = 3
@@ -1209,12 +1213,6 @@ class Engine(aiokatcp.DeviceServer):
         if extra_samples > self.src_layout.chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         self.n_samples = self.src_layout.chunk_samples + extra_samples
-
-        with context:
-            # We could quite easily make do with non-coherent mappings and
-            # explicit flushing, but since NVIDIA currently only provides
-            # host-coherent memory, this is a simpler option.
-            self.vkgdr_handle = vkgdr.Vkgdr.open_current_context(vkgdr.OpenFlags.REQUIRE_COHERENT_BIT)
 
         self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)

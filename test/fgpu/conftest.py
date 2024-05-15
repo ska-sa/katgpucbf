@@ -22,6 +22,7 @@ import aiokatcp
 import async_timeout
 import pytest
 import spead2
+import vkgdr
 from katsdpsigproc.abc import AbstractContext
 
 import katgpucbf.fgpu.engine
@@ -70,18 +71,6 @@ def mock_recv_stream(mocker) -> spead2.InprocQueue:
     return queue
 
 
-def check_vkgdr(context: AbstractContext) -> None:
-    """Check whether vkgdr works on `context`, and skip the test if not."""
-    vkgdr = pytest.importorskip("vkgdr")
-    pytest.importorskip("vkgdr.pycuda")
-    try:
-        with context:
-            handle = vkgdr.Vkgdr.open_current_context()
-            vkgdr.pycuda.Memory(handle, 16 * 1024 * 1024)
-    except Exception as exc:
-        pytest.skip(f"vkgdr not functional on this GPU: {exc}")
-
-
 @pytest.fixture
 async def engine_server(
     request,
@@ -90,6 +79,7 @@ async def engine_server(
     mock_send_stream,
     recv_max_chunks_one,
     context: AbstractContext,
+    vkgdr_handle: vkgdr.Vkgdr,
 ) -> AsyncGenerator[Engine, None]:
     """Create a dummy :class:`.fgpu.Engine` for unit testing.
 
@@ -102,7 +92,6 @@ async def engine_server(
     """
     arglist = list(engine_arglist)  # Copy, to ensure we don't alter original
     if request.node.get_closest_marker("use_vkgdr"):
-        check_vkgdr(context)
         arglist.append("--use-vkgdr")
     # iter_markers works closest-to-furthest, but we want the opposite so
     # that more specific markers append options to the end, overriding those
@@ -111,7 +100,7 @@ async def engine_server(
         arglist.extend(marker.args)
 
     args = parse_args(arglist)
-    server, _monitor = make_engine(context, args)
+    server, _monitor = make_engine(context, vkgdr_handle, args)
 
     await server.start()
     yield server

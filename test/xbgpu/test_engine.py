@@ -28,6 +28,7 @@ import spead2
 import spead2.recv.asyncio
 import spead2.send
 import spead2.send.asyncio
+import vkgdr
 from katsdpsigproc.abc import AbstractContext
 from numba import njit
 
@@ -833,11 +834,12 @@ class TestEngine:
     async def xbengine(
         self,
         context: AbstractContext,
+        vkgdr_handle: vkgdr.Vkgdr,
         engine_arglist: list[str],
     ) -> AsyncGenerator[XBEngine, None]:
         """Create and start an engine based on the fixture values."""
         args = parse_args(engine_arglist)
-        xbengine, _ = make_engine(context, args)
+        xbengine, _ = make_engine(context, vkgdr_handle, args)
         await xbengine.start()
 
         yield xbengine

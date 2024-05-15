@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -41,14 +41,20 @@ is given a dictionary mapping names to values, and returns true if that
 combination is a candidate.
 """
 
+import gc
 import itertools
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
 from typing import Any
 
+import katsdpsigproc.cuda
+import pycuda.driver
 import pytest
 import spead2
+import vkgdr
+from katsdpsigproc.abc import AbstractDevice
 
+from katgpucbf.mapped_array import make_vkgdr
 from katgpucbf.utils import TimeConverter
 
 pytest_plugins = ["katsdpsigproc.pytest_plugin"]
@@ -175,3 +181,48 @@ def time_converter() -> TimeConverter:
     closely related to make tests easily readable.
     """
     return TimeConverter(1.0, 1000.0)
+
+
+@pytest.fixture(autouse=True)
+def force_gc():
+    """Force garbage collection before each test.
+
+    This is needed because cyclic garbage can keep significant GPU resources
+    tied up, and the memory allocator isn't aware of it and so doesn't try
+    to free any of it when GPU allocations fail.
+    """
+    # Multiple passes because sometimes freeing some garbage allows more
+    # garbage to be detected.
+    for _ in range(3):
+        gc.collect()
+
+
+@pytest.fixture(scope="session")
+def _vkgdr_handles() -> dict[pycuda.driver.Device, vkgdr.Vkgdr]:
+    """Cache of Vkgdr instances, keyed by device.
+
+    A session-scoped cache is needed because repeatedly creating and
+    freeing handles can lead to failures on some setups (libnvidia-tls is
+    unable to allocate space in the static TLS block, presumably due to
+    fragmentation). It's not possible to directly declare
+    :func:`vkgdr_handle` as session-scoped because the `device` fixture
+    is function-scoped (and it can't easily be made session-scoped because
+    it's affected by function-level marks).
+    """
+    return {}
+
+
+@pytest.fixture
+def vkgdr_handle(_vkgdr_handles: dict[pycuda.driver.Device, vkgdr.Vkgdr], device: AbstractDevice) -> vkgdr.Vkgdr:
+    """Allocate a vkgdr handle for allocating mapped arrays on `device`."""
+    assert isinstance(device, katsdpsigproc.cuda.Device)
+    # Note: we need to use pycuda_device as the hash key because
+    # currently katsdpsigproc's Device classes don't implement
+    # __eq__ / __ne__ / __hash__ and so are compared by identity, and
+    # we may be getting a fresh wrapper each time.
+    pycuda_device = device._pycuda_device
+    handle = _vkgdr_handles.get(pycuda_device)
+    if handle is None:
+        handle = make_vkgdr(device)
+        _vkgdr_handles[pycuda_device] = handle
+    return handle

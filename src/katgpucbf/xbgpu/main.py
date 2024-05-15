@@ -39,6 +39,7 @@ from typing import TypedDict, TypeVar
 
 import katsdpsigproc.accel
 import prometheus_async
+import vkgdr
 from katsdpservices import get_interface_address, setup_logging
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
@@ -54,6 +55,7 @@ from .. import (
     DEFAULT_TTL,
     __version__,
 )
+from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
 from ..utils import add_gc_stats, add_signal_handlers, parse_source
@@ -378,13 +380,17 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBEngine, Monitor]:
+def make_engine(
+    context: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.Namespace
+) -> tuple[XBEngine, Monitor]:
     """Make an :class:`XBEngine` object, given a GPU context.
 
     Parameters
     ----------
     context
         The GPU context in which the :class:`.XBEngine` will operate.
+    vkgdr_handle
+        Handle to vkgdr for the same device as `context`.
     args
         Parsed arguments returned from :func:`parse_args`.
     """
@@ -427,6 +433,7 @@ def make_engine(context: AbstractContext, args: argparse.Namespace) -> tuple[XBE
         tx_enabled=args.tx_enabled,
         monitor=monitor,
         context=context,
+        vkgdr_handle=vkgdr_handle,
     )
     return xbengine, monitor
 
@@ -443,7 +450,8 @@ async def async_main(args: argparse.Namespace) -> None:
         Parsed arguments returned from :func:`parse_args`.
     """
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
-    xbengine, monitor = make_engine(context, args)
+    vkgdr_handle = make_vkgdr(context.device)
+    xbengine, monitor = make_engine(context, vkgdr_handle, args)
 
     prometheus_server: prometheus_async.aio.web.MetricsHTTPServer | None = None
     if args.prometheus_port is not None:
