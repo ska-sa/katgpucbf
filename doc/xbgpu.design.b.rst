@@ -63,7 +63,7 @@ antennas. The beam batch loop becomes an outer loop, with the rest of the
 kernel operating as before but only on a single batch.
 
 This does mean that the inputs are loaded multiple times, but caches help
-significantly here, and the kernel tends to be be more compute-bound in this
+significantly here, and the kernel tends to be more compute-bound in this
 domain.
 
 Dithering
@@ -86,3 +86,35 @@ scaling to convert to a real value in :math:`(-0.5, 0.5)`. While this is
 still a deviation from uniformity, it does give a symmetric distribution.
 
 .. _curand: https://docs.nvidia.com/cuda/curand/index.html
+
+Data flow
+---------
+The host side of the beamforming is simpler than for correlation, because
+there is no accumulation. For simplicity, the output chunk size (in time) is
+set to the same as the input chunk size.
+
+Because the kernel operates on all beams together, there is only one instead
+of the :class:`.BPipeline` class, and it handles all the beams. This is in
+contrast to :class:`.XPipeline`, which only handles a single :class:`Output`.
+
+Unlike the correlation pipeline, the beamformer pipeline can be controlled
+dynamically by setting weights and gains. Transferring these to the GPU is
+somewhat expensive and should not be done for every chunk. Instead, there is
+an associated version number. When the weights/gains are updated, the master
+version number is incremented. Before processing a chunk on the GPU, this
+version number is compared to a version number associated with the GPU copy,
+and if they differ then an update is performed.
+
+Missing data handling
+^^^^^^^^^^^^^^^^^^^^^
+When some input data is not received, we wish to exclude it from the beam
+sums. At present this is handled by zeroing out missing data when it is
+received in :meth:`.XBEngine._receiver_loop`. This is potentially expensive if
+a lot of data goes missing. Should it prove too expensive, we could zero the
+data on the GPU, or pass metadata to the kernel to indicate which values
+should not be used.
+
+The presence of heaps is also tracked, to allow the ``beam_ants`` SPEAD item
+to be populated on transmission. This item is a compromise: ideally we'd like
+to indicate exactly which antennas were present, but this would require more
+than the 48 bits available in a SPEAD immediate item.
