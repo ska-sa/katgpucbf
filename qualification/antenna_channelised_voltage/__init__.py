@@ -25,7 +25,7 @@ import asyncio
 import numpy as np
 from numpy.typing import ArrayLike
 
-from katgpucbf import DIG_SAMPLE_BITS, N_POLS
+from katgpucbf import N_POLS
 
 from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import Reporter
@@ -69,7 +69,7 @@ async def sample_tone_response_hdr(
         HDR data per spectrum.
     """
     # Determine the ideal F-engine output level at the peak. Maximum target_voltage is 127, but some headroom is good.
-    gain = compute_tone_gain(receiver=receiver, amplitude=amplitude, target_voltage=110)
+    gain = receiver.compute_tone_gain(amplitude=amplitude, target_voltage=110)
 
     rel_freqs = np.asarray(rel_freqs)
 
@@ -93,39 +93,6 @@ async def sample_tone_response_hdr(
             hdr_data = np.where(hdr_data >= peak_data / power_scale, hdr_data, data / power_scale)
         gain *= gain_step
     return hdr_data
-
-
-def compute_tone_gain(
-    receiver: BaselineCorrelationProductsReceiver,
-    amplitude: float,
-    target_voltage: int,
-) -> float:
-    """Compute F-Engine gain.
-
-    Compute gain to be applied to the F-Engine to maximise output dynamic range
-    when the input is a tone (for example, for use with :func:``sample_tone_response``).
-    The F-Engine output is 8-bit signed (max 127).
-
-    Parameters
-    ----------
-    cbf
-        Connection to the CBF.
-    amplitude
-        Amplitude of the tones, on a scale of 0 to 1.
-    target_voltage
-        Desired magnitude of F-engine output values. The calculation uses
-        an approximation, so the actual value may be slightly higher than
-        the target. The target may also be reduced if necessary to avoid
-        saturating the X-engine output.
-    """
-    # We need to avoid saturating the signed 32-bit X-engine accumulation as
-    # well (2e9 is comfortably less than 2^31).
-    # The PFB is scaled for fixed incoherent gain, but we need to be concerned
-    # about coherent gain to avoid overflowing the F-engine output. Coherent gain
-    # scales approximately with sqrt(bw / chan_bw / 2).
-    target_voltage = min(target_voltage, np.sqrt(2e9 / receiver.n_spectra_per_acc))
-    dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-    return target_voltage / (amplitude * dig_max * np.sqrt(receiver.n_chans * receiver.decimation_factor / 2))
 
 
 async def sample_tone_response(

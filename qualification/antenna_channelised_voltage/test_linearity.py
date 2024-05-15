@@ -20,7 +20,7 @@ from matplotlib.figure import Figure
 
 from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
 from ..reporter import Reporter
-from . import compute_tone_gain, sample_tone_response
+from . import sample_tone_response
 
 
 async def test_linearity(
@@ -50,7 +50,7 @@ async def test_linearity(
     )
 
     pdf_report.step("Set EQ gain.")
-    gain = compute_tone_gain(receiver=receiver, amplitude=max(cw_scales), target_voltage=110)
+    gain = receiver.compute_tone_gain(amplitude=max(cw_scales), target_voltage=100)
 
     pdf_report.detail(f"Setting gain to: {gain}")
     await cbf.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)

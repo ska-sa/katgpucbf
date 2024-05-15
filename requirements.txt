@@ -10,7 +10,7 @@ aiohttp==3.9.5
     # via
     #   aiomonitor
     #   prometheus-async
-aiokatcp==1.9.0
+aiokatcp==1.10.0
     # via katgpucbf (setup.cfg)
 aiomonitor==0.7.0
     # via katsdpservices
@@ -59,15 +59,17 @@ importlib-metadata==7.0.0
     # via dask
 janus==1.0.0
     # via aiomonitor
-jinja2==3.1.3
+jinja2==3.1.4
     # via aiomonitor
+katcp-codec==0.1.0
+    # via aiokatcp
 katsdpservices==1.3
     # via katgpucbf (setup.cfg)
 katsdpsigproc==1.8.1
     # via katgpucbf (setup.cfg)
 katsdptelstate==0.13
     # via katgpucbf (setup.cfg)
-llvmlite==0.41.1
+llvmlite==0.42.0
     # via numba
 locket==1.0.0
     # via partd
@@ -87,7 +89,7 @@ multidict==6.0.4
     #   yarl
 netifaces==0.11.0
     # via katsdpservices
-numba==0.58.1
+numba==0.59.1
     # via
     #   katgpucbf (setup.cfg)
     #   katsdpsigproc

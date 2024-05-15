@@ -135,7 +135,7 @@ def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.
         edges += [x, min(x + 0.5, 0.5 * subsampling)]
         desired.append(0.0)
         weights.append(1.0)
-    coeff = scipy.signal.remez(taps, edges, desired, weights, fs=subsampling, maxiter=1000)
+    coeff = scipy.signal.remez(taps, edges, desired, weight=weights, fs=subsampling, maxiter=1000)
     coeff *= np.sqrt(subsampling)
     return coeff.astype(np.float32)
 

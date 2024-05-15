@@ -28,12 +28,11 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from pytest_check import check
 
-from katgpucbf import BYTE_BITS, N_POLS
+from katgpucbf import BYTE_BITS, COMPLEX, N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
+from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
 from ..reporter import POTLocator, Reporter
-from . import compute_tone_gain
 
 MAX_DELAY = 79.53e-6  # seconds
 MAX_DELAY_RATE = 2.56e-9
@@ -147,7 +146,7 @@ async def test_delay_enable_disable(
     channel = 3 * receiver.n_chans // 4
     freq = receiver.center_freq + receiver.bandwidth / 4
     signal = f"cw(0.1, {freq})"
-    gain = compute_tone_gain(receiver, 0.1, 100)
+    gain = receiver.compute_tone_gain(0.1, 100)
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
     elapsed: list[float] = []
 
@@ -565,3 +564,163 @@ async def test_phase_rate(
         [(0.0, phase_rate) for phase_rate in rates],
         lambda delay_rate, phase_rate: f"phase rate {phase_rate}",
     )
+
+
+@pytest.mark.wideband_only
+async def test_group_delay(
+    cbf: CBFRemoteControl,
+    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    pdf_report: Reporter,
+) -> None:
+    r"""Test the ``pfb-group-delay`` sensor.
+
+    Verification method
+    -------------------
+    Verified by means of a test.
+
+    Group delay is defined as the negative of the derivative of phase shift
+    with respect to angular frequency :math:`\omega`. To estimate the
+    derivative by finite differences, the dsim is configured with two sine
+    waves (one in each polarisation) with a small difference in frequency. The
+    difference needs to be carefully selected. If it too small, the effect is
+    dominated by quantisation effects. However, the group delay can only be
+    determined modulo the period of the beat frequency, and hence the
+    frequencies cannot be too far apart.
+
+    Rather than try to pick a single difference, we use two: firstly the
+    minimum difference supported by the dsim, to localise the delay, and
+    then a much larger difference to refine it.
+
+    Additionally, a phase rate is set in the F-engine delay model. This
+    cancels out when measuring phase differences, but ensures that there is
+    variation in the phases and thus helps prevent systematic bias in the
+    quantisation errors.
+    """
+    receiver = receive_tied_array_channelised_voltage
+    client = cbf.product_controller_client
+
+    # Collect about 10s of data, to improve SNR.
+    chunk_timestamp_step = receiver.n_spectra_per_heap * receiver.n_samples_between_spectra
+    n_chunks = round(10.0 * receiver.scale_factor_timestamp // chunk_timestamp_step)
+    n_spectra = n_chunks * receiver.n_spectra_per_heap
+    acc_time = n_chunks * chunk_timestamp_step / receiver.scale_factor_timestamp
+
+    pdf_report.step("Choose a channel.")
+    # Channel is largely arbitrary, although we should avoid the DC frequency
+    channel = receiver.n_chans // 5
+    cfreq = (channel - receiver.n_chans / 2) / receiver.n_chans * receiver.bandwidth + receiver.center_freq
+    pdf_report.detail(f"Using channel {channel}.")
+
+    pdf_report.step("Determine dsim frequency resolution.")
+    dsim_period = await cbf.dsim_clients[0].sensor_value("max-period", int)
+    dsim_resolution = receiver.adc_sample_rate / dsim_period
+    pdf_report.detail(f"Resolution is {dsim_resolution:.6f} Hz.")
+
+    pdf_report.step("Set F-engine gains.")
+    amplitude = 0.8
+    gain = receiver.compute_tone_gain(amplitude, 100)
+    await client.request("gain-all", "antenna-channelised-voltage", gain)
+    pdf_report.detail(f"Set gain on all channels to {gain}.")
+
+    pdf_report.step("Set F-engine phase rate.")
+    # Swing phase through 2pi radians over the collection time. Start away from
+    # phase 0 where quantisation effects are particularly bad.
+    delay_model = f"0,0:0.1,{2 * np.pi / acc_time}"
+    delay_models = [delay_model] * receiver.n_inputs
+    await client.request("delays", "antenna-channelised-voltage", receiver.sync_time, *delay_models)
+    pdf_report.detail(f"Set delays to {delay_model} for all inputs.")
+
+    pdf_report.step("Set beamformer weights to use only one antenna.")
+    weights = np.zeros(len(receiver.source_indices[0]))
+    weights[0] = 1.0
+    await client.request("beam-weights", receiver.stream_names[0], *weights)
+    pdf_report.detail(f"Set weights on {receiver.stream_names[0]}.")
+
+    async def measure_once(freqs: tuple[float, float]) -> tuple[float, float, float]:
+        """Estimate group delay for a single pair of frequencies.
+
+        The delay is ambiguous and could actually be any value of the form
+        :samp:`{delay} + {i} * {period}`.
+
+        Returns
+        -------
+        delay
+            Estimated delay in samples.
+        period
+            Step between possible delay values.
+        std
+            Standard deviation in the delay estimate. Note that the distribution is
+            non-Gaussian and is due to quantisation error, which is bounded.
+        """
+        signal = f"cw({amplitude}, {freqs[0]}); cw({amplitude}, {freqs[1]});"
+        await cbf.dsim_clients[0].request("signals", signal, dsim_period)
+        pdf_report.detail(f"dsim signal set to {signal}.")
+
+        # First axis corresponds to the 2 signals we're comparing.
+        raw_data = np.zeros((2, n_spectra, COMPLEX), np.int8)
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            pdf_report.detail(f"Attempt {attempt + 1}/{max_attempts} to receive contiguous data.")
+            i = 0
+            async for timestamp, chunk in receiver.complete_chunks():
+                if i == 0:
+                    first_timestamp = timestamp
+                if timestamp != first_timestamp + i * chunk_timestamp_step:
+                    break
+                start_spectrum = i * receiver.n_spectra_per_heap
+                end_spectrum = (i + 1) * receiver.n_spectra_per_heap
+                raw_data[:, start_spectrum:end_spectrum] = chunk.data[:2, channel]
+                chunk.recycle()
+                i += 1
+                if i == n_chunks:
+                    break
+            if i == n_chunks:
+                pdf_report.detail("Received all chunks.")
+                break
+            pdf_report.detail(f"Only received {i}/{n_chunks} chunks.")
+        else:
+            pytest.fail(f"Did not receive {n_chunks} contiguous chunks after {max_attempts} attempts.")
+
+        # Convert Gaussian integers to complex128
+        data = raw_data.astype(np.float64).view(np.complex128)[..., 0]
+        # Pick a reference timestamp at which we know the dsim will be outputting
+        # both signals with phase 0.
+        ref_timestamp = first_timestamp // dsim_period * dsim_period
+        # Phase-rotate everything to be referenced to ref_timestamp
+        rel_timestamps = np.arange(n_spectra) * receiver.n_samples_between_spectra + (first_timestamp - ref_timestamp)
+        rel_times = rel_timestamps / receiver.scale_factor_timestamp
+        data *= np.exp(-2j * np.pi * rel_times[np.newaxis, :] * np.array(freqs)[:, np.newaxis])
+        # The phases should all be similar, but without np.unwrap they could
+        # make jumps of 2*pi, which would mess up taking the mean.
+        phase = np.unwrap(np.angle(data[1]) - np.angle(data[0]))
+        mean_phase = wrap_angle(np.mean(phase))
+        std_phase = np.std(phase) / np.sqrt(len(phase) - 1)
+        scale = receiver.scale_factor_timestamp / (2 * np.pi * (freqs[1] - freqs[0]))
+        delay = -mean_phase * scale
+        period = 2 * np.pi * scale
+        std = std_phase * scale
+        pdf_report.detail(f"Delay is {delay} + k*{period} ± {std} samples.")
+        return delay, period, std
+
+    pdf_report.step("Compare two tones that differ as little as possible.")
+    delay1, period1, std1 = await measure_once((cfreq, cfreq + dsim_resolution))
+
+    pdf_report.step("Compare two tones that differ by 2/3 of a channel.")
+    channel_width = receiver.bandwidth / receiver.n_chans
+    steps = round(channel_width / 3 / dsim_resolution)
+    delay2, period2, std2 = await measure_once((cfreq - steps * dsim_resolution, cfreq + steps * dsim_resolution))
+
+    pdf_report.step("Analyse results.")
+    assert 5 * std1 < period2  # Ensure the first test localised things sufficiently
+    # Solve (approximately) delay1 = delay2 + k * period2
+    k = round((delay1 - delay2) / period2)
+    delay = delay2 + k * period2
+    # Could do some error propagation to combine std1 and std2, but std2 will
+    # be orders of magnitude smaller so it is not worth worrying about.
+    std = std2
+    pdf_report.detail(f"Measured delay is {delay} ± {std} samples.")
+
+    reported_delay = await client.sensor_value("antenna-channelised-voltage.pfb-group-delay", float)
+    pdf_report.detail(f"Reported delay is {reported_delay}.")
+    assert abs(reported_delay - delay) < 5 * std
+    pdf_report.detail("Measured value agrees with reported value to within 5 sigma.")

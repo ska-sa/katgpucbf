@@ -13,7 +13,7 @@ aiohttp==3.9.5
     #   -c requirements.txt
     #   aiomonitor
     #   prometheus-async
-aiokatcp==1.9.0
+aiokatcp==1.10.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -140,11 +140,15 @@ janus==1.0.0
     #   aiomonitor
 jedi==0.19.1
     # via ipython
-jinja2==3.1.3
+jinja2==3.1.4
     # via
     #   -c requirements.txt
     #   aiomonitor
     #   sphinx
+katcp-codec==0.1.0
+    # via
+    #   -c requirements.txt
+    #   aiokatcp
 katsdpservices==1.3
     # via
     #   -c requirements.txt
@@ -159,7 +163,7 @@ katsdptelstate==0.13
     #   katgpucbf (setup.cfg)
 latexcodec==2.0.1
     # via pybtex
-llvmlite==0.41.1
+llvmlite==0.42.0
     # via
     #   -c requirements.txt
     #   numba
@@ -194,7 +198,7 @@ netifaces==0.11.0
     #   katsdpservices
 nodeenv==1.8.0
     # via pre-commit
-numba==0.58.1
+numba==0.59.1
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)

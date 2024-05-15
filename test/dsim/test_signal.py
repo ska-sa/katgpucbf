@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2023, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -28,7 +28,7 @@ import pytest
 import xarray as xr
 
 from katgpucbf.dsim import signal
-from katgpucbf.dsim.signal import CW, WGN, Constant, Delay, Nodither, Signal, TerminalError
+from katgpucbf.dsim.signal import CW, WGN, Comb, Constant, Delay, Nodither, Signal, TerminalError
 
 from .. import unpackbits
 
@@ -60,17 +60,52 @@ class TestCW:
         "amplitude, frequency, n",
         [(1.0, 200e6, 4096), (0.1, 500e6, 65535), (234.5, 123456789.1, 654321)],
     )
-    def test_sample(self, frequency: float, amplitude: float, n: int) -> None:
+    def test_sample(self, amplitude: float, frequency: float, n: int) -> None:
         """Test accuracy of basic functionality."""
         adc_sample_rate = 1e9
         cw = CW(amplitude, frequency)
         out = cw.sample(n, adc_sample_rate)
         timestamps = np.arange(0, n)
-        # Round frequency to match the rounding in CW
+        # Round frequency to match the rounding in Periodic
         waves = max(1, round(n * frequency / adc_sample_rate))
         frequency = waves * adc_sample_rate / n
         expected = np.cos(timestamps * (frequency / adc_sample_rate * 2 * np.pi)) * amplitude
         np.testing.assert_allclose(out, expected, atol=1e-6 * amplitude)
+
+
+class TestComb:
+    """Tests for :class:`katgpucbf.dsim.signal.Comb`."""
+
+    @pytest.mark.parametrize(
+        "amplitude, frequency, n",
+        [(1.0, 200e6, 5000), (0.25, 125e6, 65536)],
+    )
+    def test_exact(self, amplitude: float, frequency: float, n: int) -> None:
+        """Test correctness when frequency is an integer number of samples."""
+        adc_sample_rate = 1e9
+        comb = Comb(amplitude, frequency)
+        out = comb.sample(n, adc_sample_rate)
+        period = round(adc_sample_rate / frequency)
+        expected = np.zeros(n, np.float32)
+        expected[::period] = amplitude
+        np.testing.assert_equal(out, expected)
+
+    @pytest.mark.parametrize(
+        "amplitude, frequency, n",
+        [(0.5, 234e6, 5432), (0.25, 1e6, 65536)],
+    )
+    def test_approximate(self, amplitude: float, frequency: float, n: int) -> None:
+        """Test correctness when frequency is not an integer number of samples."""
+        adc_sample_rate = 1e9
+        comb = Comb(amplitude, frequency)
+        out = comb.sample(n, adc_sample_rate)
+        # Round frequency to match the rounding in CW
+        waves = max(1, round(n * frequency / adc_sample_rate))
+        frequency = waves * adc_sample_rate / n
+        timestamps = np.rint(np.arange(waves) / waves * n).astype(int)
+        expected = np.zeros(n, np.float32)
+        expected[timestamps] = amplitude
+        np.testing.assert_equal(out, expected)
 
 
 class TestWGN:
@@ -145,6 +180,7 @@ class TestParseSignals:
         [
             ("cw(1, 2.0);", [CW(1.0, 2.0)]),
             ("cw(1.5, 2.5); cw(3.0, 2.0);", [CW(1.5, 2.5), CW(3.0, 2.0)]),
+            ("comb(1.0, 2);", [Comb(1.0, 2.0)]),
             ("c = wgn(1.5, 12345); c; c;", [WGN(1.5, 12345), WGN(1.5, 12345)]),
             ("c = cw(1.5, +2.5e0); c + cw(1, 2);", [CW(1.5, 2.5) + CW(1, 2)]),
             ("cw(1, 2) - cw(3, 4) * cw(5, 6);", [CW(1, 2) - CW(3, 4) * CW(5, 6)]),

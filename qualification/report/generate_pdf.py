@@ -617,7 +617,7 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
         # If teardown fails, the whole test should be seen as failing
         if report.outcome != "passed" or report.when == "call":
             result.outcome = report.outcome
-            if report.outcome == "skipped" and report.wasxfail is not None:
+            if report.outcome == "skipped" and getattr(report, "wasxfail", None) is not None:
                 result.outcome = "xfail"
                 result.xfail_reason = report.wasxfail
         # The test duration will be the sum of setup, call and teardown.

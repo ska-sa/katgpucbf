@@ -120,6 +120,7 @@ def pytest_configure(config: pytest.Config) -> None:
     """
     config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
     config.addinivalue_line("markers", "name(name): human-readable name for the test")
+    config.addinivalue_line("markers", "wideband_only: do not run the test in narrowband configurations")
     for option in ini_options:
         assert config.getini(option.name) is not None, f"{option.name} missing from pytest.ini"
 
@@ -168,11 +169,12 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         # It will generate new int objects each time, causing pytest to treat
         # them as different and hence it won't reuse the fixture between tests.
         configs = [(n_channels, "1") for n_channels in metafunc.config.getini("wideband_channels")]
-        configs.extend(
-            (n_channels, decimation)
-            for decimation in metafunc.config.getini("narrowband_decimation")
-            for n_channels in metafunc.config.getini("narrowband_channels")
-        )
+        if not metafunc.definition.get_closest_marker("wideband_only"):
+            configs.extend(
+                (n_channels, decimation)
+                for decimation in metafunc.config.getini("narrowband_decimation")
+                for n_channels in metafunc.config.getini("narrowband_channels")
+            )
         metafunc.parametrize("n_channels, narrowband_decimation", configs, indirect=True)
 
 
