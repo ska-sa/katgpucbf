@@ -17,7 +17,7 @@
 """Unit tests for XBEngine module."""
 
 from collections import Counter
-from logging import WARNING, Filter, LogRecord
+from logging import WARNING
 from typing import AbstractSet, Any, AsyncGenerator, Callable, Final, Sequence
 
 import aiokatcp
@@ -496,9 +496,16 @@ def verify_beam_sensors(
         ]
 
 
-class AccumWarningFilter(Filter):
-    def filter(self, record: LogRecord) -> bool:
-        return record.message == "All Antennas had a break in data during this accumulation"
+def accum_warning_filter(record_tuple: tuple[str, int, str]) -> bool:
+    """Filter for accumulation warnings from the X-engine.
+
+    The record tuple format is (<logger-name>, <log-level>, <log-message>).
+    """
+    return record_tuple == (
+        "katgpucbf.xbgpu.engine",
+        WARNING,
+        "All Antennas had a break in data during this accumulation",
+    )
 
 
 class TestEngine:
@@ -1021,7 +1028,6 @@ class TestEngine:
                 await client.request("beam-quant-gains", output.name, quant_gains[i])
                 await client.request("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]])
 
-            # with caplog.filtering(AccumWarningFilter()):
             corrprod_results, beam_results, acc_indices = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
@@ -1039,13 +1045,13 @@ class TestEngine:
             last_timestamp = batch_end_index2 * timestamp_step
 
         # TODO: NGC-1308 Update this check to not be a subset of the warnings filtered
-        # assert caplog.record_tuples[: len(corrprod_outputs)] == [
-        #     (
-        #         "katgpucbf.xbgpu.engine",
-        #         WARNING,
-        #         "All Antennas had a break in data during this accumulation",
-        #     ),
-        # ] * len(corrprod_outputs)
+        assert list(filter(accum_warning_filter, caplog.record_tuples))[: len(corrprod_outputs)] == [
+            (
+                "katgpucbf.xbgpu.engine",
+                WARNING,
+                "All Antennas had a break in data during this accumulation",
+            ),
+        ] * len(corrprod_outputs)
 
         verify_corrprod_data(
             corrprod_outputs=corrprod_outputs,
