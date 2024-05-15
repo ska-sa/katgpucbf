@@ -48,7 +48,10 @@ async def test_channels(
 
     pdf_report.step("Configure dsim")
     amplitude = 0.05
-    signal = " + ".join(f"cw({amplitude}, {c / receiver.n_chans * receiver.bandwidth})" for c in channels)
+    freqs = [
+        (c - receiver.n_chans / 2) / receiver.n_chans * receiver.bandwidth + receiver.center_freq for c in channels
+    ]
+    signal = " + ".join(f"cw({amplitude}, {freq})" for freq in freqs)
     await cbf.dsim_clients[0].request("signals", f"common = {signal}; common; common;")
 
     pdf_report.step("Set F-engine gain")
