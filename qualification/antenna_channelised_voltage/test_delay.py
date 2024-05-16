@@ -144,7 +144,7 @@ async def test_delay_enable_disable(
 
     receiver = receive_baseline_correlation_products
     channel = 3 * receiver.n_chans // 4
-    freq = receiver.center_freq + receiver.bandwidth / 4
+    freq = receiver.channel_frequency(channel)
     signal = f"cw(0.1, {freq})"
     gain = receiver.compute_tone_gain(0.1, 100)
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
@@ -608,7 +608,7 @@ async def test_group_delay(
     pdf_report.step("Choose a channel.")
     # Channel is largely arbitrary, although we should avoid the DC frequency
     channel = receiver.n_chans // 5
-    cfreq = (channel - receiver.n_chans / 2) / receiver.n_chans * receiver.bandwidth + receiver.center_freq
+    cfreq = receiver.channel_frequency(channel)
     pdf_report.detail(f"Using channel {channel}.")
 
     pdf_report.step("Determine dsim frequency resolution.")

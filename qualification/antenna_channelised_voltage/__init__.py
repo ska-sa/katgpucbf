@@ -122,8 +122,7 @@ async def sample_tone_response(
     for i in range(0, len(receiver.input_labels), 2):
         corrs.append(receiver.bls_ordering.index((receiver.input_labels[i], receiver.input_labels[i + 1])))
 
-    channel_width = receiver.bandwidth / receiver.n_chans
-    freqs = receiver.center_freq + (np.asarray(rel_freqs) - receiver.n_chans / 2) * channel_width
+    freqs = receiver.channel_frequency(np.asarray(rel_freqs))
     amplitude = np.asarray(amplitude)
     out_shape = np.broadcast_shapes(freqs.shape, amplitude.shape) + (receiver.n_chans,)
     out = np.empty(out_shape, np.float64)
