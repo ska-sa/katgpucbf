@@ -496,18 +496,6 @@ def verify_beam_sensors(
         ]
 
 
-def accum_warning_filter(record_tuple: tuple[str, int, str]) -> bool:
-    """Filter for accumulation warnings from the X-engine.
-
-    The record tuple format is (<logger-name>, <log-level>, <log-message>).
-    """
-    return record_tuple == (
-        "katgpucbf.xbgpu.engine",
-        WARNING,
-        "All Antennas had a break in data during this accumulation",
-    )
-
-
 class TestEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
@@ -1044,14 +1032,15 @@ class TestEngine:
             )
             last_timestamp = batch_end_index2 * timestamp_step
 
-        # TODO: NGC-1308 Update this check to not be a subset of the warnings filtered
-        assert list(filter(accum_warning_filter, caplog.record_tuples))[: len(corrprod_outputs)] == [
+        # TODO: NGC-1308 Update this check to be an exact match on the number
+        # of logged messages.
+        assert caplog.record_tuples.count(
             (
                 "katgpucbf.xbgpu.engine",
                 WARNING,
                 "All Antennas had a break in data during this accumulation",
-            ),
-        ] * len(corrprod_outputs)
+            )
+        ) >= len(corrprod_outputs)
 
         verify_corrprod_data(
             corrprod_outputs=corrprod_outputs,
