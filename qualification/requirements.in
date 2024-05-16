@@ -1,2 +1,9 @@
 -c ../requirements.txt
 -c ../requirements-dev.txt
+# As per https://github.com/pytest-dev/pytest/issues/12328, the pytest 8
+# upgrade resulted in significantly more correlator configurations being
+# launched for a qualification run - i.e. correlator fixtures were not being
+# reused effectively. This, in turn, resulted in a much lengthier run time
+# (~12 hours) and, on balance, does not warrant the version upgrade. We hold
+# this version limit until the issue is resolved.
+pytest<8
