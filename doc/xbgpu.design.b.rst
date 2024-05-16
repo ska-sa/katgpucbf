@@ -89,11 +89,11 @@ still a deviation from uniformity, it does give a symmetric distribution.
 
 Data flow
 ---------
-The host side of the beamforming is simpler than for correlation, because
+The host side of the beamforming is simpler than for correlation because
 there is no accumulation. For simplicity, the output chunk size (in time) is
 set to the same as the input chunk size.
 
-Because the kernel operates on all beams together, there is only one instead
+Because the kernel operates on all beams together, there is only one instance
 of the :class:`.BPipeline` class, and it handles all the beams. This is in
 contrast to :class:`.XPipeline`, which only handles a single :class:`Output`.
 
@@ -102,8 +102,8 @@ dynamically by setting weights and gains. Transferring these to the GPU is
 somewhat expensive and should not be done for every chunk. Instead, there is
 an associated version number. When the weights/gains are updated, the master
 version number is incremented. Before processing a chunk on the GPU, this
-version number is compared to a version number associated with the GPU copy,
-and if they differ then an update is performed.
+version number is compared to a version number associated with the GPU copy.
+If they differ, an update is performed.
 
 Missing data handling
 ^^^^^^^^^^^^^^^^^^^^^
@@ -114,7 +114,7 @@ a lot of data goes missing. Should it prove too expensive, we could zero the
 data on the GPU, or pass metadata to the kernel to indicate which values
 should not be used.
 
-The presence of heaps is also tracked, to allow the ``beam_ants`` SPEAD item
+The presence of heaps is also tracked to allow the ``beam_ants`` SPEAD item
 to be populated on transmission. This item is a compromise: ideally we'd like
 to indicate exactly which antennas were present, but this would require more
 than the 48 bits available in a SPEAD immediate item.
