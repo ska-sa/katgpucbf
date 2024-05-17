@@ -144,7 +144,7 @@ async def test_delay_enable_disable(
 
     receiver = receive_baseline_correlation_products
     channel = 3 * receiver.n_chans // 4
-    freq = receiver.center_freq + receiver.bandwidth / 4
+    freq = receiver.centre_freq + receiver.bandwidth / 4
     signal = f"cw(0.1, {freq})"
     gain = receiver.compute_tone_gain(0.1, 100)
     bl_idx = receiver.bls_ordering.index((receiver.input_labels[0], receiver.input_labels[1]))
@@ -172,7 +172,7 @@ async def test_delay_enable_disable(
     # One might expect it to be pi radians, but that ignores the implicit
     # phase adjustment that ensures the centre channel has zero phase.
     with check:
-        assert phase == pytest.approx(math.pi * (freq - receiver.center_freq) / freq, abs=np.deg2rad(1))
+        assert phase == pytest.approx(math.pi * (freq - receiver.centre_freq) / freq, abs=np.deg2rad(1))
 
     pdf_report.step("Check that compensation can be disabled.")
     await set_delays(["0,0:0,0"] * (2 * receiver.n_ants))
@@ -389,7 +389,7 @@ async def _test_delay_phase_fixed(
         expected = delay_phase(receiver, residual) + phase
         # The delay in the dsim will affect the phase of the centre frequency,
         # which the delay compensation won't correct.
-        expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.center_freq
+        expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.centre_freq
         check_phases(pdf_report, actual[:, bl_idx], expected, caption)
 
 
@@ -608,7 +608,7 @@ async def test_group_delay(
     pdf_report.step("Choose a channel.")
     # Channel is largely arbitrary, although we should avoid the DC frequency
     channel = receiver.n_chans // 5
-    cfreq = (channel - receiver.n_chans / 2) / receiver.n_chans * receiver.bandwidth + receiver.center_freq
+    cfreq = (channel - receiver.n_chans / 2) / receiver.n_chans * receiver.bandwidth + receiver.centre_freq
     pdf_report.detail(f"Using channel {channel}.")
 
     pdf_report.step("Determine dsim frequency resolution.")

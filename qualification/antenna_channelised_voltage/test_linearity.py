@@ -42,11 +42,11 @@ async def test_linearity(
     cw_scales = [0.5**i for i in range(10)]
     pdf_report.detail(f"CW scales: {cw_scales}")
 
-    pdf_report.step("Select a channel and compute the channel center frequency for the D-sim.")
-    sel_chan_center = receiver.n_chans // 3
-    channel_frequency = sel_chan_center * (receiver.bandwidth / receiver.n_chans)
+    pdf_report.step("Select a channel and compute the channel centre frequency for the D-sim.")
+    sel_chan_centre = receiver.n_chans // 3
+    channel_frequency = sel_chan_centre * (receiver.bandwidth / receiver.n_chans)
     pdf_report.detail(
-        f"Channel {sel_chan_center} selected, with center frequency " + f"{channel_frequency/1e6:.2f} MHz."
+        f"Channel {sel_chan_centre} selected, with centre frequency " + f"{channel_frequency/1e6:.2f} MHz."
     )
 
     pdf_report.step("Set EQ gain.")
@@ -56,12 +56,12 @@ async def test_linearity(
     await cbf.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
 
     base_corr_prod = await sample_tone_response(
-        rel_freqs=sel_chan_center,
+        rel_freqs=sel_chan_centre,
         amplitude=cw_scales,
         receiver=receiver,
     )
 
-    linear_scale_result = base_corr_prod[:, sel_chan_center]
+    linear_scale_result = base_corr_prod[:, sel_chan_centre]
 
     # Normalise and compute the effective received voltage value (from power) for comparison to the requested value.
     linear_test_result = np.sqrt(linear_scale_result / np.max(linear_scale_result))

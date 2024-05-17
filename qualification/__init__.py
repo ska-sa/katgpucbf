@@ -233,7 +233,7 @@ class XBReceiver:
         self.sync_time = cbf.sensors[f"{acv_name}.sync-time"].value
         self.scale_factor_timestamp = cbf.sensors[f"{acv_name}.scale-factor-timestamp"].value
         self.bandwidth = cbf.sensors[f"{acv_name}.bandwidth"].value
-        self.center_freq = cbf.sensors[f"{acv_name}.center-freq"].value
+        self.centre_freq = cbf.sensors[f"{acv_name}.centre-freq"].value
         self.multicast_endpoints = [
             [
                 (endpoint.host, endpoint.port)
