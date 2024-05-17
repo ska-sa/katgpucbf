@@ -48,8 +48,7 @@ async def test_weight_mapping(
 
     rng = np.random.default_rng()
     channels = rng.integers(1, receiver.n_chans, size=2)
-    channel_width = receiver.bandwidth / receiver.n_chans
-    freqs = receiver.center_freq + (channels - receiver.n_chans / 2) * channel_width
+    freqs = receiver.channel_frequency(channels)
     amplitude = 0.5  # Will probably saturate the PFB, but we don't care
     signals = f"cw({amplitude}, {freqs[0]}); cw({amplitude}, {freqs[1]});"
 
