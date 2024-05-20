@@ -178,12 +178,7 @@ pipeline {
     always {
       emailext attachLog: true,
       attachmentsPattern: 'reports/result.xml',
-      body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
-      <b>Node:</b> ${env.NODE_NAME}<br>
-      <b>Duration:</b> ${currentBuild.durationString}<br>
-      <b>Build URL:</b> ${env.BUILD_URL}<br>
-      <br>
-      <i>Note: This is an Automated email notification.</i>""",
+      body: '${SCRIPT, template="groovy-html.template"}',
       recipientProviders: [developers(), requestor(), culprits()],
       subject: '$PROJECT_NAME - $BUILD_STATUS!',
       to: '$DEFAULT_RECIPIENTS'
