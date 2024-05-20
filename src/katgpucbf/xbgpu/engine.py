@@ -392,7 +392,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             n_channels=engine.n_channels_total,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
-            adc_sample_rate=engine.adc_sample_rate_hz,
+            adc_sample_rate=engine.adc_sample_rate,
             timestamp_step=engine.rx_heap_timestamp_step,
             send_rate_factor=engine.send_rate_factor,
             channel_offset=engine.channel_offset_value,
@@ -641,7 +641,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
         # Care needs to be taken to ensure that this rate is not set too high.
         # If it is too high, the entire pipeline will stall needlessly waiting
         # for packets to be transmitted too slowly.
-        self.dump_interval_s = self.timestamp_increment_per_accumulation / engine.adc_sample_rate_hz
+        self.dump_interval_s = self.timestamp_increment_per_accumulation / engine.adc_sample_rate
 
         correlation_template = CorrelationTemplate(
             context=context,
@@ -969,7 +969,7 @@ class XBEngine(DeviceServer):
         Hostname or IP on which to listen for KATCP C&M connections.
     katcp_port
         Network port on which to listen for KATCP C&M connections.
-    adc_sample_rate_hz
+    adc_sample_rate
         Sample rate of the digitisers in the current array. This value is
         required to calculate the packet spacing of the output heaps. If it is
         set incorrectly, the packet spacing could be too large causing the
@@ -1058,7 +1058,7 @@ class XBEngine(DeviceServer):
         *,
         katcp_host: str,
         katcp_port: int,
-        adc_sample_rate_hz: float,
+        adc_sample_rate: float,
         bandwidth_hz: float,
         send_rate_factor: float,
         n_ants: int,
@@ -1097,9 +1097,9 @@ class XBEngine(DeviceServer):
                 raise ValueError(f"{output.name}: channel_offset must be an integer multiple of channels_per_substream")
 
         # Array configuration parameters
-        self.adc_sample_rate_hz = adc_sample_rate_hz
+        self.adc_sample_rate = adc_sample_rate
         self.bandwidth_hz = bandwidth_hz
-        self.time_converter = TimeConverter(sync_time, adc_sample_rate_hz)
+        self.time_converter = TimeConverter(sync_time, adc_sample_rate)
         self.n_ants = n_ants
         self.n_channels_total = n_channels_total
         self.n_channels_per_substream = n_channels_per_substream
@@ -1129,10 +1129,7 @@ class XBEngine(DeviceServer):
             self.sensors,
             max(
                 RX_SENSOR_TIMEOUT_MIN,
-                RX_SENSOR_TIMEOUT_CHUNKS
-                * heaps_per_fengine_per_chunk
-                * self.rx_heap_timestamp_step
-                / adc_sample_rate_hz,
+                RX_SENSOR_TIMEOUT_CHUNKS * heaps_per_fengine_per_chunk * self.rx_heap_timestamp_step / adc_sample_rate,
             ),
         )
 

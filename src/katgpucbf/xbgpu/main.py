@@ -404,7 +404,7 @@ def make_engine(
     xbengine = XBEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
-        adc_sample_rate_hz=args.adc_sample_rate,
+        adc_sample_rate=args.adc_sample_rate,
         bandwidth_hz=args.bandwidth,
         send_rate_factor=args.send_rate_factor,
         n_ants=args.array_size,
