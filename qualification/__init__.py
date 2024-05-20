@@ -372,6 +372,26 @@ class XBReceiver:
                     return chunks
         raise RuntimeError(f"stream was shut down before we received {n} complete chunk(s)")
 
+    @overload
+    def channel_frequency(self, channel: float) -> float:
+        ...
+
+    @overload
+    def channel_frequency(self, channel: np.ndarray) -> np.ndarray:
+        ...
+
+    def channel_frequency(self, channel):
+        """Compute the frequency (in Hz) for a given channel.
+
+        The channel number may be a real value to select a frequency that is
+        not at the centre of a channel bin. Integral values correspond to bin
+        centres. This is the frequency of the signal received from the
+        digitiser rather than sky frequency.
+
+        Either a scalar or a numpy array may be used.
+        """
+        return (channel - self.n_chans / 2) * self.bandwidth / self.n_chans + self.center_freq
+
     def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:
         """Compute F-Engine gain.
 

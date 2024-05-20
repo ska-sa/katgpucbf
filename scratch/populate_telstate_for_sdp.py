@@ -97,7 +97,7 @@ async def main():
                 await converter(float, "scale-factor-timestamp")
                 converter.set("instrument_dev_name", "dummy")
                 # TODO: get sky centre frequency from digitiser config?
-                converter.set("center_freq", 1284e6)
+                converter.set("centre_freq", 1284e6)
             elif stream["type"] == "sim.dig.baseband_voltage" and name.endswith("h"):
                 # Both pols are represented, but we're only interested in one per antenna.
                 converter = SensorConverter(client, telstate, name[:-1])
