@@ -408,7 +408,7 @@ def make_engine(
         bandwidth_hz=args.bandwidth,
         send_rate_factor=args.send_rate_factor,
         n_ants=args.array_size,
-        n_channels_total=args.channels,
+        n_channels=args.channels,
         n_channels_per_substream=args.channels_per_substream,
         n_samples_between_spectra=args.samples_between_spectra,
         n_spectra_per_heap=args.jones_per_batch // args.channels,

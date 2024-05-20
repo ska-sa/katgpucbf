@@ -106,7 +106,7 @@ def test_correlator(
     num_channels: int,
 ) -> None:
     """Test the Tensor Core correlation kernel for correctness."""
-    n_chans_per_stream = num_channels // num_ants
+    n_channels_per_substream = num_channels // num_ants
     n_batches = 7
     # The kernel requires it to be a multiple of 16
     n_spectra_per_heap = roundup(num_jones_per_batch // num_channels, 16)
@@ -115,7 +115,7 @@ def test_correlator(
     template = CorrelationTemplate(
         context,
         n_ants=num_ants,
-        n_channels=n_chans_per_stream,
+        n_channels_per_substream=n_channels_per_substream,
         n_spectra_per_heap=n_spectra_per_heap,
         input_sample_bits=8,
     )
@@ -174,7 +174,9 @@ def test_correlator(
 
 def test_saturation(context: AbstractContext, command_queue: AbstractCommandQueue) -> None:
     """Test that values that overflow are saturated."""
-    template = CorrelationTemplate(context, n_ants=2, n_channels=4, n_spectra_per_heap=256, input_sample_bits=8)
+    template = CorrelationTemplate(
+        context, n_ants=2, n_channels_per_substream=4, n_spectra_per_heap=256, input_sample_bits=8
+    )
     correlation = template.instantiate(command_queue, 2)
     correlation.ensure_all_bound()
 

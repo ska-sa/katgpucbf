@@ -69,7 +69,7 @@ class CorrelationTemplate:
     n_ants
         The number of antennas that will be correlated. Each antennas is
         expected to produce two polarisations.
-    n_channels
+    n_channels_per_substream
         The number of frequency channels to be processed.
     n_spectra_per_heap
         The number of time samples to be processed per frequency channel.
@@ -81,12 +81,12 @@ class CorrelationTemplate:
         self,
         context: AbstractContext,
         n_ants: int,
-        n_channels: int,
+        n_channels_per_substream: int,
         n_spectra_per_heap: int,
         input_sample_bits: int,
     ) -> None:
         self.n_ants = n_ants
-        self.n_channels = n_channels
+        self.n_channels_per_substream = n_channels_per_substream
         self.n_spectra_per_heap = n_spectra_per_heap
         self.n_baselines = self.n_ants * (self.n_ants + 1) // 2
 
@@ -130,7 +130,7 @@ class CorrelationTemplate:
                 f"-DNR_RECEIVERS={self.n_ants}",
                 f"-DNR_RECEIVERS_PER_BLOCK={self._n_ants_per_block}",
                 f"-DNR_BITS={self.input_sample_bits}",
-                f"-DNR_CHANNELS={self.n_channels}",
+                f"-DNR_CHANNELS_PER_SUBSTREAM={self.n_channels_per_substream}",
                 f"-DNR_SAMPLES_PER_CHANNEL={self.n_spectra_per_heap}",
                 f"-DNR_POLARIZATIONS={N_POLS}",
                 "-DCUSTOM_STORE_VISIBILITY=1",
@@ -199,20 +199,20 @@ class Correlation(accel.Operation):
         # work-groups, while sticking to powers of 2 since that's likely to
         # give an even division of work across them.
         n_mid = 1
-        while n_mid * self.template.n_channels * self.template.n_blocks < 1024:
+        while n_mid * self.template.n_channels_per_substream * self.template.n_blocks < 1024:
             n_mid *= 2
 
         input_data_dimensions = (
             accel.Dimension(n_batches),
             accel.Dimension(self.template.n_ants, exact=True),
-            accel.Dimension(self.template.n_channels, exact=True),
+            accel.Dimension(self.template.n_channels_per_substream, exact=True),
             accel.Dimension(self.template.n_spectra_per_heap, exact=True),
             accel.Dimension(N_POLS, exact=True),
             accel.Dimension(COMPLEX, exact=True),
         )
         mid_data_dimensions = (
             accel.Dimension(n_mid),
-            accel.Dimension(self.template.n_channels, exact=True),
+            accel.Dimension(self.template.n_channels_per_substream, exact=True),
             accel.Dimension(self.template.n_baselines * N_POLS * N_POLS, exact=True),
             accel.Dimension(COMPLEX, exact=True),
         )
@@ -226,7 +226,7 @@ class Correlation(accel.Operation):
         self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
         self.slots["out_saturated"] = accel.IOSlot(dimensions=(), dtype=np.uint32)
         self.slots["present_baselines"] = accel.IOSlot(dimensions=(self.template.n_baselines,), dtype=np.uint8)
-        if n_batches * self.template.n_channels * self.template.n_baselines * N_POLS * N_POLS >= 2**31:
+        if n_batches * self.template.n_channels_per_substream * self.template.n_baselines * N_POLS * N_POLS >= 2**31:
             # Can probably go higher, but rather keep it low to reduce the risk
             # of indexing bugs.
             raise ValueError("2^31 or more visibilities are not currently supported")
@@ -264,7 +264,7 @@ class Correlation(accel.Operation):
             # conventions. As such we need to multiply the number of
             # blocks(global_size) by the block size(local_size) in order to
             # specify global threads not global blocks.
-            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels, 2 * n_z),
+            global_size=(32 * self.template.n_blocks, 2 * self.template.n_channels_per_substream, 2 * n_z),
             local_size=(32, 2, 2),
         )
 

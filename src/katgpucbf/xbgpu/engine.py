@@ -361,10 +361,10 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             self._proc_command_queue,
             n_batches=engine.heaps_per_fengine_per_chunk,
             n_ants=engine.n_ants,
-            n_channels=engine.n_channels_per_substream,
+            n_channels_per_substream=engine.n_channels_per_substream,
             seed=int(engine.time_converter.sync_time),
             sequence_first=engine.channel_offset_value,
-            sequence_step=engine.n_channels_total,
+            sequence_step=engine.n_channels,
         )
         allocator = accel.DeviceAllocator(context=context)
         for _ in range(self.n_tx_items):
@@ -389,7 +389,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             outputs=outputs,
             batches_per_chunk=engine.heaps_per_fengine_per_chunk,
             n_tx_items=self.n_tx_items,
-            n_channels=engine.n_channels_total,
+            n_channels=engine.n_channels,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
             adc_sample_rate=engine.adc_sample_rate,
@@ -499,11 +499,11 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
             # Recompute the weights and delays if necessary
             if tx_item.weights_version != self._weights_version:
-                channel_spacing = self.engine.bandwidth_hz / self.engine.n_channels_total
+                channel_spacing = self.engine.bandwidth_hz / self.engine.n_channels
                 # The user provides a fringe phase for the centre frequency. We
                 # need to adjust that to the target fringe phase for the first
                 # channel processed by this engine (channel_offset_value).
-                centre_channel = self.engine.n_channels_total / 2
+                centre_channel = self.engine.n_channels / 2
                 fringe_scale = -2 * np.pi * channel_spacing * (self.engine.channel_offset_value - centre_channel)
                 fringe_phase = self._delays.T[1] + fringe_scale * self._delays.T[0]
                 fringe_rotator = np.exp(1j * fringe_phase)
@@ -646,7 +646,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
         correlation_template = CorrelationTemplate(
             context=context,
             n_ants=engine.n_ants,
-            n_channels=engine.n_channels_per_substream,
+            n_channels_per_substream=engine.n_channels_per_substream,
             n_spectra_per_heap=engine.src_layout.n_spectra_per_heap,
             input_sample_bits=engine.sample_bits,
         )
@@ -668,7 +668,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
         self.send_stream = XSend(
             output_name=output.name,
             n_ants=engine.n_ants,
-            n_channels=engine.n_channels_total,
+            n_channels=engine.n_channels,
             n_channels_per_substream=engine.n_channels_per_substream,
             dump_interval_s=self.dump_interval_s,
             send_rate_factor=engine.send_rate_factor,
@@ -976,7 +976,7 @@ class XBEngine(DeviceServer):
         pipeline to stall as heaps queue at the sender faster than they are
         sent.
     bandwidth_hz
-        Total bandwidth across `n_channels_total` channels. This is used in
+        Total bandwidth across `n_channels` channels. This is used in
         delay calculations.
     send_rate_factor
         Configure the spead2 sender with a rate proportional to this factor.
@@ -985,7 +985,7 @@ class XBEngine(DeviceServer):
         to transmit as fast as possible.
     n_ants
         The number of antennas to be correlated.
-    n_channels_total
+    n_channels
         The total number of frequency channels out of the F-Engine.
     n_channels_per_substream
         The number of frequency channels contained per substream.
@@ -1062,7 +1062,7 @@ class XBEngine(DeviceServer):
         bandwidth_hz: float,
         send_rate_factor: float,
         n_ants: int,
-        n_channels_total: int,
+        n_channels: int,
         n_channels_per_substream: int,
         n_samples_between_spectra: int,
         n_spectra_per_heap: int,
@@ -1101,7 +1101,7 @@ class XBEngine(DeviceServer):
         self.bandwidth_hz = bandwidth_hz
         self.time_converter = TimeConverter(sync_time, adc_sample_rate)
         self.n_ants = n_ants
-        self.n_channels_total = n_channels_total
+        self.n_channels = n_channels
         self.n_channels_per_substream = n_channels_per_substream
         self.sample_bits = sample_bits
         self.channel_offset_value = channel_offset_value

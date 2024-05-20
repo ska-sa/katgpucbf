@@ -169,10 +169,10 @@ inline __device__ Visibility operator += (Visibility &a, Visibility b)
 }
 
 
-typedef Sample Samples[NR_RECEIVERS][NR_CHANNELS][NR_BLOCKS_PER_BATCH][NR_TIMES_PER_BLOCK][NR_POLARIZATIONS];
+typedef Sample Samples[NR_RECEIVERS][NR_CHANNELS_PER_SUBSTREAM][NR_BLOCKS_PER_BATCH][NR_TIMES_PER_BLOCK][NR_POLARIZATIONS];
 
 #if !defined CUSTOM_STORE_VISIBILITY
-typedef Visibility Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
+typedef Visibility Visibilities[NR_CHANNELS_PER_SUBSTREAM][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 #endif
 
 
@@ -301,7 +301,7 @@ __device__ inline float2 make_complex(float real, float imag)
 // the code we want here.
 // CUSTOM_STORE_VISIBILITY
 typedef long2 StoredVisibility;
-typedef StoredVisibility Visibilities[NR_CHANNELS][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
+typedef StoredVisibility Visibilities[NR_CHANNELS_PER_SUBSTREAM][NR_BASELINES][NR_POLARIZATIONS][NR_POLARIZATIONS];
 
 inline __device__ StoredVisibility operator += (StoredVisibility &a, Visibility b)
 {
@@ -717,7 +717,7 @@ void reduce(
   unsigned buffers)
 {
   namespace cg = cooperative_groups;
-  const unsigned int stride = NR_CHANNELS * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
+  const unsigned int stride = NR_CHANNELS_PER_SUBSTREAM * NR_BASELINES * NR_POLARIZATIONS * NR_POLARIZATIONS;
   const unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= stride)
     return;

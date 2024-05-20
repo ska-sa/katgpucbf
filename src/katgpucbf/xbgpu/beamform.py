@@ -64,13 +64,15 @@ class BeamformTemplate:
         command_queue: AbstractCommandQueue,
         n_batches: int,
         n_ants: int,
-        n_channels: int,
+        n_channels_per_substream: int,
         seed: int,
         sequence_first: int,
         sequence_step: int = 1,
     ) -> "Beamform":
         """Generate a :class:`Beamform` object based on the template."""
-        return Beamform(self, command_queue, n_batches, n_ants, n_channels, seed, sequence_first, sequence_step)
+        return Beamform(
+            self, command_queue, n_batches, n_ants, n_channels_per_substream, seed, sequence_first, sequence_step
+        )
 
 
 class Beamform(accel.Operation):
@@ -82,9 +84,9 @@ class Beamform(accel.Operation):
 
     .. rubric:: Slots
 
-    **in** : n_batches × n_ants × n_channels × n_spectra_per_batch × N_POLS × COMPLEX, int8
+    **in** : n_batches × n_ants × n_channels_per_substream × n_spectra_per_batch × N_POLS × COMPLEX, int8
         Complex (Gaussian integer) input channelised voltages
-    **out** : n_batches × n_beams × n_channels × n_spectra_per_batch × COMPLEX, int8
+    **out** : n_batches × n_beams × n_channels_per_substream × n_spectra_per_batch × COMPLEX, int8
         Complex (Gaussian integer) output channelised voltages
     **saturated**: n_beams, uint32
         Number of saturated output values, per beam. This value is *incremented*
@@ -97,7 +99,7 @@ class Beamform(accel.Operation):
         the channel number and :math:`d` is the delay value. Note
         that this will not apply any rotation to the first channel
         in the data; any such rotation needs to be baked into **weights**.
-    **rand_states** : n_batches × n_channels × n_spectra_per_batch, curandStateXORWOW_t (packed)
+    **rand_states** : n_batches × n_channels_per_substream × n_spectra_per_batch, curandStateXORWOW_t (packed)
         Independent random states for generating dither values. This is set
         up by the constructor and should not normally need to be touched.
 
@@ -111,7 +113,7 @@ class Beamform(accel.Operation):
         Number of batches (coarse time dimension)
     n_ants
         Number of antennas
-    n_channels
+    n_channels_per_substream
         Number of frequency channels
     seed, sequence_first, sequence_step
         See :class:`.RandomStateBuilder`.
@@ -123,7 +125,7 @@ class Beamform(accel.Operation):
         command_queue: AbstractCommandQueue,
         n_batches: int,
         n_ants: int,
-        n_channels: int,
+        n_channels_per_substream: int,
         seed: int,
         sequence_first: int,
         sequence_step: int = 1,
@@ -136,9 +138,11 @@ class Beamform(accel.Operation):
         n_spectra_per_batch = template.n_spectra_per_batch
         builder = RandomStateBuilder(command_queue.context)
         self.slots["in"] = accel.IOSlot(
-            (n_batches, n_ants, n_channels, n_spectra_per_batch, pol_dim, complex_dim), np.int8
+            (n_batches, n_ants, n_channels_per_substream, n_spectra_per_batch, pol_dim, complex_dim), np.int8
         )
-        self.slots["out"] = accel.IOSlot((n_batches, n_beams, n_channels, n_spectra_per_batch, complex_dim), np.int8)
+        self.slots["out"] = accel.IOSlot(
+            (n_batches, n_beams, n_channels_per_substream, n_spectra_per_batch, complex_dim), np.int8
+        )
         self.slots["saturated"] = accel.IOSlot((n_beams,), np.uint32)
         weights_dims = (n_ants, accel.Dimension(n_beams, exact=True))
         self.slots["weights"] = accel.IOSlot(weights_dims, np.complex64)
@@ -146,13 +150,13 @@ class Beamform(accel.Operation):
         self.slots["rand_states"] = accel.IOSlot(
             (
                 accel.Dimension(n_batches, exact=True),
-                accel.Dimension(n_channels, exact=True),
+                accel.Dimension(n_channels_per_substream, exact=True),
                 accel.Dimension(n_spectra_per_batch, exact=True),
             ),
             builder.dtype,
         )
         rand_states = builder.make_states(
-            (n_batches, n_channels, n_spectra_per_batch),
+            (n_batches, n_channels_per_substream, n_spectra_per_batch),
             seed=seed,
             sequence_first=sequence_first,
             sequence_step=sequence_step,
