@@ -38,7 +38,7 @@ pytest_mark = pytest.mark.parametrize("bits", [4, 8])
 ADC_SAMPLE_RATE = 1e9
 N_SUBSTREAMS = 16
 N_CHUNKS = 5
-N_FRAMES = 7  # frames per chunk
+N_BATCHES = 7  # batches per chunk
 N_CHANNELS = 1024
 N_SPECTRA_PER_HEAP = 32  # Small to make the test fast
 SPECTRA_SAMPLES = 2 * N_CHANNELS
@@ -73,8 +73,8 @@ def chunks(sample_bits) -> list[Chunk]:
     dtype = gaussian_dtype(sample_bits)
     return [
         Chunk(
-            np.zeros((N_FRAMES, N_CHANNELS, N_SPECTRA_PER_HEAP, N_POLS), dtype),
-            np.zeros((N_FRAMES, N_POLS), np.uint32),
+            np.zeros((N_BATCHES, N_CHANNELS, N_SPECTRA_PER_HEAP, N_POLS), dtype),
+            np.zeros((N_BATCHES, N_POLS), np.uint32),
             n_substreams=N_SUBSTREAMS,
             feng_id=FENG_ID,
             spectra_samples=SPECTRA_SAMPLES,
@@ -125,7 +125,7 @@ def send_streams(
             send_rate_factor=0.0,  # Just send as fast as possible
             feng_id=FENG_ID,
             num_ants=64,
-            n_data_heaps=N_CHUNKS * N_FRAMES * N_SUBSTREAMS,
+            n_data_heaps=N_CHUNKS * N_BATCHES * N_SUBSTREAMS,
             chunks=chunks,
         )
 
@@ -177,8 +177,8 @@ def test_bad_substreams():
     dtype = gaussian_dtype(8)
     with pytest.raises(ValueError):
         Chunk(
-            np.zeros((N_FRAMES, N_CHANNELS, N_SPECTRA_PER_HEAP, N_POLS), dtype),
-            np.zeros((N_FRAMES, N_POLS), np.uint32),
+            np.zeros((N_BATCHES, N_CHANNELS, N_SPECTRA_PER_HEAP, N_POLS), dtype),
+            np.zeros((N_BATCHES, N_POLS), np.uint32),
             n_substreams=5,
             feng_id=FENG_ID,
             spectra_samples=SPECTRA_SAMPLES,
@@ -207,29 +207,29 @@ async def test_send(
 
     rng = np.random.default_rng(seed=1)
     first_timestamp = 0x123456780000
-    skip_frames = 3
+    skip_batches = 3
     for i, chunk in enumerate(chunks):
         _fill_random(chunk.data, rng)
         # Note: this doesn't correspond in any way to the values in data.
         # That isn't necessary for this test.
         _fill_random(chunk.saturated, rng)
         chunk.present[:] = True
-        timestamp = first_timestamp + i * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP * N_FRAMES
+        timestamp = first_timestamp + i * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP * N_BATCHES
         chunk.timestamp = timestamp
         # Check that the property works as expected
         assert chunk.timestamp == timestamp
-    # Knock out the first few frames, to test partial transmission
-    chunks[0].present[:skip_frames] = False
+    # Knock out the first few batches, to test partial transmission
+    chunks[0].present[:skip_batches] = False
     data = np.concatenate([chunk.data for chunk in chunks])
     saturated = np.concatenate([chunk.saturated for chunk in chunks])
-    saturated = np.sum(saturated[skip_frames:], axis=0, dtype=np.uint64)
+    saturated = np.sum(saturated[skip_batches:], axis=0, dtype=np.uint64)
 
     with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
         # Send all the chunks, without waiting for the first one to complete
         # transmission (to ensure that the send streams have sufficient
         # capacity).
         futures = [
-            asyncio.create_task(chunk.send(send_streams, N_FRAMES, time_converter, sensors, NAME)) for chunk in chunks
+            asyncio.create_task(chunk.send(send_streams, N_BATCHES, time_converter, sensors, NAME)) for chunk in chunks
         ]
         await asyncio.gather(*futures)
 
@@ -240,44 +240,44 @@ async def test_send(
     n_channels_per_substream = N_CHANNELS // N_SUBSTREAMS
     heaps_per_iface = {iface: 0 for iface in queues.keys()}
     for i in range(N_SUBSTREAMS):
-        seen_frames = np.zeros(N_CHUNKS * N_FRAMES, bool)
+        seen_batches = np.zeros(N_CHUNKS * N_BATCHES, bool)
         # Only one of the two interfaces should be receiving any data for
         # this substream, but it's simpler to just iterate over both and
         # find the data wherever it happened to fall.
         for iface in queues.keys():
             recv_stream = recv_streams[iface][i]
             ig = spead2.ItemGroup()
-            frame = skip_frames
+            batch = skip_batches
             async for heap in recv_stream:
                 updated = ig.update(heap)
                 if not updated:
                     continue  # it's a stream control or descriptor heap
-                expected_timestamp = first_timestamp + frame * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP
+                expected_timestamp = first_timestamp + batch * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP
                 assert updated["feng_id"].value == FENG_ID
                 assert updated["frequency"].value == i * n_channels_per_substream
                 assert updated["timestamp"].value == expected_timestamp
                 raw = updated["feng_raw"].value
                 raw_complex = raw[..., 0] + 1j * raw[..., 1]
-                expected = data[frame, i * n_channels_per_substream : (i + 1) * n_channels_per_substream]
+                expected = data[batch, i * n_channels_per_substream : (i + 1) * n_channels_per_substream]
                 np.testing.assert_equal(raw_complex, unpack_complex(expected))
-                assert not seen_frames[frame]
-                seen_frames[frame] = True
-                frame += 1
+                assert not seen_batches[batch]
+                seen_batches[batch] = True
+                batch += 1
                 heaps_per_iface[iface] += 1
-        assert np.all(seen_frames[skip_frames:])  # Check that we received all the data we expected
+        assert np.all(seen_batches[skip_batches:])  # Check that we received all the data we expected
     # Check the load balancing
-    good_frames = N_CHUNKS * N_FRAMES - skip_frames
+    good_batches = N_CHUNKS * N_BATCHES - skip_batches
     for iface in queues.keys():
-        assert heaps_per_iface[iface] == N_SUBSTREAMS * good_frames // len(queues)
+        assert heaps_per_iface[iface] == N_SUBSTREAMS * good_batches // len(queues)
 
     # Check the sensors and Prometheus metrics
     labels = {"stream": NAME}
-    assert prom_diff.get_sample_diff("output_heaps_total", labels) == good_frames * N_SUBSTREAMS
-    expected_samples = good_frames * N_SPECTRA_PER_HEAP * N_CHANNELS * N_POLS
+    assert prom_diff.get_sample_diff("output_heaps_total", labels) == good_batches * N_SUBSTREAMS
+    expected_samples = good_batches * N_SPECTRA_PER_HEAP * N_CHANNELS * N_POLS
     assert prom_diff.get_sample_diff("output_samples_total", labels) == expected_samples
     expected_bytes = expected_samples * COMPLEX * sample_bits // BYTE_BITS
     assert prom_diff.get_sample_diff("output_bytes_total", labels) == expected_bytes
-    assert prom_diff.get_sample_diff("output_skipped_heaps_total", labels) == skip_frames * N_SUBSTREAMS
+    assert prom_diff.get_sample_diff("output_skipped_heaps_total", labels) == skip_batches * N_SUBSTREAMS
     for pol in range(N_POLS):
         pol_labels = {"stream": NAME, "pol": str(pol)}
         assert prom_diff.get_sample_diff("output_clipped_samples_total", pol_labels) == saturated[pol]

@@ -862,7 +862,7 @@ class Pipeline:
         self._out_queue.put_nowait(None)
 
     async def _chunk_send_and_cleanup(
-        self, streams: list["spead2.send.asyncio.AsyncStream"], n_frames: int, chunk: send.Chunk
+        self, streams: list["spead2.send.asyncio.AsyncStream"], n_batches: int, chunk: send.Chunk
     ) -> None:
         """Transmit a chunk's data and return it to the free queue.
 
@@ -873,13 +873,13 @@ class Pipeline:
         ----------
         streams
             The streams transmitting data.
-        n_frames
-            Number of frames of data to be transmitted.
+        n_batches
+            Number of batches of data to be transmitted.
         chunk
             :class:`~send.Chunk` used to facilitate data transmission.
         """
         try:
-            await chunk.send(streams, n_frames, self.engine.time_converter, self.engine.sensors, self.output.name)
+            await chunk.send(streams, n_batches, self.engine.time_converter, self.engine.sensors, self.output.name)
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -935,7 +935,7 @@ class Pipeline:
                 out_item.dig_total_power.get_async(self._download_queue, dig_total_power)
 
             chunk.timestamp = out_item.timestamp
-            # Each frame is valid if all spectra in it are valid
+            # Each batch is valid if all spectra in it are valid
             out_item.present.reshape(-1, self.output.spectra_per_heap).all(axis=-1, out=chunk.present)
             download_marker = self._download_queue.enqueue_marker()
             with self.engine.monitor.with_state(func_name, "wait transfer"):
@@ -955,13 +955,13 @@ class Pipeline:
                         avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
                     )
 
-            n_frames = out_item.n_spectra // self.output.spectra_per_heap
+            n_batches = out_item.n_spectra // self.output.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
                 # Account for heaps skipped between the end of the previous out_item and the
                 # start of the current one.
                 skipped_samples = out_item.timestamp - last_end_timestamp
-                skipped_frames = skipped_samples // (self.output.spectra_per_heap * self.output.spectra_samples)
-                send.skipped_heaps_counter.labels(self.output.name).inc(skipped_frames * len(self.output.dst))
+                skipped_batches = skipped_samples // (self.output.spectra_per_heap * self.output.spectra_samples)
+                send.skipped_heaps_counter.labels(self.output.name).inc(skipped_batches * len(self.output.dst))
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data
             if out_item.chunk is None:
@@ -969,7 +969,7 @@ class Pipeline:
                 # (when we are the cleanup callback returns the item)
                 self._out_free_queue.put_nowait(out_item)
             task = asyncio.create_task(
-                self._chunk_send_and_cleanup(self._send_streams, n_frames, chunk),
+                self._chunk_send_and_cleanup(self._send_streams, n_batches, chunk),
                 name="Chunk Send and Cleanup Task",
             )
             self.engine.add_service_task(task)

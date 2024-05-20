@@ -324,14 +324,14 @@ class TestEngine:
             If present, a bitmask per pol and input heap indicating which heaps
             will be sent.
         dst_present
-            A bitmask per output frame indicating which frames should be
+            A bitmask per output batch indicating which batches should be
             present. As a shortcut, specifying an integer indicates the number
-            of expected output frames, which must all be present; and specifying
+            of expected output batches, which must all be present; and specifying
             None indicates that this integer should be calculated from the
             input data length, assuming default state for the engine (in
             particular, it will not be correct if there are non-zero delays).
 
-            Missing frames still take space in the output but are zeroed out.
+            Missing batches still take space in the output but are zeroed out.
 
         Returns
         -------
@@ -919,14 +919,14 @@ class TestEngine:
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
         assert prom_diff.get_sample_diff("output_heaps_total", {"stream": output.name}) == output_heaps
-        frame_samples = channels * spectra_per_heap * N_POLS
-        frame_size = frame_samples * COMPLEX * np.dtype(np.int8).itemsize
+        batch_samples = channels * spectra_per_heap * N_POLS
+        batch_size = batch_samples * COMPLEX * np.dtype(np.int8).itemsize
         assert (
-            prom_diff.get_sample_diff("output_bytes_total", {"stream": output.name}) == np.sum(dst_present) * frame_size
+            prom_diff.get_sample_diff("output_bytes_total", {"stream": output.name}) == np.sum(dst_present) * batch_size
         )
         assert (
             prom_diff.get_sample_diff("output_samples_total", {"stream": output.name})
-            == np.sum(dst_present) * frame_samples
+            == np.sum(dst_present) * batch_samples
         )
         assert (
             prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": output.name})

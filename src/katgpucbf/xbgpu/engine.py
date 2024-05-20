@@ -159,7 +159,7 @@ class BTxQueueItem(QueueItem):
     ----------
     out
         An int8 type :class:`~katsdpsigproc.accel.DeviceArray` with shape
-        (frames, ants, channels, spectra_per_frame, N_POLS, COMPLEX).
+        (batches, ants, channels, spectra_per_batch, N_POLS, COMPLEX).
     saturated
         An uint32 type :class:`~katsdpsigproc.accel.DeviceArray` with shape
         (n_beams,).
@@ -355,11 +355,11 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         template = BeamformTemplate(
             context,
             [output.pol for output in outputs],
-            n_spectra_per_frame=engine.src_layout.n_spectra_per_heap,
+            n_spectra_per_batch=engine.src_layout.n_spectra_per_heap,
         )
         self._beamform = template.instantiate(
             self._proc_command_queue,
-            n_frames=engine.heaps_per_fengine_per_chunk,
+            n_batches=engine.heaps_per_fengine_per_chunk,
             n_ants=engine.n_ants,
             n_channels=engine.n_channels_per_substream,
             seed=int(engine.time_converter.sync_time),
@@ -387,7 +387,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
 
         self.send_stream = BSend(
             outputs=outputs,
-            frames_per_chunk=engine.heaps_per_fengine_per_chunk,
+            batches_per_chunk=engine.heaps_per_fengine_per_chunk,
             n_tx_items=self.n_tx_items,
             n_channels=engine.n_channels_total,
             n_channels_per_substream=engine.n_channels_per_substream,

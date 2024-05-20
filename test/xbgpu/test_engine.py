@@ -658,7 +658,7 @@ class TestEngine:
             corrprod_output, where each array has shape
             (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
         beam_results
-            Beamformer output, with shape (n_beams, n_frames,
+            Beamformer output, with shape (n_beams, n_batches,
             n_channels_per_substream, n_spectra_per_heap, COMPLEX).
         acc_indices
             List of accumulation indices for each corrprod_output.

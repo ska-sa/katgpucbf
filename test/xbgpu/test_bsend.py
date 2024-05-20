@@ -35,9 +35,9 @@ from katgpucbf.xbgpu.output import BOutput
 
 from . import test_parameters
 
-FRAMES_PER_CHUNK: Final[int] = 5
+BATCHES_PER_CHUNK: Final[int] = 5
 N_TX_ITEMS: Final[int] = 2
-TX_HEAPS_PER_SUBSTREAM: Final[int] = N_TX_ITEMS * FRAMES_PER_CHUNK
+TX_HEAPS_PER_SUBSTREAM: Final[int] = N_TX_ITEMS * BATCHES_PER_CHUNK
 
 
 @pytest.fixture
@@ -79,8 +79,8 @@ class TestBSend:
         """Send a fixed number of heaps.
 
         More specifically, in addition to a descriptor heap per substream, send
-        `N_TX_ITEMS` Chunks, each of which contain `FRAMES_PER_CHUNK` heaps. The
-        first Frame of each Chunk is dropped as per the formulation of the
+        `N_TX_ITEMS` Chunks, each of which contain `BATCHES_PER_CHUNK` heaps. The
+        first Batch of each Chunk is dropped as per the formulation of the
         Chunk's `present_ants` attribute. This is done in order to simulate and
         test handling data missing at the receiver.
 
@@ -95,7 +95,7 @@ class TestBSend:
         -------
         data
             Array of shape
-            (N_TX_ITEMS, FRAMES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
+            (N_TX_ITEMS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
         """
         # Send the descriptors as the recv_stream object needs it to
         # interpret the received heaps correctly.
@@ -106,7 +106,7 @@ class TestBSend:
             )
 
         data = np.zeros(
-            shape=(N_TX_ITEMS, FRAMES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
+            shape=(N_TX_ITEMS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
             dtype=SEND_DTYPE,
         )
 
@@ -122,15 +122,15 @@ class TestBSend:
             # Populate the buffer with dummy data.
             chunk.data[:] = data[i, ...]
 
-            # NOTE: This is actually an ndarray with shape (FRAMES_PER_CHUNK,)
+            # NOTE: This is actually an ndarray with shape (BATCHES_PER_CHUNK,)
             # Each entry holds a count for number of antennas that were present
-            # in the received heap. Any value > 0 will allow a Frame to be
+            # in the received heap. Any value > 0 will allow a Batch to be
             # transmitted.
-            chunk.present_ants[:] = np.arange(FRAMES_PER_CHUNK)
+            chunk.present_ants[:] = np.arange(BATCHES_PER_CHUNK)
 
             # Give the chunk back to the send_stream to transmit out
             # onto the network.
-            chunk.timestamp = i * FRAMES_PER_CHUNK * heap_timestamp_step
+            chunk.timestamp = i * BATCHES_PER_CHUNK * heap_timestamp_step
             send_stream.send_chunk(chunk, time_converter, sensors)
         # send_heap just queues data for sending but is non-blocking.
         # Flush to ensure that the data all gets sent before we return.
@@ -157,7 +157,7 @@ class TestBSend:
         ----------
         data
             Random data generated during data transmission, of shape
-            - (N_TX_ITEMS, FRAMES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
+            - (N_TX_ITEMS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
         queues
             List of :class:`spead2.InprocQueue` used to transmit heaps
             in :meth:`_send_data`.
@@ -184,7 +184,7 @@ class TestBSend:
 
             # Check the data heaps
             for j in range(TX_HEAPS_PER_SUBSTREAM):
-                if j % FRAMES_PER_CHUNK == 0:
+                if j % BATCHES_PER_CHUNK == 0:
                     # See `_send_data` for logic dictating antenna presence
                     continue
                 heap = await stream.get()
@@ -195,7 +195,7 @@ class TestBSend:
                 assert items["frequency"].id == FREQUENCY_ID
                 assert items["frequency"].value == channel_offset
                 assert items["beam_ants"].id == BEAM_ANTS_ID
-                assert items["beam_ants"].value == j % FRAMES_PER_CHUNK
+                assert items["beam_ants"].value == j % BATCHES_PER_CHUNK
                 assert items["bf_raw"].id == BF_RAW_ID
                 assert items["bf_raw"].value.shape == (n_channels_per_substream, n_spectra_per_heap, COMPLEX)
                 assert items["bf_raw"].value.dtype == np.int8
@@ -249,7 +249,7 @@ class TestBSend:
         queues = [spead2.InprocQueue() for _ in outputs]
         send_stream = BSend(
             outputs=outputs,
-            frames_per_chunk=FRAMES_PER_CHUNK,
+            batches_per_chunk=BATCHES_PER_CHUNK,
             n_tx_items=N_TX_ITEMS,
             n_channels=num_channels,
             n_channels_per_substream=n_channels_per_substream,

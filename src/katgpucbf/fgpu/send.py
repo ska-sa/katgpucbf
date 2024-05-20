@@ -59,7 +59,7 @@ output_clip_counter = Counter(
 )
 
 
-class Frame:
+class Batch:
     """Holds all the heaps for a single timestamp.
 
     It does not own its memory - the backing store is in :class:`Chunk`.
@@ -69,9 +69,9 @@ class Frame:
     timestamp
         Zero-dimensional array of dtype ``>u8`` holding the timestamp.
     data
-        Payload data for the frame, of shape (channels, spectra_per_heap, N_POLS).
+        Payload data for the batch, of shape (channels, spectra_per_heap, N_POLS).
     saturated
-        Saturation data for the frame, of shape (N_POLS,)
+        Saturation data for the batch, of shape (N_POLS,)
     feng_id
         Value to put in ``feng_id`` SPEAD item
     n_substreams
@@ -125,16 +125,16 @@ def _multi_send(
 
 
 class Chunk:
-    """An array of frames, spanning multiple timestamps.
+    """An array of batches, spanning multiple timestamps.
 
     Parameters
     ----------
     data
-        Storage for voltage data, with shape (n_frames, n_channels,
+        Storage for voltage data, with shape (n_batches, n_channels,
         n_spectra_per_heap, N_POLS) and a dtype returned by
         :func:`.gaussian_dtype`.
     saturated
-        Storage for saturation counts, with shape (n_frames, N_POLS)
+        Storage for saturation counts, with shape (n_batches, N_POLS)
         and dtype uint32.
     n_substreams
         Number of substreams over which the data will be divided
@@ -142,7 +142,7 @@ class Chunk:
     feng_id
         F-Engine ID to place in the SPEAD heaps
     spectra_samples
-        Difference in timestamps between successive frames
+        Difference in timestamps between successive batches
     """
 
     def __init__(
@@ -154,27 +154,27 @@ class Chunk:
         feng_id: int,
         spectra_samples: int,
     ) -> None:
-        n_frames = data.shape[0]
+        n_batches = data.shape[0]
         n_channels = data.shape[1]
         n_spectra_per_heap = data.shape[2]
         if n_channels % n_substreams != 0:
             raise ValueError("n_substreams must divide into n_channels")
         self.data = data
         self.saturated = saturated
-        #: Whether each frame has valid data
-        self.present = np.zeros(n_frames, dtype=bool)
+        #: Whether each batch has valid data
+        self.present = np.zeros(n_batches, dtype=bool)
         #: Timestamp of the first heap
         self._timestamp = 0
         #: Callback to return the chunk to the appropriate queue
         self.cleanup: Callable[[], None] | None = None
         self._timestamp_step = n_spectra_per_heap * spectra_samples
         #: Storage for timestamps in the SPEAD heaps.
-        self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(IMMEDIATE_DTYPE)
+        self._timestamps = (np.arange(n_batches) * self._timestamp_step).astype(IMMEDIATE_DTYPE)
         # The ... in indexing causes numpy to give a 0d array view, rather than
         # a scalar.
-        self._frames = [
-            Frame(self._timestamps[i, ...], data[i], saturated[i], feng_id=feng_id, n_substreams=n_substreams)
-            for i in range(n_frames)
+        self._batches = [
+            Batch(self._timestamps[i, ...], data[i], saturated[i], feng_id=feng_id, n_substreams=n_substreams)
+            for i in range(n_batches)
         ]
 
     @property
@@ -194,42 +194,42 @@ class Chunk:
         self._timestamp = value
 
     @staticmethod
-    def _inc_counters(frame: Frame, output_name: str, future: asyncio.Future) -> None:
+    def _inc_counters(batch: Batch, output_name: str, future: asyncio.Future) -> None:
         if not future.cancelled() and future.exception() is None:
-            output_heaps_counter.labels(output_name).inc(len(frame.heaps))
-            output_bytes_counter.labels(output_name).inc(frame.data.nbytes)
-            output_samples_counter.labels(output_name).inc(frame.data.size)
+            output_heaps_counter.labels(output_name).inc(len(batch.heaps))
+            output_bytes_counter.labels(output_name).inc(batch.data.nbytes)
+            output_samples_counter.labels(output_name).inc(batch.data.size)
             for pol in range(N_POLS):
-                output_clip_counter.labels(output_name, pol).inc(frame.saturated[pol])
+                output_clip_counter.labels(output_name, pol).inc(batch.saturated[pol])
 
     async def send(
         self,
         streams: list["spead2.send.asyncio.AsyncStream"],
-        frames: int,
+        batches: int,
         time_converter: TimeConverter,
         sensors: SensorSet,
         output_name: str,
     ) -> None:
         """Transmit heaps over SPEAD streams.
 
-        Frames from 0 to `frames` - 1 are sent asynchronously. The contents of
-        each frame are distributed over the streams. If the number of streams
+        Batches from 0 to `batches` - 1 are sent asynchronously. The contents of
+        each batch are distributed over the streams. If the number of streams
         does not divide into the number of destination endpoints, there will be
-        imbalances, because the partitioning is the same for every frame.
+        imbalances, because the partitioning is the same for every batch.
         """
         futures = []
         saturated = [0] * N_POLS
-        for present, frame in zip(self.present[:frames], self._frames[:frames]):
+        for present, batch in zip(self.present[:batches], self._batches[:batches]):
             if present:
-                futures.append(_multi_send(streams, frame.heaps))
-                futures[-1].add_done_callback(functools.partial(self._inc_counters, frame, output_name))
+                futures.append(_multi_send(streams, batch.heaps))
+                futures[-1].add_done_callback(functools.partial(self._inc_counters, batch, output_name))
                 for pol in range(N_POLS):
-                    saturated[pol] += frame.saturated[pol]
+                    saturated[pol] += batch.saturated[pol]
             else:
-                skipped_heaps_counter.labels(output_name).inc(len(frame.heaps))
+                skipped_heaps_counter.labels(output_name).inc(len(batch.heaps))
         if futures:
             await asyncio.gather(*futures)
-        end_timestamp = self._timestamp + self._timestamp_step * len(self._frames)
+        end_timestamp = self._timestamp + self._timestamp_step * len(self._batches)
         end_time = time_converter.adc_to_unix(end_timestamp)
         for pol in range(N_POLS):
             sensor = sensors[f"{output_name}.input{pol}.feng-clip-cnt"]

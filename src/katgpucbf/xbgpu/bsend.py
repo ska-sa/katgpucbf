@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 SEND_DTYPE = np.dtype(np.int8)
 
 
-class Frame:
+class Batch:
     """Hold all data for heaps with a single timestamp.
 
     It does not own its memory - the backing store is in :class:`Chunk`. It keeps
@@ -77,13 +77,13 @@ class Frame:
     timestamp
         Zero-dimensional array of dtype ``>u8`` holding the timestamp
     data
-        Payload data for the frame with shape (n_beams,
+        Payload data for the batch with shape (n_beams,
         n_channels_per_substream, spectra_per_heap, COMPLEX).
     channel_offset
         The first frequency channel processed.
     present_ants
         Zero-dimensional array of dtype ``>u8`` holding the number of antennas
-        present in the Frame's input data.
+        present in the Batch's input data.
     """
 
     def __init__(
@@ -120,12 +120,12 @@ class Frame:
 
 class Chunk:
     r"""
-    An array of :class:`Frame`\ s.
+    An array of :class:`Batch`\ es.
 
     Parameters
     ----------
     data
-        Storage for tied-array-channelised-voltage data, with shape (n_frames,
+        Storage for tied-array-channelised-voltage data, with shape (n_batches,
         n_beams, n_channels_per_substream, n_spectra_per_heap, COMPLEX) and
         dtype :const:`SEND_DTYPE`.
     saturated
@@ -134,7 +134,7 @@ class Chunk:
     channel_offset
         The first frequency channel processed.
     timestamp_step
-        Timestamp step between successive :class:`Frame`\ s in a chunk.
+        Timestamp step between successive :class:`Batch`\ es in a chunk.
     """
 
     def __init__(
@@ -145,29 +145,29 @@ class Chunk:
         channel_offset: int,
         timestamp_step: int,
     ) -> None:
-        n_frames = data.shape[0]
+        n_batches = data.shape[0]
         self.data = data
         self.saturated = saturated
 
         self._timestamp = 0
         self._timestamp_step = timestamp_step
-        self._timestamps = (np.arange(n_frames) * self._timestamp_step).astype(IMMEDIATE_DTYPE)
+        self._timestamps = (np.arange(n_batches) * self._timestamp_step).astype(IMMEDIATE_DTYPE)
 
-        self._present_ants = np.zeros(shape=(n_frames,), dtype=IMMEDIATE_DTYPE)
+        self._present_ants = np.zeros(shape=(n_batches,), dtype=IMMEDIATE_DTYPE)
         # NOTE: The future indicates when it is safe to modify the chunk,
         # i.e. it is not being transmitted. At construction there is nothing to
         # wait for, so we mark it ready.
         self.future = asyncio.get_running_loop().create_future()
         self.future.set_result(None)
 
-        self._frames = [
-            Frame(
+        self._batches = [
+            Batch(
                 self._timestamps[i, ...],
                 data[i],
                 channel_offset=channel_offset,
                 present_ants=self._present_ants[i, ...],
             )
-            for i in range(n_frames)
+            for i in range(n_batches)
         ]
 
     @property
@@ -175,7 +175,7 @@ class Chunk:
         """
         Number of antennas present in the current beam sums.
 
-        This is a count for each :class:`Frame` in the chunk. Setting this
+        This is a count for each :class:`Batch` in the chunk. Setting this
         property updates the immediate SPEAD items in the heaps. Much like
         :attr:`timestamp`, this should only be done when :attr:`future`
         is done.
@@ -204,7 +204,7 @@ class Chunk:
 
     @staticmethod
     def _inc_counters(
-        n_frames_sent: int,
+        n_batches_sent: int,
         data_shape: tuple[int, int, int],
         data_dtype: np.dtype,
         enabled: Sequence[bool],
@@ -222,8 +222,8 @@ class Chunk:
 
         Parameters
         ----------
-        n_frames_sent
-            The number of frames transmitted.
+        n_batches_sent
+            The number of batches transmitted.
         data_shape
             The shape of the beam data being transmitted. Expected in the
             format of (n_channels_per_substream, samples_per_spectra, COMPLEX).
@@ -244,19 +244,19 @@ class Chunk:
         """
         if future.cancelled() or future.exception() is not None:
             # Don't update output counters if we didn't successfully transmit the data.
-            n_frames_sent = 0
+            n_batches_sent = 0
         # int casts are because np.prod returns np.int64 which is
         # incompatible with the type annotations for Prometheus.
         # Multiply across dimensions to get total bytes
-        byte_count = int(np.prod(data_shape)) * data_dtype.itemsize * n_frames_sent
+        byte_count = int(np.prod(data_shape)) * data_dtype.itemsize * n_batches_sent
         # Multiply across the first two dimensions to get complex sample count
-        sample_count = int(np.prod(data_shape[:-1])) * n_frames_sent
+        sample_count = int(np.prod(data_shape[:-1])) * n_batches_sent
         for i, output_name in enumerate(output_names):
             clipped = int(saturated[i])
             sensor = sensors[f"{output_name}.beng-clip-cnt"]
             sensor.set_value(sensor.value + clipped, timestamp=sensor_timestamp)
-            if enabled[i] and n_frames_sent != 0:
-                output_heaps_counter.labels(output_name).inc(n_frames_sent)
+            if enabled[i] and n_batches_sent != 0:
+                output_heaps_counter.labels(output_name).inc(n_batches_sent)
                 output_bytes_counter.labels(output_name).inc(byte_count)
                 output_samples_counter.labels(output_name).inc(sample_count)
                 output_clip_counter.labels(output_name).inc(clipped)
@@ -277,24 +277,24 @@ class Chunk:
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         send_futures: list[asyncio.Future] = []
         if n_enabled > 0:
-            for frame, antenna_presence in zip(self._frames, self._present_ants):
+            for batch, antenna_presence in zip(self._batches, self._present_ants):
                 if antenna_presence == 0:
                     # No antennas were present in the received batch of heaps
-                    # This check takes priority as we do not transmit frames
+                    # This check takes priority as we do not transmit batches
                     # that did not have any input data. The updating of the
-                    # frame's :class:`HeapReferenceList` is not time-critical.
+                    # batch's :class:`HeapReferenceList` is not time-critical.
                     continue
-                if frame.tx_enabled_version != send_stream.tx_enabled_version:
-                    frame.tx_heaps = spead2.send.HeapReferenceList(
+                if batch.tx_enabled_version != send_stream.tx_enabled_version:
+                    batch.tx_heaps = spead2.send.HeapReferenceList(
                         [
                             spead2.send.HeapReference(heap, substream_index=i, rate=rate)
-                            for i, (heap, enabled) in enumerate(zip(frame.heaps, send_stream.tx_enabled))
+                            for i, (heap, enabled) in enumerate(zip(batch.heaps, send_stream.tx_enabled))
                             if enabled
                         ]
                     )
-                    frame.tx_enabled_version = send_stream.tx_enabled_version
+                    batch.tx_enabled_version = send_stream.tx_enabled_version
                 send_futures.append(
-                    send_stream.stream.async_send_heaps(frame.tx_heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
+                    send_stream.stream.async_send_heaps(batch.tx_heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
 
             self.future = asyncio.gather(*send_futures)
@@ -302,13 +302,13 @@ class Chunk:
             # TODO: Is it necessary to handle this case?
             self.future = asyncio.create_task(send_stream.stream.async_flush())
 
-        end_timestamp_adc = self._timestamp + self._timestamp_step * len(self._frames)
+        end_timestamp_adc = self._timestamp + self._timestamp_step * len(self._batches)
         end_timestamp_unix = time_converter.adc_to_unix(end_timestamp_adc)
         self.future.add_done_callback(
             functools.partial(
                 self._inc_counters,
                 len(send_futures),  # Increment counters for as many calls to async_send_heaps
-                self.data.shape[2:],  # Get rid of 'frame' and 'beam' dimensions
+                self.data.shape[2:],  # Get rid of 'batch' and 'beam' dimensions
                 self.data.dtype,
                 send_stream.tx_enabled,
                 send_stream.output_names,
@@ -344,8 +344,8 @@ class BSend:
     ----------
     outputs
         Sequence of :class:`.output.BOutput`.
-    frames_per_chunk
-        Number of :class:`Frame`\ s in each transmitted :class:`Chunk`.
+    batches_per_chunk
+        Number of :class:`Batch`\ es in each transmitted :class:`Chunk`.
     n_tx_items
         Number of :class:`Chunk` to create.
     adc_sample_rate, n_channels, n_channels_per_substream, spectra_per_heap, channel_offset
@@ -372,7 +372,7 @@ class BSend:
     def __init__(
         self,
         outputs: Sequence[BOutput],
-        frames_per_chunk: int,
+        batches_per_chunk: int,
         n_tx_items: int,
         n_channels: int,
         n_channels_per_substream: int,
@@ -399,7 +399,7 @@ class BSend:
         self._chunks_queue: asyncio.Queue[Chunk] = asyncio.Queue()
         buffers: list[np.ndarray] = []
 
-        send_shape = (frames_per_chunk, n_beams, n_channels_per_substream, spectra_per_heap, COMPLEX)
+        send_shape = (batches_per_chunk, n_beams, n_channels_per_substream, spectra_per_heap, COMPLEX)
         for _ in range(n_tx_items):
             chunk = Chunk(
                 accel.HostArray(send_shape, SEND_DTYPE, context=context),
@@ -424,7 +424,7 @@ class BSend:
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
             # + 1 below for the descriptor per beam
-            max_heaps=(n_tx_items * frames_per_chunk + 1) * n_beams,
+            max_heaps=(n_tx_items * batches_per_chunk + 1) * n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
         )
         self.stream = stream_factory(stream_config, buffers)

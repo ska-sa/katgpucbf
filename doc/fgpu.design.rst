@@ -534,7 +534,7 @@ From there a number of transformations occur:
    computed (per polarisation) to determine whether any are missing, to
    produce per-spectrum presence flags.
 4. When an output chunk is ready to be sent, the per-spectrum flags are
-   reduced to per-frame flags.
+   reduced to per-batch flags.
 
 .. _fgpu.narrow:
 

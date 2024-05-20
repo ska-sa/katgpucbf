@@ -48,16 +48,16 @@ def beamform_host(
     saturated_high
         Upper bound on saturation count
     """
-    n_frames = in_.shape[0]
+    n_batches = in_.shape[0]
     n_channels = in_.shape[2]
     n_times = in_.shape[3]
     n_beams = len(beam_pols)
-    out = np.zeros((n_frames, n_beams, n_channels, n_times, COMPLEX), np.int8)
+    out = np.zeros((n_batches, n_beams, n_channels, n_times, COMPLEX), np.int8)
     saturated_low = np.zeros(n_beams, np.uint32)
     saturated_high = np.zeros(n_beams, np.uint32)
-    for frame in range(n_frames):
+    for batch in range(n_batches):
         for channel in range(n_channels):
-            in_c = in_[frame, :, channel, ..., 0] + np.complex64(1j) * in_[frame, :, channel, ..., 1]
+            in_c = in_[batch, :, channel, ..., 0] + np.complex64(1j) * in_[batch, :, channel, ..., 1]
             for beam in range(n_beams):
                 p = beam_pols[beam]
                 w = weights[:, beam]
@@ -66,8 +66,8 @@ def beamform_host(
                     # .copy() is added because otherwise we get a warning that np.dot is
                     # more efficient on C-contiguous arrays.
                     accum = np.dot(in_c[:, time, p].copy(), w)
-                    out[frame, beam, channel, time, 0] = quant(accum.real)
-                    out[frame, beam, channel, time, 1] = quant(accum.imag)
+                    out[batch, beam, channel, time, 0] = quant(accum.real)
+                    out[batch, beam, channel, time, 1] = quant(accum.imag)
                     if abs(accum.real) > 126.5 or abs(accum.imag) > 126.5:
                         saturated_high[beam] += 1
                         if abs(accum.real) >= 127.5 or abs(accum.imag) >= 127.5:
@@ -76,7 +76,7 @@ def beamform_host(
 
 
 @pytest.mark.combinations(
-    "n_frames, n_channels, n_times, n_antennas",
+    "n_batches, n_channels, n_times, n_antennas",
     [1, 5],
     [1, 128, 200, 1025],
     [1, 128, 256, 321],
@@ -85,7 +85,7 @@ def beamform_host(
 def test_beamform(
     context: AbstractContext,
     command_queue: AbstractCommandQueue,
-    n_frames: int,
+    n_batches: int,
     n_channels: int,
     n_times: int,
     n_antennas: int,
@@ -95,7 +95,7 @@ def test_beamform(
     n_beams = len(beam_pols)
 
     template = BeamformTemplate(context, beam_pols, n_times)
-    fn = template.instantiate(command_queue, n_frames, n_antennas, n_channels, seed=321, sequence_first=0)
+    fn = template.instantiate(command_queue, n_batches, n_antennas, n_channels, seed=321, sequence_first=0)
 
     fn.ensure_all_bound()
     h_in = fn.buffer("in").empty_like()
@@ -103,8 +103,8 @@ def test_beamform(
     h_saturated = fn.buffer("saturated").empty_like()
     h_weights = fn.buffer("weights").empty_like()
     h_delays = fn.buffer("delays").empty_like()
-    assert h_in.shape == (n_frames, n_antennas, n_channels, n_times, N_POLS, COMPLEX)
-    assert h_out.shape == (n_frames, n_beams, n_channels, n_times, COMPLEX)
+    assert h_in.shape == (n_batches, n_antennas, n_channels, n_times, N_POLS, COMPLEX)
+    assert h_out.shape == (n_batches, n_beams, n_channels, n_times, COMPLEX)
     assert h_saturated.shape == (n_beams,)
     assert h_weights.shape == (n_antennas, n_beams)
     assert h_delays.shape == (n_antennas, n_beams)
@@ -138,7 +138,7 @@ def test_beamform(
     # Ensure that the scale factor on the weights causes some clamping, but
     # not too much. But only do it for larger test cases; in small tests cases
     # it is hard to guarantee this.
-    if n_antennas > 1 and n_frames * n_channels * n_times > 1000:
+    if n_antennas > 1 and n_batches * n_channels * n_times > 1000:
         clamped = np.sum(np.abs(h_out) == 127, axis=(0, 1, 2, 3)) / h_out[..., 0].size
         assert 0.1 < clamped[0] < 0.9  # real
         assert 0.1 < clamped[1] < 0.9  # imag
