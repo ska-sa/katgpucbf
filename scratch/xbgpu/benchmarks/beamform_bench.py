@@ -30,18 +30,18 @@ def main():
     parser.add_argument(
         "--channels-per-substream", type=int, default=16, help="Channels processed by one engine [%(default)s]"
     )
-    parser.add_argument("--spectra-per-heap", type=int, default=256, help="Spectra in each frame [%(default)s]")
-    parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=32, help="Frames per chunk [%(default)s]")
+    parser.add_argument("--spectra-per-heap", type=int, default=256, help="Spectra in each batch [%(default)s]")
+    parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=32, help="Batches per chunk [%(default)s]")
     parser.add_argument("--beams", type=int, default=4, help="Number of dual-pol beams [%(default)s]")
     parser.add_argument("--passes", type=int, default=10000, help="Number of times to repeat the test [%(default)s]")
     args = parser.parse_args()
 
     ctx = katsdpsigproc.accel.create_some_context()
     command_queue = ctx.create_command_queue()
-    template = BeamformTemplate(ctx, [0, 1] * args.beams, n_spectra_per_frame=args.spectra_per_heap)
+    template = BeamformTemplate(ctx, [0, 1] * args.beams, n_spectra_per_batch=args.spectra_per_heap)
     fn = template.instantiate(
         command_queue,
-        n_frames=args.heaps_per_fengine_per_chunk,
+        n_batches=args.heaps_per_fengine_per_chunk,
         n_ants=args.array_size,
         n_channels=args.channels_per_substream,
     )

@@ -26,16 +26,16 @@ def parse_args(args: list[str]) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-class Frame:
+class Batch:
     def __init__(self, timestamp, channels: int, acc_len: int) -> None:
         self.timestamp = timestamp
         self.data = np.empty((channels, acc_len, 2, 2), np.int8)
         self.present = np.zeros(channels, np.bool_)
 
 
-class DisplayFrame:
-    def __init__(self, frame: Frame) -> None:
-        cplex = frame.data.astype(np.float32).view(np.complex64)[..., 0]
+class DisplayBatch:
+    def __init__(self, batch: Batch) -> None:
+        cplex = batch.data.astype(np.float32).view(np.complex64)[..., 0]
         self.mag = np.abs(cplex)
         self.phase = np.where(cplex != 0, np.angle(cplex), np.nan)
 
@@ -69,25 +69,25 @@ class Backend:
             spead2.recv.RingStreamConfig(heaps=32 * substreams),
         )
         self.stream.add_udp_ibv_reader(endpoint_tuples, get_interface_address(interface), buffer_size=64 * 1024 * 1024)
-        self.frames: deque[Frame] = deque()
+        self.batches: deque[Batch] = deque()
         self.last_full_timestamp = -1
         self.server_context = server_context
 
-    def _get_frame(self, timestamp: int) -> Frame | None:
+    def _get_batch(self, timestamp: int) -> Batch | None:
         if timestamp % self.keep_step != 0:
             return None
-        if not self.frames or timestamp > self.frames[-1].timestamp:
-            self.frames.append(Frame(timestamp, self.channels, self.acc_len))
-            if len(self.frames) > 2:
-                self.frames.popleft()
-            return self.frames[-1]
+        if not self.batches or timestamp > self.batches[-1].timestamp:
+            self.batches.append(Batch(timestamp, self.channels, self.acc_len))
+            if len(self.batches) > 2:
+                self.batches.popleft()
+            return self.batches[-1]
         else:
-            for frame in self.frames:
-                if frame.timestamp == timestamp:
-                    return frame
+            for batch in self.batches:
+                if batch.timestamp == timestamp:
+                    return batch
         return None
 
-    def _update_document(self, doc: bokeh.document.document.Document, display: DisplayFrame) -> None:
+    def _update_document(self, doc: bokeh.document.document.Document, display: DisplayBatch) -> None:
         for pol in range(2):
             source = doc.get_model_by_name(f"source{pol}")
             new_data = copy.copy(source.data)
@@ -95,8 +95,8 @@ class Backend:
             new_data["phase"] = [display.phase[..., pol].T]
             source.data = new_data
 
-    async def _update_sessions(self, frame: Frame) -> None:
-        display = await asyncio.get_event_loop().run_in_executor(None, DisplayFrame, frame)
+    async def _update_sessions(self, batch: Batch) -> None:
+        display = await asyncio.get_event_loop().run_in_executor(None, DisplayBatch, batch)
         for sctx in self.server_context.sessions:
             sctx.with_document_locked(self._update_document, sctx.document, display)
 
@@ -117,14 +117,14 @@ class Backend:
                         if item.id == FENG_RAW_ID:
                             data = np.array(item, np.int8, copy=False).reshape(heap_shape)
                 if timestamp is not None and frequency is not None:
-                    frame = self._get_frame(timestamp)
-                    if frame is not None:
+                    batch = self._get_batch(timestamp)
+                    if batch is not None:
                         end = frequency + self.channels_per_substream
-                        frame.data[frequency:end] = data
-                        frame.present[frequency:end] = True
-                        if frame.timestamp > self.last_full_timestamp and np.all(frame.present):
-                            self._last_full_timestamp = frame.timestamp
-                            self.server_context.add_next_tick_callback(functools.partial(self._update_sessions, frame))
+                        batch.data[frequency:end] = data
+                        batch.present[frequency:end] = True
+                        if batch.timestamp > self.last_full_timestamp and np.all(batch.present):
+                            self._last_full_timestamp = batch.timestamp
+                            self.server_context.add_next_tick_callback(functools.partial(self._update_sessions, batch))
 
                 # Allow them to be reclaimed before popping next heap
                 del heap
