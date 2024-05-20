@@ -390,7 +390,7 @@ class XBReceiver:
 
         Either a scalar or a numpy array may be used.
         """
-        return (channel - self.n_chans / 2) * self.bandwidth / self.n_chans + self.center_freq
+        return (channel - self.n_chans / 2) * self.bandwidth / self.n_chans + self.centre_freq
 
     def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:
         """Compute F-Engine gain.
