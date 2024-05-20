@@ -18,7 +18,7 @@
 This module defines the objects that implement an entire GPU XB-Engine pipeline.
 
 The XBEngine comprises multiple Pipeline objects that facilitate output data
-products. Additionally, the RxQueueItem and TxQueueItem objects, used in the
+products. Additionally, the InQueueItem and OutQueueItem objects, used in the
 XBEngine for passing information between different async processing loops,
 are defined here.
 """
@@ -58,7 +58,7 @@ from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, steady_state_timestamp_sensor
-from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_RX_ITEMS, DEFAULT_N_TX_ITEMS, DEFAULT_XPIPELINE_NAME, recv
+from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_IN_ITEMS, DEFAULT_N_OUT_ITEMS, DEFAULT_XPIPELINE_NAME, recv
 from .beamform import BeamformTemplate
 from .bsend import BSend
 from .bsend import make_stream as make_bstream
@@ -73,17 +73,17 @@ _O = TypeVar("_O", bound=Output)
 _T = TypeVar("_T", bound=QueueItem)
 
 
-class RxQueueItem(QueueItem):
+class InQueueItem(QueueItem):
     """
     Extension of the QueueItem for use in receive queues.
 
-    The RxQueueItem holds a reference to the received Chunk because its data is
+    The InQueueItem holds a reference to the received Chunk because its data is
     copied into the GPU buffer asynchronously. Once the GPU processing loop is
     done with the Chunk's data, it hands it back to the receiving loop to reuse
     the resource. It is for this reason that the Chunk's heap presence is
     stored separately.
 
-    The RxQueueItem also holds a reference count of the number of pipelines still
+    The InQueueItem also holds a reference count of the number of pipelines still
     using this item. This is to ensure the item isn't freed before each pipeline
     has had a chance to use the received data.
     """
@@ -100,11 +100,11 @@ class RxQueueItem(QueueItem):
         self.chunk: recv.Chunk | None = None
 
 
-class XTxQueueItem(QueueItem):
+class XOutQueueItem(QueueItem):
     """
     Extension of the QueueItem to track antennas that have missed data.
 
-    The TxQueueItem between the gpu-proc and sender loops needs to carry a
+    The OutQueueItem between the gpu-proc and sender loops needs to carry a
     record of which antennas have missed data at any point in the accumulation
     being processed. This is used to determine whether any output products were
     affected, and have their data zeroed accordingly.
@@ -145,7 +145,7 @@ class XTxQueueItem(QueueItem):
             offset += len(section)
 
 
-class BTxQueueItem(QueueItem):
+class BOutQueueItem(QueueItem):
     """Transmit queue item for the beamformer pipeline.
 
     The `out`, `saturated`, `rand_states`, `weights` and `delays` must have the
@@ -176,7 +176,7 @@ class BTxQueueItem(QueueItem):
 
     .. todo::
 
-        Potentially create (yet another) base class for B- and XTxQueueItems.
+        Potentially create (yet another) base class for B- and XOutQueueItems.
     """
 
     def __init__(
@@ -236,15 +236,15 @@ class Pipeline(Generic[_O, _T]):
         CUDA context for device work.
     """
 
-    # NOTE: n_rx_items and n_tx_items dictate the number of GPU buffers.
+    # NOTE: n_in_item and n_out_items dictate the number of GPU buffers.
     # Setting these values too high results in too much GPU memory being
     # consumed. The quantity of each needs to be sufficient so as not to starve
     # the different processing loops. The low single digits is suitable.
     # These values are not configurable as they have been acceptable for
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
-    n_rx_items = DEFAULT_N_RX_ITEMS
-    n_tx_items = DEFAULT_N_TX_ITEMS
+    n_in_items = DEFAULT_N_IN_ITEMS
+    n_out_items = DEFAULT_N_OUT_ITEMS
 
     def __init__(self, outputs: Sequence[_O], name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.outputs = outputs
@@ -256,35 +256,31 @@ class Pipeline(Generic[_O, _T]):
 
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
-        # - The _rx_item_queue receives items from :meth:`.XBEngine._receiver_loop`
+        # - The _in_queue receives items from :meth:`.XBEngine._receiver_loop`
         #   to be used by :meth:`_gpu_proc_loop`.
-        # - The _tx_item_queue receives items from :meth:`gpu_proc_loop` to be
+        # - The _out_queue receives items from :meth:`gpu_proc_loop` to be
         #   used by :meth:`sender_loop`.
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding free-item queue to ensure that all
         # allocated buffers are in continuous circulation.
-        # NOTE: Pipelines must not place :class:`RxQueueItem`s directly back on
+        # NOTE: Pipelines must not place :class:`InQueueItem`s directly back on
         # the `_rx_free_item_queue` as multiple pipelines will hold
-        # references to a single :class:`RxQueueItem`. Instead, invoke
-        # :meth:`.XBEngine.free_rx_item` to indicate this Pipeline no longer
+        # references to a single :class:`InQueueItem`. Instead, invoke
+        # :meth:`.XBEngine.free_in_item` to indicate this Pipeline no longer
         # holds a reference to the item.
-        self._rx_item_queue: asyncio.Queue[RxQueueItem | None] = engine.monitor.make_queue(
-            f"{name}.rx_item_queue", self.n_rx_items
+        self._in_queue: asyncio.Queue[InQueueItem | None] = engine.monitor.make_queue(
+            f"{name}.in_queue", self.n_in_items
         )
-        self._tx_item_queue: asyncio.Queue[_T | None] = engine.monitor.make_queue(
-            f"{name}.tx_item_queue", self.n_tx_items
-        )
-        self._tx_free_item_queue: asyncio.Queue[_T] = engine.monitor.make_queue(
-            f"{name}.tx_free_item_queue", self.n_tx_items
-        )
+        self._out_queue: asyncio.Queue[_T | None] = engine.monitor.make_queue(f"{name}.out_queue", self.n_out_items)
+        self._out_free_queue: asyncio.Queue[_T] = engine.monitor.make_queue(f"{name}.out_free_queue", self.n_out_items)
 
-    def add_rx_item(self, item: RxQueueItem) -> None:
-        """Append a newly-received :class:`RxQueueItem` to the :attr:`_rx_item_queue`."""
-        self._rx_item_queue.put_nowait(item)
+    def add_in_item(self, item: InQueueItem) -> None:
+        """Append a newly-received :class:`InQueueItem` to the :attr:`_in_queue`."""
+        self._in_queue.put_nowait(item)
 
     def shutdown(self) -> None:
-        """Start a graceful shutdown after the final call to :meth:`add_rx_item`."""
-        self._rx_item_queue.put_nowait(None)
+        """Start a graceful shutdown after the final call to :meth:`add_in_item`."""
+        self._in_queue.put_nowait(None)
 
     @abstractmethod
     async def gpu_proc_loop(self) -> None:
@@ -292,19 +288,19 @@ class Pipeline(Generic[_O, _T]):
 
         This method does the following:
 
-        - Get an RxQueueItem off the rx_item_queue
+        - Get an InQueueItem off the in_queue
         - Ensure it is not a NoneType value (indicating shutdown sequence)
-        - await any outstanding events associated with the RxQueueItem
-        - Apply GPU processing to data in the RxQueueItem
+        - await any outstanding events associated with the InQueueItem
+        - Apply GPU processing to data in the InQueueItem
 
             - Bind input buffer(s) accordingly
 
-        - Obtain a free QueueItem from the tx_free_item_queue
+        - Obtain a free QueueItem from the out_free_queue
 
             - Add event marker to wait for the proc_command_queue
-            - Put the prepared QueueItem on the tx_item_queue
+            - Put the prepared QueueItem on the out_queue
 
-        NOTE: An initial QueueItem needs to be obtained from the tx_free_item_queue
+        NOTE: An initial QueueItem needs to be obtained from the out_free_queue
         for the first round of processing:
 
         - The gpu_proc_loop requires logic to decipher the timestamp of the
@@ -319,7 +315,7 @@ class Pipeline(Generic[_O, _T]):
 
         This method does the following:
 
-        - Get a QueueItem from the tx_item_queue
+        - Get a QueueItem from the out_queue
         - Ensure it is not a NoneType value (indicating shutdown sequence)
         - Wait for events on the item to complete (likely GPU processing)
         - Wait for an available heap buffer from the send_stream
@@ -328,7 +324,7 @@ class Pipeline(Generic[_O, _T]):
             - Wait for the transfer to complete, before
 
         - Transmit heap buffer onto the network
-        - Place the QueueItem back on the tx_free_item_queue once complete
+        - Place the QueueItem back on the out_free_queue once complete
         """
         raise NotImplementedError  # pragma: nocover
 
@@ -338,7 +334,7 @@ class Pipeline(Generic[_O, _T]):
         raise NotImplementedError  # pragma: nocover
 
 
-class BPipeline(Pipeline[BOutput, BTxQueueItem]):
+class BPipeline(Pipeline[BOutput, BOutQueueItem]):
     """Processing pipeline for a collection of :class:`.output.BOutput`."""
 
     def __init__(
@@ -367,14 +363,14 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             sequence_step=engine.n_channels,
         )
         allocator = accel.DeviceAllocator(context=context)
-        for _ in range(self.n_tx_items):
+        for _ in range(self.n_out_items):
             out = self._beamform.slots["out"].allocate(allocator=allocator, bind=False)
             saturated = self._beamform.slots["saturated"].allocate(allocator=allocator, bind=False)
             present = np.zeros(shape=(engine.heaps_per_fengine_per_chunk, engine.n_ants), dtype=bool)
             weights = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["weights"])
             delays = MappedArray.from_slot(vkgdr_handle, context, self._beamform.slots["delays"])
-            tx_item = BTxQueueItem(out, saturated, present, weights, delays)
-            self._tx_free_item_queue.put_nowait(tx_item)
+            out_item = BOutQueueItem(out, saturated, present, weights, delays)
+            self._out_free_queue.put_nowait(out_item)
 
         # These are the original weights, delays and gains as provided by the
         # user, rather than the processed values passed to the kernel.
@@ -388,7 +384,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         self.send_stream = BSend(
             outputs=outputs,
             batches_per_chunk=engine.heaps_per_fengine_per_chunk,
-            n_tx_items=self.n_tx_items,
+            n_out_items=self.n_out_items,
             n_channels=engine.n_channels,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
@@ -470,35 +466,35 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 )
             )
 
-    async def _get_rx_item(self) -> RxQueueItem | None:
-        """Get the next :class:`RxQueueItem`.
+    async def _get_in_item(self) -> InQueueItem | None:
+        """Get the next :class:`InQueueItem`.
 
         This is wrapped in a method so that it can be mocked.
         """
-        return await self._rx_item_queue.get()
+        return await self._in_queue.get()
 
     async def gpu_proc_loop(self) -> None:  # noqa: D102
         while True:
             # Get item from the receiver loop.
             # - Wait for the HtoD transfers to complete, then
             # - Give the chunk back to the receiver for reuse.
-            rx_item = await self._get_rx_item()
-            if rx_item is None:
+            in_item = await self._get_in_item()
+            if in_item is None:
                 break
-            await rx_item.async_wait_for_events()
+            await in_item.async_wait_for_events()
 
-            tx_item = await self._tx_free_item_queue.get()
-            await tx_item.async_wait_for_events()
-            tx_item.reset(rx_item.timestamp)
+            out_item = await self._out_free_queue.get()
+            await out_item.async_wait_for_events()
+            out_item.reset(in_item.timestamp)
 
             # After this point it's too late for set_weights etc to update
             # the weights for this timestamp.
             self._weights_steady = (
-                rx_item.timestamp + self.engine.heaps_per_fengine_per_chunk * self.engine.rx_heap_timestamp_step
+                in_item.timestamp + self.engine.heaps_per_fengine_per_chunk * self.engine.rx_heap_timestamp_step
             )
 
             # Recompute the weights and delays if necessary
-            if tx_item.weights_version != self._weights_version:
+            if out_item.weights_version != self._weights_version:
                 channel_spacing = self.engine.bandwidth_hz / self.engine.n_channels
                 # The user provides a fringe phase for the centre frequency. We
                 # need to adjust that to the target fringe phase for the first
@@ -507,47 +503,47 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
                 fringe_scale = -2 * np.pi * channel_spacing * (self.engine.channel_offset_value - centre_channel)
                 fringe_phase = self._delays.T[1] + fringe_scale * self._delays.T[0]
                 fringe_rotator = np.exp(1j * fringe_phase)
-                tx_item.weights.host[:] = self._weights.T * self._quant_gains * fringe_rotator
+                out_item.weights.host[:] = self._weights.T * self._quant_gains * fringe_rotator
                 # The factor of 2 combines with the factor of pi used by the
                 # kernel to give a factor of 2pi, to convert cycles to radians.
                 # The minus sign is because delaying the wave results in a
                 # decrease in the phase at a fixed time.
-                tx_item.delays.host[:] = -2 * channel_spacing * self._delays.T[0]
-                tx_item.weights_version = self._weights_version
+                out_item.delays.host[:] = -2 * channel_spacing * self._delays.T[0]
+                out_item.weights_version = self._weights_version
 
             # Queue GPU work
-            tx_item.saturated.zero(self._proc_command_queue)
+            out_item.saturated.zero(self._proc_command_queue)
             self._beamform.bind(
                 **{
-                    "in": rx_item.buffer_device,
-                    "out": tx_item.out,
-                    "saturated": tx_item.saturated,
-                    "weights": tx_item.weights.device,
-                    "delays": tx_item.delays.device,
+                    "in": in_item.buffer_device,
+                    "out": out_item.out,
+                    "saturated": out_item.saturated,
+                    "weights": out_item.weights.device,
+                    "delays": out_item.delays.device,
                 }
             )
             self._beamform()
 
-            tx_item.present[:] = rx_item.present
+            out_item.present[:] = in_item.present
 
-            tx_item.add_marker(self._proc_command_queue)
-            self._tx_item_queue.put_nowait(tx_item)
+            out_item.add_marker(self._proc_command_queue)
+            self._out_queue.put_nowait(out_item)
 
-            # Finish with the rx_item
-            rx_item.add_marker(self._proc_command_queue)
-            self.engine.free_rx_item(rx_item)
+            # Finish with the in_item
+            in_item.add_marker(self._proc_command_queue)
+            self.engine.free_in_item(in_item)
         # When the stream is closed, if the sender loop is waiting for a tx item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can
         # stop waiting and exit.
         logger.debug("gpu_proc_loop completed")
-        self._tx_item_queue.put_nowait(None)
+        self._out_queue.put_nowait(None)
 
     async def sender_loop(self) -> None:  # noqa: D102
         # NOTE: This function passes the entire downloaded data to
         # chunk.send, which then takes care of directing data to each beam's
         # output destination.
         while True:
-            item = await self._tx_item_queue.get()
+            item = await self._out_queue.get()
             if item is None:
                 break
             # The CPU doesn't need to wait, but the GPU does to ensure it
@@ -565,7 +561,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
             np.sum(item.present, axis=1, dtype=np.uint64, out=chunk.present_ants)
             chunk.timestamp = item.timestamp
             self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
-            self._tx_free_item_queue.put_nowait(item)
+            self._out_free_queue.put_nowait(item)
 
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
@@ -621,7 +617,7 @@ class BPipeline(Pipeline[BOutput, BTxQueueItem]):
         self._weights_updated()
 
 
-class XPipeline(Pipeline[XOutput, XTxQueueItem]):
+class XPipeline(Pipeline[XOutput, XOutQueueItem]):
     """Processing pipeline for a single baseline-correlation-products stream."""
 
     def __init__(
@@ -655,15 +651,15 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
         )
 
         allocator = accel.DeviceAllocator(context=context)
-        for _ in range(self.n_tx_items):
+        for _ in range(self.n_out_items):
             buffer_device = self.correlation.slots["out_visibilities"].allocate(allocator, bind=False)
             saturated = self.correlation.slots["out_saturated"].allocate(allocator, bind=False)
             present_ants = np.zeros(shape=(engine.n_ants,), dtype=bool)
             present_baselines = MappedArray.from_slot(
                 vkgdr_handle, context, self.correlation.slots["present_baselines"]
             )
-            tx_item = XTxQueueItem(buffer_device, saturated, present_ants, present_baselines)
-            self._tx_free_item_queue.put_nowait(tx_item)
+            out_item = XOutQueueItem(buffer_device, saturated, present_ants, present_baselines)
+            self._out_free_queue.put_nowait(out_item)
 
         self.send_stream = XSend(
             output_name=output.name,
@@ -731,47 +727,47 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
             )
         )
 
-    async def _flush_accumulation(self, tx_item: XTxQueueItem, next_accum: int) -> XTxQueueItem:
-        """Emit the current `tx_item` and prepare a new one."""
-        if tx_item.batches == 0:
+    async def _flush_accumulation(self, out_item: XOutQueueItem, next_accum: int) -> XOutQueueItem:
+        """Emit the current `out_item` and prepare a new one."""
+        if out_item.batches == 0:
             # We never actually started this accumulation. We can just
             # update the timestamp and continue using it.
-            tx_item.timestamp = next_accum * self.timestamp_increment_per_accumulation
-            return tx_item
+            out_item.timestamp = next_accum * self.timestamp_increment_per_accumulation
+            return out_item
 
         # present_ants only takes into account batches that have
         # been seen. If some batches went missing entirely, the
         # whole accumulation is bad.
-        if tx_item.batches != self.output.heap_accumulation_threshold:
-            tx_item.present_ants.fill(False)
+        if out_item.batches != self.output.heap_accumulation_threshold:
+            out_item.present_ants.fill(False)
 
         # Update the sync sensor (converting np.bool_ to Python bool)
-        self.engine.sensors[f"{self.output.name}.rx.synchronised"].value = bool(tx_item.present_ants.all())
+        self.engine.sensors[f"{self.output.name}.rx.synchronised"].value = bool(out_item.present_ants.all())
 
-        tx_item.update_present_baselines()
+        out_item.update_present_baselines()
         self.correlation.reduce()
-        tx_item.add_marker(self._proc_command_queue)
-        self._tx_item_queue.put_nowait(tx_item)
+        out_item.add_marker(self._proc_command_queue)
+        self._out_queue.put_nowait(out_item)
 
         # Prepare for the next accumulation (which might not be
         # contiguous with the previous one).
-        tx_item = await self._tx_free_item_queue.get()
-        await tx_item.async_wait_for_events()
-        tx_item.reset(next_accum * self.timestamp_increment_per_accumulation)
+        out_item = await self._out_free_queue.get()
+        await out_item.async_wait_for_events()
+        out_item.reset(next_accum * self.timestamp_increment_per_accumulation)
         self.correlation.bind(
-            out_visibilities=tx_item.buffer_device,
-            out_saturated=tx_item.saturated,
-            present_baselines=tx_item.present_baselines.device,
+            out_visibilities=out_item.buffer_device,
+            out_saturated=out_item.saturated,
+            present_baselines=out_item.present_baselines.device,
         )
         self.correlation.zero_visibilities()
-        return tx_item
+        return out_item
 
     async def gpu_proc_loop(self) -> None:  # noqa: D102
-        # NOTE: The ratio of rx_items to tx_items is not one-to-one; there are expected
-        # to be many more rx_items in for every tx_item out. For this reason, and in
+        # NOTE: The ratio of in_items to tx_items is not one-to-one; there are expected
+        # to be many more in_items in for every out_item out. For this reason, and in
         # addition to the steps outlined in :meth:`.Pipeline.gpu_proc_loop`, data is
-        # only transferred to a `XTxQueueItem` once sufficient correlations have occurred.
-        rx_item: RxQueueItem | None
+        # only transferred to a `XOutQueueItem` once sufficient correlations have occurred.
+        in_item: InQueueItem | None
 
         def do_correlation() -> None:
             """Apply correlation kernel to all pending batches."""
@@ -780,45 +776,45 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
             if first_batch < last_batch:
                 self.correlation()
                 # Update the present ants tracker one last time
-                assert rx_item is not None
-                tx_item.present_ants[:] &= rx_item.present[first_batch:last_batch, :].all(axis=0)
-                # TODO: NGC-1308 Update the usage of tx_item.batches to check
-                # against rx_item.present, i.e. whether it's actually received
+                assert in_item is not None
+                out_item.present_ants[:] &= in_item.present[first_batch:last_batch, :].all(axis=0)
+                # TODO: NGC-1308 Update the usage of out_item.batches to check
+                # against in_item.present, i.e. whether it's actually received
                 # any data for this batch.
-                tx_item.batches += last_batch - first_batch
+                out_item.batches += last_batch - first_batch
                 self.correlation.first_batch = last_batch
 
-        tx_item = await self._tx_free_item_queue.get()
-        await tx_item.async_wait_for_events()
+        out_item = await self._out_free_queue.get()
+        await out_item.async_wait_for_events()
 
         # Indicate that the timestamp still needs to be filled in.
-        tx_item.timestamp = -1
+        out_item.timestamp = -1
         self.correlation.bind(
-            out_visibilities=tx_item.buffer_device,
-            out_saturated=tx_item.saturated,
-            present_baselines=tx_item.present_baselines.device,
+            out_visibilities=out_item.buffer_device,
+            out_saturated=out_item.saturated,
+            present_baselines=out_item.present_baselines.device,
         )
         self.correlation.zero_visibilities()
         while True:
             # Get item from the receiver function.
             # - Wait for the HtoD transfers to complete, then
             # - Give the chunk back to the receiver for reuse.
-            rx_item = await self._rx_item_queue.get()
-            if rx_item is None:
+            in_item = await self._in_queue.get()
+            if in_item is None:
                 break
-            await rx_item.async_wait_for_events()
+            await in_item.async_wait_for_events()
 
-            current_timestamp = rx_item.timestamp
-            if tx_item.timestamp < 0:
+            current_timestamp = in_item.timestamp
+            if out_item.timestamp < 0:
                 # First heap seen. Round the timestamp down to the previous
                 # accumulation boundary
-                tx_item.timestamp = (
+                out_item.timestamp = (
                     current_timestamp
                     // self.timestamp_increment_per_accumulation
                     * self.timestamp_increment_per_accumulation
                 )
 
-            self.correlation.bind(in_samples=rx_item.buffer_device)
+            self.correlation.bind(in_samples=in_item.buffer_device)
             # Initially no work to do; as each batch is examined, last_batch
             # is extended.
             self.correlation.first_batch = 0
@@ -831,10 +827,10 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
                 # batch. This check is the equivalent of the MeerKAT SKARAB
                 # X-Engine auto-resync logic.
                 current_accum = current_timestamp // self.timestamp_increment_per_accumulation
-                tx_accum = tx_item.timestamp // self.timestamp_increment_per_accumulation
+                tx_accum = out_item.timestamp // self.timestamp_increment_per_accumulation
                 if current_accum != tx_accum:
                     do_correlation()
-                    tx_item = await self._flush_accumulation(tx_item, current_accum)
+                    out_item = await self._flush_accumulation(out_item, current_accum)
                 self.correlation.last_batch = i + 1
                 current_timestamp += self.engine.rx_heap_timestamp_step
 
@@ -844,17 +840,17 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
             # This is mostly a convenience for unit tests, since in practice
             # we'd expect to see more data soon.
             current_accum = current_timestamp // self.timestamp_increment_per_accumulation
-            tx_accum = tx_item.timestamp // self.timestamp_increment_per_accumulation
+            tx_accum = out_item.timestamp // self.timestamp_increment_per_accumulation
             if current_accum != tx_accum:
-                tx_item = await self._flush_accumulation(tx_item, current_accum)
+                out_item = await self._flush_accumulation(out_item, current_accum)
 
-            rx_item.add_marker(self._proc_command_queue)
-            self.engine.free_rx_item(rx_item)
+            in_item.add_marker(self._proc_command_queue)
+            self.engine.free_in_item(in_item)
         # When the stream is closed, if the sender loop is waiting for a tx item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can
         # stop waiting and exit.
         logger.debug("gpu_proc_loop completed")
-        self._tx_item_queue.put_nowait(None)
+        self._out_queue.put_nowait(None)
 
     async def sender_loop(self) -> None:  # noqa: D102
         # NOTE: The transfer from the GPU to the heap buffer and the sending onto
@@ -865,7 +861,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
         old_timestamp = 0
 
         while True:
-            item = await self._tx_item_queue.get()
+            item = await self._out_queue.get()
             if item is None:
                 break
             await item.async_wait_for_events()
@@ -930,7 +926,7 @@ class XPipeline(Pipeline[XOutput, XTxQueueItem]):
                     clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
                 self.send_stream.send_heap(heap)
 
-            await self._tx_free_item_queue.put(item)
+            await self._out_free_queue.put(item)
 
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
@@ -1183,14 +1179,14 @@ class XBEngine(DeviceServer):
         # This queue is extended in the monitor class, allowing for the
         # monitor to track the number of items on the queue.
         # - The XBEngine passes items from the :meth:`_receiver_loop` to each
-        #   pipeline via :meth:`.Pipeline.add_rx_item`.
-        # - Once the each pipeline is finished with an :class:`RxQueueItem`,
+        #   pipeline via :meth:`.Pipeline.add_in_item`.
+        # - Once the each pipeline is finished with an :class:`InQueueItem`,
         #   it must pass it back to the _rx_free_item_queue via
-        #   :meth:`free_rx_item` to ensure that all allocated buffers are in
+        #   :meth:`free_in_item` to ensure that all allocated buffers are in
         #   continuous circulation.
         # NOTE: Too high means too much GPU memory gets allocate
-        self._rx_free_item_queue: asyncio.Queue[RxQueueItem] = monitor.make_queue(
-            "rx_free_item_queue", DEFAULT_N_RX_ITEMS
+        self._rx_free_item_queue: asyncio.Queue[InQueueItem] = monitor.make_queue(
+            "rx_free_item_queue", DEFAULT_N_IN_ITEMS
         )
 
         rx_data_shape = (
@@ -1201,12 +1197,12 @@ class XBEngine(DeviceServer):
             N_POLS,
             COMPLEX,
         )
-        for _ in range(DEFAULT_N_RX_ITEMS):
+        for _ in range(DEFAULT_N_IN_ITEMS):
             # TODO: NGC-1106 update buffer_device dtype once 4-bit mode is supported
             buffer_device = accel.DeviceArray(context, rx_data_shape, dtype=np.int8)
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
-            rx_item = RxQueueItem(buffer_device, present)
-            self._rx_free_item_queue.put_nowait(rx_item)
+            in_item = InQueueItem(buffer_device, present)
+            self._rx_free_item_queue.put_nowait(in_item)
 
         for _ in range(n_free_chunks):
             buf = buffer_device.empty_like()
@@ -1226,8 +1222,8 @@ class XBEngine(DeviceServer):
         self.add_service_task(time_sync_task)
         self._cancel_tasks.append(time_sync_task)
 
-    def free_rx_item(self, item: RxQueueItem) -> None:
-        """Return an RxQueueItem to the free queue if its refcount hits zero."""
+    def free_in_item(self, item: InQueueItem) -> None:
+        """Return an InQueueItem to the free queue if its refcount hits zero."""
         item.refcount -= 1
         if item.refcount == 0:
             # All Pipelines are done with this item
@@ -1238,12 +1234,12 @@ class XBEngine(DeviceServer):
             item.chunk.recycle()
             self._rx_free_item_queue.put_nowait(item)
 
-    async def _add_rx_item(self, item: RxQueueItem) -> None:
-        """Push an :class:`RxQueueItem` to all the pipelines."""
+    async def _add_in_item(self, item: InQueueItem) -> None:
+        """Push an :class:`InQueueItem` to all the pipelines."""
         await self._active_in_sem.acquire()
         item.refcount = len(self._pipelines)
         for pipeline in self._pipelines:
-            pipeline.add_rx_item(item)
+            pipeline.add_in_item(item)
 
     def update_steady_state_timestamp(self, timestamp: int) -> None:
         """Update ``steady-state-timestamp`` sensor to at least `timestamp`."""
@@ -1258,8 +1254,8 @@ class XBEngine(DeviceServer):
         1. Wait for a chunk to be assembled on the receiver.
         2. Get a free rx item off of the _rx_free_item_queue.
         3. Initiate the transfer of the chunk from system memory to the buffer
-           in GPU RAM that belongs to the rx_item.
-        4. Place the rx_item on _rx_item_queue so that it can be processed downstream.
+           in GPU RAM that belongs to the in_item.
+        4. Place the in_item on _in_queue so that it can be processed downstream.
 
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
@@ -1269,7 +1265,7 @@ class XBEngine(DeviceServer):
             self.sensors,
             self.time_converter,
         ):
-            # Get a free rx_item that will contain the GPU buffer to which the
+            # Get a free in_item that will contain the GPU buffer to which the
             # received chunk will be transferred.
             item = await self._rx_free_item_queue.get()
             # First wait for asynchronous GPU work on the buffer.
@@ -1289,12 +1285,12 @@ class XBEngine(DeviceServer):
                 for antenna in range(self.n_ants):
                     if not item.present[heap, antenna]:
                         chunk.data[heap, antenna, ...] = 0
-            # Initiate transfer from received chunk to rx_item buffer.
+            # Initiate transfer from received chunk to in_item buffer.
             item.buffer_device.set_async(self._upload_command_queue, chunk.data)
             item.add_marker(self._upload_command_queue)
 
             # Give the received item to the pipelines' gpu_proc_loop.
-            await self._add_rx_item(item)
+            await self._add_in_item(item)
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
         logger.debug("_receiver_loop completed")

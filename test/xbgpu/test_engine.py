@@ -36,7 +36,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import BPipeline, RxQueueItem, XBEngine, XPipeline
+from katgpucbf.xbgpu.engine import BPipeline, InQueueItem, XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args, parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
@@ -1162,10 +1162,10 @@ class TestEngine:
             )
             assert xbengine.sensors[f"{corrprod_output.name}.xeng-clip-cnt"].value == n_vis
 
-    def _patch_get_rx_item(
+    def _patch_get_in_item(
         self, monkeypatch: pytest.MonkeyPatch, count: int, client: aiokatcp.Client, *request
     ) -> list[int]:
-        """Patch :meth:`~.BPipeline._get_rx_item` to make a request partway through the stream.
+        """Patch :meth:`~.BPipeline._get_in_item` to make a request partway through the stream.
 
         The returned list will be populated with the value of the
         ``steady-state-timestamp`` sensor immediately after executing the
@@ -1173,17 +1173,17 @@ class TestEngine:
         """
         counter = 0
         timestamp = []
-        orig_get_rx_item = BPipeline._get_rx_item
+        orig_get_in_item = BPipeline._get_in_item
 
-        async def get_rx_item(self: BPipeline) -> RxQueueItem | None:
+        async def get_in_item(self: BPipeline) -> InQueueItem | None:
             nonlocal counter
             counter += 1
             if counter == count:
                 await client.request(*request)
                 timestamp.append(await client.sensor_value("steady-state-timestamp", int))
-            return await orig_get_rx_item(self)
+            return await orig_get_in_item(self)
 
-        monkeypatch.setattr(BPipeline, "_get_rx_item", get_rx_item)
+        monkeypatch.setattr(BPipeline, "_get_in_item", get_in_item)
         return timestamp
 
     @DEFAULT_PARAMETERS
@@ -1226,7 +1226,7 @@ class TestEngine:
             ]
 
         request = request_factory(beam_outputs[0].name, n_ants)
-        timestamp_list = self._patch_get_rx_item(monkeypatch, 4, client, *request)
+        timestamp_list = self._patch_get_in_item(monkeypatch, 4, client, *request)
         n_batches = heap_accumulation_threshold[0]
         _, data, _ = await self._send_data(
             mock_recv_streams,

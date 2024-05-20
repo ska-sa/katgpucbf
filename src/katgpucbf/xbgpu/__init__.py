@@ -24,5 +24,5 @@ DEFAULT_XPIPELINE_NAME: Final = "xpipeline"
 DEFAULT_BPIPELINE_NAME: Final = "bpipeline"
 
 # NOTE: Too high means too much GPU memory gets allocated
-DEFAULT_N_RX_ITEMS: Final = 3
-DEFAULT_N_TX_ITEMS: Final = 2
+DEFAULT_N_IN_ITEMS: Final = 3
+DEFAULT_N_OUT_ITEMS: Final = 2

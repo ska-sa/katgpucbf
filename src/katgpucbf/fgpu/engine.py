@@ -150,7 +150,7 @@ def _padded_input_size(size_bytes: int) -> int:
     return dim.required_padded_size()
 
 
-class InItem(QueueItem):
+class InQueueItem(QueueItem):
     """Item for use in input queues.
 
     This Item references GPU memory regions for input samples from both
@@ -258,7 +258,7 @@ class InItem(QueueItem):
         return self.timestamp + self.n_samples
 
 
-class OutItem(QueueItem):
+class OutQueueItem(QueueItem):
     """Item for use in output queues.
 
     This Item references GPU memory regions for output spectra from both
@@ -290,7 +290,7 @@ class OutItem(QueueItem):
     spectra_samples
         Number of ADC samples between spectra.
     timestamp
-        Timestamp of the first spectrum in the `OutItem`.
+        Timestamp of the first spectrum in the `OutQueueItem`.
     """
 
     #: Output data, a collection of spectra, arranged in memory by pol and by heap.
@@ -456,13 +456,19 @@ class Pipeline:
         self.engine = engine
         self.output = output
         self.dig_stats = dig_stats
-        self._in_queue: asyncio.Queue[InItem | None] = engine.monitor.make_queue(f"{output.name}.in_queue", engine.n_in)
-        self._out_queue: asyncio.Queue[OutItem | None] = engine.monitor.make_queue(f"{output.name}.out_queue", n_out)
-        self._out_free_queue: asyncio.Queue[OutItem] = engine.monitor.make_queue(f"{output.name}.out_free_queue", n_out)
+        self._in_queue: asyncio.Queue[InQueueItem | None] = engine.monitor.make_queue(
+            f"{output.name}.in_queue", engine.n_in
+        )
+        self._out_queue: asyncio.Queue[OutQueueItem | None] = engine.monitor.make_queue(
+            f"{output.name}.out_queue", n_out
+        )
+        self._out_free_queue: asyncio.Queue[OutQueueItem] = engine.monitor.make_queue(
+            f"{output.name}.out_free_queue", n_out
+        )
         self._send_free_queue: asyncio.Queue[send.Chunk] = engine.monitor.make_queue(
             f"{output.name}.send_free_queue", n_send
         )
-        self._in_item: InItem | None = None
+        self._in_item: InQueueItem | None = None
 
         # Initialise self._compute
         compute_queue = context.create_command_queue()
@@ -566,7 +572,7 @@ class Pipeline:
         """Initialise the send side of the pipeline."""
         send_chunks: list[send.Chunk] = []
         for _ in range(self._out_free_queue.maxsize):
-            item = OutItem(self.engine.vkgdr_handle, self._compute, self.output.spectra_samples)
+            item = OutQueueItem(self.engine.vkgdr_handle, self._compute, self.output.spectra_samples)
             if use_peerdirect:
                 dev_buffer = item.spectra.buffer.gpudata.as_buffer(item.spectra.buffer.nbytes)
                 # buf is structurally a numpy array, but the pointer in it is a CUDA
@@ -612,19 +618,19 @@ class Pipeline:
         """Number of spectra per output chunk."""
         return self.engine.chunk_jones // self.output.channels
 
-    def add_in_item(self, item: InItem) -> None:
-        """Append a newly-received :class:`~.InItem`."""
+    def add_in_item(self, item: InQueueItem) -> None:
+        """Append a newly-received :class:`~.InQueueItem`."""
         self._in_queue.put_nowait(item)
 
     def shutdown(self) -> None:
         """Start graceful shutdown after the final call to :meth:`add_in_item`."""
         self._in_queue.put_nowait(None)
 
-    async def _fill_in(self) -> InItem | None:
+    async def _fill_in(self) -> InQueueItem | None:
         """Populate :attr:`_in_item` to continue processing.
 
-        Retrieve the next :class:`InItem` from the queue if necessary. Returns the
-        current :class:`InItem`, or ``None`` if there isn't one.
+        Retrieve the next :class:`InQueueItem` from the queue if necessary. Returns the
+        current :class:`InQueueItem`, or ``None`` if there isn't one.
         """
         if self._in_item is None:
             with self.engine.monitor.with_state(f"{self.output.name}.run_processing", "wait in_queue"):
@@ -643,13 +649,13 @@ class Pipeline:
         return self._in_item
 
     def _pop_in(self) -> None:
-        """Remove the current InItem."""
+        """Remove the current InQueueItem."""
         assert self._in_item is not None
         self.engine.free_in_item(self._in_item)
         self._in_item = None
 
-    async def _next_out(self, new_timestamp: int) -> OutItem:
-        """Grab the next free OutItem in the queue."""
+    async def _next_out(self, new_timestamp: int) -> OutQueueItem:
+        """Grab the next free OutQueueItem in the queue."""
         with self.engine.monitor.with_state(f"{self.output.name}.run_processing", "wait out_free_queue"):
             item = await self._out_free_queue.get()
 
@@ -669,7 +675,7 @@ class Pipeline:
         Parameters
         ----------
         new_timestamp
-            The timestamp that will immediately follow the current OutItem.
+            The timestamp that will immediately follow the current OutQueueItem.
         """
         # Round down to a multiple of accs (don't send heap with partial
         # data).
@@ -737,7 +743,7 @@ class Pipeline:
             # `orig_timestamp` is the timestamp of first sample from the input
             # to process in the PFB to produce the output spectrum with
             # `timestamp`. `offset` is the sample index corresponding to
-            # `orig_timestamp` within the InItem.
+            # `orig_timestamp` within the InQueueItem.
             start_coarse_delays = [start_timestamp - orig_timestamp for orig_timestamp in orig_start_timestamps]
             offsets = [orig_timestamp - in_item.timestamp for orig_timestamp in orig_start_timestamps]
             # Convert from original samples to post-DDC samples
@@ -893,7 +899,7 @@ class Pipeline:
         """Get the processed data from the GPU to the Network.
 
         This could be done either with or without PeerDirect. In the
-        non-PeerDirect case, :class:`OutItem` objects are pulled from the
+        non-PeerDirect case, :class:`OutQueueItem` objects are pulled from the
         `_out_queue`. We wait for the events that mark the end of the processing,
         then copy the data to host memory before turning it over to the
         :obj:`sender` for transmission on the network. The "empty" item is then
@@ -1025,7 +1031,7 @@ class Pipeline:
         # always valid, except while _flush_out is waiting to update
         # self._out_item. If a less conservative answer is needed, one would
         # need to track a separate timestamp in the class that is updated
-        # as gains are copied to the OutItem.
+        # as gains are copied to the OutQueueItem.
         self.engine._update_steady_state_timestamp(self._out_item.end_timestamp)
         if np.all(gains == gains[0]):
             # All the values are the same, so it can be reported as a single value
@@ -1214,7 +1220,7 @@ class Engine(aiokatcp.DeviceServer):
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         self.n_samples = self.src_layout.chunk_samples + extra_samples
 
-        self._in_free_queue: asyncio.Queue[InItem] = monitor.make_queue("in_free_queue", self.n_in)
+        self._in_free_queue: asyncio.Queue[InQueueItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(src_affinity, monitor)
 
         # Prevent multiple chunks from being in flight in pipelines at the same
@@ -1236,7 +1242,9 @@ class Engine(aiokatcp.DeviceServer):
 
         context = self._upload_queue.context
         for _ in range(self._in_free_queue.maxsize):
-            self._in_free_queue.put_nowait(InItem(context, self.src_layout, self.n_samples, use_vkgdr=self.use_vkgdr))
+            self._in_free_queue.put_nowait(
+                InQueueItem(context, self.src_layout, self.n_samples, use_vkgdr=self.use_vkgdr)
+            )
 
         data_ringbuffer = ChunkRingbuffer(
             ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
@@ -1340,8 +1348,8 @@ class Engine(aiokatcp.DeviceServer):
         sensor = self.sensors["steady-state-timestamp"]
         sensor.value = max(sensor.value, timestamp)
 
-    def free_in_item(self, item: InItem) -> None:
-        """Return an InItem to the free queue if its refcount hits zero."""
+    def free_in_item(self, item: InQueueItem) -> None:
+        """Return an InQueueItem to the free queue if its refcount hits zero."""
         item.refcount -= 1
         if item.refcount == 0:
             self._active_in_sem.release()
@@ -1367,8 +1375,8 @@ class Engine(aiokatcp.DeviceServer):
         for chunk in chunks:
             chunk.recycle()
 
-    async def _add_in_item(self, item: InItem) -> None:
-        """Push an :class:`InItem` to all the pipelines.
+    async def _add_in_item(self, item: InQueueItem) -> None:
+        """Push an :class:`InQueueItem` to all the pipelines.
 
         This also takes care of computing `present_cumsum` and initialising
         the refcount.
@@ -1381,7 +1389,7 @@ class Engine(aiokatcp.DeviceServer):
         for pipeline in self._pipelines:
             pipeline.add_in_item(item)
 
-    def _copy_tail(self, prev_item: InItem, in_item: InItem | None) -> None:
+    def _copy_tail(self, prev_item: InQueueItem, in_item: InQueueItem | None) -> None:
         """Copy the head of `in_item` to the tail of `prev_item`.
 
         This allows for PFB windows to fit and for some protection against

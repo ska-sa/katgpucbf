@@ -33,7 +33,7 @@ from numpy.typing import ArrayLike
 from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
-from katgpucbf.fgpu.engine import Engine, InItem, Pipeline, generate_ddc_weights, generate_pfb_weights
+from katgpucbf.fgpu.engine import Engine, InQueueItem, Pipeline, generate_ddc_weights, generate_pfb_weights
 from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
 from katgpucbf.fgpu.output import NarrowbandOutput, Output
 from katgpucbf.utils import TimeConverter
@@ -1061,7 +1061,7 @@ class TestEngine:
         counter = 0
         timestamp = []
 
-        async def fill_in(self) -> InItem | None:
+        async def fill_in(self) -> InQueueItem | None:
             if self._in_item is None and self.output.name == output.name:
                 nonlocal counter
                 counter += 1
