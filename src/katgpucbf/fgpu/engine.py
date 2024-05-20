@@ -1108,7 +1108,7 @@ class Engine(aiokatcp.DeviceServer):
         ID of the F-engine indicating which one in the array this is. Included
         in the output heaps so that the X-engine can determine where the data
         fits in.
-    num_ants
+    n_ants
         The number of antennas in the array. Used for numbering heaps so as
         not to collide with other antennas transmitting to the same X-engine.
     chunk_samples
@@ -1163,7 +1163,7 @@ class Engine(aiokatcp.DeviceServer):
         adc_sample_rate: float,
         send_rate_factor: float,
         feng_id: int,
-        num_ants: int,
+        n_ants: int,
         chunk_samples: int,
         chunk_jones: int,
         dig_sample_bits: int,
@@ -1198,7 +1198,7 @@ class Engine(aiokatcp.DeviceServer):
         self._send_rate_factor = send_rate_factor
         self.adc_sample_rate = adc_sample_rate
         self.feng_id = feng_id
-        self.n_ants = num_ants
+        self.n_ants = n_ants
         self.chunk_jones = chunk_jones
         self.default_gain = gain
         self.time_converter = TimeConverter(sync_time, adc_sample_rate)
@@ -1338,7 +1338,7 @@ class Engine(aiokatcp.DeviceServer):
             bandwidth=self.adc_sample_rate * 0.5 / output.decimation,
             send_rate_factor=self._send_rate_factor,
             feng_id=self.feng_id,
-            num_ants=self.n_ants,
+            n_ants=self.n_ants,
             n_data_heaps=n_data_heaps,
             chunks=chunks,
         )

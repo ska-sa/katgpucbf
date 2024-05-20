@@ -125,7 +125,7 @@ def cmult_and_scale(a, b, c, out):
 @njit
 def generate_expected_corrprods(
     batch_start_idx: int,
-    num_batches: int,
+    n_batches: int,
     channels: int,
     antennas: int,
     n_spectra_per_heap: int,
@@ -139,7 +139,7 @@ def generate_expected_corrprods(
     """
     baselines = antennas * (antennas + 1) * 2
     output_array = np.zeros((channels, baselines, COMPLEX), dtype=np.int32)
-    for b in range(batch_start_idx, batch_start_idx + num_batches):
+    for b in range(batch_start_idx, batch_start_idx + n_batches):
         for c in range(channels):
             # This is allocated as int32 so that cmult_and_scale won't overflow. The actual
             # stored values are in the range -127..127.
@@ -855,8 +855,8 @@ class TestEngine:
     @pytest.mark.combinations(
         "n_ants, n_channels, n_jones_per_batch, missing_antenna, heap_accumulation_threshold",
         test_parameters.array_size,
-        test_parameters.num_channels,
-        test_parameters.num_jones_per_batch,
+        test_parameters.n_channels,
+        test_parameters.n_jones_per_batch,
         [None, 0, 3],
         [(3, 7), (4, 8), (5, 9)],
         filter=valid_end_to_end_combination,

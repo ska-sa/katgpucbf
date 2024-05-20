@@ -124,7 +124,7 @@ def send_streams(
             bandwidth=0.5 * ADC_SAMPLE_RATE,
             send_rate_factor=0.0,  # Just send as fast as possible
             feng_id=FENG_ID,
-            num_ants=64,
+            n_ants=64,
             n_data_heaps=N_CHUNKS * N_BATCHES * N_SUBSTREAMS,
             chunks=chunks,
         )

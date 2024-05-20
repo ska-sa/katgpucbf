@@ -250,7 +250,7 @@ def make_streams(
     bandwidth: float,
     send_rate_factor: float,
     feng_id: int,
-    num_ants: int,
+    n_ants: int,
     n_data_heaps: int,
     chunks: Sequence[Chunk],
 ) -> list["spead2.send.asyncio.AsyncStream"]:
@@ -299,9 +299,9 @@ def make_streams(
     for i, stream in enumerate(streams):
         # Ensure that streams do not interfere with each other or with those of
         # other F-engines. This assumes that there are at most 256
-        # interfaces. IDs may get reused after 2^40/num_ants heaps, which should
+        # interfaces. IDs may get reused after 2^40/n_ants heaps, which should
         # be much larger than a receiver's window.
-        stream.set_cnt_sequence((i << 40) + feng_id, num_ants)
+        stream.set_cnt_sequence((i << 40) + feng_id, n_ants)
     # Referencing the labels causes them to be created, in advance of data
     # actually being transmitted.
     output_heaps_counter.labels(output_name)
