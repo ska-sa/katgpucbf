@@ -233,7 +233,7 @@ class XBReceiver:
         self.sync_time = cbf.sensors[f"{acv_name}.sync-time"].value
         self.scale_factor_timestamp = cbf.sensors[f"{acv_name}.scale-factor-timestamp"].value
         self.bandwidth = cbf.sensors[f"{acv_name}.bandwidth"].value
-        self.centre_freq = cbf.sensors[f"{acv_name}.centre-freq"].value
+        self.center_freq = cbf.sensors[f"{acv_name}.center-freq"].value
         self.multicast_endpoints = [
             [
                 (endpoint.host, endpoint.port)
@@ -390,7 +390,7 @@ class XBReceiver:
 
         Either a scalar or a numpy array may be used.
         """
-        return (channel - self.n_chans / 2) * self.bandwidth / self.n_chans + self.centre_freq
+        return (channel - self.n_chans / 2) * self.bandwidth / self.n_chans + self.center_freq
 
     def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:
         """Compute F-Engine gain.

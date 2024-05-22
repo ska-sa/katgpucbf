@@ -172,7 +172,7 @@ async def test_delay_enable_disable(
     # One might expect it to be pi radians, but that ignores the implicit
     # phase adjustment that ensures the centre channel has zero phase.
     with check:
-        assert phase == pytest.approx(math.pi * (freq - receiver.centre_freq) / freq, abs=np.deg2rad(1))
+        assert phase == pytest.approx(math.pi * (freq - receiver.center_freq) / freq, abs=np.deg2rad(1))
 
     pdf_report.step("Check that compensation can be disabled.")
     await set_delays(["0,0:0,0"] * (2 * receiver.n_ants))
@@ -389,7 +389,7 @@ async def _test_delay_phase_fixed(
         expected = delay_phase(receiver, residual) + phase
         # The delay in the dsim will affect the phase of the centre frequency,
         # which the delay compensation won't correct.
-        expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.centre_freq
+        expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.center_freq
         check_phases(pdf_report, actual[:, bl_idx], expected, caption)
 
 
