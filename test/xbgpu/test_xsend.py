@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -97,11 +97,11 @@ class TestXSend:
             np.testing.assert_equal(items["xeng_raw"].value, i)
 
     @pytest.mark.combinations(
-        "num_ants, num_channels",
+        "n_ants, n_channels",
         test_parameters.array_size,
-        test_parameters.num_channels,
+        test_parameters.n_channels,
     )
-    async def test_send_simple(self, context: AbstractContext, num_ants: int, num_channels: int) -> None:
+    async def test_send_simple(self, context: AbstractContext, n_ants: int, n_channels: int) -> None:
         """
         Test :class:`katgpucbf.xbgpu.xsend.XSend`.
 
@@ -127,25 +127,25 @@ class TestXSend:
         ----------
         context
             Device context for allocating buffers.
-        num_ants
+        n_ants
             The number of antennas that have been correlated.
-        num_channels
+        n_channels
             The number of frequency channels out of the FFT. NB: This is not the
             number of FFT channels per stream. The number of channels per stream is
             calculated from this value.
         """
         # Get a realistic number of engines: round n_ants*4 up to the next power of 2.
         n_engines = 1
-        while n_engines < num_ants * 4:
+        while n_engines < n_ants * 4:
             n_engines *= 2
-        n_channels_per_substream = num_channels // n_engines
-        n_baselines = (num_ants + 1) * (num_ants) * 2
+        n_channels_per_substream = n_channels // n_engines
+        n_baselines = (n_ants + 1) * (n_ants) * 2
 
         queue = spead2.InprocQueue()
         send_stream = XSend(
             output_name="test",
-            n_ants=num_ants,
-            n_channels=num_channels,
+            n_ants=n_ants,
+            n_channels=n_channels,
             n_channels_per_substream=n_channels_per_substream,
             dump_interval_s=0.0,  # Just send as fast as possible to speed up the test
             send_rate_factor=0,

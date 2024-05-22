@@ -184,7 +184,7 @@ def make_heap(
     be transmitted by reference, so it can be updated in place to change the
     stored timestamp.
     """
-    # The heap setup should be equivalent to katgpucbf.fgpu.send.Frame
+    # The heap setup should be equivalent to katgpucbf.fgpu.send.Batch
     heap = spead2.send.Heap(flavour=spead.FLAVOUR)
     heap.repeat_pointers = True
     heap.add_item(spead.make_immediate(spead.TIMESTAMP_ID, timestamp))
@@ -250,23 +250,23 @@ class Sender:
         )
         self.timestamp_step = args.samples_between_spectra * n_spectra_per_heap
         self.timestamps = np.empty(QUEUE_DEPTH, spead.IMMEDIATE_DTYPE)
-        self.frames: list[spead2.send.HeapReferenceList] = []
+        self.batches: list[spead2.send.HeapReferenceList] = []
         for i in range(QUEUE_DEPTH):
-            frame_heaps = []
+            batch_heaps = []
             for j in range(args.array_size):
                 payload = self.data[i, j]
                 make_heap_payload(payload, i, j, args.array_size)
                 # The ... makes numpy return a 0d array instead of a scalar
-                frame_heaps.append(
+                batch_heaps.append(
                     make_heap(
                         self.timestamps[i, ...], j, channel_offset=idx * args.channels_per_substream, payload=payload
                     )
                 )
-            self.frames.append(spead2.send.HeapReferenceList(frame_heaps))
+            self.batches.append(spead2.send.HeapReferenceList(batch_heaps))
         self.stream = make_stream(args, idx, self.data)
         self.time_error_gauge = time_error_gauge.labels(str(idx))
-        self.frame_heaps = args.array_size
-        self.frame_bytes = self.data[0].nbytes
+        self.batch_heaps = args.array_size
+        self.batch_bytes = self.data[0].nbytes
         # Actual sync time will be filled in by run().
         self.time_converter = TimeConverter(0.0, args.adc_sample_rate)
         self.descriptor_heap = make_descriptor_heap(
@@ -278,8 +278,8 @@ class Sender:
     def _update_metrics(self, end_timestamp: int, future: asyncio.Future) -> None:
         end_time = self.time_converter.adc_to_unix(end_timestamp)
         self.time_error_gauge.set(time.time() - end_time)
-        output_heaps_counter.inc(self.frame_heaps)
-        output_bytes_counter.inc(self.frame_bytes)
+        output_heaps_counter.inc(self.batch_heaps)
+        output_bytes_counter.inc(self.batch_bytes)
 
     async def run(self, sync_time: float, run_once: bool) -> None:
         """Send heaps until cancelled."""
@@ -289,9 +289,9 @@ class Sender:
             futures[i].set_result(0)  # Make the future ready
         timestamp = 0
         for idx in itertools.cycle(range(QUEUE_DEPTH)):
-            await futures[idx]  # Wait for previous transmission of this frame
+            await futures[idx]  # Wait for previous transmission of this batch
             self.timestamps[idx] = timestamp
-            futures[idx] = self.stream.async_send_heaps(self.frames[idx], spead2.send.GroupMode.ROUND_ROBIN)
+            futures[idx] = self.stream.async_send_heaps(self.batches[idx], spead2.send.GroupMode.ROUND_ROBIN)
             timestamp += self.timestamp_step
             if run_once:
                 break

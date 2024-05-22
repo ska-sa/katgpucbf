@@ -21,7 +21,7 @@
 # run.
 array_size = [1, 3, 4, 19, 33, 64, 80]
 
-num_jones_per_batch = [2**20]
+n_jones_per_batch = [2**20]
 
 # Number of FFT channels out of the F-Engine
-num_channels = [1024, 8192, 32768]
+n_channels = [1024, 8192, 32768]

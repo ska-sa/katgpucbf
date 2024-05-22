@@ -1,7 +1,7 @@
 # noqa: D104
 
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2021, 2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -24,5 +24,5 @@ DEFAULT_XPIPELINE_NAME: Final = "xpipeline"
 DEFAULT_BPIPELINE_NAME: Final = "bpipeline"
 
 # NOTE: Too high means too much GPU memory gets allocated
-DEFAULT_N_RX_ITEMS: Final = 3
-DEFAULT_N_TX_ITEMS: Final = 2
+DEFAULT_N_IN_ITEMS: Final = 3
+DEFAULT_N_OUT_ITEMS: Final = 2

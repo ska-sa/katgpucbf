@@ -485,7 +485,7 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
         adc_sample_rate=args.adc_sample_rate,
         send_rate_factor=args.send_rate_factor,
         feng_id=args.feng_id,
-        num_ants=args.array_size,
+        n_ants=args.array_size,
         chunk_samples=args.src_chunk_samples,
         chunk_jones=chunk_jones,
         dig_sample_bits=args.dig_sample_bits,

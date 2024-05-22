@@ -36,7 +36,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import BPipeline, RxQueueItem, XBEngine, XPipeline
+from katgpucbf.xbgpu.engine import BPipeline, InQueueItem, XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args, parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
@@ -54,7 +54,7 @@ SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 # Mark that can be applied to a test that just needs one set of parameters
 DEFAULT_PARAMETERS = pytest.mark.parametrize(
-    "n_ants, n_channels_total, n_jones_per_batch, heap_accumulation_threshold",
+    "n_ants, n_channels, n_jones_per_batch, heap_accumulation_threshold",
     [(4, 1024, 262144, [300, 300])],
 )
 
@@ -125,7 +125,7 @@ def cmult_and_scale(a, b, c, out):
 @njit
 def generate_expected_corrprods(
     batch_start_idx: int,
-    num_batches: int,
+    n_batches: int,
     channels: int,
     antennas: int,
     n_spectra_per_heap: int,
@@ -139,7 +139,7 @@ def generate_expected_corrprods(
     """
     baselines = antennas * (antennas + 1) * 2
     output_array = np.zeros((channels, baselines, COMPLEX), dtype=np.int32)
-    for b in range(batch_start_idx, batch_start_idx + num_batches):
+    for b in range(batch_start_idx, batch_start_idx + n_batches):
         for c in range(channels):
             # This is allocated as int32 so that cmult_and_scale won't overflow. The actual
             # stored values are in the range -127..127.
@@ -658,7 +658,7 @@ class TestEngine:
             corrprod_output, where each array has shape
             (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
         beam_results
-            Beamformer output, with shape (n_beams, n_frames,
+            Beamformer output, with shape (n_beams, n_batches,
             n_channels_per_substream, n_spectra_per_heap, COMPLEX).
         acc_indices
             List of accumulation indices for each corrprod_output.
@@ -776,25 +776,25 @@ class TestEngine:
         return n_engines
 
     @pytest.fixture
-    def n_channels_per_substream(self, n_channels_total: int, n_engines: int) -> int:  # noqa: D102
-        return n_channels_total // n_engines
+    def n_channels_per_substream(self, n_channels: int, n_engines: int) -> int:  # noqa: D102
+        return n_channels // n_engines
 
     @pytest.fixture
-    def n_spectra_per_heap(self, n_channels_total: int, n_jones_per_batch: int) -> int:  # noqa: D102
-        return n_jones_per_batch // n_channels_total
+    def n_spectra_per_heap(self, n_channels: int, n_jones_per_batch: int) -> int:  # noqa: D102
+        return n_jones_per_batch // n_channels
 
     @pytest.fixture
-    def n_samples_between_spectra(self, n_channels_total: int) -> int:  # noqa: D102
+    def n_samples_between_spectra(self, n_channels: int) -> int:  # noqa: D102
         # NOTE: Multiply by 8 to account for a decimation factor in the
         # Narrowband case. It is also included to ensure we don't rely on the
-        # assumption that `n_samples_between_spectra == 2 * n_channels_total`.
-        return 2 * n_channels_total * 8
+        # assumption that `n_samples_between_spectra == 2 * n_channels`.
+        return 2 * n_channels * 8
 
     @pytest.fixture
     def engine_arglist(
         self,
         n_ants: int,
-        n_channels_total: int,
+        n_channels: int,
         n_channels_per_substream: int,
         frequency: int,
         n_samples_between_spectra: int,
@@ -807,7 +807,7 @@ class TestEngine:
             "--katcp-port=0",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--array-size={n_ants}",
-            f"--channels={n_channels_total}",
+            f"--channels={n_channels}",
             f"--channels-per-substream={n_channels_per_substream}",
             f"--samples-between-spectra={n_samples_between_spectra}",
             f"--channel-offset-value={frequency}",
@@ -853,10 +853,10 @@ class TestEngine:
         await client.wait_closed()
 
     @pytest.mark.combinations(
-        "n_ants, n_channels_total, n_jones_per_batch, missing_antenna, heap_accumulation_threshold",
+        "n_ants, n_channels, n_jones_per_batch, missing_antenna, heap_accumulation_threshold",
         test_parameters.array_size,
-        test_parameters.num_channels,
-        test_parameters.num_jones_per_batch,
+        test_parameters.n_channels,
+        test_parameters.n_jones_per_batch,
         [None, 0, 3],
         [(3, 7), (4, 8), (5, 9)],
         filter=valid_end_to_end_combination,
@@ -869,7 +869,7 @@ class TestEngine:
         client: aiokatcp.Client,
         n_ants: int,
         n_spectra_per_heap: int,
-        n_channels_total: int,
+        n_channels: int,
         n_channels_per_substream: int,
         frequency: int,
         n_samples_between_spectra: int,
@@ -1065,7 +1065,7 @@ class TestEngine:
             missing_antenna=missing_antenna,
         )
 
-        channel_spacing = xbengine.bandwidth_hz / xbengine.n_channels_total
+        channel_spacing = xbengine.bandwidth / xbengine.n_channels
         expected_beams, expected_beam_saturated_low, expected_beam_saturated_high = generate_expected_beams(
             np.asarray(test_batch_indices),
             n_channels_per_substream,
@@ -1077,7 +1077,7 @@ class TestEngine:
             delays=delays,
             quant_gains=quant_gains,
             channel_spacing=channel_spacing,
-            centre_channel=n_channels_total // 2 - frequency,
+            centre_channel=n_channels // 2 - frequency,
         )
         # assert_allclose converts to float, which bloats memory usage.
         # To keep it manageable, compare a batch at a time.
@@ -1162,10 +1162,10 @@ class TestEngine:
             )
             assert xbengine.sensors[f"{corrprod_output.name}.xeng-clip-cnt"].value == n_vis
 
-    def _patch_get_rx_item(
+    def _patch_get_in_item(
         self, monkeypatch: pytest.MonkeyPatch, count: int, client: aiokatcp.Client, *request
     ) -> list[int]:
-        """Patch :meth:`~.BPipeline._get_rx_item` to make a request partway through the stream.
+        """Patch :meth:`~.BPipeline._get_in_item` to make a request partway through the stream.
 
         The returned list will be populated with the value of the
         ``steady-state-timestamp`` sensor immediately after executing the
@@ -1173,17 +1173,17 @@ class TestEngine:
         """
         counter = 0
         timestamp = []
-        orig_get_rx_item = BPipeline._get_rx_item
+        orig_get_in_item = BPipeline._get_in_item
 
-        async def get_rx_item(self: BPipeline) -> RxQueueItem | None:
+        async def get_in_item(self: BPipeline) -> InQueueItem | None:
             nonlocal counter
             counter += 1
             if counter == count:
                 await client.request(*request)
                 timestamp.append(await client.sensor_value("steady-state-timestamp", int))
-            return await orig_get_rx_item(self)
+            return await orig_get_in_item(self)
 
-        monkeypatch.setattr(BPipeline, "_get_rx_item", get_rx_item)
+        monkeypatch.setattr(BPipeline, "_get_in_item", get_in_item)
         return timestamp
 
     @DEFAULT_PARAMETERS
@@ -1226,7 +1226,7 @@ class TestEngine:
             ]
 
         request = request_factory(beam_outputs[0].name, n_ants)
-        timestamp_list = self._patch_get_rx_item(monkeypatch, 4, client, *request)
+        timestamp_list = self._patch_get_in_item(monkeypatch, 4, client, *request)
         n_batches = heap_accumulation_threshold[0]
         _, data, _ = await self._send_data(
             mock_recv_streams,

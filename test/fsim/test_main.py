@@ -95,10 +95,10 @@ async def test_sender(
     This does not check the payload values, since they're largely irrelevant to
     how fsim is used.
     """
-    frames = 20
+    batches = 20
     ig = spead2.ItemGroup()
-    for i in range(frames):
-        seen = set()  # Antennas seen this frame
+    for i in range(batches):
+        seen = set()  # Antennas seen this batch
         for _ in range(args.array_size):
             while not (updated := ig.update(await mock_stream.get())):  # Loop until non-descriptor
                 pass

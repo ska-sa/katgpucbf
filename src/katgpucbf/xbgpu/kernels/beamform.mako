@@ -59,18 +59,18 @@ DEVICE_FN float dither(GLOBAL curandStateXORWOW_t *state)
 
 // Each thread computes all beams for one (channel, time)
 KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
-    GLOBAL char2 * RESTRICT out,             // shape frame, beam, channel, time
+    GLOBAL char2 * RESTRICT out,             // shape batch, beam, channel, time
     GLOBAL unsigned int * RESTRICT out_saturated,    // shape beam
-    GLOBAL const char4 * RESTRICT in,        // shape frame, antenna, channel, time, pol
+    GLOBAL const char4 * RESTRICT in,        // shape batch, antenna, channel, time, pol
     GLOBAL const cplx * RESTRICT weights,    // shape antenna, beam, tightly packed
     GLOBAL const float * RESTRICT delays,    // shape antenna, beam, tightly packed
-    GLOBAL curandStateXORWOW_t * RESTRICT rand_state,  // shape frame, channel, time (packed)
+    GLOBAL curandStateXORWOW_t * RESTRICT rand_state,  // shape batch, channel, time (packed)
     int out_stride,                          // elements between channels
     int out_beam_stride,                     // elements between beams
-    int out_frame_stride,                    // elements between frames
+    int out_batch_stride,                    // elements between batches
     int in_stride,                           // elements between channels
     int in_antenna_stride,                   // elements between antennas
-    int in_frame_stride,                     // elements between frames
+    int in_batch_stride,                     // elements between batches
     int n_ants,
     int n_spectra
 )
@@ -88,16 +88,16 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     const int lid = get_local_id(0);
     const int spectrum = get_global_id(0);
     const int channel = get_global_id(1);
-    const int frame = get_global_id(2);
+    const int batch = get_global_id(2);
     /* Whether this thread works on actual input/output values. Some work
      * items will hang off the end of the data but need to keep running to
      * participate in the coefficient calculations.
      */
     const bool valid = (spectrum < n_spectra);
     // Point to the first input/output handled by this work item
-    in += frame * in_frame_stride + channel * in_stride + spectrum;
-    out += frame * out_frame_stride + channel * out_stride + spectrum;
-    rand_state += (frame * get_num_groups(1) + channel) * n_spectra + spectrum;
+    in += batch * in_batch_stride + channel * in_stride + spectrum;
+    out += batch * out_batch_stride + channel * out_stride + spectrum;
+    rand_state += (batch * get_num_groups(1) + channel) * n_spectra + spectrum;
 
     /* It's critical that this loop is unrolled, so that b_batch_size is known at
      * compile time.
