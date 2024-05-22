@@ -36,8 +36,8 @@ from katgpucbf.xbgpu.output import BOutput
 from . import test_parameters
 
 BATCHES_PER_CHUNK: Final[int] = 5
-N_OUT_ITEMS: Final[int] = 2
-TX_HEAPS_PER_SUBSTREAM: Final[int] = N_OUT_ITEMS * BATCHES_PER_CHUNK
+N_CHUNKS: Final[int] = 2
+TX_HEAPS_PER_SUBSTREAM: Final[int] = N_CHUNKS * BATCHES_PER_CHUNK
 
 
 @pytest.fixture
@@ -79,7 +79,7 @@ class TestBSend:
         """Send a fixed number of heaps.
 
         More specifically, in addition to a descriptor heap per substream, send
-        `N_OUT_ITEMS` Chunks, each of which contain `BATCHES_PER_CHUNK` heaps. The
+        `N_CHUNKS` Chunks, each of which contain `BATCHES_PER_CHUNK` heaps. The
         first Batch of each Chunk is dropped as per the formulation of the
         Chunk's `present_ants` attribute. This is done in order to simulate and
         test handling data missing at the receiver.
@@ -95,7 +95,7 @@ class TestBSend:
         -------
         data
             Array of shape
-            (N_OUT_ITEMS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
+            (N_CHUNKS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
         """
         # Send the descriptors as the recv_stream object needs it to
         # interpret the received heaps correctly.
@@ -106,12 +106,12 @@ class TestBSend:
             )
 
         data = np.zeros(
-            shape=(N_OUT_ITEMS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
+            shape=(N_CHUNKS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
             dtype=SEND_DTYPE,
         )
 
         rng = np.random.default_rng(seed=1)
-        for i in range(N_OUT_ITEMS):
+        for i in range(N_CHUNKS):
             # Get a free chunk - there is not always a free one available. This
             # function blocks until one is available.
             chunk = await send_stream.get_free_chunk()
@@ -157,7 +157,7 @@ class TestBSend:
         ----------
         data
             Random data generated during data transmission, of shape
-            - (N_OUT_ITEMS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
+            - (N_CHUNKS, BATCHES_PER_CHUNK, len(outputs), n_channels_per_substream, n_spectra_per_heap, COMPLEX)
         queues
             List of :class:`spead2.InprocQueue` used to transmit heaps
             in :meth:`_send_data`.
@@ -250,7 +250,7 @@ class TestBSend:
         send_stream = BSend(
             outputs=outputs,
             batches_per_chunk=BATCHES_PER_CHUNK,
-            n_out_items=N_OUT_ITEMS,
+            n_chunks=N_CHUNKS,
             n_channels=n_channels,
             n_channels_per_substream=n_channels_per_substream,
             spectra_per_heap=n_spectra_per_heap,

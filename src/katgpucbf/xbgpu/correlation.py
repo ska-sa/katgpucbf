@@ -130,7 +130,7 @@ class CorrelationTemplate:
                 f"-DNR_RECEIVERS={self.n_ants}",
                 f"-DNR_RECEIVERS_PER_BLOCK={self._n_ants_per_block}",
                 f"-DNR_BITS={self.input_sample_bits}",
-                f"-DNR_CHANNELS_PER_SUBSTREAM={self.n_channels_per_substream}",
+                f"-DNR_CHANNELS={self.n_channels_per_substream}",
                 f"-DNR_SAMPLES_PER_CHANNEL={self.n_spectra_per_heap}",
                 f"-DNR_POLARIZATIONS={N_POLS}",
                 "-DCUSTOM_STORE_VISIBILITY=1",

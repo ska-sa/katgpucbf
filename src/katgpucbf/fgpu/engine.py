@@ -290,7 +290,7 @@ class OutQueueItem(QueueItem):
     spectra_samples
         Number of ADC samples between spectra.
     timestamp
-        Timestamp of the first spectrum in the `OutQueueItem`.
+        Timestamp of the first spectrum in the :class:`OutQueueItem`.
     """
 
     #: Output data, a collection of spectra, arranged in memory by pol and by heap.

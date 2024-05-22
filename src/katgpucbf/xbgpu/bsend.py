@@ -346,8 +346,8 @@ class BSend:
         Sequence of :class:`.output.BOutput`.
     batches_per_chunk
         Number of :class:`Batch`\ es in each transmitted :class:`Chunk`.
-    n_out_items
-        Number of :class:`Chunk` to create.
+    n_chunks
+        Number of :class:`Chunk`\ s to create.
     adc_sample_rate, n_channels, n_channels_per_substream, spectra_per_heap, channel_offset
         See :class:`.XBEngine` for further information.
     timestamp_step
@@ -373,7 +373,7 @@ class BSend:
         self,
         outputs: Sequence[BOutput],
         batches_per_chunk: int,
-        n_out_items: int,
+        n_chunks: int,
         n_channels: int,
         n_channels_per_substream: int,
         spectra_per_heap: int,
@@ -400,7 +400,7 @@ class BSend:
         buffers: list[np.ndarray] = []
 
         send_shape = (batches_per_chunk, n_beams, n_channels_per_substream, spectra_per_heap, COMPLEX)
-        for _ in range(n_out_items):
+        for _ in range(n_chunks):
             chunk = Chunk(
                 accel.HostArray(send_shape, SEND_DTYPE, context=context),
                 accel.HostArray((n_beams,), np.uint32, context=context),
@@ -424,7 +424,7 @@ class BSend:
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + BSend.header_size,
             # + 1 below for the descriptor per beam
-            max_heaps=(n_out_items * batches_per_chunk + 1) * n_beams,
+            max_heaps=(n_chunks * batches_per_chunk + 1) * n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
         )
         self.stream = stream_factory(stream_config, buffers)

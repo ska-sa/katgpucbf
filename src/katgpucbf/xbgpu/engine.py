@@ -18,9 +18,8 @@
 This module defines the objects that implement an entire GPU XB-Engine pipeline.
 
 The XBEngine comprises multiple Pipeline objects that facilitate output data
-products. Additionally, the InQueueItem and OutQueueItem objects, used in the
-XBEngine for passing information between different async processing loops,
-are defined here.
+products. Additionally, several subclasses of :class:`.QueueItem` are defined
+for passing data between parts of the engine.
 """
 
 import asyncio
@@ -104,7 +103,7 @@ class XOutQueueItem(QueueItem):
     """
     Extension of the QueueItem to track antennas that have missed data.
 
-    The OutQueueItem between the gpu-proc and sender loops needs to carry a
+    The XOutQueueItem between the gpu-proc and sender loops needs to carry a
     record of which antennas have missed data at any point in the accumulation
     being processed. This is used to determine whether any output products were
     affected, and have their data zeroed accordingly.
@@ -263,8 +262,8 @@ class Pipeline(Generic[_O, _T]):
         # Once the destination function is finished with an item, it will pass
         # it back to the corresponding free-item queue to ensure that all
         # allocated buffers are in continuous circulation.
-        # NOTE: Pipelines must not place :class:`InQueueItem`s directly back on
-        # the `_rx_free_item_queue` as multiple pipelines will hold
+        # NOTE: Pipelines must not place :class:`InQueueItem`\ s directly back on
+        # the `_in_free_queue` as multiple pipelines will hold
         # references to a single :class:`InQueueItem`. Instead, invoke
         # :meth:`.XBEngine.free_in_item` to indicate this Pipeline no longer
         # holds a reference to the item.
@@ -381,10 +380,13 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         # Timestamp which will include effect of a weights update made now
         self._weights_steady = 0
 
+        # Note: there is no particular reason that n_chunks should match
+        # n_out_items, other than it being a reasonable value of the depth
+        # of any queue.
         self.send_stream = BSend(
             outputs=outputs,
             batches_per_chunk=engine.heaps_per_fengine_per_chunk,
-            n_out_items=self.n_out_items,
+            n_chunks=self.n_out_items,
             n_channels=engine.n_channels,
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
@@ -495,7 +497,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
 
             # Recompute the weights and delays if necessary
             if out_item.weights_version != self._weights_version:
-                channel_spacing = self.engine.bandwidth_hz / self.engine.n_channels
+                channel_spacing = self.engine.bandwidth / self.engine.n_channels
                 # The user provides a fringe phase for the centre frequency. We
                 # need to adjust that to the target fringe phase for the first
                 # channel processed by this engine (channel_offset_value).
@@ -966,13 +968,13 @@ class XBEngine(DeviceServer):
     katcp_port
         Network port on which to listen for KATCP C&M connections.
     adc_sample_rate
-        Sample rate of the digitisers in the current array. This value is
-        required to calculate the packet spacing of the output heaps. If it is
-        set incorrectly, the packet spacing could be too large causing the
+        Sample rate of the digitisers in the current array (in Hz). This value
+        is required to calculate the packet spacing of the output heaps. If it
+        is set incorrectly, the packet spacing could be too large causing the
         pipeline to stall as heaps queue at the sender faster than they are
         sent.
-    bandwidth_hz
-        Total bandwidth across `n_channels` channels. This is used in
+    bandwidth
+        Total bandwidth across `n_channels` channels (in Hz). This is used in
         delay calculations.
     send_rate_factor
         Configure the spead2 sender with a rate proportional to this factor.
@@ -1055,7 +1057,7 @@ class XBEngine(DeviceServer):
         katcp_host: str,
         katcp_port: int,
         adc_sample_rate: float,
-        bandwidth_hz: float,
+        bandwidth: float,
         send_rate_factor: float,
         n_ants: int,
         n_channels: int,
@@ -1094,7 +1096,7 @@ class XBEngine(DeviceServer):
 
         # Array configuration parameters
         self.adc_sample_rate = adc_sample_rate
-        self.bandwidth_hz = bandwidth_hz
+        self.bandwidth = bandwidth
         self.time_converter = TimeConverter(sync_time, adc_sample_rate)
         self.n_ants = n_ants
         self.n_channels = n_channels
@@ -1181,13 +1183,11 @@ class XBEngine(DeviceServer):
         # - The XBEngine passes items from the :meth:`_receiver_loop` to each
         #   pipeline via :meth:`.Pipeline.add_in_item`.
         # - Once the each pipeline is finished with an :class:`InQueueItem`,
-        #   it must pass it back to the _rx_free_item_queue via
+        #   it must pass it back to the _in_free_queue via
         #   :meth:`free_in_item` to ensure that all allocated buffers are in
         #   continuous circulation.
         # NOTE: Too high means too much GPU memory gets allocate
-        self._rx_free_item_queue: asyncio.Queue[InQueueItem] = monitor.make_queue(
-            "rx_free_item_queue", DEFAULT_N_IN_ITEMS
-        )
+        self._in_free_queue: asyncio.Queue[InQueueItem] = monitor.make_queue("in_free_queue", DEFAULT_N_IN_ITEMS)
 
         rx_data_shape = (
             heaps_per_fengine_per_chunk,
@@ -1202,7 +1202,7 @@ class XBEngine(DeviceServer):
             buffer_device = accel.DeviceArray(context, rx_data_shape, dtype=np.int8)
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             in_item = InQueueItem(buffer_device, present)
-            self._rx_free_item_queue.put_nowait(in_item)
+            self._in_free_queue.put_nowait(in_item)
 
         for _ in range(n_free_chunks):
             buf = buffer_device.empty_like()
@@ -1232,7 +1232,7 @@ class XBEngine(DeviceServer):
             # when it is taken off the queue.
             assert item.chunk is not None
             item.chunk.recycle()
-            self._rx_free_item_queue.put_nowait(item)
+            self._in_free_queue.put_nowait(item)
 
     async def _add_in_item(self, item: InQueueItem) -> None:
         """Push an :class:`InQueueItem` to all the pipelines."""
@@ -1252,7 +1252,7 @@ class XBEngine(DeviceServer):
 
         This function does the following:
         1. Wait for a chunk to be assembled on the receiver.
-        2. Get a free rx item off of the _rx_free_item_queue.
+        2. Get a free :class:`InQueueItem` off of the _in_free_queue.
         3. Initiate the transfer of the chunk from system memory to the buffer
            in GPU RAM that belongs to the in_item.
         4. Place the in_item on _in_queue so that it can be processed downstream.
@@ -1267,7 +1267,7 @@ class XBEngine(DeviceServer):
         ):
             # Get a free in_item that will contain the GPU buffer to which the
             # received chunk will be transferred.
-            item = await self._rx_free_item_queue.get()
+            item = await self._in_free_queue.get()
             # First wait for asynchronous GPU work on the buffer.
             item.enqueue_wait_for_events(self._upload_command_queue)
             item.reset()

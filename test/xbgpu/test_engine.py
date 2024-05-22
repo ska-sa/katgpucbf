@@ -1065,7 +1065,7 @@ class TestEngine:
             missing_antenna=missing_antenna,
         )
 
-        channel_spacing = xbengine.bandwidth_hz / xbengine.n_channels
+        channel_spacing = xbengine.bandwidth / xbengine.n_channels
         expected_beams, expected_beam_saturated_low, expected_beam_saturated_high = generate_expected_beams(
             np.asarray(test_batch_indices),
             n_channels_per_substream,
