@@ -22,6 +22,7 @@ from ast import literal_eval
 from collections.abc import Callable
 from typing import Sequence, cast
 
+import async_timeout
 import numpy as np
 import pytest
 from matplotlib.axes import Axes
@@ -661,23 +662,28 @@ async def test_group_delay(
         max_attempts = 5
         for attempt in range(max_attempts):
             pdf_report.detail(f"Attempt {attempt + 1}/{max_attempts} to receive contiguous data.")
-            i = 0
-            async for timestamp, chunk in receiver.complete_chunks():
-                if i == 0:
-                    first_timestamp = timestamp
-                if timestamp != first_timestamp + i * chunk_timestamp_step:
-                    break
-                start_spectrum = i * receiver.n_spectra_per_heap
-                end_spectrum = (i + 1) * receiver.n_spectra_per_heap
-                raw_data[:, start_spectrum:end_spectrum] = chunk.data[:2, channel]
-                chunk.recycle()
-                i += 1
-                if i == n_chunks:
-                    break
-            if i == n_chunks:
-                pdf_report.detail("Received all chunks.")
-                break
-            pdf_report.detail(f"Only received {i}/{n_chunks} chunks.")
+            try:
+                async with async_timeout.timeout(20.0) as timer:
+                    i = 0
+                    async for timestamp, chunk in receiver.complete_chunks():
+                        with chunk:
+                            if i == 0:
+                                first_timestamp = timestamp
+                            if timestamp != first_timestamp + i * chunk_timestamp_step:
+                                break
+                            start_spectrum = i * receiver.n_spectra_per_heap
+                            end_spectrum = (i + 1) * receiver.n_spectra_per_heap
+                            raw_data[:, start_spectrum:end_spectrum] = chunk.data[:2, channel]
+                        i += 1
+                        if i == n_chunks:
+                            break
+                    if i == n_chunks:
+                        pdf_report.detail("Received all chunks.")
+                        break
+                    pdf_report.detail(f"Only received {i}/{n_chunks} chunks.")
+            except asyncio.TimeoutError:
+                if timer.expired:
+                    pdf_report.detail(f"Timed out after receiving {i}/{n_chunks} chunks.")
         else:
             pytest.fail(f"Did not receive {n_chunks} contiguous chunks after {max_attempts} attempts.")
 
