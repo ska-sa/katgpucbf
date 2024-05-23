@@ -682,8 +682,10 @@ async def test_group_delay(
                         break
                     pdf_report.detail(f"Only received {i}/{n_chunks} chunks.")
             except asyncio.TimeoutError:
-                if timer.expired:
-                    pdf_report.detail(f"Timed out after receiving {i}/{n_chunks} chunks.")
+                if not timer.expired:
+                    raise  # Something other than our timer timed out
+                pdf_report.detail(f"Timed out after receiving {i}/{n_chunks} chunks.")
+
         else:
             pytest.fail(f"Did not receive {n_chunks} contiguous chunks after {max_attempts} attempts.")
 
