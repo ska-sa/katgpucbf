@@ -981,43 +981,19 @@ class TestEngine:
         with caplog.at_level(WARNING, logger="katgpucbf.xbgpu.engine"), PromDiff(
             namespace=METRIC_NAMESPACE
         ) as prom_diff:
-            # NOTE: The product of `heap_accumulation_thresholds` is used in
-            # two ways below. Both uses are to ensure there is a whole number
-            # of accumulations for *both* XPipelines. The first usage is
-            # dual-purpose once more:
-            # - In addition to the above, the arbitrary start position for data
-            #   in this test dictates the first received chunk to be in the
-            #   middle of an accumulation.
-            # - More accurately, it forces the first accumulation (to be
-            #   processed) to only contain one chunk of data. This ensures
-            #   we test that output dumps are aligned correctly, despite
-            #   the first data processed not being on an accumulation
-            #   boundary.
-            # Explicitly cast to python int as the np.int64 returned wasn't
-            # playing nice with `last_timestamp`
-            n_heaps = int(np.prod(heap_accumulation_thresholds))
-            # NOTE: The batch indices calculated below are done in order to ensure
-            # both XPipeline's move in step through processing input data.
-            # - We send a number of full accumulations for each XPipeline,
-            # - Then 'skip ahead' in time, far enough that both XPipelines
-            #   miss accumulations (plural)
-            # - Lastly, send the same amount of data as the first step to ensure
-            #   both XPipelines process whole accumulations once more.
-            # We use `n_heaps` as the 'stride' for both present and absent data
-            batch_start_index1 = 12 * n_heaps  # Somewhere arbitrary that isn't zero
-            batch_end_index1 = batch_start_index1 + n_heaps
-            # Add an extra chunk before the first full accumulation
-            test_batch_indices1 = list(range(batch_start_index1 - HEAPS_PER_FENGINE_PER_CHUNK, batch_end_index1))
-            # Then add another set of batches sufficient for another few accumulations
-            batch_start_index2 = batch_end_index1 + n_heaps
-            batch_end_index2 = batch_start_index2 + n_heaps
-            test_batch_indices2 = list(range(batch_start_index2, batch_end_index2))
-
-            test_batch_indices = test_batch_indices1 + test_batch_indices2
-            present = np.zeros((max(test_batch_indices) + 1, n_ants), bool)
-            present[test_batch_indices, :] = True
+            # We want to test a variety of scenarios:
+            # - Transmission starts either on an accumulation boundary or not.
+            # - Accumulations that are completely missing.
+            # - Accumulations missing complete batches (including the first or
+            #   last batch).
+            # - Accumulations missing antennas completely.
+            # - Misc heaps missing, without losing a whole batch or antenna.
+            present = np.ones((70, n_ants), bool)
+            present[:16] = False  # Start not at index 0 - sometimes aligned with accumulations
+            present[30:40] = False  # Knock out some complete and some partial accumulations
             if missing_antenna is not None:
-                present[:, missing_antenna] = False
+                present[40:50, missing_antenna] = False  # Covers some complete accumulations
+                present[60, missing_antenna] = False  # Just one heap in an accumulation
 
             for i, output in enumerate(beam_outputs):
                 # We only capture the timestamps before and after all katcp
@@ -1043,7 +1019,7 @@ class TestEngine:
                 n_spectra_per_heap=n_spectra_per_heap,
                 present=present,
             )
-            last_timestamp = batch_end_index2 * timestamp_step
+            last_timestamp = present.shape[0] * timestamp_step
 
         # TODO: NGC-1308 Update this check to be an exact match on the number
         # of logged messages.
