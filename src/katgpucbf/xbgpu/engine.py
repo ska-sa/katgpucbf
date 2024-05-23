@@ -43,6 +43,7 @@ from .. import (
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
     GPU_PROC_TASK_NAME,
+    MIN_SENSOR_UPDATE_PERIOD,
     N_POLS,
     RECV_TASK_NAME,
     SEND_TASK_NAME,
@@ -456,6 +457,8 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     # Cast to list first to add comma delimiter
                     default=str(list(self._weights[i])),
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
@@ -465,6 +468,8 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     "Number of complex samples that saturated.",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
 
