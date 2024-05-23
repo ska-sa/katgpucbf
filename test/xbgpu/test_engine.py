@@ -18,7 +18,7 @@
 
 from collections import Counter
 from logging import WARNING
-from typing import AbstractSet, Any, AsyncGenerator, Callable, Final, Sequence
+from typing import Any, AsyncGenerator, Callable, Final
 
 import aiokatcp
 import async_timeout
@@ -124,29 +124,43 @@ def cmult_and_scale(a, b, c, out):
 
 @njit
 def generate_expected_corrprods(
-    batch_start_idx: int,
+    batch_start_index: int,
     n_batches: int,
-    channels: int,
-    antennas: int,
+    n_channels: int,
     n_spectra_per_heap: int,
-    missing_antenna: int | None,
+    present_ants: np.ndarray,
 ) -> np.ndarray:
-    """Calculate the expected correlator output.
+    """Calculate the expected correlator output for a single accumulation.
 
-    This doesn't do a full correlator. It calculates the results according to
-    what is expected from the specific input generated in
+    This doesn't implement a full correlator. It calculates the results
+    according to what is expected from the specific input generated in
     :meth:`TestEngine._create_heaps`.
+
+    Parameters
+    ----------
+    batch_start_index
+        Batch index of the first batch in the accumulation
+    n_batches
+        Number of batches in the accumulation
+    n_channels
+        Number of channels in the output stream
+    n_spectra_per_heap
+        Number of spectra in each heap/batch
+    present_ants
+        A boolean array indicating which antennas were present for *all* the
+        batches in the accumulation.
     """
-    baselines = antennas * (antennas + 1) * 2
-    output_array = np.zeros((channels, baselines, COMPLEX), dtype=np.int32)
-    for b in range(batch_start_idx, batch_start_idx + n_batches):
-        for c in range(channels):
+    n_ants = len(present_ants)
+    n_baselines = n_ants * (n_ants + 1) * 2
+    output_array = np.zeros((n_channels, n_baselines, COMPLEX), dtype=np.int32)
+    for b in range(batch_start_index, batch_start_index + n_batches):
+        for c in range(n_channels):
             # This is allocated as int32 so that cmult_and_scale won't overflow. The actual
             # stored values are in the range -127..127.
-            in_data = np.empty((antennas, N_POLS, COMPLEX), np.int32)
-            for a in range(antennas):
+            in_data = np.empty((n_ants, N_POLS, COMPLEX), np.int32)
+            for a in range(n_ants):
                 feng_sample(b, c, a, in_data[a])
-            for a2 in range(antennas):
+            for a2 in range(n_ants):
                 for a1 in range(a2 + 1):
                     bl_idx = get_baseline_index(a1, a2)
                     output_piece = output_array[c, 4 * bl_idx : 4 * bl_idx + 4, :]
@@ -156,10 +170,10 @@ def generate_expected_corrprods(
                     cmult_and_scale(in_data[a1, 1], in_data[a2, 1], n_spectra_per_heap, output_piece[3])
 
     # Flag missing data
-    for a2 in range(antennas):
+    for a2 in range(n_ants):
         for a1 in range(a2 + 1):
-            bl_idx = get_baseline_index(a1, a2)
-            if a1 == missing_antenna or a2 == missing_antenna:
+            if not present_ants[a1] or not present_ants[a2]:
+                bl_idx = get_baseline_index(a1, a2)
                 output_array[:, 4 * bl_idx : 4 * bl_idx + 4, 0] = -(2**31)
                 output_array[:, 4 * bl_idx : 4 * bl_idx + 4, 1] = 1
 
@@ -169,10 +183,9 @@ def generate_expected_corrprods(
 @njit
 def generate_expected_beams(
     batch_indices: np.ndarray,
-    channels: int,
-    antennas: int,
+    n_channels: int,
     n_spectra_per_heap: int,
-    missing_antenna: int | None,
+    present: np.ndarray,
     beam_pols: np.ndarray,
     weights: np.ndarray,
     delays: np.ndarray,
@@ -188,15 +201,14 @@ def generate_expected_beams(
     Parameters
     ----------
     batch_indices
-        Array of indices used to create batches of data for XBEngine stimulus.
-    channels
+        Indices for which output should be generated.
+    n_channels
         Number of channels.
-    antennas
-        Number of antennas.
     n_spectra_per_heap
         Number of spectra in each batch.
-    missing_antenna
-        If not None, data for this antenna is excluded from the beam.
+    present
+        Array of shape (n_batches, n_ants) indicating which heaps were
+        received.
     beam_pols
         Indicates, for each beam, which polarisation is used to form the beam.
     weights
@@ -218,26 +230,27 @@ def generate_expected_beams(
     saturated_low, saturated_high
         Lower and upper bounds on saturation count per beam
     """
-    out = np.empty((len(beam_pols), len(batch_indices), channels, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
+    n_ants = present.shape[1]
+    out = np.empty((len(beam_pols), len(batch_indices), n_channels, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE)
     saturated_low = np.zeros((len(beam_pols),), np.uint32)
     saturated_high = np.zeros((len(beam_pols),), np.uint32)
-    accum = np.zeros((len(beam_pols), len(batch_indices), channels), np.complex64)
+    accum = np.zeros((len(beam_pols), len(batch_indices), n_channels), np.complex64)
     sample = np.empty((N_POLS, COMPLEX), np.int8)
     sample_fp = np.empty(N_POLS, np.complex64)
     for batch_id, batch_index in enumerate(batch_indices):
-        for channel in range(channels):
+        for channel in range(n_channels):
             # Compute scale factor for turning a delay into a phase
             delay_to_phase = -2 * np.pi * channel_spacing * (channel - centre_channel)
-            for antenna in range(antennas):
-                if antenna == missing_antenna:
+            for ant in range(n_ants):
+                if not present[batch_index, ant]:
                     continue
-                feng_sample(batch_index, channel, antenna, sample)
+                feng_sample(batch_index, channel, ant, sample)
                 sample_fp[0] = sample[0, 0] + np.complex64(1j) * sample[0, 1]
                 sample_fp[1] = sample[1, 0] + np.complex64(1j) * sample[1, 1]
                 for beam, pol in enumerate(beam_pols):
-                    phase = delay_to_phase * delays[beam, antenna, 0] + delays[beam, antenna, 1]
+                    phase = delay_to_phase * delays[beam, ant, 0] + delays[beam, ant, 1]
                     rotation = np.exp(1j * phase)
-                    accum[beam, batch_id, channel] += sample_fp[pol] * weights[beam, antenna] * rotation
+                    accum[beam, batch_id, channel] += sample_fp[pol] * weights[beam, ant] * rotation
             for beam in range(len(beam_pols)):
                 value = accum[beam, batch_id, channel] * quant_gains[beam]
                 sample[0, 0] = np.fmin(np.fmax(np.rint(value.real), -127), 127)
@@ -279,16 +292,15 @@ def verify_corrprod_data(
     corrprod_outputs: list[XOutput],
     corrprod_results: list[np.ndarray],
     acc_indices: list[list[int]],
-    n_ants: int,
     n_channels_per_substream: int,
     n_spectra_per_heap: int,
-    missing_antenna: int | None,
+    present: np.ndarray,
 ) -> None:
     """Verify XPipeline data.
 
     Parameters
     ----------
-    corrprod_outputs, n_ants, n_channels_per_substream, n_spectra_per_heap
+    corrprod_outputs, n_channels_per_substream, n_spectra_per_heap
         Unit test fixtures in :class:`TestEngine`.
     corrprod_results
         List of arrays of all GPU-generated data from
@@ -298,19 +310,23 @@ def verify_corrprod_data(
         corrprod_output. This is a list of lists, with the outer index matching
         `corrprod_outputs`. See :meth:`TestEngine.test_engine_end_to_end` for
         more details.
+    present
+        Boolean array of shape (n_batches, n_ants) indicating which heaps were
+        present.
     """
     for i, (corrprod_output, acc_index_list) in enumerate(zip(corrprod_outputs, acc_indices)):
         for j, acc_index in enumerate(acc_index_list):
+            n_batches = corrprod_output.heap_accumulation_threshold
+            batch_start_index = acc_index * n_batches
             # We know the XPipeline avoids sending data where all antennas
             # were absent, so we can be confident there are a whole number
             # of accumulations in the `corrprod_results`.
             expected_output = generate_expected_corrprods(
-                acc_index * corrprod_output.heap_accumulation_threshold,
-                corrprod_output.heap_accumulation_threshold,
+                batch_start_index,
+                n_batches,
                 n_channels_per_substream,
-                n_ants,
                 n_spectra_per_heap,
-                missing_antenna,
+                present[batch_start_index : batch_start_index + n_batches].all(axis=0),
             )
             np.testing.assert_equal(expected_output, corrprod_results[i][j])
 
@@ -318,12 +334,12 @@ def verify_corrprod_data(
 def verify_corrprod_sensors(
     *,
     xpipelines: list[XPipeline],
-    corrprod_results: list[np.ndarray],
+    acc_indices: list[list[int]],
     prom_diff: PromDiff,
     actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
     n_channels_per_substream: int,
     n_baselines: int,
-    missing_antenna: int | None,
+    present: np.ndarray,
 ) -> None:
     """Verify katcp and Prometheus sensors for processed XPipeline data.
 
@@ -331,10 +347,8 @@ def verify_corrprod_sensors(
     ----------
     xpipelines
         List of :class:`XPipeline` that are part of the unit test.
-    corrprod_results
-        List of arrays of all GPU-generated data. One output array per
-        corrprod_output, where each array has shape
-        (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
+    acc_indices
+        List of accumulation indices received, per pipeline.
     prom_diff
         Collection of Prometheus metrics observed during the XBEngine's
     actual_sensor_updates
@@ -348,28 +362,36 @@ def verify_corrprod_sensors(
         Unit test fixture.
     n_baselines
         Number of baselines for the array size in the unit test.
-    missing_antenna
-        Index of the antenna missing, if any, during the XBEngine's processing
-        of data.
+    present
+        Array of shape (n_batches, n_ants) indicating which heaps were present.
     """
-    for xpipeline, corrprod_result in zip(xpipelines, corrprod_results):
-        output_name = xpipeline.output.name
-        n_accumulations_completed = corrprod_result.shape[0]
-        # NOTE: The XBEngine does not transmit accumulations where all input
-        # data was absent. Therefore, depending on the value of `missing_antenna`,
-        # all the accumulations received are either complete or incomplete.
-        assert prom_diff.get_sample_diff("output_x_incomplete_accs_total", {"stream": output_name}) == (
-            n_accumulations_completed if missing_antenna is not None else 0
-        )
-        assert prom_diff.get_sample_diff("output_x_heaps_total", {"stream": output_name}) == n_accumulations_completed
+    for xpipeline, pipeline_acc_indices in zip(xpipelines, acc_indices):
+        # The assert statements are mainly to force mypy to realise the
+        # prom_diff values obtained are the expected data type
+        def prom_get(name: str) -> float:
+            diff = prom_diff.get_sample_diff(name, {"stream": xpipeline.output.name})  # noqa: B023
+            assert diff is not None, f"{name} is None"
+            return diff
+
+        n_accumulations_completed = len(pipeline_acc_indices)
+        # Count accumulations for which we expect to receive the accumulation
+        # but have incomplete data.
+        incomplete_accs = 0
+        for acc_index in pipeline_acc_indices:
+            batch_start = acc_index * xpipeline.output.heap_accumulation_threshold
+            batch_end = (acc_index + 1) * xpipeline.output.heap_accumulation_threshold
+            if not np.all(present[batch_start:batch_end]):
+                incomplete_accs += 1
+        assert prom_get("output_x_incomplete_accs_total") == incomplete_accs
+        assert prom_get("output_x_heaps_total") == n_accumulations_completed
         # Could manually calculate it here, but it's available inside the send_stream
-        assert prom_diff.get_sample_diff("output_x_bytes_total", {"stream": output_name}) == (
+        assert prom_get("output_x_bytes_total") == (
             xpipeline.send_stream.heap_payload_size_bytes * n_accumulations_completed
         )
-        assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": output_name}) == (
+        assert prom_get("output_x_visibilities_total") == (
             n_channels_per_substream * n_baselines * n_accumulations_completed
         )
-        assert prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": output_name}) == 0
+        assert prom_get("output_x_clipped_visibilities_total") == 0
 
         # Verify sensor updates while we're here
         xsync_sensor_name = f"{xpipeline.output.name}.rx.synchronised"
@@ -378,18 +400,9 @@ def verify_corrprod_sensors(
         # incomplete accumulations due to the method of sending data.
         # The assert statement is to force mypy to realise the prom_diff value
         # obtained can be cast to int.
-        prom_output_skipped_accs_total = prom_diff.get_sample_diff(
-            "output_x_skipped_accs_total", {"stream": output_name}
-        )
-        assert prom_output_skipped_accs_total is not None, "output_x_skipped_accs counter is None"
-        expected_error_updates = int(prom_output_skipped_accs_total)
-        # Depending on the `missing_antenna` parameter, the full accumulations
-        # will either be all complete or incomplete.
-        expected_nominal_updates = 0
-        if missing_antenna is not None:
-            expected_error_updates += n_accumulations_completed
-        else:
-            expected_nominal_updates = n_accumulations_completed
+        prom_output_skipped_accs_total = prom_get("output_x_skipped_accs_total")
+        expected_error_updates = int(prom_output_skipped_accs_total) + incomplete_accs
+        expected_nominal_updates = n_accumulations_completed - incomplete_accs
 
         # TODO: NGC-1308 Update this to check the order of sensor updates, not just the count
         assert (
@@ -541,11 +554,10 @@ class TestEngine:
     def _create_heaps(
         timestamp: int,
         batch_index: int,
-        n_ants: int,
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
-        missing_antennas: AbstractSet[int] = frozenset(),
+        present_ants: np.ndarray,
     ) -> list[spead2.send.HeapReference]:
         """Generate a deterministic input for sending to the XBEngine.
 
@@ -566,18 +578,15 @@ class TestEngine:
         batch_index
             Represents the index of this collection of generated heaps. Value is
             used to encode sample data.
-        n_ants
-            The number of antennas that data will be received from. A seperate heap
-            will be generated per antenna.
         n_channels_per_substream
             The number of frequency channels contained in a heap.
         frequency
             The first channel in the range handled by this XBEngine.
         n_spectra_per_heap
             The number of time samples per frequency channel.
-        missing_antennas
-            The desired antennas whose heaps will be removed from the created
-            list, indexed from zero (0).
+        present_ants
+            Boolean flag array indicating for which antennas data should be
+            generated.
 
         Returns
         -------
@@ -586,14 +595,14 @@ class TestEngine:
         """
         # Generate all the heaps for the different antennas.
         heaps: list[spead2.send.HeapReference] = []
-        for ant_index in range(n_ants):
-            if ant_index in missing_antennas:
+        for ant_index, present in enumerate(present_ants):
+            if not present:
                 continue
             sample_array = feng_samples(batch_index, ant_index, n_channels_per_substream)
             # Replicate the value to all spectra in the heap
             sample_array = sample_array[:, np.newaxis, :, :].repeat(n_spectra_per_heap, axis=1)
 
-            # Create the heap, add it to a list of HeapReferences.
+            # Create the heap and add it to a list of HeapReferences.
             heap = gen_heap(timestamp, ant_index, frequency, sample_array)
             heaps.append(spead2.send.HeapReference(heap))
 
@@ -616,15 +625,13 @@ class TestEngine:
         corrprod_outputs: list[XOutput],
         beam_outputs: list[BOutput],
         *,
-        heap_factory: Callable[[int], list[spead2.send.HeapReference]],
-        batch_indices: Sequence[int],
+        heap_factory: Callable[[int, np.ndarray], list[spead2.send.HeapReference]],
+        present: np.ndarray,
         timestamp_step: int,
-        n_ants: int,
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
-        missing_antennas: AbstractSet[int] = frozenset(),
-    ) -> tuple[list[np.ndarray], np.ndarray, list[list[int]]]:
+    ) -> tuple[list[np.ndarray], np.ndarray, list[list[int]], list[int]]:
         """Send a stream of data to the engine and retrieve the results.
 
         Each full accumulation (for each corrprod-output) requires
@@ -642,13 +649,15 @@ class TestEngine:
         corrprod_outputs
             Fixture
         heap_factory
-            Callback that takes a batch index and returns the heaps for that index.
-        batch_indices
-            Indices of the batches to send. These must be strictly increasing,
-            but need not be contiguous.
+            Callback to generate heaps. It is passed a batch index and a
+            boolean array indicating which antennas are present for that
+            batch.
+        present
+            Boolean array of shape (n_batches, n_ants). Each element is true to
+            send the corresponding heap.
         timestamp_step
             Timestamp step between each received heap processed.
-        n_ants, n_channels_per_substream, n_spectra_per_heap, frequency, missing_antennas
+        n_channels_per_substream, n_spectra_per_heap, frequency
             See :meth:`_create_heaps` for more info.
 
         Returns
@@ -662,7 +671,13 @@ class TestEngine:
             n_channels_per_substream, n_spectra_per_heap, COMPLEX).
         acc_indices
             List of accumulation indices for each corrprod_output.
+        batch_indices
+            List of batch indices which have at least one antenna present.
+            The ith positionon the batch axis of `beam_results` corresponds
+            to batch ``batch_indices[i]``.
         """
+        batch_indices = list(np.nonzero(np.any(present, axis=1))[0])
+        n_ants = present.shape[1]
         max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
@@ -672,8 +687,10 @@ class TestEngine:
             for i, corrprod_output in enumerate(corrprod_outputs):
                 acc_index = batch_index // corrprod_output.heap_accumulation_threshold
                 acc_counts[i][acc_index] += 1
-            heaps = heap_factory(batch_index)
+            heaps = heap_factory(batch_index, present[batch_index])
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
+        # Accumulations are only transmitted if there is some data for every
+        # corresponding batch.
         acc_indices = [
             [acc_index for acc_index, count in counts.items() if count == corrprod_output.heap_accumulation_threshold]
             for counts, corrprod_output in zip(acc_counts, corrprod_outputs)
@@ -762,10 +779,10 @@ class TestEngine:
                 assert updated_items == {"frequency", "timestamp", "beam_ants", "bf_raw"}
                 assert ig_recv["timestamp"].value == index * timestamp_step
                 assert ig_recv["frequency"].value == frequency
-                assert ig_recv["beam_ants"].value == n_ants - len(missing_antennas)
+                assert ig_recv["beam_ants"].value == np.sum(present[index])
                 beam_results[i, j, ...] = ig_recv["bf_raw"].value
 
-        return corrprod_results, beam_results, acc_indices
+        return corrprod_results, beam_results, acc_indices, batch_indices
 
     @pytest.fixture
     def n_engines(self, n_ants: int) -> int:
@@ -915,14 +932,11 @@ class TestEngine:
         n_baselines = n_ants * (n_ants + 1) * 2
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
-        missing_antennas = set() if missing_antenna is None else {missing_antenna}
 
         range_start = frequency
         range_end = range_start + n_channels_per_substream - 1
-        for corrprod_output in corrprod_outputs:
-            assert xbengine.sensors[f"{corrprod_output.name}.chan-range"].value == f"({range_start},{range_end})"
-        for beam_output in beam_outputs:
-            assert xbengine.sensors[f"{beam_output.name}.chan-range"].value == f"({range_start},{range_end})"
+        for output in corrprod_outputs + beam_outputs:
+            assert xbengine.sensors[f"{output.name}.chan-range"].value == f"({range_start},{range_end})"
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates as
         # they happen in the XBEngine
@@ -940,23 +954,18 @@ class TestEngine:
             """Record sensor updates in a list for later comparison."""
             actual_sensor_updates[sensor.name].append((sensor_reading.value, sensor_reading.status))
 
-        for corrprod_output in corrprod_outputs:
-            xbengine.sensors[f"{corrprod_output.name}.rx.synchronised"].attach(sensor_observer)
+        for sensor_name in actual_sensor_updates.keys():
+            xbengine.sensors[sensor_name].attach(sensor_observer)
 
-        for beam_output in beam_outputs:
-            for dynamic_bsensor_name in dynamic_bsensor_names:
-                xbengine.sensors[f"{beam_output.name}.{dynamic_bsensor_name}"].attach(sensor_observer)
-
-        def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
+        def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
             return self._create_heaps(
                 timestamp,
                 batch_index,
-                n_ants,
                 n_channels_per_substream,
                 frequency,
                 n_spectra_per_heap,
-                missing_antennas=missing_antennas,
+                present,
             )
 
         first_timestamp = last_timestamp = 0
@@ -1005,6 +1014,10 @@ class TestEngine:
             test_batch_indices2 = list(range(batch_start_index2, batch_end_index2))
 
             test_batch_indices = test_batch_indices1 + test_batch_indices2
+            present = np.zeros((max(test_batch_indices) + 1, n_ants), bool)
+            present[test_batch_indices, :] = True
+            if missing_antenna is not None:
+                present[:, missing_antenna] = False
 
             for i, output in enumerate(beam_outputs):
                 # We only capture the timestamps before and after all katcp
@@ -1018,19 +1031,17 @@ class TestEngine:
                 await client.request("beam-quant-gains", output.name, quant_gains[i])
                 await client.request("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]])
 
-            corrprod_results, beam_results, acc_indices = await self._send_data(
+            corrprod_results, beam_results, acc_indices, batch_indices = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
                 corrprod_outputs=corrprod_outputs,
                 beam_outputs=beam_outputs,
-                batch_indices=test_batch_indices,
                 heap_factory=heap_factory,
                 timestamp_step=timestamp_step,
-                n_ants=n_ants,
                 n_channels_per_substream=n_channels_per_substream,
                 frequency=frequency,
                 n_spectra_per_heap=n_spectra_per_heap,
-                missing_antennas=missing_antennas,
+                present=present,
             )
             last_timestamp = batch_end_index2 * timestamp_step
 
@@ -1048,30 +1059,28 @@ class TestEngine:
             corrprod_outputs=corrprod_outputs,
             corrprod_results=corrprod_results,
             acc_indices=acc_indices,
-            n_ants=n_ants,
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
-            missing_antenna=missing_antenna,
+            present=present,
         )
 
         xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
         verify_corrprod_sensors(
             xpipelines=xpipelines,
-            corrprod_results=corrprod_results,
+            acc_indices=acc_indices,
             prom_diff=prom_diff,
             actual_sensor_updates=actual_sensor_updates,
             n_channels_per_substream=n_channels_per_substream,
             n_baselines=n_baselines,
-            missing_antenna=missing_antenna,
+            present=present,
         )
 
         channel_spacing = xbengine.bandwidth / xbengine.n_channels
         expected_beams, expected_beam_saturated_low, expected_beam_saturated_high = generate_expected_beams(
-            np.asarray(test_batch_indices),
+            np.asarray(batch_indices),
             n_channels_per_substream,
-            n_ants,
             n_spectra_per_heap,
-            missing_antenna,
+            present,
             np.array([beam_output.pol for beam_output in beam_outputs]),
             weights=weights,
             delays=delays,
@@ -1082,7 +1091,7 @@ class TestEngine:
         # assert_allclose converts to float, which bloats memory usage.
         # To keep it manageable, compare a batch at a time.
         for i in range(len(beam_outputs)):
-            for j in range(len(test_batch_indices)):
+            for j in range(len(batch_indices)):
                 np.testing.assert_allclose(expected_beams[i, j], beam_results[i, j], atol=1)
 
         # `beam_results` holds results for each heap transmitted by a
@@ -1128,24 +1137,25 @@ class TestEngine:
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         n_baselines = n_ants * (n_ants + 1) * 2
 
-        def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
+        def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
             data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), 127, np.int8)
             return [
                 spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
                 for ant_index in range(n_ants)
+                if present[ant_index]
             ]
 
+        present = np.ones((heap_accumulation_threshold[0], n_ants), bool)
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
                 corrprod_outputs,
                 beam_outputs,
-                batch_indices=range(0, heap_accumulation_threshold[0]),
                 heap_factory=heap_factory,
+                present=present,
                 timestamp_step=timestamp_step,
-                n_ants=n_ants,
                 n_channels_per_substream=n_channels_per_substream,
                 frequency=frequency,
                 n_spectra_per_heap=n_spectra_per_heap,
@@ -1217,26 +1227,26 @@ class TestEngine:
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
-        def heap_factory(batch_index: int) -> list[spead2.send.HeapReference]:
+        def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
             data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), 10, np.int8)
             return [
                 spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
                 for ant_index in range(n_ants)
+                if present[ant_index]
             ]
 
         request = request_factory(beam_outputs[0].name, n_ants)
         timestamp_list = self._patch_get_in_item(monkeypatch, 4, client, *request)
         n_batches = heap_accumulation_threshold[0]
-        _, data, _ = await self._send_data(
+        _, data, _, _ = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
             corrprod_outputs,
             beam_outputs,
-            batch_indices=range(n_batches),
             heap_factory=heap_factory,
+            present=np.ones((n_batches, n_ants), bool),
             timestamp_step=timestamp_step,
-            n_ants=n_ants,
             n_channels_per_substream=n_channels_per_substream,
             frequency=frequency,
             n_spectra_per_heap=n_spectra_per_heap,
