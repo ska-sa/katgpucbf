@@ -860,6 +860,7 @@ class TestEngine:
         the heaps in the second half.
         """
         sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
+        sensor_update_dict = self._watch_sensors(sensors)
         spectra_per_heap = output.spectra_per_heap
         chunk_samples = engine_server.src_layout.chunk_samples
         n_samples = 16 * chunk_samples
@@ -917,8 +918,10 @@ class TestEngine:
         for pol in range(N_POLS):
             input_missing_heaps = np.sum(~src_present[pol])
             assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
-            assert sensors[pol].value == -np.inf
-            assert sensors[pol].status == aiokatcp.Sensor.Status.FAILURE
+            for present, reading in zip(src_present[pol], sensor_update_dict[f"input{pol}.dig-rms-dbfs"]):
+                if not present:
+                    assert reading.value == -np.inf
+                    assert reading.status == aiokatcp.Sensor.Status.FAILURE
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
         assert prom_diff.get_sample_diff("output_heaps_total", {"stream": output.name}) == output_heaps
