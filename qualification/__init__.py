@@ -257,6 +257,7 @@ class XBReceiver:
         *,
         all_timestamps: Literal[False] = False,
         max_delay: int = DEFAULT_MAX_DELAY,
+        time_limit: float | None = None,
     ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk], None]:  # noqa: D102
         yield ...  # type: ignore
 
@@ -267,6 +268,7 @@ class XBReceiver:
         *,
         all_timestamps: bool = False,
         max_delay: int = DEFAULT_MAX_DELAY,
+        time_limit: float | None = None,
     ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk | None], None]:  # noqa: D102
         yield ...  # type: ignore
 
@@ -276,6 +278,7 @@ class XBReceiver:
         *,
         all_timestamps=False,
         max_delay=DEFAULT_MAX_DELAY,
+        time_limit=None,
     ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk | None], None]:
         """Iterate over the complete chunks of the stream.
 
@@ -293,31 +296,39 @@ class XBReceiver:
         max_delay
             An upper bound on the delay set on any F-engine. This is used in
             the calculation of `min_timestamp` when no value is provided.
+        time_limit
+            If a floating-point value is given, the iteration will end after
+            this many seconds. Note that no :exc:`asyncio.TimeoutError` will be
+            raised.
         """
         if min_timestamp is None:
             min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
 
         data_ringbuffer = self.stream.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
-        async for chunk in data_ringbuffer:
-            assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
-            timestamp = chunk.chunk_id * self.timestamp_step
-            if min_timestamp is not None and timestamp < min_timestamp:
-                logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
-            elif not np.all(chunk.present):
-                logger.debug("Incomplete chunk %d", chunk.chunk_id)
-            elif (chunk.data.dtype == np.dtype(np.int32) and np.any(chunk.data == -(2**31))) or (
-                chunk.extra is not None and np.min(chunk.extra) < self.n_ants
-            ):
-                logger.debug("Chunk with missing antenna(s) (%d)", chunk.chunk_id)
-            else:
-                yield timestamp, chunk
-                continue
-            # If we get here, the chunk is ignored
-            chunk.recycle()
-            if all_timestamps:
-                yield timestamp, None
-        return
+        try:
+            async with async_timeout.timeout(time_limit) as timer:
+                async for chunk in data_ringbuffer:
+                    assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
+                    timestamp = chunk.chunk_id * self.timestamp_step
+                    if min_timestamp is not None and timestamp < min_timestamp:
+                        logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
+                    elif not np.all(chunk.present):
+                        logger.debug("Incomplete chunk %d", chunk.chunk_id)
+                    elif (chunk.data.dtype == np.dtype(np.int32) and np.any(chunk.data == -(2**31))) or (
+                        chunk.extra is not None and np.min(chunk.extra) < self.n_ants
+                    ):
+                        logger.debug("Chunk with missing antenna(s) (%d)", chunk.chunk_id)
+                    else:
+                        yield timestamp, chunk
+                        continue
+                    # If we get here, the chunk is ignored
+                    chunk.recycle()
+                    if all_timestamps:
+                        yield timestamp, None
+        except asyncio.TimeoutError:
+            if not timer.expired:
+                raise  # The TimeoutError came from something else
 
     async def next_complete_chunk(
         self,
