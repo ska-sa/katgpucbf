@@ -895,7 +895,7 @@ class Pipeline:
                 chunk.cleanup()
                 chunk.cleanup = None  # Potentially helps break reference cycles
 
-    async def run_transmit(self) -> None:
+    async def run_transmit(self) -> None:  # noqa: C901
         """Get the processed data from the GPU to the Network.
 
         This could be done either with or without PeerDirect. In the
@@ -962,11 +962,12 @@ class Pipeline:
                             avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
                         )
                 else:
-                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                        -np.inf,
-                        status=aiokatcp.Sensor.Status.FAILURE,
-                        timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp),
-                    )
+                    for pol in range(N_POLS):
+                        self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
+                            -np.inf,
+                            status=aiokatcp.Sensor.Status.FAILURE,
+                            timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp),
+                        )
 
             n_batches = out_item.n_spectra // self.output.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
