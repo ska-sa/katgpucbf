@@ -410,12 +410,13 @@ traitlets==5.14.0
     # via
     #   ipython
     #   matplotlib-inline
-typing-extensions==4.8.0
+typing-extensions==4.12.0
     # via
     #   -c requirements.txt
     #   aiokatcp
     #   aiomonitor
     #   janus
+    #   katgpucbf (setup.cfg)
     #   katsdpsigproc
     #   pytools
 tzdata==2023.3
