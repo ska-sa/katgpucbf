@@ -29,6 +29,7 @@ from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import COMPLEX, N_POLS
+from ..send import send_rate
 from ..spead import (
     FENG_ID_ID,
     FENG_RAW_ID,
@@ -262,10 +263,18 @@ def make_streams(
     """
     dtype = chunks[0].data.dtype  # Type for each complex value
     memory_regions: list[object] = [chunk.data for chunk in chunks]
-    # Send a bit faster than nominal rate to account for header overheads
-    rate = N_POLS * bandwidth * dtype.itemsize * send_rate_factor / len(interfaces)
+    heap_payload = sum(chunk.data.nbytes for chunk in chunks) // n_data_heaps
+    # Work backwards from payload byte rate to get heap payload rate
+    heap_interval = heap_payload / (N_POLS * bandwidth * dtype.itemsize)
     config = spead2.send.StreamConfig(
-        rate=rate,
+        rate=send_rate(
+            packet_header=PREAMBLE_SIZE,
+            packet_payload=packet_payload,
+            heap_payload=heap_payload,
+            heap_interval=heap_interval,
+            send_rate_factor=send_rate_factor,
+        )
+        / len(interfaces),
         max_packet_size=packet_payload + PREAMBLE_SIZE,
         # Adding len(endpoints) to accommodate descriptors sent for each substream
         max_heaps=n_data_heaps + len(endpoints),

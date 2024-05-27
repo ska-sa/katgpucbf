@@ -64,6 +64,7 @@ from .bsend import BSend
 from .bsend import make_stream as make_bstream
 from .correlation import CorrelationTemplate
 from .output import BOutput, Output, XOutput
+from .send import Send
 from .xsend import XSend, incomplete_accum_counter
 from .xsend import make_stream as make_xstream
 from .xsend import skipped_accum_counter
@@ -246,6 +247,8 @@ class Pipeline(Generic[_O, _T]):
     n_in_items = DEFAULT_N_IN_ITEMS
     n_out_items = DEFAULT_N_OUT_ITEMS
 
+    send_stream: Send
+
     def __init__(self, outputs: Sequence[_O], name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.outputs = outputs
         self.name = name
@@ -384,7 +387,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         # Note: there is no particular reason that n_chunks should match
         # n_out_items, other than it being a reasonable value of the depth
         # of any queue.
-        self.send_stream = BSend(
+        self.send_stream: BSend = BSend(
             outputs=outputs,
             batches_per_chunk=engine.heaps_per_fengine_per_chunk,
             n_chunks=self.n_out_items,
@@ -668,7 +671,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             out_item = XOutQueueItem(buffer_device, saturated, present_ants, present_baselines)
             self._out_free_queue.put_nowait(out_item)
 
-        self.send_stream = XSend(
+        self.send_stream: XSend = XSend(
             output_name=output.name,
             n_ants=engine.n_ants,
             n_channels=engine.n_channels,
@@ -1427,13 +1430,12 @@ class XBEngine(DeviceServer):
         # Create the descriptor task first to ensure descriptor will be sent
         # before any data makes its way through the pipeline.
         for pipeline in self._pipelines:
-            # TODO: Make this parametrisable somehow for XPipeline vs BPipeline
-            # BPipeline needs to stagger the sending of descriptors
+            # TODO: BPipeline needs to stagger the sending of descriptors
             descriptor_sender = DescriptorSender(
-                pipeline.send_stream.stream,  # type: ignore
-                pipeline.send_stream.descriptor_heap,  # type: ignore
+                pipeline.send_stream.stream,
+                pipeline.send_stream.descriptor_heap,
                 descriptor_interval_s,
-                substreams=range(pipeline.send_stream.stream.num_substreams),  # type: ignore
+                substreams=range(pipeline.send_stream.stream.num_substreams),
             )
             descriptor_task = asyncio.create_task(
                 descriptor_sender.run(), name=f"{pipeline.name}.{DESCRIPTOR_TASK_NAME}"

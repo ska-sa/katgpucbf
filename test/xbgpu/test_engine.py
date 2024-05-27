@@ -34,7 +34,7 @@ from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
-from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend
+from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend, xsend
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.engine import BPipeline, InQueueItem, XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args, parse_beam, parse_corrprod
@@ -384,9 +384,8 @@ def verify_corrprod_sensors(
                 incomplete_accs += 1
         assert prom_get("output_x_incomplete_accs_total") == incomplete_accs
         assert prom_get("output_x_heaps_total") == n_accumulations_completed
-        # Could manually calculate it here, but it's available inside the send_stream
         assert prom_get("output_x_bytes_total") == (
-            xpipeline.send_stream.heap_payload_size_bytes * n_accumulations_completed
+            n_channels_per_substream * n_baselines * COMPLEX * xsend.SEND_DTYPE.itemsize * n_accumulations_completed
         )
         assert prom_get("output_x_visibilities_total") == (
             n_channels_per_substream * n_baselines * n_accumulations_completed

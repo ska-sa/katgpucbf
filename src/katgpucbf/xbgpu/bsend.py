@@ -19,7 +19,6 @@
 import asyncio
 import functools
 import logging
-from math import ceil
 from typing import Callable, Final, Sequence
 
 import katsdpsigproc.accel as accel
@@ -32,6 +31,7 @@ from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
+from ..send import send_rate
 from ..spead import (
     BEAM_ANTS_ID,
     BF_RAW_ID,
@@ -45,6 +45,7 @@ from ..spead import (
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 from .output import BOutput
+from .send import Send
 
 output_heaps_counter = Counter(
     "output_b_heaps", "number of B-engine heaps transmitted", ["stream"], namespace=METRIC_NAMESPACE
@@ -320,7 +321,7 @@ class Chunk:
         return self.future
 
 
-class BSend:
+class BSend(Send):
     r"""
     Class for turning tied array channelised voltage products into SPEAD heaps.
 
@@ -386,11 +387,6 @@ class BSend:
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
         tx_enabled: bool = False,
     ) -> None:
-        if n_channels % n_channels_per_substream != 0:
-            raise ValueError("n_channels must be an integer multiple of n_channels_per_substream")
-        if channel_offset % n_channels_per_substream != 0:
-            raise ValueError("channel_offset must be an integer multiple of n_channels_per_substream")
-
         self.tx_enabled = [tx_enabled] * len(outputs)
         self.tx_enabled_version = 0
         n_beams = len(outputs)
@@ -411,14 +407,12 @@ class BSend:
             buffers.append(chunk.data)
 
         heap_payload_size_bytes = n_channels_per_substream * spectra_per_heap * COMPLEX * SEND_DTYPE.itemsize
-
-        # Transport-agnostic stream information
-        packets_per_heap = ceil(heap_payload_size_bytes / packet_payload)
-        packet_header_overhead_bytes = packets_per_heap * BSend.header_size
-
-        heap_interval = timestamp_step / adc_sample_rate
-        self.bytes_per_second_per_beam = (
-            (heap_payload_size_bytes + packet_header_overhead_bytes) / heap_interval * send_rate_factor
+        self.bytes_per_second_per_beam = send_rate(
+            packet_header=BSend.header_size,
+            packet_payload=packet_payload,
+            heap_payload=heap_payload_size_bytes,
+            heap_interval=timestamp_step / adc_sample_rate,
+            send_rate_factor=send_rate_factor,
         )
 
         stream_config = spead2.send.StreamConfig(
@@ -426,13 +420,6 @@ class BSend:
             # + 1 below for the descriptor per beam
             max_heaps=(n_chunks * batches_per_chunk + 1) * n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
-        )
-        self.stream = stream_factory(stream_config, buffers)
-        # Set heap count sequence to allow a receiver to ingest multiple
-        # B-engine outputs, if they should so choose.
-        self.stream.set_cnt_sequence(
-            channel_offset // n_channels_per_substream,
-            n_channels // n_channels_per_substream,
         )
 
         item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
@@ -465,7 +452,13 @@ class BSend:
             dtype=buffers[0].dtype,
         )
 
-        self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
+        super().__init__(
+            n_channels=n_channels,
+            n_channels_per_substream=n_channels_per_substream,
+            channel_offset=channel_offset,
+            stream=stream_factory(stream_config, buffers),
+            descriptor_heap=item_group.get_heap(descriptors="all", data="none"),
+        )
 
     def enable_substream(self, stream_id: int, enable: bool = True) -> None:
         """Enable/Disable a substream's data transmission.
