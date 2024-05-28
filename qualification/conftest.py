@@ -580,8 +580,9 @@ async def session_cbf(
 
     finally:
         # In case anything does go wrong, we want to make sure that we the
-        # deconfigure the product.
-        await master_controller_client.request("product-deconfigure", product_name)
+        # deconfigure the product. We force-deconfigure, both to ensure that
+        # it dies, and because doing so is faster than a graceful shutdown.
+        await master_controller_client.request("product-deconfigure", product_name, True)
 
 
 @pytest.fixture
@@ -592,11 +593,11 @@ async def cbf(
     """Set up a CBF for a single test.
 
     The returned CBF might not be specific to this test, but it will have
-    been reset to a default state, with the dsim outputting zeros.
+    been reset to a default state, with the exception that the dsims will
+    be outputting an unspecified signal.
     """
     # Reset the CBF to default state
     pcc = session_cbf.product_controller_client
-    await asyncio.gather(*[client.request("signals", "0;0;") for client in session_cbf.dsim_clients])
     capture_types = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
     for name, conf in session_cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
