@@ -367,7 +367,7 @@ class BSend:
     """
 
     descriptor_heap: spead2.send.Heap
-    header_size: Final[int] = 64
+    header_size: Final[int] = 72
 
     def __init__(
         self,
