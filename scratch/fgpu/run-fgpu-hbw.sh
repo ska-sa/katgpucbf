@@ -29,7 +29,7 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --src-affinity $src_affinity --src-comp-vector=$src_comp \
     --dst-affinity $dst_affinity --dst-comp-vector=$dst_comp \
     --adc-sample-rate ${adc_sample_rate:-7000000000} \
-    --spectra-per-heap ${spectra_per_heap:-256} \
+    --jones-per-batch ${jones_per_batch:-1048576} \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
     --sync-time 0 \

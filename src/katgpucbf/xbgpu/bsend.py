@@ -32,16 +32,7 @@ from prometheus_client import Counter
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
 from ..send import send_rate
-from ..spead import (
-    BEAM_ANTS_ID,
-    BF_RAW_ID,
-    FLAVOUR,
-    FREQUENCY_ID,
-    IMMEDIATE_DTYPE,
-    IMMEDIATE_FORMAT,
-    TIMESTAMP_ID,
-    make_immediate,
-)
+from ..spead import BEAM_ANTS_ID, BF_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_DTYPE, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 from .output import BOutput
@@ -64,6 +55,40 @@ logger = logging.getLogger(__name__)
 # NOTE: ICD suggests `beng_out_bits_per_sample`,
 # MK correlator doesn't make this configurable.
 SEND_DTYPE = np.dtype(np.int8)
+
+
+def make_item_group(bf_raw_shape: tuple[int, ...]) -> spead2.send.ItemGroup:
+    """Create an item group (with no values)."""
+    item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
+    item_group.add_item(
+        FREQUENCY_ID,
+        "frequency",  # Misleading name, but it's what the ICD specifies
+        "Value of the first channel in collections stored here.",
+        shape=[],
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        TIMESTAMP_ID,
+        "timestamp",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+        shape=[],
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        BEAM_ANTS_ID,
+        "beam_ants",
+        "Count of antennas included in the beam sum.",
+        shape=[],
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        BF_RAW_ID,
+        "bf_raw",
+        "Beamformer output for frequency-domain beam.",
+        shape=bf_raw_shape,
+        dtype=SEND_DTYPE,
+    )
+    return item_group
 
 
 class Batch:
@@ -98,22 +123,15 @@ class Batch:
         self.heaps: list[spead2.send.Heap] = []
         self.data = data
         n_substreams = data.shape[0]
+
+        item_group = make_item_group(data.shape[1:])  # Get rid of the 'beam' dimension
+        item_group[FREQUENCY_ID].value = channel_offset
+        item_group[TIMESTAMP_ID].value = timestamp
+        item_group[BEAM_ANTS_ID].value = present_ants
         for i in range(n_substreams):
-            heap = spead2.send.Heap(flavour=FLAVOUR)
+            item_group[BF_RAW_ID].value = self.data[i, ...]
+            heap = item_group.get_heap(descriptors="none", data="all")
             heap.repeat_pointers = True
-            heap.add_item(make_immediate(FREQUENCY_ID, channel_offset))
-            heap.add_item(make_immediate(TIMESTAMP_ID, timestamp))
-            heap.add_item(make_immediate(BEAM_ANTS_ID, present_ants))
-            heap.add_item(
-                spead2.Item(
-                    BF_RAW_ID,
-                    "bf_raw",
-                    "",
-                    shape=data.shape[1:],  # Get rid of the 'beam' dimension
-                    dtype=data.dtype,
-                    value=self.data[i, ...],
-                )
-            )
             self.heaps.append(heap)
         self.tx_enabled_version = -1
         self.tx_heaps = spead2.send.HeapReferenceList([])
@@ -368,7 +386,7 @@ class BSend(Send):
     """
 
     descriptor_heap: spead2.send.Heap
-    header_size: Final[int] = 64
+    header_size: Final[int] = 72
 
     def __init__(
         self,
@@ -422,36 +440,7 @@ class BSend(Send):
             rate_method=spead2.send.RateMethod.AUTO,
         )
 
-        item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
-        item_group.add_item(
-            FREQUENCY_ID,
-            "frequency",  # Misleading name, but it's what the ICD specifies
-            "Value of the first channel in collections stored here.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        item_group.add_item(
-            TIMESTAMP_ID,
-            "timestamp",
-            "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        item_group.add_item(
-            BEAM_ANTS_ID,
-            "beam_ants",
-            "Count of antennas included in the beam sum.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        item_group.add_item(
-            BF_RAW_ID,
-            "bf_raw",
-            "Beamformer output for frequency-domain beam.",
-            shape=buffers[0].shape[2:],
-            dtype=buffers[0].dtype,
-        )
-
+        item_group = make_item_group(buffers[0].shape[2:])
         super().__init__(
             n_channels=n_channels,
             n_channels_per_substream=n_channels_per_substream,

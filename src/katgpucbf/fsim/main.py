@@ -46,7 +46,7 @@ from .. import (
     SPEAD_DESCRIPTOR_INTERVAL_S,
     spead,
 )
-from ..fgpu.send import PREAMBLE_SIZE, make_descriptor_heap
+from ..fgpu.send import PREAMBLE_SIZE, make_descriptor_heap, make_item_group
 from ..send import DescriptorSender
 from ..utils import TimeConverter, add_gc_stats, comma_split
 from . import METRIC_NAMESPACE
@@ -185,12 +185,13 @@ def make_heap(
     stored timestamp.
     """
     # The heap setup should be equivalent to katgpucbf.fgpu.send.Batch
-    heap = spead2.send.Heap(flavour=spead.FLAVOUR)
+    item_group = make_item_group(shape=payload.shape, dtype=payload.dtype)
+    item_group[spead.TIMESTAMP_ID].value = timestamp
+    item_group[spead.FENG_ID_ID].value = feng_id
+    item_group[spead.FREQUENCY_ID].value = channel_offset
+    item_group[spead.FENG_RAW_ID].value = payload
+    heap = item_group.get_heap(descriptors="none", data="all")
     heap.repeat_pointers = True
-    heap.add_item(spead.make_immediate(spead.TIMESTAMP_ID, timestamp))
-    heap.add_item(spead.make_immediate(spead.FENG_ID_ID, feng_id))
-    heap.add_item(spead.make_immediate(spead.FREQUENCY_ID, channel_offset))
-    heap.add_item(spead2.Item(spead.FENG_RAW_ID, "", "", shape=payload.shape, dtype=payload.dtype, value=payload))
     return spead2.send.HeapReference(heap)
 
 
