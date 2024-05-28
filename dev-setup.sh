@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Copyright (c) 2020-2022, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, 2024 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -24,7 +24,7 @@ echo "Activating the virtual env"
 source .venv/bin/activate
 
 pip install --upgrade pip # stops pip from complaining
-pip install wheel # Makes the process a bit slicker.
+pip install -c requirements-dev.txt wheel # Makes the process a bit slicker.
 echo "Installing requirements for running and development"
 pip install -r requirements.txt -r requirements-dev.txt
 
