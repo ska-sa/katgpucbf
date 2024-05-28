@@ -27,18 +27,10 @@ import spead2.send.asyncio
 from aiokatcp import SensorSet
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
+from typing_extensions import Unpack
 
 from .. import COMPLEX, N_POLS
-from ..spead import (
-    FENG_ID_ID,
-    FENG_RAW_ID,
-    FLAVOUR,
-    FREQUENCY_ID,
-    IMMEDIATE_DTYPE,
-    IMMEDIATE_FORMAT,
-    TIMESTAMP_ID,
-    make_immediate,
-)
+from ..spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_DTYPE, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
@@ -57,6 +49,51 @@ skipped_heaps_counter = Counter(
 output_clip_counter = Counter(
     "output_clipped_samples", "number of samples that were saturated", ["stream", "pol"], namespace=METRIC_NAMESPACE
 )
+
+
+class _FengRawKwargs(TypedDict, total=False):
+    """Helper class for type annotations."""
+
+    shape: tuple[int, ...]
+    dtype: np.dtype
+    format: list[tuple[str, int]]
+
+
+def make_item_group(**feng_raw_kwargs: Unpack[_FengRawKwargs]) -> spead2.send.ItemGroup:
+    """Create an item group (without values).
+
+    The `feng_raw_kwargs` must specify the shape and dtype/format for the
+    ``feng_raw`` item.
+    """
+    item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
+    item_group.add_item(
+        TIMESTAMP_ID,
+        "timestamp",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        FENG_ID_ID,
+        "feng_id",
+        "Uniquely identifies the F-Engine source for the data.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        FREQUENCY_ID,
+        "frequency",
+        "Identifies the first channel in the band of frequencies in the SPEAD heap.",
+        shape=(),
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        FENG_RAW_ID,
+        "feng_raw",
+        "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
+        **feng_raw_kwargs,
+    )
+    return item_group
 
 
 class Batch:
@@ -87,18 +124,18 @@ class Batch:
         self.heaps = []
         self.data = data
         self.saturated = saturated
+
+        item_group = make_item_group(shape=(n_channels_per_substream,) + data.shape[1:], dtype=data.dtype)
+        item_group[TIMESTAMP_ID].value = timestamp
+        item_group[FENG_ID_ID].value = feng_id
         for i in range(n_substreams):
             start_channel = i * n_channels_per_substream
-            heap = spead2.send.Heap(FLAVOUR)
-            heap.repeat_pointers = True
-            heap.add_item(make_immediate(TIMESTAMP_ID, timestamp))
-            heap.add_item(make_immediate(FENG_ID_ID, feng_id))
-            heap.add_item(make_immediate(FREQUENCY_ID, start_channel))
             heap_data = data[start_channel : start_channel + n_channels_per_substream]
             assert heap_data.flags.c_contiguous, "Heap data must be contiguous"
-            heap.add_item(
-                spead2.Item(FENG_RAW_ID, "", "", shape=heap_data.shape, dtype=heap_data.dtype, value=heap_data)
-            )
+            item_group[FREQUENCY_ID].value = start_channel
+            item_group[FENG_RAW_ID].value = heap_data
+            heap = item_group.get_heap(data="all", descriptors="none")
+            heap.repeat_pointers = True
             self.heaps.append(spead2.send.HeapReference(heap, substream_index=i))
 
 
@@ -313,13 +350,6 @@ def make_streams(
     return streams
 
 
-class _RawKwargs(TypedDict, total=False):
-    """Helper class for type annotations."""
-
-    dtype: np.dtype
-    format: list[tuple[str, int]]
-
-
 def make_descriptor_heap(
     *,
     channels_per_substream: int,
@@ -327,43 +357,12 @@ def make_descriptor_heap(
     sample_bits: int,
 ) -> "spead2.send.Heap":
     """Create a descriptor heap for output F-Engine data."""
-    heap_data_shape = (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)
-
-    ig = spead2.send.ItemGroup(flavour=FLAVOUR)
-    ig.add_item(
-        TIMESTAMP_ID,
-        "timestamp",
-        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
-        shape=(),
-        format=IMMEDIATE_FORMAT,
-    )
-    ig.add_item(
-        FENG_ID_ID,
-        "feng_id",
-        "Uniquely identifies the F-Engine source for the data.",
-        shape=(),
-        format=IMMEDIATE_FORMAT,
-    )
-    ig.add_item(
-        FREQUENCY_ID,
-        "frequency",
-        "Identifies the first channel in the band of frequencies in the SPEAD heap.",
-        shape=(),
-        format=IMMEDIATE_FORMAT,
-    )
-
-    raw_kwargs: _RawKwargs = {}
+    raw_kwargs: _FengRawKwargs = {"shape": (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)}
     try:
         raw_kwargs["dtype"] = np.dtype(f"int{sample_bits}")
     except TypeError:
         # The number of bits doesn't neatly fit a numpy dtype
         raw_kwargs["format"] = [("i", sample_bits)]
-    ig.add_item(
-        FENG_RAW_ID,
-        "feng_raw",
-        "Channelised complex data from both polarisations of digitiser associated with F-Engine.",
-        shape=heap_data_shape,
-        **raw_kwargs,
-    )
 
-    return ig.get_heap(descriptors="all", data="none")
+    item_group = make_item_group(**raw_kwargs)
+    return item_group.get_heap(descriptors="all", data="none")

@@ -374,13 +374,14 @@ trafaret==2.1.1
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
-typing-extensions==4.8.0
+typing-extensions==4.12.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiokatcp
     #   aiomonitor
     #   janus
+    #   katgpucbf (setup.cfg)
     #   katsdpsigproc
 tzdata==2023.3
     # via

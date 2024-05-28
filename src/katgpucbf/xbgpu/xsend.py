@@ -29,7 +29,7 @@ from katsdpsigproc.abc import AbstractContext
 from prometheus_client import Counter
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
-from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID, make_immediate
+from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID
 from . import METRIC_NAMESPACE
 
 output_heaps_counter = Counter(
@@ -62,6 +62,33 @@ incomplete_accum_counter = Counter(
 SEND_DTYPE = np.dtype(np.int32)
 
 
+def make_item_group(xeng_raw_shape: tuple[int, ...]) -> spead2.send.ItemGroup:
+    """Create an item group (with no values)."""
+    item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
+    item_group.add_item(
+        FREQUENCY_ID,
+        "frequency",  # Misleading name, but it's what the ICD specifies
+        "Value of first channel in collections stored here.",
+        shape=[],
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        TIMESTAMP_ID,
+        "timestamp",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+        shape=[],
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        XENG_RAW_ID,
+        "xeng_raw",
+        "Integrated baseline correlation products.",
+        shape=xeng_raw_shape,
+        dtype=SEND_DTYPE,
+    )
+    return item_group
+
+
 class Heap:
     """Hold all the data for a heap.
 
@@ -79,19 +106,11 @@ class Heap:
         self.future = asyncio.get_running_loop().create_future()
         self.future.set_result(None)
 
-        self.heap: Final = spead2.send.Heap(FLAVOUR)
-        self.heap.add_item(make_immediate(TIMESTAMP_ID, self._timestamp))
-        self.heap.add_item(make_immediate(FREQUENCY_ID, channel_offset))
-        self.heap.add_item(
-            spead2.Item(
-                XENG_RAW_ID,
-                "xeng_raw",
-                "",
-                shape=self.buffer.shape,
-                dtype=self.buffer.dtype,
-                value=self.buffer,
-            )
-        )
+        item_group = make_item_group(self.buffer.shape)
+        item_group[TIMESTAMP_ID].value = self._timestamp
+        item_group[FREQUENCY_ID].value = channel_offset
+        item_group[XENG_RAW_ID].value = self.buffer
+        self.heap: Final = item_group.get_heap(descriptors="none", data="all")
         self.heap.repeat_pointers = True
 
     @property
@@ -283,29 +302,7 @@ class XSend:
             n_channels // n_channels_per_substream,
         )
 
-        item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
-        item_group.add_item(
-            FREQUENCY_ID,
-            "frequency",  # Misleading name, but it's what the ICD specifies
-            "Value of first channel in collections stored here.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        item_group.add_item(
-            TIMESTAMP_ID,
-            "timestamp",
-            "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        item_group.add_item(
-            XENG_RAW_ID,
-            "xeng_raw",
-            "Integrated baseline correlation products.",
-            shape=buffers[0].shape,
-            dtype=buffers[0].dtype,
-        )
-
+        item_group = make_item_group(buffers[0].shape)
         self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
 
     def send_heap(self, heap: Heap) -> None:
