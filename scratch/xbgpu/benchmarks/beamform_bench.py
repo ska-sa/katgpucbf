@@ -43,7 +43,9 @@ def main():
         command_queue,
         n_batches=args.heaps_per_fengine_per_chunk,
         n_ants=args.array_size,
-        n_channels=args.channels_per_substream,
+        n_channels_per_substream=args.channels_per_substream,
+        seed=1,
+        sequence_first=0,
     )
 
     builder = RandomStateBuilder(ctx)
