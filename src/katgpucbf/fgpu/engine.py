@@ -916,7 +916,7 @@ class Pipeline:
                     )
                 else:
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                        -np.inf,
+                        np.finfo(np.float64).min,
                         status=aiokatcp.Sensor.Status.FAILURE,
                         timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp),
                     )
