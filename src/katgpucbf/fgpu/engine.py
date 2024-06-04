@@ -895,7 +895,34 @@ class Pipeline:
                 chunk.cleanup()
                 chunk.cleanup = None  # Potentially helps break reference cycles
 
-    async def run_transmit(self) -> None:  # noqa: C901
+    def _update_dig_power_sensors(self, dig_total_power: accel.HostArray | None, out_item: OutQueueItem) -> None:
+        """Update digitiser power sensors.
+
+        Helper function for keeping the complexity of :meth:`run_transmit` down to manageable levels.
+        """
+        if dig_total_power is not None:
+            if np.all(out_item.present):
+                for pol, trg in enumerate(dig_total_power):
+                    total_power = float(trg)
+                    avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
+                    # Normalise relative to full scale. The factor of 2 is because we
+                    # want 1.0 to correspond to a sine wave rather than a square wave.
+                    avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
+                    # If for some reason there's zero power, avoid reporting
+                    # -inf dB by assigning the most negative representable value
+                    avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
+                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
+                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
+                    )
+            else:
+                for pol in range(N_POLS):
+                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
+                        -np.inf,
+                        status=aiokatcp.Sensor.Status.FAILURE,
+                        timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp),
+                    )
+
+    async def run_transmit(self) -> None:
         """Get the processed data from the GPU to the Network.
 
         This could be done either with or without PeerDirect. In the
@@ -947,27 +974,7 @@ class Pipeline:
             with self.engine.monitor.with_state(func_name, "wait transfer"):
                 await async_wait_for_events([download_marker])
 
-            if dig_total_power is not None:
-                if np.all(out_item.present):
-                    for pol, trg in enumerate(dig_total_power):
-                        total_power = float(trg)
-                        avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
-                        # Normalise relative to full scale. The factor of 2 is because we
-                        # want 1.0 to correspond to a sine wave rather than a square wave.
-                        avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
-                        # If for some reason there's zero power, avoid reporting
-                        # -inf dB by assigning the most negative representable value
-                        avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
-                        self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                            avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
-                        )
-                else:
-                    for pol in range(N_POLS):
-                        self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                            -np.inf,
-                            status=aiokatcp.Sensor.Status.FAILURE,
-                            timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp),
-                        )
+            self._update_dig_power_sensors(dig_total_power, out_item)
 
             n_batches = out_item.n_spectra // self.output.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
