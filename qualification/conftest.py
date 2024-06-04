@@ -312,9 +312,11 @@ async def _cbf_config_and_description(
     int_time: float,
     narrowband_decimation: int,
 ) -> tuple[dict, dict]:
+    # shutdown_delay is set to zero to speed up the test. We don't care
+    # that Prometheus might not get to scrape the final metric updates.
     config: dict = {
-        "version": "4.0",
-        "config": {},
+        "version": "4.1",
+        "config": {"shutdown_delay": 0.0},
         "inputs": {},
         "outputs": {},
     }
@@ -580,8 +582,10 @@ async def session_cbf(
 
     finally:
         # In case anything does go wrong, we want to make sure that we the
-        # deconfigure the product. We force-deconfigure, both to ensure that
-        # it dies, and because doing so is faster than a graceful shutdown.
+        # deconfigure the product. We force-deconfigure to ensure that
+        # it dies (katsdpcontroller first tries a normal deconfigure before
+        # killing it hard, so we're still testing the normal deconfigure
+        # codepath).
         await master_controller_client.request("product-deconfigure", product_name, True)
 
 
