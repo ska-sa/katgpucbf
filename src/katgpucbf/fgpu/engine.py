@@ -901,8 +901,8 @@ class Pipeline:
         Helper function for keeping the complexity of :meth:`run_transmit` down to manageable levels.
         """
         if dig_total_power is not None:
-            if np.all(out_item.present):
-                for pol, trg in enumerate(dig_total_power):
+            for pol, trg in enumerate(dig_total_power):
+                if np.all(out_item.present[pol]):
                     total_power = float(trg)
                     avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
                     # Normalise relative to full scale. The factor of 2 is because we
@@ -914,8 +914,7 @@ class Pipeline:
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
                         avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
                     )
-            else:
-                for pol in range(N_POLS):
+                else:
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
                         -np.inf,
                         status=aiokatcp.Sensor.Status.FAILURE,
