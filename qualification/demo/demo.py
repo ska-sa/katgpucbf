@@ -16,6 +16,8 @@
 
 """Example tests helpful in developing the reporting framework."""
 
+import asyncio
+
 import matplotlib.figure
 import numpy as np
 import pytest
@@ -24,8 +26,14 @@ from pytest_check import check
 from ..reporter import POTLocator, Reporter
 
 
+@pytest.fixture
+async def slow_fixture(pdf_report: Reporter) -> None:
+    """Fixture that takes a while to set up, to test the time reporting."""
+    await asyncio.sleep(0.5)
+
+
 @pytest.mark.requirements("DEMO-000")
-def test_passes(pdf_report: Reporter) -> None:
+def test_passes(pdf_report: Reporter, slow_fixture) -> None:
     r"""Pass the test.
 
     Here is some maths: :math:`e^{\pi j} + 1 = 0`.
