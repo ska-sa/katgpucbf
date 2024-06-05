@@ -859,6 +859,8 @@ class TestEngine:
         It then checks that the heaps successfully received in the first half match
         the heaps in the second half.
         """
+        sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
+        sensor_update_dict = self._watch_sensors(sensors)
         spectra_per_heap = output.spectra_per_heap
         chunk_samples = engine_server.src_layout.chunk_samples
         n_samples = 16 * chunk_samples
@@ -913,9 +915,32 @@ class TestEngine:
                 # the time difference is a multiple of the mixer wavelength.
                 np.testing.assert_equal(x, y)
 
+        time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
+        unix_timestamps = [time_converter.adc_to_unix(t) for t in timestamps]
+
         for pol in range(N_POLS):
             input_missing_heaps = np.sum(~src_present[pol])
             assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
+
+            sensor_update_iter = iter(sensor_update_dict[f"input{pol}.dig-rms-dbfs"])
+            sensor_update = next(sensor_update_iter)
+            mark = 0
+            for i, ts in enumerate(unix_timestamps[: len(unix_timestamps) // 2]):
+                if ts < sensor_update.timestamp:
+                    continue
+
+                if np.all(dst_present[mark : i // 32]):
+                    assert sensor_update.status != aiokatcp.Sensor.Status.FAILURE
+                else:
+                    assert sensor_update.status == aiokatcp.Sensor.Status.FAILURE
+                mark = i // 32
+
+                try:
+                    sensor_update = next(sensor_update_iter)
+                except StopIteration:
+                    # We have run out of sensor updates. We expect to be missing the last one.
+                    break
+
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
         assert prom_diff.get_sample_diff("output_heaps_total", {"stream": output.name}) == output_heaps
