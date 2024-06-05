@@ -312,9 +312,11 @@ async def _cbf_config_and_description(
     int_time: float,
     narrowband_decimation: int,
 ) -> tuple[dict, dict]:
+    # shutdown_delay is set to zero to speed up the test. We don't care
+    # that Prometheus might not get to scrape the final metric updates.
     config: dict = {
-        "version": "4.0",
-        "config": {},
+        "version": "4.1",
+        "config": {"shutdown_delay": 0.0},
         "inputs": {},
         "outputs": {},
     }
