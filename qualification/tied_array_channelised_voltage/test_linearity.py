@@ -38,7 +38,7 @@ def batched(iterable: Iterable[_T], n: int) -> Iterator[tuple[_T, ...]]:
     implementation is based on the documentation for that function.
     """
     if n < 1:
-        raise ValueError('n must be at least one')
+        raise ValueError("n must be at least one")
     it = iter(iterable)
     while batch := tuple(itertools.islice(it, n)):
         yield batch
