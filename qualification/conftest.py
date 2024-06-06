@@ -653,12 +653,9 @@ async def receive_baseline_correlation_products(
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
-    # Ensure that the data is flowing, and that we throw away any data that
-    # predates the start of this test (to prevent any state leaks from previous
-    # tests).
-    await receiver.next_complete_chunk(max_delay=0)
+    await receiver.start()
     yield receiver
-    receiver.stream.stop()
+    await receiver.stop()
 
 
 @pytest.fixture
@@ -698,10 +695,6 @@ async def receive_tied_array_channelised_voltage(
     receiver = TiedArrayChannelisedVoltageReceiver(
         cbf=cbf, stream_names=stream_names, interface_address=interface_address, use_ibv=use_ibv
     )
-
-    # Ensure that the data is flowing, and that we throw away any data that
-    # predates the start of this test (to prevent any state leaks from previous
-    # tests).
-    await receiver.next_complete_chunk(max_delay=0)
+    await receiver.start()
     yield receiver
-    receiver.stream.stop()
+    await receiver.stop()

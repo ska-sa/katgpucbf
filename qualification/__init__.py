@@ -202,7 +202,17 @@ class CBFRemoteControl:
 
 
 class XBReceiver:
-    """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
+    """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`.
+
+    The design is based around the test not continuously retrieving chunks. To
+    avoid applying back-pressure when it is not needed, the receiver runs a
+    separate worker task that continuously takes chunks and either places them
+    onto a queue (if the main thread is requesting data) or discards them (if
+    not).
+
+    Note that the worker task can still be blocked for significant amounts of
+    time if the test is performing computations.
+    """
 
     # Attributes instantiated by the derived classes
     stream: spead2.recv.ChunkStreamRingGroup
@@ -247,6 +257,38 @@ class XBReceiver:
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
         self.cbf = cbf
         self._acv_name = acv_name
+        self._queue: asyncio.Queue[katgpucbf.recv.Chunk] = asyncio.Queue(maxsize=2)
+        self._worker_task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        """Start listening for chunks and block until a complete chunk is received."""
+        self._worker_task = asyncio.create_task(self._worker(self._queue))
+        # We avoid using next_complete_chunk here since it has overhead to
+        # duplicate the data in the chunk.
+        async for timestamp, chunk in self.complete_chunks(max_delay=0):
+            chunk.recycle()
+            return
+
+    async def stop(self) -> None:
+        """Shut down the receiver."""
+        self.stream.stop()
+        if self._worker_task is not None:
+            await self._worker_task
+            self._worker_task = None
+
+    async def _worker(self, queue: asyncio.Queue[katgpucbf.recv.Chunk]) -> None:
+        """Worker task."""
+        data_ringbuffer = self.stream.data_ringbuffer
+        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
+        async for chunk in data_ringbuffer:
+            assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
+            assert chunk.data is not None
+            if queue.full():
+                # Since we don't await, we don't have to worry about race
+                # conditions where a consumer has taken the chunk from under
+                # us.
+                queue.get_nowait().recycle()
+            queue.put_nowait(chunk)
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
@@ -304,12 +346,10 @@ class XBReceiver:
         if min_timestamp is None:
             min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
 
-        data_ringbuffer = self.stream.data_ringbuffer
-        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         try:
             async with async_timeout.timeout(time_limit) as timer:
-                async for chunk in data_ringbuffer:
-                    assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
+                while True:
+                    chunk = await self._queue.get()
                     timestamp = chunk.chunk_id * self.timestamp_step
                     if min_timestamp is not None and timestamp < min_timestamp:
                         logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
@@ -539,7 +579,7 @@ def _create_receive_stream_group(
     chunk_factory
         Factory function to initialise the chunks.
     """
-    n_extra_chunks = 2  # Chunks that are being processed
+    n_extra_chunks = 4  # Chunks that are being processed (including XBReceiver._queue)
     free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_extra_chunks)
     group_config = spead2.recv.ChunkStreamGroupConfig(
