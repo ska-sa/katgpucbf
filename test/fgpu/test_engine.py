@@ -915,31 +915,59 @@ class TestEngine:
                 # the time difference is a multiple of the mixer wavelength.
                 np.testing.assert_equal(x, y)
 
+        # Information needed to check that the dig-rms-dbfs sensor is correctly
+        # going into FAILURE when there are missing samples.
         time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
         unix_timestamps = [time_converter.adc_to_unix(t) for t in timestamps]
+        # The sensor is updated once per out_item.
+        timestamps_per_output_chunk = engine_server.chunk_jones // output.channels
+        decimation = output.decimation  # Check if we are in narrowband.
 
         for pol in range(N_POLS):
+            # Check prometheus counter
             input_missing_heaps = np.sum(~src_present[pol])
             assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
 
-            sensor_update_iter = iter(sensor_update_dict[f"input{pol}.dig-rms-dbfs"])
-            sensor_update = next(sensor_update_iter)
-            mark = 0
-            for i, ts in enumerate(unix_timestamps[: len(unix_timestamps) // 2]):
-                if ts < sensor_update.timestamp:
-                    continue
+            # Check dig-rms-dbfs sensor. Not present in the narrowband mode.
+            if decimation == 1:
+                sensor_update_iter = iter(sensor_update_dict[f"input{pol}.dig-rms-dbfs"])
+                sensor_update = next(sensor_update_iter)
+                # The sensor is updated once per out_item. But the step between
+                # timestamps of the sensor update is not consistent, it wobbles a
+                # bit (I am currently not sure why). So we need to keep track of
+                # what the last timestamp was that we considered.
+                mark = 0
+                for i, ts in enumerate(unix_timestamps[: len(unix_timestamps) // 2]):
+                    # Advance until we have caught up with the sensor's timestamp.
+                    if ts < sensor_update.timestamp:
+                        continue
 
-                if np.all(dst_present[mark : i // 32]):
-                    assert sensor_update.status != aiokatcp.Sensor.Status.FAILURE
-                else:
-                    assert sensor_update.status == aiokatcp.Sensor.Status.FAILURE
-                mark = i // 32
+                    # If a long time has gone by that means that more than a chunk
+                    # was missing on the input and the chunk was just not
+                    # transmitted, therefore the sensor would not be updated. The
+                    # 1.1 is arbitrary, it just needs to be bigger than 1.
+                    if mark < i - 1.1 * timestamps_per_output_chunk:
+                        # Once the input recovers, the output starts a new chunk
+                        # and the sensor won't consider the entire missing range,
+                        # just the most recent complete (or nearly complete chunk).
+                        mark = i - timestamps_per_output_chunk + 1
 
-                try:
-                    sensor_update = next(sensor_update_iter)
-                except StopIteration:
-                    # We have run out of sensor updates. We expect to be missing the last one.
-                    break
+                    # TODO: make the 32 spectra-per-heap into an easier-to-use
+                    # constant. It's a naked 32 in the pytest mark at the top
+                    # of this test.
+                    recent_present = dst_present[mark // 32 : i // 32]
+                    if np.all(recent_present):
+                        assert sensor_update.status != aiokatcp.Sensor.Status.FAILURE
+                    else:
+                        assert sensor_update.status == aiokatcp.Sensor.Status.FAILURE
+
+                    mark = i
+
+                    try:
+                        sensor_update = next(sensor_update_iter)
+                    except StopIteration:
+                        # We have run out of sensor updates.
+                        break
 
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
