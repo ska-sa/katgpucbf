@@ -268,6 +268,21 @@ def pdf_report(request, monkeypatch) -> Reporter:
     return reporter
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item) -> Generator[None, None, None]:
+    """Update the test_start field when the test is actually started.
+
+    This gives a more accurate start time than the one recorded by the
+    :func:`pdf_report` fixture, in the event that other slow fixtures are set
+    up after :func:`pdf_report`.
+    """
+    for name, value in item.user_properties:
+        if name == "pdf_report_data":
+            value[0]["test_start"] = time.time()
+            break
+    yield
+
+
 @pytest.fixture(scope="session")
 def host_config_querier(pytestconfig: pytest.Config) -> HostConfigQuerier:
     """Querier for getting host config."""
