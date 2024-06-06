@@ -957,7 +957,7 @@ class TestEngine:
             dig_data,
         )
         time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
-        expected_timestamps = [time_converter.adc_to_unix(t * 524288) for t in range(1, 10)]
+        expected_timestamps = [time_converter.adc_to_unix(t * CHUNK_SAMPLES) for t in range(1, 10)]
         assert sensor_update_dict[sensors[0].name] == [
             aiokatcp.Reading(t, aiokatcp.Sensor.Status.NOMINAL, 5000) for t in expected_timestamps
         ]
@@ -995,7 +995,7 @@ class TestEngine:
             dig_data,
         )
         time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
-        expected_timestamps = [time_converter.adc_to_unix(t * 524288) for t in range(1, 10)]
+        expected_timestamps = [time_converter.adc_to_unix(t * CHUNK_SAMPLES) for t in range(1, 10)]
         for pol in range(N_POLS):
             assert sensor_update_dict[sensors[pol].name] == [
                 aiokatcp.Reading(t, aiokatcp.Sensor.Status.WARN, output_power_dbfs) for t in expected_timestamps
