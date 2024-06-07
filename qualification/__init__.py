@@ -30,7 +30,7 @@ import math
 import re
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Literal, Sequence, overload
+from typing import TYPE_CHECKING, Callable, Iterable, Literal, Sequence, overload
 from uuid import UUID, uuid4
 
 import aiokatcp
@@ -201,6 +201,54 @@ class CBFRemoteControl:
             pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}{suffix}.")
 
 
+class CoreAllocator:
+    """Provide CPU cores to receivers that need them.
+
+    It is initialised with a list of cores, with earlier entries considered
+    better than later ones. When cores are requested, the best cores are
+    provided. Cores must then later be returned to the allocator.
+    """
+
+    def __init__(self, cores: Iterable[int]) -> None:
+        self._cores = list(cores)
+        n = len(self._cores)
+        self._index = {core: i for i, core in enumerate(self._cores)}
+        if len(self._index) != n:
+            raise ValueError("Cores must be unique")
+        self._available = [True] * n
+
+    def allocate(self, n: int) -> Sequence[int]:
+        """Request `n` cores.
+
+        Raises
+        ------
+        ValueError
+            If there are insufficient cores available
+        """
+        available = sum(self._available)
+        if n > available:
+            raise ValueError(f"{n} cores requested but only {available} cores available")
+        out = []
+        for i in range(len(self._cores)):
+            if self._available[i]:
+                out.append(self._cores[i])
+                self._available[i] = False
+                if len(out) == n:
+                    return out
+        raise AssertionError("this statement should be unreachable")  # pragma: nocover
+
+    def release(self, cores: Iterable[int]) -> None:
+        """Return cores previously allocated with `allocate`.
+
+        Cores do not need to be returned in the same batches or the same order they
+        were allocated, but they must be returned at most once.
+        """
+        for core in cores:
+            idx = self._index[core]
+            assert not self._available[idx]
+            self._available[idx] = True
+
+
 class XBReceiver:
     """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
 
@@ -208,7 +256,9 @@ class XBReceiver:
     stream: spead2.recv.ChunkStreamRingGroup
     timestamp_step: int  # Step (in ADC samples) between chunk timestamps
 
-    def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
+    def __init__(
+        self, cbf: CBFRemoteControl, stream_names: Sequence[str], core_allocator: CoreAllocator | None
+    ) -> None:
         # Some metadata we know already from the config.
         acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
         acv_config = cbf.config["outputs"][acv_name]
@@ -247,6 +297,15 @@ class XBReceiver:
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
         self.cbf = cbf
         self._acv_name = acv_name
+        self.core_allocator = core_allocator
+        self.cores = core_allocator.allocate(len(self.stream_names)) if core_allocator is not None else None
+
+    def stop(self) -> None:
+        """Shut down the receiver."""
+        self.stream.stop()
+        if self.core_allocator is not None:
+            assert self.cores is not None
+            self.core_allocator.release(self.cores)
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
@@ -431,8 +490,15 @@ class XBReceiver:
 class BaselineCorrelationProductsReceiver(XBReceiver):
     """Wrap a baseline-correlation-products stream with helper functions."""
 
-    def __init__(self, cbf: CBFRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False) -> None:
-        super().__init__(cbf, [stream_name])
+    def __init__(
+        self,
+        cbf: CBFRemoteControl,
+        stream_name: str,
+        interface_address: str,
+        use_ibv: bool = False,
+        core_allocator: CoreAllocator | None = None,
+    ) -> None:
+        super().__init__(cbf, [stream_name], core_allocator)
 
         # Fill in extra sensors specific to baseline-correlation-products
         self.n_bls = cbf.sensors[f"{stream_name}.n-bls"].value
@@ -453,6 +519,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             int_time=self.int_time,
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
+            cores=self.cores,
         )
 
     def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:  # noqa: D102
@@ -477,9 +544,14 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
     """Wrap a tied-array-channelised-voltage stream with helper functions."""
 
     def __init__(
-        self, cbf: CBFRemoteControl, stream_names: Sequence[str], interface_address: str, use_ibv: bool = False
+        self,
+        cbf: CBFRemoteControl,
+        stream_names: Sequence[str],
+        interface_address: str,
+        use_ibv: bool = False,
+        core_allocator: CoreAllocator | None = None,
     ) -> None:
-        super().__init__(cbf, stream_names)
+        super().__init__(cbf, stream_names, core_allocator)
 
         self.n_bits_per_sample = cbf.sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
@@ -497,6 +569,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             n_spectra_per_heap=self.n_spectra_per_heap,
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
+            cores=self.cores,
         )
 
 
@@ -509,6 +582,7 @@ def _create_receive_stream_group(
     max_heap_extra: int,
     chunk_place: Callable,  # Actual type comes from ctypes.CFUNCTYPE, but it doesn't have a static name
     chunk_factory: Callable[[spead2.recv.ChunkRingPair], katgpucbf.recv.Chunk],
+    cores: Sequence[int] | None = None,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a stream group to receive data from an engine.
 
@@ -538,6 +612,9 @@ def _create_receive_stream_group(
         `multicast_endpoints`) as an int64.
     chunk_factory
         Factory function to initialise the chunks.
+    cores
+        Cores on which to run the worker threads. If specified, this must have
+        the same number of elements as `multicast_endpoints`.
     """
     n_extra_chunks = 2  # Chunks that are being processed
     free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
@@ -565,11 +642,17 @@ def _create_receive_stream_group(
                 user_data=user_data.ctypes.data_as(ctypes.c_void_p),
             ),
         )
-        stream = group.emplace_back(spead2.ThreadPool(), stream_config, chunk_stream_config)
+        if cores is not None:
+            core = cores[i]
+            tp = spead2.ThreadPool(1, [core])
+        else:
+            core = -1
+            tp = spead2.ThreadPool()
+        stream = group.emplace_back(tp, stream_config, chunk_stream_config)
 
         if use_ibv:
             config = spead2.recv.UdpIbvConfig(
-                endpoints=endpoints, interface_address=interface_address, buffer_size=int(16e6), comp_vector=-1
+                endpoints=endpoints, interface_address=interface_address, buffer_size=int(16e6), comp_vector=core
             )
             stream.add_udp_ibv_reader(config)
         else:
@@ -592,6 +675,7 @@ def create_baseline_correlation_product_receive_stream(
     int_time: float,
     n_samples_between_spectra: int,
     use_ibv: bool = False,
+    cores: Sequence[int] | None = None,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a spead2 recv stream for ingesting baseline correlation product data."""
     # Lifted from :class:`katgpucbf.xbgpu.XSend`.
@@ -634,6 +718,7 @@ def create_baseline_correlation_product_receive_stream(
             data=np.empty((n_chans, n_bls, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
             sink=stream,
         ),
+        cores=cores,
     )
 
 
@@ -646,6 +731,7 @@ def create_tied_array_channelised_voltage_receive_stream(
     n_spectra_per_heap: int,
     n_samples_between_spectra: int,
     use_ibv: bool = False,
+    cores: Sequence[int] | None = None,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a spead2 recv stream for ingesting tied array channelised voltage data."""
     n_substreams = n_chans // n_chans_per_substream
@@ -694,4 +780,5 @@ def create_tied_array_channelised_voltage_receive_stream(
             data=np.empty((n_beams, n_chans, n_spectra_per_heap, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
             sink=stream,
         ),
+        cores=cores,
     )

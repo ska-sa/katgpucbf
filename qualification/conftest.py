@@ -22,6 +22,7 @@ import copy
 import inspect
 import json
 import logging
+import os
 import re
 import subprocess
 import time
@@ -38,7 +39,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
+from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, CoreAllocator, TiedArrayChannelisedVoltageReceiver
 from .host_config import HostConfigQuerier
 from .reporter import Reporter
 
@@ -65,6 +66,7 @@ ini_options = [
         name="interface_gbps", help="Maximum bandwidth to subscribe to on 'interface'", type="string", default="90"
     ),
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default=False),
+    IniOption(name="cores", help="Space-separated list of cores to use for worker threads", type="args", default=[]),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_cbf"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
     IniOption(name="max_antennas", help="Maximum number of antennas to test", type="string", default="8"),
@@ -638,9 +640,23 @@ async def cbf(
             await pcc.request("capture-stop", name)
 
 
+@pytest.fixture(scope="session")
+def core_allocator(pytestconfig: pytest.Config) -> CoreAllocator | None:
+    """Create a :class:`.CoreAllocator` and pin the main thread to one of the cores."""
+    cores_str = pytestconfig.getini("cores")
+    if not cores_str:
+        return None
+    allocator = CoreAllocator(int(x) for x in cores_str)
+    # Pin the main thread to a core that won't be shared with the worker
+    # threads. Note that since this is a session-scoped fixture, there is
+    # no need to return the core during cleanup.
+    os.sched_setaffinity(0, allocator.allocate(1))
+    return allocator
+
+
 @pytest.fixture
 async def receive_baseline_correlation_products(
-    pytestconfig: pytest.Config, cbf: CBFRemoteControl
+    pytestconfig: pytest.Config, core_allocator: CoreAllocator | None, cbf: CBFRemoteControl
 ) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -652,18 +668,20 @@ async def receive_baseline_correlation_products(
         stream_name="baseline-correlation-products",
         interface_address=interface_address,
         use_ibv=use_ibv,
+        core_allocator=core_allocator,
     )
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests).
     await receiver.next_complete_chunk(max_delay=0)
     yield receiver
-    receiver.stream.stop()
+    receiver.stop()
 
 
 @pytest.fixture
 async def receive_tied_array_channelised_voltage(
     pytestconfig: pytest.Config,
+    core_allocator: CoreAllocator | None,
     cbf: CBFRemoteControl,
     cbf_config: dict,
     n_antennas: int,
@@ -696,7 +714,11 @@ async def receive_tied_array_channelised_voltage(
 
     stream_names = stream_names[:max_streams]
     receiver = TiedArrayChannelisedVoltageReceiver(
-        cbf=cbf, stream_names=stream_names, interface_address=interface_address, use_ibv=use_ibv
+        cbf=cbf,
+        stream_names=stream_names,
+        interface_address=interface_address,
+        use_ibv=use_ibv,
+        core_allocator=core_allocator,
     )
 
     # Ensure that the data is flowing, and that we throw away any data that
@@ -704,4 +726,4 @@ async def receive_tied_array_channelised_voltage(
     # tests).
     await receiver.next_complete_chunk(max_delay=0)
     yield receiver
-    receiver.stream.stop()
+    receiver.stop()
