@@ -22,6 +22,7 @@ from ast import literal_eval
 from collections.abc import Callable
 from typing import Sequence, cast
 
+import async_timeout
 import numpy as np
 import pytest
 from matplotlib.axes import Axes
@@ -658,33 +659,29 @@ async def test_group_delay(
         await cbf.dsim_clients[0].request("signals", signal, dsim_period)
         pdf_report.detail(f"dsim signal set to {signal}.")
 
+        pdf_report.detail(f"Receive {n_chunks} chunks of contiguous data.")
+        i = 0
+        attempts = 0
+        first_timestamp = -1
         # First axis corresponds to the 2 signals we're comparing.
-        raw_data = np.zeros((2, n_spectra, COMPLEX), np.int8)
-        max_attempts = 5
-        for attempt in range(max_attempts):
-            pdf_report.detail(f"Attempt {attempt + 1}/{max_attempts} to receive contiguous data.")
-            i = 0
-            async for timestamp, chunk in receiver.complete_chunks(time_limit=20.0):
-                with chunk:
-                    if i == 0:
-                        first_timestamp = timestamp
-                    if timestamp != first_timestamp + i * chunk_timestamp_step:
-                        pdf_report.detail(f"Only received {i}/{n_chunks} chunks.")
+        raw_data = np.ones((2, n_spectra, COMPLEX), np.int8)
+        try:
+            async with async_timeout.timeout(30.0):
+                async for timestamp, chunk in receiver.complete_chunks():
+                    with chunk:
+                        if i == 0 or timestamp != first_timestamp + i * chunk_timestamp_step:
+                            first_timestamp = timestamp
+                            i = 0  # If we had a gap, start from the beginning again
+                            attempts += 1
+                        start_spectrum = i * receiver.n_spectra_per_heap
+                        end_spectrum = (i + 1) * receiver.n_spectra_per_heap
+                        raw_data[:, start_spectrum:end_spectrum] = chunk.data[:2, channel]
+                    i += 1
+                    if i == n_chunks:
+                        pdf_report.detail(f"Received all chunks after {attempts} attempt(s).")
                         break
-                    start_spectrum = i * receiver.n_spectra_per_heap
-                    end_spectrum = (i + 1) * receiver.n_spectra_per_heap
-                    raw_data[:, start_spectrum:end_spectrum] = chunk.data[:2, channel]
-                i += 1
-                if i == n_chunks:
-                    pdf_report.detail("Received all chunks.")
-                    break
-            else:
-                # We get here if we reached time_limit
-                pdf_report.detail(f"Timed out after receiving {i}/{n_chunks} chunks.")
-            if i == n_chunks:
-                break
-        else:
-            pytest.fail(f"Did not receive {n_chunks} contiguous chunks after {max_attempts} attempts.")
+        except asyncio.TimeoutError:
+            pytest.fail("Timed out.")
 
         # Convert Gaussian integers to complex128
         data = raw_data.astype(np.float64).view(np.complex128)[..., 0]
