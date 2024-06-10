@@ -915,59 +915,10 @@ class TestEngine:
                 # the time difference is a multiple of the mixer wavelength.
                 np.testing.assert_equal(x, y)
 
-        # Information needed to check that the dig-rms-dbfs sensor is correctly
-        # going into FAILURE when there are missing samples.
-        time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
-        unix_timestamps = [time_converter.adc_to_unix(t) for t in timestamps]
-        # The sensor is updated once per out_item.
-        timestamps_per_output_chunk = engine_server.chunk_jones // output.channels
-        decimation = output.decimation  # Check if we are in narrowband.
-
         for pol in range(N_POLS):
             # Check prometheus counter
             input_missing_heaps = np.sum(~src_present[pol])
             assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
-
-            # Check dig-rms-dbfs sensor. Not present in the narrowband mode.
-            if decimation == 1:
-                sensor_update_iter = iter(sensor_update_dict[f"input{pol}.dig-rms-dbfs"])
-                sensor_update = next(sensor_update_iter)
-                # The sensor is updated once per out_item. But the step between
-                # timestamps of the sensor update is not consistent, it wobbles a
-                # bit (I am currently not sure why). So we need to keep track of
-                # what the last timestamp was that we considered.
-                mark = 0
-                for i, ts in enumerate(unix_timestamps[: len(unix_timestamps) // 2]):
-                    # Advance until we have caught up with the sensor's timestamp.
-                    if ts < sensor_update.timestamp:
-                        continue
-
-                    # If a long time has gone by that means that more than a chunk
-                    # was missing on the input and the chunk was just not
-                    # transmitted, therefore the sensor would not be updated. The
-                    # 1.1 is arbitrary, it just needs to be bigger than 1.
-                    if mark < i - 1.1 * timestamps_per_output_chunk:
-                        # Once the input recovers, the output starts a new chunk
-                        # and the sensor won't consider the entire missing range,
-                        # just the most recent complete (or nearly complete chunk).
-                        mark = i - timestamps_per_output_chunk + 1
-
-                    # TODO: make the 32 spectra-per-heap into an easier-to-use
-                    # constant. It's a naked 32 in the pytest mark at the top
-                    # of this test.
-                    recent_present = dst_present[mark // 32 : i // 32]
-                    if np.all(recent_present):
-                        assert sensor_update.status != aiokatcp.Sensor.Status.FAILURE
-                    else:
-                        assert sensor_update.status == aiokatcp.Sensor.Status.FAILURE
-
-                    mark = i
-
-                    try:
-                        sensor_update = next(sensor_update_iter)
-                    except StopIteration:
-                        # We have run out of sensor updates.
-                        break
 
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
@@ -985,6 +936,60 @@ class TestEngine:
             prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": output.name})
             == np.sum(~dst_present) * n_substreams
         )
+
+        # Information needed to check that the dig-rms-dbfs sensor is correctly
+        # going into FAILURE when there are missing samples.
+        time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
+        unix_timestamps = [time_converter.adc_to_unix(t) for t in timestamps]
+
+        # The sensor is updated once per out_item.
+        spectra_per_output_chunk = engine_server.chunk_jones // output.channels
+        heaps_per_output_chunk = spectra_per_output_chunk // spectra_per_heap
+
+        # Need to reshape timestamp list so that we can work in batches of
+        # chunk size. The last chunk isn't finished so we need to add a
+        # bit on the end.  Need to test this after the prometheus counters
+        # becaus this affects np arrays which those tests use to count things.
+        if (remainder := len(unix_timestamps) % spectra_per_output_chunk) != 0:
+            unix_timestamps.extend([0 for _ in range(spectra_per_output_chunk - remainder)])
+        chunk_timestamps = np.reshape(unix_timestamps, (-1, spectra_per_output_chunk))
+        chunk_time_step = np.average(chunk_timestamps[1]) - np.average(chunk_timestamps[0])
+
+        # Same with dst_present
+        if (remainder := len(dst_present) % heaps_per_output_chunk) != 0:
+            dst_present = np.append(dst_present, [False for _ in range(heaps_per_output_chunk - remainder)])
+        chunk_present = np.reshape(dst_present, (-1, heaps_per_output_chunk))
+
+        # Sensor is not present in the narrowband mode.
+        if output.decimation == 1:
+            # We can't just for-loop because we may not have an update every chunk.
+            sensor_update_iter = iter(sensor_update_dict["input1.dig-rms-dbfs"])  # Both sensors should be the same.
+            sensor_update = next(sensor_update_iter)
+
+            for chunk_time, present in zip(chunk_timestamps, chunk_present):
+                # Sensor timestamp should be close to the end of the chunk if # it exists.
+                diff = abs(sensor_update.timestamp - np.max(chunk_time))
+                if diff / chunk_time_step > 1:  # Somewhat arbitrary, if a chunk is skipped this will be large.
+                    # The next sensor update is some time in the future, so we
+                    # don't have anything to compare it to for a while.
+                    assert not np.any(present)
+                else:
+                    if np.any(present) or len(present) == 1:
+                        # There were heaps in this chunk, or the edge case where a chunk is one heap.
+                        if np.all(present):
+                            assert (
+                                sensor_update.status == aiokatcp.Sensor.Status.NOMINAL
+                                or sensor_update.status == aiokatcp.Sensor.Status.WARN
+                            )
+                        else:
+                            assert sensor_update.status == aiokatcp.Sensor.Status.FAILURE
+
+                        try:
+                            sensor_update = next(sensor_update_iter)
+                        except StopIteration:
+                            # We are finished with sensor updates. The last
+                            # chunk doesn't finish so we don't expect anymore.
+                            break
 
     async def test_dig_clip_cnt_sensors(
         self,
