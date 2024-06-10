@@ -44,7 +44,6 @@ from .reporter import Reporter
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
-DEFAULT_ANTENNAS = 8  #: Number of antennas for antenna_channelised_voltage tests
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
 
 
@@ -67,6 +66,7 @@ ini_options = [
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default=False),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_cbf"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
+    IniOption(name="default_antennas", help="Number of antennas for antenna-channelised-voltage tests", type="string", default="8"),
     IniOption(name="max_antennas", help="Maximum number of antennas to test", type="string", default="8"),
     IniOption(
         name="wideband_channels",
@@ -156,10 +156,11 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "n_antennas" in metafunc.fixturenames:
         rel_path = metafunc.definition.path.relative_to(metafunc.config.rootpath)
         max_antennas = int(metafunc.config.getini("max_antennas"))
+        default_antennas = int(metafunc.config.getini("default_antennas"))
         if rel_path.parts[0] != "antenna_channelised_voltage":
             values = FULL_ANTENNAS
         else:
-            values = [min(max_antennas, DEFAULT_ANTENNAS)]
+            values = [min(max_antennas, default_antennas)]
         values = [value for value in values if value <= max_antennas]
         metafunc.parametrize("n_antennas", values, indirect=True)
     if "band" in metafunc.fixturenames:
