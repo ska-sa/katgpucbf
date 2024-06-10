@@ -66,7 +66,12 @@ ini_options = [
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default=False),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_cbf"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
-    IniOption(name="default_antennas", help="Number of antennas for antenna-channelised-voltage tests", type="string", default="8"),
+    IniOption(
+        name="default_antennas",
+        help="Number of antennas for antenna-channelised-voltage tests",
+        type="string",
+        default="8",
+    ),
     IniOption(name="max_antennas", help="Maximum number of antennas to test", type="string", default="8"),
     IniOption(
         name="wideband_channels",
