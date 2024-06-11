@@ -399,7 +399,7 @@ class OutQueueItem(QueueItem):
         The canonical way to check whether this item's data is complete is
         therefore to use this property.
         """
-        return self.n_spectra == self.capacity and np.all(self.present)  # type: ignore
+        return self.n_spectra == self.capacity and bool(np.all(self.present))
 
 
 def format_complex(value: numbers.Complex) -> str:
