@@ -913,14 +913,14 @@ class Pipeline:
                     # -inf dB by assigning the most negative representable value
                     avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
+                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.timestamp)
                     )
             else:
                 for pol in range(N_POLS):
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
                         np.finfo(np.float64).min,
                         status=aiokatcp.Sensor.Status.FAILURE,
-                        timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp),
+                        timestamp=self.engine.time_converter.adc_to_unix(out_item.timestamp),
                     )
 
     async def run_transmit(self) -> None:
