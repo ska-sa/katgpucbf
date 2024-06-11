@@ -971,23 +971,24 @@ class TestEngine:
                     # was present but it had no valid heaps.
                     expected_updates.append((sensor_timestamp, Update.OPTIONAL_FAILURE))
 
-            p = 0
-            actual = sensor_update_dict["input1.dig-rms-dbfs"]  # Both sensors should be the same.
-            for timestamp, update in expected_updates:
-                match update:
-                    case Update.NORMAL:
-                        assert actual[p].timestamp == timestamp
-                        assert actual[p].status in {aiokatcp.Sensor.Status.NOMINAL, aiokatcp.Sensor.Status.WARN}
-                        p += 1
-                    case Update.FAILURE:
-                        assert actual[p].timestamp == timestamp
-                        assert actual[p].status == aiokatcp.Sensor.Status.FAILURE
-                        p += 1
-                    case Update.OPTIONAL_FAILURE:
-                        if p < len(actual) and actual[p].timestamp == timestamp:
+            for pol in range(N_POLS):
+                p = 0
+                actual = sensor_update_dict[f"input{pol}.dig-rms-dbfs"]
+                for timestamp, update in expected_updates:
+                    match update:
+                        case Update.NORMAL:
+                            assert actual[p].timestamp == timestamp
+                            assert actual[p].status in {aiokatcp.Sensor.Status.NOMINAL, aiokatcp.Sensor.Status.WARN}
+                            p += 1
+                        case Update.FAILURE:
+                            assert actual[p].timestamp == timestamp
                             assert actual[p].status == aiokatcp.Sensor.Status.FAILURE
                             p += 1
-            assert p == len(actual)
+                        case Update.OPTIONAL_FAILURE:
+                            if p < len(actual) and actual[p].timestamp == timestamp:
+                                assert actual[p].status == aiokatcp.Sensor.Status.FAILURE
+                                p += 1
+                assert p == len(actual)
 
     async def test_dig_clip_cnt_sensors(
         self,
