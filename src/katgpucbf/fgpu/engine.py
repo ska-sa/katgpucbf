@@ -387,6 +387,20 @@ class OutQueueItem(QueueItem):
         """Number of polarisations."""
         return self.spectra.shape[3]
 
+    @property
+    def all_present(self) -> bool:  # noqa: D410
+        """All batches for this chunk are complete.
+
+        :attr:`OutQueueItem.present` does not get "reset" in-between chunks. If
+        one chunk is complete and it is filled with the value `True`, and the
+        last few heaps / batches of the next chunk processed by this Item go
+        missing, you won't be able to tell directly from _out_item.present.
+
+        The canonical way to check whether this item's data is complete is
+        therefore to use this property.
+        """
+        return self.n_spectra == self.capacity and np.all(self.present)  # type: ignore
+
 
 def format_complex(value: numbers.Complex) -> str:
     """Format a complex number for a katcp request.
@@ -686,7 +700,6 @@ class Pipeline:
         # data).
         accs = self._out_item.n_spectra // self.output.spectra_per_heap
         self._out_item.n_spectra = accs * self.output.spectra_per_heap
-        self._out_item.present[self._out_item.n_spectra :] = False
         if self._out_item.n_spectra > 0:
             # Copy the gains to the device if they are out of date.
             if self._out_item.gains_version != self.gains_version:
@@ -907,7 +920,7 @@ class Pipeline:
         Helper function for keeping the complexity of :meth:`run_transmit` down to manageable levels.
         """
         if dig_total_power is not None:
-            if np.all(out_item.present):
+            if out_item.all_present:
                 for pol, trg in enumerate(dig_total_power):
                     total_power = float(trg)
                     avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
