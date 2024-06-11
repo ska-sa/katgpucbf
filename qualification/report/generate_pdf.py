@@ -391,17 +391,23 @@ class ResultSet:
         self.group = self.results[0].group
         for result in self.results:
             assert result.base_nodeid == self.base_nodeid, "base_nodeids do not match"
-            if result.text_name != self.text_name:
-                raise ValueError(
-                    f"Inconsistent text names for tests in ResultSet ({result.text_name} != {self.text_name})"
-                )
-            if result.blurb != self.blurb:
-                raise ValueError(f"Inconsistent blurbs for tests in ResultSet {self.base_nodeid}")
+            self.text_name = self._merge(self.text_name, result.text_name, "text names")
+            self.blurb = self._merge(self.blurb, result.blurb, "blurbs")
             self.duration += result.duration
             self.outcome_counts[result.outcome] += 1
             for requirement in result.requirements:
                 if requirement not in self.requirements:
                     self.requirements.append(requirement)
+
+    def _merge(self, a: str, b: str, name: str) -> str:
+        """Combine a property from two results.
+
+        If either is blank, the other is used. If both are non-blank and they
+        don't match, raise a :exc:`ValueError`.
+        """
+        if a != b and a and b:
+            raise ValueError(f"Inconsistent {name} for tests in ResultSet {self.base_nodeid}")
+        return a or b
 
     @property
     def marker(self) -> Marker:
