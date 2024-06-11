@@ -268,6 +268,21 @@ def pdf_report(request, monkeypatch) -> Reporter:
     return reporter
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item) -> Generator[None, None, None]:
+    """Update the test_start field when the test is actually started.
+
+    This gives a more accurate start time than the one recorded by the
+    :func:`pdf_report` fixture, in the event that other slow fixtures are set
+    up after :func:`pdf_report`.
+    """
+    for name, value in item.user_properties:
+        if name == "pdf_report_data":
+            value[0]["test_start"] = time.time()
+            break
+    yield
+
+
 @pytest.fixture(scope="session")
 def host_config_querier(pytestconfig: pytest.Config) -> HostConfigQuerier:
     """Querier for getting host config."""
@@ -312,9 +327,11 @@ async def _cbf_config_and_description(
     int_time: float,
     narrowband_decimation: int,
 ) -> tuple[dict, dict]:
+    # shutdown_delay is set to zero to speed up the test. We don't care
+    # that Prometheus might not get to scrape the final metric updates.
     config: dict = {
-        "version": "4.0",
-        "config": {},
+        "version": "4.1",
+        "config": {"shutdown_delay": 0.0},
         "inputs": {},
         "outputs": {},
     }

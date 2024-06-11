@@ -1115,8 +1115,7 @@ class Engine(aiokatcp.DeviceServer):
     dst_buffer
         Size of the network send buffer.
     outputs
-        Output streams to generate. At present this must be a single
-        WidebandOutput.
+        Output streams to generate.
     adc_sample_rate
         Digitiser sampling rate (in Hz), used to determine transmission rate.
     send_rate_factor

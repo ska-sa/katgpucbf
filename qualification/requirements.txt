@@ -307,7 +307,7 @@ pytest-custom-exit-code==0.3.0
     #   katgpucbf (setup.cfg)
 pytest-reportlog==0.4.0
     # via katgpucbf (setup.cfg)
-python-dateutil==2.8.2
+python-dateutil==2.9.0.post0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -332,7 +332,7 @@ redis==5.0.1
     #   katsdptelstate
 regex==2023.10.3
     # via dateparser
-requests==2.32.0
+requests==2.32.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   httmock
@@ -374,13 +374,14 @@ trafaret==2.1.1
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
-typing-extensions==4.8.0
+typing-extensions==4.12.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiokatcp
     #   aiomonitor
     #   janus
+    #   katgpucbf (setup.cfg)
     #   katsdpsigproc
 tzdata==2023.3
     # via

@@ -16,7 +16,8 @@
 
 """Test linearity of gains and weights."""
 
-from typing import Awaitable, Callable
+import itertools
+from typing import Awaitable, Callable, Iterable, Iterator, TypeVar
 
 import aiokatcp
 import numpy as np
@@ -25,6 +26,22 @@ from matplotlib.figure import Figure
 
 from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
 from ..reporter import Reporter
+
+_T = TypeVar("_T")
+
+
+# TODO (NGC-1266): use itertools.batched once Python 3.12 is required.
+def batched(iterable: Iterable[_T], n: int) -> Iterator[tuple[_T, ...]]:
+    """Divide an iterable into fixed-sized batches.
+
+    This is a backport of :func:`itertools.batched` from Python 3.12. The
+    implementation is based on the documentation for that function.
+    """
+    if n < 1:
+        raise ValueError("n must be at least one")
+    it = iter(iterable)
+    while batch := tuple(itertools.islice(it, n)):
+        yield batch
 
 
 async def _test_linearity(
@@ -37,28 +54,31 @@ async def _test_linearity(
     set_variable: Callable[[aiokatcp.Client, str, float], Awaitable],
 ) -> None:
     client = cbf.product_controller_client
-    beam_name = receiver.stream_names[0]
     n_sources = len(receiver.source_indices[0])
 
     period = receiver.n_spectra_per_heap * receiver.n_samples_between_spectra
     # Small amplitude so that we don't saturate in the time domain.
     await cbf.dsim_gaussian(16.0, pdf_report, period=period)
 
-    pdf_report.step(f"Set {fixed} to 1/antennas")
-    await set_fixed(client, beam_name, 1.0 / n_sources)
-    pdf_report.detail(f"Set {fixed} on {beam_name} to 1/{n_sources}")
+    pdf_report.step(f"Set {fixed} to 1/antennas.")
+    for beam_name in receiver.stream_names:
+        await set_fixed(client, beam_name, 1.0 / n_sources)
+        pdf_report.detail(f"Set {fixed} on {beam_name} to 1/{n_sources}.")
 
-    pdf_report.step("Measure total power responses")
+    pdf_report.step("Measure total power responses.")
     scales = np.logspace(-2.0, 2.0, 41)  # Note: n is chosen to ensure 1.0 is included
     middle = np.searchsorted(scales, 1.0)
     assert scales[middle] == pytest.approx(1.0)
     powers = np.zeros_like(scales)
-    for i, scale in enumerate(scales):
-        await set_variable(client, beam_name, scale)
+    for batch in batched(enumerate(scales), len(receiver.stream_names)):
+        for (_, scale), beam_name in zip(batch, receiver.stream_names):
+            await set_variable(client, beam_name, scale)
+            pdf_report.detail(f"Set {variable} to {scale} on {beam_name}.")
         _, data = await receiver.next_complete_chunk()
-        data = data[0]  # Use only the first beam
-        powers[i] = np.sum(np.square(data.astype(np.float64)))
-        pdf_report.detail(f"Set {variable} to {scale}; power is {powers[i]}")
+        pdf_report.detail("Received chunk.")
+        for (i, _), d, beam_name in zip(batch, data, receiver.stream_names):
+            powers[i] = np.sum(np.square(d.astype(np.float64)))
+            pdf_report.detail(f"Power on {beam_name} is {powers[i]}.")
 
     # Normalise power
     powers /= powers[middle]
@@ -87,8 +107,9 @@ async def test_weight_linearity(
     Verification method
     -------------------
     Verification by means of test. Configure the dsim with Gaussian noise with
-    a period of one heap. Set the weights for all inputs to a range of values,
-    and measure the total power (for one beam) in each case.
+    a period of one heap. Assign one trial weight to each beam, and measure the
+    total power across the band. Repeat as many times as needed to test all the
+    trial weights.
 
     Large weights are expected to have non-linear response due to saturation,
     and small weights are expected to have non-linear response due to
@@ -118,8 +139,9 @@ async def test_gain_linearity(
     Verification method
     -------------------
     Verification by means of test. Configure the dsim with Gaussian noise with
-    a period of one heap. Set the gain to a range of values, and measure the
-    total power (for one beam) in each case.
+    a period of one heap. Assign one trial gain to each beam, and measure the
+    total power across the band. Repeat as many times as needed to test all the
+    trial gains.
 
     Large gains are expected to have non-linear response due to saturation,
     and small gains are expected to have non-linear response due to

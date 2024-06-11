@@ -92,7 +92,7 @@ pycparser==2.21
     # via
     #   -c scratch/benchmarks/../../requirements.txt
     #   cffi
-python-dateutil==2.8.2
+python-dateutil==2.9.0.post0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
@@ -125,7 +125,7 @@ tomli==2.0.1 ; python_version < "3.11"
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -r scratch/benchmarks/requirements.in
-typing-extensions==4.8.0
+typing-extensions==4.12.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt

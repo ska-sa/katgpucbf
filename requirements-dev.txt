@@ -306,7 +306,7 @@ pytest-mock==3.12.0
     # via katgpucbf (setup.cfg)
 pytest-xdist==3.5.0
     # via -r requirements-dev.in
-python-dateutil==2.8.2
+python-dateutil==2.9.0.post0
     # via
     #   -c requirements.txt
     #   pandas
@@ -328,7 +328,7 @@ redis==5.0.1
     # via
     #   -c requirements.txt
     #   katsdptelstate
-requests==2.32.0
+requests==2.32.2
     # via sphinx
 scipy==1.11.4
     # via
@@ -410,12 +410,13 @@ traitlets==5.14.0
     # via
     #   ipython
     #   matplotlib-inline
-typing-extensions==4.8.0
+typing-extensions==4.12.0
     # via
     #   -c requirements.txt
     #   aiokatcp
     #   aiomonitor
     #   janus
+    #   katgpucbf (setup.cfg)
     #   katsdpsigproc
     #   pytools
 tzdata==2023.3

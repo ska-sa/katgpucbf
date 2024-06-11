@@ -97,3 +97,34 @@ class DescriptorSender:
             except asyncio.TimeoutError:
                 pass
             t = self._interval
+
+
+def send_rate(
+    packet_header: int,
+    packet_payload: int,
+    heap_payload: int,
+    heap_interval: float,
+    send_rate_factor: float,
+) -> float:
+    """Compute the send rate (in bytes per second) to pass to spead2.
+
+    Parameters
+    ----------
+    packet_header
+        Overhead bytes in each SPEAD packet, including the SPEAD header (but
+        excluding UDP/IP etc headers)
+    packet_payload
+        Number of payload bytes that should be included in each packet
+    heap_payload
+        Number of payload bytes in each heap
+    heap_interval
+        Time (in seconds) between sending heaps (or 0 for as fast as possible)
+    send_rate_factor
+        Safety factor by which the transmission rate should exceed the
+        incoming data rate
+    """
+    if heap_interval == 0.0:
+        return 0.0
+    packets_per_heap = (heap_payload + packet_payload - 1) // packet_payload
+    heap_overhead = packets_per_heap * packet_header
+    return (heap_payload + heap_overhead) / heap_interval * send_rate_factor

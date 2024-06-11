@@ -17,7 +17,6 @@
 """Module for sending baseline correlation products onto the network."""
 
 import asyncio
-import math
 from collections.abc import Callable, Sequence
 from typing import Final
 
@@ -29,8 +28,10 @@ from katsdpsigproc.abc import AbstractContext
 from prometheus_client import Counter
 
 from .. import COMPLEX, DEFAULT_PACKET_PAYLOAD_BYTES
-from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID, make_immediate
+from ..send import send_rate
+from ..spead import FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID, XENG_RAW_ID
 from . import METRIC_NAMESPACE
+from .send import Send
 
 output_heaps_counter = Counter(
     "output_x_heaps", "number of X-engine heaps transmitted", ["stream"], namespace=METRIC_NAMESPACE
@@ -62,6 +63,33 @@ incomplete_accum_counter = Counter(
 SEND_DTYPE = np.dtype(np.int32)
 
 
+def make_item_group(xeng_raw_shape: tuple[int, ...]) -> spead2.send.ItemGroup:
+    """Create an item group (with no values)."""
+    item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
+    item_group.add_item(
+        FREQUENCY_ID,
+        "frequency",  # Misleading name, but it's what the ICD specifies
+        "Value of first channel in collections stored here.",
+        shape=[],
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        TIMESTAMP_ID,
+        "timestamp",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+        shape=[],
+        format=IMMEDIATE_FORMAT,
+    )
+    item_group.add_item(
+        XENG_RAW_ID,
+        "xeng_raw",
+        "Integrated baseline correlation products.",
+        shape=xeng_raw_shape,
+        dtype=SEND_DTYPE,
+    )
+    return item_group
+
+
 class Heap:
     """Hold all the data for a heap.
 
@@ -79,19 +107,11 @@ class Heap:
         self.future = asyncio.get_running_loop().create_future()
         self.future.set_result(None)
 
-        self.heap: Final = spead2.send.Heap(FLAVOUR)
-        self.heap.add_item(make_immediate(TIMESTAMP_ID, self._timestamp))
-        self.heap.add_item(make_immediate(FREQUENCY_ID, channel_offset))
-        self.heap.add_item(
-            spead2.Item(
-                XENG_RAW_ID,
-                "xeng_raw",
-                "",
-                shape=self.buffer.shape,
-                dtype=self.buffer.dtype,
-                value=self.buffer,
-            )
-        )
+        item_group = make_item_group(self.buffer.shape)
+        item_group[TIMESTAMP_ID].value = self._timestamp
+        item_group[FREQUENCY_ID].value = channel_offset
+        item_group[XENG_RAW_ID].value = self.buffer
+        self.heap: Final = item_group.get_heap(descriptors="none", data="all")
         self.heap.repeat_pointers = True
 
     @property
@@ -152,7 +172,7 @@ def make_stream(
     return stream
 
 
-class XSend:
+class XSend(Send):
     """
     Class for turning baseline correlation products into SPEAD heaps and transmitting them.
 
@@ -233,21 +253,12 @@ class XSend:
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")
 
-        if n_channels % n_channels_per_substream != 0:
-            raise ValueError("n_channels must be an integer multiple of n_channels_per_substream")
-        if channel_offset % n_channels_per_substream != 0:
-            raise ValueError("channel_offset must be an integer multiple of n_channels_per_substream")
-
         self.output_name = output_name
         self.tx_enabled = tx_enabled
 
         # Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
-        self.n_channels_per_substream: Final[int] = n_channels_per_substream
         n_baselines: Final[int] = (self.n_ants + 1) * (self.n_ants) * 2
-
-        # Multicast Stream Parameters
-        self.heap_payload_size_bytes = self.n_channels_per_substream * n_baselines * COMPLEX * SEND_DTYPE.itemsize
 
         self._heaps_queue: asyncio.Queue[Heap] = asyncio.Queue()
         buffers: list[accel.HostArray] = []
@@ -257,56 +268,27 @@ class XSend:
             self._heaps_queue.put_nowait(heap)
             buffers.append(heap.buffer)
 
-        # Transport-agnostic stream information
-        packets_per_heap = math.ceil(self.heap_payload_size_bytes / packet_payload)
-        packet_header_overhead_bytes = packets_per_heap * XSend.header_size
-
-        if dump_interval_s != 0:
-            send_rate_bytes_per_second = (
-                (self.heap_payload_size_bytes + packet_header_overhead_bytes) / dump_interval_s * send_rate_factor
-            )  # * send_rate_factor adds a buffer to the rate to compensate for any unexpected jitter
-        else:
-            # Pass zero to stream_config to send as fast as possible.
-            send_rate_bytes_per_second = 0
-
         stream_config = spead2.send.StreamConfig(
             max_packet_size=packet_payload + XSend.header_size,
             max_heaps=n_send_heaps_in_flight + 1,  # + 1 to allow for descriptors
             rate_method=spead2.send.RateMethod.AUTO,
-            rate=send_rate_bytes_per_second,
-        )
-        self.stream = stream_factory(stream_config, buffers)
-        # Set heap count sequence to allow a receiver to ingest multiple
-        # X-engine outputs, if they should so choose.
-        self.stream.set_cnt_sequence(
-            channel_offset // n_channels_per_substream,
-            n_channels // n_channels_per_substream,
-        )
-
-        item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
-        item_group.add_item(
-            FREQUENCY_ID,
-            "frequency",  # Misleading name, but it's what the ICD specifies
-            "Value of first channel in collections stored here.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        item_group.add_item(
-            TIMESTAMP_ID,
-            "timestamp",
-            "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
-            shape=[],
-            format=IMMEDIATE_FORMAT,
-        )
-        item_group.add_item(
-            XENG_RAW_ID,
-            "xeng_raw",
-            "Integrated baseline correlation products.",
-            shape=buffers[0].shape,
-            dtype=buffers[0].dtype,
+            rate=send_rate(
+                packet_header=XSend.header_size,
+                packet_payload=packet_payload,
+                heap_payload=n_channels_per_substream * n_baselines * COMPLEX * SEND_DTYPE.itemsize,
+                heap_interval=dump_interval_s,
+                send_rate_factor=send_rate_factor,
+            ),
         )
 
-        self.descriptor_heap = item_group.get_heap(descriptors="all", data="none")
+        item_group = make_item_group(buffers[0].shape)
+        super().__init__(
+            n_channels=n_channels,
+            n_channels_per_substream=n_channels_per_substream,
+            channel_offset=channel_offset,
+            stream=stream_factory(stream_config, buffers),
+            descriptor_heap=item_group.get_heap(descriptors="all", data="none"),
+        )
 
     def send_heap(self, heap: Heap) -> None:
         """Take in a buffer and send it as a SPEAD heap.

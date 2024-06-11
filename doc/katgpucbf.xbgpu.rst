@@ -14,6 +14,7 @@ Submodules
    katgpucbf.xbgpu.main
    katgpucbf.xbgpu.output
    katgpucbf.xbgpu.recv
+   katgpucbf.xbgpu.send
    katgpucbf.xbgpu.xsend
 
 Module contents
