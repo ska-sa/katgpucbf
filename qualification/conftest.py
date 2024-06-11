@@ -45,6 +45,7 @@ from .reporter import Reporter
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
+pdf_report_data_key = pytest.StashKey[dict]()
 
 
 # Storing ini options this way makes pytest.ini easier to validate up-front.
@@ -231,21 +232,7 @@ def int_time() -> float:  # noqa: D104
 @pytest.fixture(autouse=True)
 def pdf_report(request, monkeypatch) -> Reporter:
     """Fixture for logging steps in a test."""
-    blurb = inspect.getdoc(request.node.function)
-    if blurb is None:
-        raise AssertionError(f"Test {request.node.name} has no docstring")
-    reqs: list[str] = []
-    for marker in request.node.iter_markers("requirements"):
-        if isinstance(marker.args[0], (tuple, list)):
-            reqs.extend(marker.args[0])
-        else:
-            reqs.extend(name.strip() for name in marker.args[0].split(",") if name.strip())
-    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time(), "requirements": reqs}]
-    name_marker = request.node.get_closest_marker("name")
-    if name_marker is not None:
-        data[0]["test_name"] = name_marker.args[0]
-    request.node.user_properties.append(("pdf_report_data", data))
-    reporter = Reporter(data, raw_data=request.config.getini("raw_data"))
+    reporter = Reporter(request.node.stash[pdf_report_data_key], raw_data=request.config.getini("raw_data"))
     orig_log_failure = pytest_check.check_log.log_failure
     orig_stack = inspect.stack
 
@@ -275,17 +262,35 @@ def pdf_report(request, monkeypatch) -> Reporter:
 
 
 @pytest.hookimpl(wrapper=True)
+def pytest_runtest_setup(item) -> Generator[None, None, None]:
+    """Set up the user property for passing data to the report generator."""
+    blurb = inspect.getdoc(item.function)
+    if blurb is None:
+        raise AssertionError(f"Test {item.name} has no docstring")
+    reqs: list[str] = []
+    for marker in item.iter_markers("requirements"):
+        if isinstance(marker.args[0], (tuple, list)):
+            reqs.extend(marker.args[0])
+        else:
+            reqs.extend(name.strip() for name in marker.args[0].split(",") if name.strip())
+    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time(), "requirements": reqs}]
+    name_marker = item.get_closest_marker("name")
+    if name_marker is not None:
+        data[0]["test_name"] = name_marker.args[0]
+    item.user_properties.append(("pdf_report_data", data))
+    item.stash[pdf_report_data_key] = data
+    yield
+
+
+@pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item) -> Generator[None, None, None]:
     """Update the test_start field when the test is actually started.
 
-    This gives a more accurate start time than the one recorded by the
-    :func:`pdf_report` fixture, in the event that other slow fixtures are set
-    up after :func:`pdf_report`.
+    This gives a more accurate start time than the one recorded by
+    :func:`pytest_runtest_setup`, which is the time at which setup
+    started.
     """
-    for name, value in item.user_properties:
-        if name == "pdf_report_data":
-            value[0]["test_start"] = time.time()
-            break
+    item.stash[pdf_report_data_key][0]["test_start"] = time.time()
     yield
 
 
