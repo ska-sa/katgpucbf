@@ -952,13 +952,17 @@ class TestEngine:
             # The sensor is updated once per out_item.
             spectra_per_output_chunk = engine_server.chunk_jones // output.channels
             heaps_per_output_chunk = spectra_per_output_chunk // spectra_per_heap
+            chunk_timestamp_step = spectra_per_output_chunk * output.spectra_samples
 
             total_chunks = (total_heaps + heaps_per_output_chunk - 1) // heaps_per_output_chunk
             for i in range(total_chunks):
                 start_heap = i * heaps_per_output_chunk
                 stop_heap = (i + 1) * heaps_per_output_chunk
                 n_present = np.sum(dst_present[start_heap:stop_heap])
-                sensor_timestamp = TIME_CONVERTER.adc_to_unix(timestamps[start_heap * spectra_per_heap])
+                # The sensor timestamp shows from the previous processed chunk
+                sensor_timestamp = TIME_CONVERTER.adc_to_unix(
+                    timestamps[start_heap * spectra_per_heap] + chunk_timestamp_step
+                )
                 if n_present == heaps_per_output_chunk:
                     expected_updates.append((sensor_timestamp, Update.NORMAL))
                 elif n_present > 0:

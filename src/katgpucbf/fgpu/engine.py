@@ -378,6 +378,11 @@ class OutQueueItem(QueueItem):
         return self.spectra.shape[0] * self.spectra.shape[2]
 
     @property
+    def next_timestamp(self) -> int:  # noqa: D401
+        """Timestamp of the next chunk afer this one."""
+        return self.timestamp + self.capacity * self.spectra_samples
+
+    @property
     def pols(self) -> int:  # noqa: D401
         """Number of polarisations."""
         return self.spectra.shape[3]
@@ -913,14 +918,14 @@ class Pipeline:
                     # -inf dB by assigning the most negative representable value
                     avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.timestamp)
+                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
                     )
             else:
                 for pol in range(N_POLS):
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
                         np.finfo(np.float64).min,
                         status=aiokatcp.Sensor.Status.FAILURE,
-                        timestamp=self.engine.time_converter.adc_to_unix(out_item.timestamp),
+                        timestamp=self.engine.time_converter.adc_to_unix(out_item.next_timestamp),
                     )
 
     async def run_transmit(self) -> None:
