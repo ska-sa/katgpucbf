@@ -233,7 +233,7 @@ class XSend(Send):
     """
 
     # Class static constants
-    header_size: Final[int] = 64
+    preamble_size: Final[int] = 64
 
     def __init__(
         self,
@@ -269,11 +269,11 @@ class XSend(Send):
             buffers.append(heap.buffer)
 
         stream_config = spead2.send.StreamConfig(
-            max_packet_size=packet_payload + XSend.header_size,
+            max_packet_size=packet_payload + XSend.preamble_size,
             max_heaps=n_send_heaps_in_flight + 1,  # + 1 to allow for descriptors
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate(
-                packet_header=XSend.header_size,
+                packet_header=XSend.preamble_size,
                 packet_payload=packet_payload,
                 heap_payload=n_channels_per_substream * n_baselines * COMPLEX * SEND_DTYPE.itemsize,
                 heap_interval=dump_interval_s,

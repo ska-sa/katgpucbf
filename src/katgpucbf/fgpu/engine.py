@@ -195,11 +195,11 @@ class InQueueItem(QueueItem):
     present_cumsum: np.ndarray
     #: Chunk to return to recv after processing (used with vkgdr only).
     chunk: recv.Chunk | None = None
-    #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
+    #: Number of samples for each polarisation in :attr:`samples`.
     n_samples: int
-    #: Bitwidth of the data in :attr:`PolInItem.samples`
+    #: Bitwidth of the data in :attr:`samples`.
     dig_sample_bits: int
-    #: Number of pipelines still using this item
+    #: Number of pipelines still using this item.
     refcount: int
 
     def __init__(

@@ -386,7 +386,7 @@ class BSend(Send):
     """
 
     descriptor_heap: spead2.send.Heap
-    header_size: Final[int] = 72
+    preamble_size: Final[int] = 72
 
     def __init__(
         self,
@@ -426,7 +426,7 @@ class BSend(Send):
 
         heap_payload_size_bytes = n_channels_per_substream * spectra_per_heap * COMPLEX * SEND_DTYPE.itemsize
         self.bytes_per_second_per_beam = send_rate(
-            packet_header=BSend.header_size,
+            packet_header=BSend.preamble_size,
             packet_payload=packet_payload,
             heap_payload=heap_payload_size_bytes,
             heap_interval=timestamp_step / adc_sample_rate,
@@ -434,7 +434,7 @@ class BSend(Send):
         )
 
         stream_config = spead2.send.StreamConfig(
-            max_packet_size=packet_payload + BSend.header_size,
+            max_packet_size=packet_payload + BSend.preamble_size,
             # + 1 below for the descriptor per beam
             max_heaps=(n_chunks * batches_per_chunk + 1) * n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
