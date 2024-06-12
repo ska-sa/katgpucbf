@@ -379,7 +379,7 @@ class OutQueueItem(QueueItem):
 
     @property
     def next_timestamp(self) -> int:  # noqa: D401
-        """Timestamp of the next chunk afer this one."""
+        """Timestamp of the next :class:`OutQueueItem` after this one."""
         return self.timestamp + self.capacity * self.spectra_samples
 
     @property
@@ -391,10 +391,8 @@ class OutQueueItem(QueueItem):
     def all_present(self) -> bool:  # noqa: D410
         """All batches for this chunk are complete.
 
-        :attr:`OutQueueItem.present` does not get "reset" in-between chunks. If
-        one chunk is complete and it is filled with the value `True`, and the
-        last few heaps / batches of the next chunk processed by this Item go
-        missing, you won't be able to tell directly from _out_item.present.
+        Only the first :attr:`n_spectra` elements of :attr:`OutQueueItem.present` have
+        defined values, so it is not safe to use ``np.all(item.present)``.
 
         The canonical way to check whether this item's data is complete is
         therefore to use this property.
