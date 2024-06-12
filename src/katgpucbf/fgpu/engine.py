@@ -775,7 +775,7 @@ class Pipeline:
             max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.output.window + 1
             max_end_out = self._out_item.next_timestamp
             max_end = min(max_end_in, max_end_out)
-            # Speculatively evaluate until one of the fnext_timestampirst two conditions is met
+            # Speculatively evaluate until one of the first two conditions is met
             timestamps = np.arange(start_timestamp, max_end, self.output.spectra_samples)
             orig_timestamps, fine_delays, phase = _sample_models(
                 self.delay_models, start_timestamp, max_end, self.output.spectra_samples
