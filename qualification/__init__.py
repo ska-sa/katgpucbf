@@ -678,11 +678,11 @@ def create_tied_array_channelised_voltage_receive_stream(
 
     stream_config = spead2.recv.StreamConfig(substreams=n_substreams, explicit_start=True)
 
-    # Allow about 256 MiB for resynchronising the B-engines in wideband.
+    # Allow about 1 GiB for resynchronising the B-engines in wideband.
     # In narrowband, reduce it by the decimation factor to avoid creating
     # an excessively high latency which slows down the test.
     chunk_size = expected_payload_size * n_substreams * n_beams
-    max_chunks = math.ceil(256 * 1024**2 / chunk_size / decimation_factor)
+    max_chunks = math.ceil(1024**3 / chunk_size / decimation_factor)
 
     return _create_receive_stream_group(
         interface_address,
