@@ -378,9 +378,25 @@ class OutQueueItem(QueueItem):
         return self.spectra.shape[0] * self.spectra.shape[2]
 
     @property
+    def next_timestamp(self) -> int:  # noqa: D401
+        """Timestamp of the next :class:`OutQueueItem` after this one."""
+        return self.timestamp + self.capacity * self.spectra_samples
+
+    @property
     def pols(self) -> int:  # noqa: D401
         """Number of polarisations."""
         return self.spectra.shape[3]
+
+    def all_present(self) -> bool:  # noqa: D410
+        """All batches for this chunk are complete.
+
+        Only the first :attr:`n_spectra` elements of :attr:`OutQueueItem.present` have
+        defined values, so it is not safe to use ``np.all(item.present)``.
+
+        The canonical way to check whether this item's data is complete is
+        therefore to use this property.
+        """
+        return self.n_spectra == self.capacity and bool(np.all(self.present))
 
 
 def format_complex(value: numbers.Complex) -> str:
@@ -757,7 +773,7 @@ class Pipeline:
             # met, then truncate if we observe a coarse delay change. Note:
             # max_end_in is computed assuming the coarse delay does not change.
             max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.output.window + 1
-            max_end_out = self._out_item.timestamp + self._out_item.capacity * self.output.spectra_samples
+            max_end_out = self._out_item.next_timestamp
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
             timestamps = np.arange(start_timestamp, max_end, self.output.spectra_samples)
@@ -895,6 +911,30 @@ class Pipeline:
                 chunk.cleanup()
                 chunk.cleanup = None  # Potentially helps break reference cycles
 
+    def _update_dig_power_sensors(self, dig_total_power: accel.HostArray | None, out_item: OutQueueItem) -> None:
+        """Update digitiser power sensors.
+
+        Helper function for keeping the complexity of :meth:`run_transmit` down to manageable levels.
+        """
+        if dig_total_power is not None:
+            update_timestamp = self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
+            if out_item.all_present():
+                for pol, trg in enumerate(dig_total_power):
+                    total_power = float(trg)
+                    avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
+                    # Normalise relative to full scale. The factor of 2 is because we
+                    # want 1.0 to correspond to a sine wave rather than a square wave.
+                    avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
+                    # If for some reason there's zero power, avoid reporting
+                    # -inf dB by assigning the most negative representable value
+                    avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
+                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(avg_power_db, timestamp=update_timestamp)
+            else:
+                for pol in range(N_POLS):
+                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
+                        np.finfo(np.float64).min, status=aiokatcp.Sensor.Status.FAILURE, timestamp=update_timestamp
+                    )
+
     async def run_transmit(self) -> None:
         """Get the processed data from the GPU to the Network.
 
@@ -947,19 +987,7 @@ class Pipeline:
             with self.engine.monitor.with_state(func_name, "wait transfer"):
                 await async_wait_for_events([download_marker])
 
-            if dig_total_power is not None:
-                for pol, trg in enumerate(dig_total_power):
-                    total_power = float(trg)
-                    avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
-                    # Normalise relative to full scale. The factor of 2 is because we
-                    # want 1.0 to correspond to a sine wave rather than a square wave.
-                    avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
-                    # If for some reason there's zero power, avoid reporting
-                    # -inf dB by assigning the most negative representable value
-                    avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
-                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
-                    )
+            self._update_dig_power_sensors(dig_total_power, out_item)
 
             n_batches = out_item.n_spectra // self.output.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:

@@ -19,6 +19,7 @@
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from functools import partial
 from ipaddress import IPv4Network
 
@@ -59,6 +60,7 @@ TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
 DSTS = 16
+TIME_CONVERTER = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
 
 WIDEBAND_ARGS = f"name=test_wideband,dst=239.10.11.0+{DSTS - 1}:7149,taps={TAPS}"
 # Centre frequency is not a multiple of the channel width, but it does ensure
@@ -859,6 +861,8 @@ class TestEngine:
         It then checks that the heaps successfully received in the first half match
         the heaps in the second half.
         """
+        sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
+        sensor_update_dict = self._watch_sensors(sensors)
         spectra_per_heap = output.spectra_per_heap
         chunk_samples = engine_server.src_layout.chunk_samples
         n_samples = 16 * chunk_samples
@@ -914,8 +918,10 @@ class TestEngine:
                 np.testing.assert_equal(x, y)
 
         for pol in range(N_POLS):
+            # Check prometheus counter
             input_missing_heaps = np.sum(~src_present[pol])
             assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
+
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(dst_present) * n_substreams
         assert prom_diff.get_sample_diff("output_heaps_total", {"stream": output.name}) == output_heaps
@@ -932,6 +938,60 @@ class TestEngine:
             prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": output.name})
             == np.sum(~dst_present) * n_substreams
         )
+
+        # Sensor is not present in the narrowband mode.
+        if output.decimation == 1:
+
+            class Update(Enum):
+                NORMAL = 1
+                FAILURE = 2
+                OPTIONAL_FAILURE = 3
+
+            expected_updates = []
+            # The sensor is updated once per out_item.
+            spectra_per_output_chunk = engine_server.chunk_jones // output.channels
+            heaps_per_output_chunk = spectra_per_output_chunk // spectra_per_heap
+            chunk_timestamp_step = spectra_per_output_chunk * output.spectra_samples
+
+            total_chunks = (total_heaps + heaps_per_output_chunk - 1) // heaps_per_output_chunk
+            for i in range(total_chunks):
+                start_heap = i * heaps_per_output_chunk
+                stop_heap = (i + 1) * heaps_per_output_chunk
+                n_present = np.sum(dst_present[start_heap:stop_heap])
+                # The sensor timestamp shows from the previous processed chunk
+                sensor_timestamp = TIME_CONVERTER.adc_to_unix(
+                    timestamps[start_heap * spectra_per_heap] + chunk_timestamp_step
+                )
+                if n_present == heaps_per_output_chunk:
+                    expected_updates.append((sensor_timestamp, Update.NORMAL))
+                elif n_present > 0:
+                    expected_updates.append((sensor_timestamp, Update.FAILURE))
+                else:
+                    # If a chunk is completely missing, it could indicate that
+                    # there was a break in the input (and no OutQueueItem was
+                    # generated), in which case there will be no sensor update.
+                    # On the other hand, it could indicate that an OutQueueItem
+                    # was present but it had no valid heaps.
+                    expected_updates.append((sensor_timestamp, Update.OPTIONAL_FAILURE))
+
+            for pol in range(N_POLS):
+                p = 0
+                actual = sensor_update_dict[f"input{pol}.dig-rms-dbfs"]
+                for timestamp, update in expected_updates:
+                    match update:
+                        case Update.NORMAL:
+                            assert actual[p].timestamp == timestamp
+                            assert actual[p].status in {aiokatcp.Sensor.Status.NOMINAL, aiokatcp.Sensor.Status.WARN}
+                            p += 1
+                        case Update.FAILURE:
+                            assert actual[p].timestamp == timestamp
+                            assert actual[p].status == aiokatcp.Sensor.Status.FAILURE
+                            p += 1
+                        case Update.OPTIONAL_FAILURE:
+                            if p < len(actual) and actual[p].timestamp == timestamp:
+                                assert actual[p].status == aiokatcp.Sensor.Status.FAILURE
+                                p += 1
+                assert p == len(actual)
 
     async def test_dig_clip_cnt_sensors(
         self,
@@ -956,8 +1016,7 @@ class TestEngine:
             output,
             dig_data,
         )
-        time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
-        expected_timestamps = [time_converter.adc_to_unix(t * CHUNK_SAMPLES) for t in range(1, 10)]
+        expected_timestamps = [TIME_CONVERTER.adc_to_unix(t * CHUNK_SAMPLES) for t in range(1, 10)]
         assert sensor_update_dict[sensors[0].name] == [
             aiokatcp.Reading(t, aiokatcp.Sensor.Status.NOMINAL, 5000) for t in expected_timestamps
         ]
@@ -994,8 +1053,7 @@ class TestEngine:
             output,
             dig_data,
         )
-        time_converter = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
-        expected_timestamps = [time_converter.adc_to_unix(t * CHUNK_SAMPLES) for t in range(1, 10)]
+        expected_timestamps = [TIME_CONVERTER.adc_to_unix(t * CHUNK_SAMPLES) for t in range(1, 10)]
         for pol in range(N_POLS):
             assert sensor_update_dict[sensors[pol].name] == [
                 aiokatcp.Reading(t, aiokatcp.Sensor.Status.WARN, output_power_dbfs) for t in expected_timestamps
