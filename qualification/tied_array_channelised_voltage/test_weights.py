@@ -17,6 +17,7 @@
 """Weights test."""
 
 import asyncio
+
 import numpy as np
 import pytest
 from pytest_check import check
@@ -51,7 +52,7 @@ async def test_weight_mapping(
     rng = np.random.default_rng()
     # Pick a random channel for each input
     channels = rng.choice(receiver.n_chans, receiver.n_inputs, replace=False)
-    signals = f"common=wgn(0.2); common; common;"
+    signals = "common=wgn(0.2); common; common;"
 
     pdf_report.step("Configure dsim with Gaussian noise.")
     await cbf.dsim_clients[0].request("signals", signals)
