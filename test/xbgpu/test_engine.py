@@ -832,7 +832,7 @@ class TestEngine:
             "--sync-time=1234567890",
             "--src-interface=lo",
             "--dst-interface=lo",
-            "--tx-enabled",
+            "--send-enabled",
             "239.10.11.4:7149",  # src
         ]
         for corrprod in corrprod_args:

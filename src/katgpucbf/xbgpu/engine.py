@@ -1016,7 +1016,7 @@ class XBEngine(DeviceServer):
     src_ibv
         Use ibverbs for input.
     src_affinity
-        Specific CPU core to assign the RX stream processing thread to.
+        Specific CPU core to assign the RECV stream processing thread to.
     src_comp_vector
         Completion vector for source stream, or -1 for polling.
         See :class:`spead2.recv.UdpIbvConfig` for further information.
