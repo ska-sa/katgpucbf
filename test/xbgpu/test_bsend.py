@@ -262,7 +262,7 @@ class TestBSend:
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
                 spead2.ThreadPool(1), queues, stream_config
             ),
-            tx_enabled=True,
+            send_enabled=True,
         )
         data = await self._send_data(
             outputs,
