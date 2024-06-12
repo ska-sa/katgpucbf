@@ -941,8 +941,7 @@ class TestEngine:
 
         # Sensor is not present in the narrowband mode.
         if output.decimation == 1:
-            # Information needed to check that the dig-rms-dbfs sensor is correctly
-            # going into FAILURE when there are missing samples.
+
             class Update(Enum):
                 NORMAL = 1
                 FAILURE = 2

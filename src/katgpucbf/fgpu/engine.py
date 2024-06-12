@@ -387,7 +387,6 @@ class OutQueueItem(QueueItem):
         """Number of polarisations."""
         return self.spectra.shape[3]
 
-    @property
     def all_present(self) -> bool:  # noqa: D410
         """All batches for this chunk are complete.
 
@@ -774,9 +773,9 @@ class Pipeline:
             # met, then truncate if we observe a coarse delay change. Note:
             # max_end_in is computed assuming the coarse delay does not change.
             max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.output.window + 1
-            max_end_out = self._out_item.timestamp + self._out_item.capacity * self.output.spectra_samples
+            max_end_out = self._out_item.next_timestamp
             max_end = min(max_end_in, max_end_out)
-            # Speculatively evaluate until one of the first two conditions is met
+            # Speculatively evaluate until one of the fnext_timestampirst two conditions is met
             timestamps = np.arange(start_timestamp, max_end, self.output.spectra_samples)
             orig_timestamps, fine_delays, phase = _sample_models(
                 self.delay_models, start_timestamp, max_end, self.output.spectra_samples
@@ -918,7 +917,8 @@ class Pipeline:
         Helper function for keeping the complexity of :meth:`run_transmit` down to manageable levels.
         """
         if dig_total_power is not None:
-            if out_item.all_present:
+            update_timestamp = self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
+            if out_item.all_present():
                 for pol, trg in enumerate(dig_total_power):
                     total_power = float(trg)
                     avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
@@ -928,15 +928,11 @@ class Pipeline:
                     # If for some reason there's zero power, avoid reporting
                     # -inf dB by assigning the most negative representable value
                     avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
-                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
-                    )
+                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(avg_power_db, timestamp=update_timestamp)
             else:
                 for pol in range(N_POLS):
                     self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                        np.finfo(np.float64).min,
-                        status=aiokatcp.Sensor.Status.FAILURE,
-                        timestamp=self.engine.time_converter.adc_to_unix(out_item.next_timestamp),
+                        np.finfo(np.float64).min, status=aiokatcp.Sensor.Status.FAILURE, timestamp=update_timestamp
                     )
 
     async def run_transmit(self) -> None:
