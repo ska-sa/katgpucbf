@@ -344,6 +344,7 @@ class OutQueueItem(QueueItem):
         """
         super().reset(timestamp)
         self.n_spectra = 0
+        self.present[:] = False
 
     def reset_all(self, command_queue: AbstractCommandQueue, timestamp: int = 0) -> None:
         """Fully reset the item.
@@ -386,17 +387,6 @@ class OutQueueItem(QueueItem):
     def pols(self) -> int:  # noqa: D401
         """Number of polarisations."""
         return self.spectra.shape[3]
-
-    def all_present(self) -> bool:  # noqa: D410
-        """All batches for this chunk are complete.
-
-        Only the first :attr:`n_spectra` elements of :attr:`OutQueueItem.present` have
-        defined values, so it is not safe to use ``np.all(item.present)``.
-
-        The canonical way to check whether this item's data is complete is
-        therefore to use this property.
-        """
-        return self.n_spectra == self.capacity and bool(np.all(self.present))
 
 
 def format_complex(value: numbers.Complex) -> str:
@@ -918,7 +908,7 @@ class Pipeline:
         """
         if dig_total_power is not None:
             update_timestamp = self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
-            if out_item.all_present():
+            if np.all(out_item.present):
                 for pol, trg in enumerate(dig_total_power):
                     total_power = float(trg)
                     avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
