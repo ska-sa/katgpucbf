@@ -908,7 +908,7 @@ class Pipeline:
         """
         if dig_total_power is not None:
             update_timestamp = self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
-            if np.all(out_item.present[: out_item.n_spectra]):
+            if np.all(out_item.present):
                 for pol, trg in enumerate(dig_total_power):
                     total_power = float(trg)
                     avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
