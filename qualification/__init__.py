@@ -496,6 +496,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             n_bits_per_sample=self.n_bits_per_sample,
             n_spectra_per_heap=self.n_spectra_per_heap,
             n_samples_between_spectra=self.n_samples_between_spectra,
+            decimation_factor=self.decimation_factor,
             use_ibv=use_ibv,
         )
 
@@ -645,6 +646,7 @@ def create_tied_array_channelised_voltage_receive_stream(
     n_bits_per_sample: int,
     n_spectra_per_heap: int,
     n_samples_between_spectra: int,
+    decimation_factor: int,
     use_ibv: bool = False,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a spead2 recv stream for ingesting tied array channelised voltage data."""
@@ -676,9 +678,11 @@ def create_tied_array_channelised_voltage_receive_stream(
 
     stream_config = spead2.recv.StreamConfig(substreams=n_substreams, explicit_start=True)
 
-    # Allow about 1 GiB for resynchronising the B-engines.
+    # Allow about 1 GiB for resynchronising the B-engines in wideband.
+    # In narrowband, reduce it by the decimation factor to avoid creating
+    # an excessively high latency which slows down the test.
     chunk_size = expected_payload_size * n_substreams * n_beams
-    max_chunks = math.ceil(1024**3 / chunk_size)
+    max_chunks = math.ceil(1024**3 / chunk_size / decimation_factor)
 
     return _create_receive_stream_group(
         interface_address,
