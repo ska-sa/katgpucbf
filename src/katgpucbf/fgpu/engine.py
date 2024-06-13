@@ -388,17 +388,6 @@ class OutQueueItem(QueueItem):
         """Number of polarisations."""
         return self.spectra.shape[3]
 
-    def all_present(self) -> bool:  # noqa: D410
-        """All batches for this chunk are complete.
-
-        Only the first :attr:`n_spectra` elements of :attr:`OutQueueItem.present` have
-        defined values, so it is not safe to use ``np.all(item.present)``.
-
-        The canonical way to check whether this item's data is complete is
-        therefore to use this property.
-        """
-        return self.n_spectra == self.capacity and bool(np.all(self.present))
-
 
 def format_complex(value: numbers.Complex) -> str:
     """Format a complex number for a katcp request.
@@ -919,7 +908,7 @@ class Pipeline:
         """
         if dig_total_power is not None:
             update_timestamp = self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
-            if out_item.all_present():
+            if np.all(out_item.present[: out_item.n_spectra]):
                 for pol, trg in enumerate(dig_total_power):
                     total_power = float(trg)
                     avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
