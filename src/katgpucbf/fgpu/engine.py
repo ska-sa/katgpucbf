@@ -344,6 +344,7 @@ class OutQueueItem(QueueItem):
         """
         super().reset(timestamp)
         self.n_spectra = 0
+        self.present[:] = False
 
     def reset_all(self, command_queue: AbstractCommandQueue, timestamp: int = 0) -> None:
         """Fully reset the item.
