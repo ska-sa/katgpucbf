@@ -1016,7 +1016,7 @@ class XBEngine(DeviceServer):
     src_ibv
         Use ibverbs for input.
     src_affinity
-        Specific CPU core to assign the RECV stream processing thread to.
+        Specific CPU core to assign the receive stream processing thread to.
     src_comp_vector
         Completion vector for source stream, or -1 for polling.
         See :class:`spead2.recv.UdpIbvConfig` for further information.
@@ -1026,7 +1026,7 @@ class XBEngine(DeviceServer):
         The number of consecutive batches to store in the same chunk. The higher
         this value is, the more GPU and system RAM is allocated, the lower,
         the more work the Python processing thread is required to do.
-    recv_reorder_tol
+    src_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
     dst_interface
@@ -1089,7 +1089,7 @@ class XBEngine(DeviceServer):
         dst_affinity: int,
         dst_comp_vector: int,
         heaps_per_fengine_per_chunk: int,  # Used for GPU memory tuning
-        recv_reorder_tol: int,
+        src_reorder_tol: int,
         send_enabled: bool,
         monitor: Monitor,
         context: AbstractContext,
@@ -1152,7 +1152,7 @@ class XBEngine(DeviceServer):
         # most tests cases up until now. If the pipeline starts bottlenecking,
         # then maybe look at increasing these values.
         self.max_active_chunks: int = (
-            math.ceil(recv_reorder_tol / self.recv_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
+            math.ceil(src_reorder_tol / self.recv_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
         )
         n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
 

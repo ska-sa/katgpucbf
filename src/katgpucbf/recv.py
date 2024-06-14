@@ -42,7 +42,7 @@ user_data_type = types.Record.make_c_struct(
 
 #: Number of chunks before rx sensor status changes
 RECV_SENSOR_TIMEOUT_CHUNKS = 10
-#: Minimum rx sensor status timeout in seconds
+#: Minimum recv sensor status timeout in seconds
 RECV_SENSOR_TIMEOUT_MIN = 1.0
 #: Eviction mode to use when some streams fall behind
 EVICTION_MODE = spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY

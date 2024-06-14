@@ -429,7 +429,7 @@ def make_engine(
         dst_affinity=args.dst_affinity,
         dst_comp_vector=args.dst_comp_vector,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
-        recv_reorder_tol=args.recv_reorder_tol,
+        src_reorder_tol=args.src_reorder_tol,
         send_enabled=args.send_enabled,
         monitor=monitor,
         context=context,

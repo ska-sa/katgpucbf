@@ -259,7 +259,7 @@ xbgpu
 ``?capture-start``, ``?capture-stop``
     Enable or disable transmission of output data. This does not affect
     transmission of descriptors, which cannot be disabled. In the initial
-    state transmission is disabled, unless the :option:`!--tx-enabled`
+    state transmission is disabled, unless the :option:`!--send-enabled`
     command-line option has been passed.
 
 Shutting down the correlator
