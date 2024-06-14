@@ -293,7 +293,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "is required to do. [%(default)s]",
     )
     parser.add_argument(
-        "--recv-reorder-tol",
+        "--src-reorder-tol",
         type=int,
         default=2**29,
         help="Maximum time (in ADC ticks) that packets can be delayed relative to others "
