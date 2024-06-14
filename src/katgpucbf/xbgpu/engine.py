@@ -542,7 +542,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             # Finish with the in_item
             in_item.add_marker(self._proc_command_queue)
             self.engine.free_in_item(in_item)
-        # When the stream is closed, if the sender loop is waiting for a tx item,
+        # When the stream is closed, if the sender loop is waiting for an out item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can
         # stop waiting and exit.
         logger.debug("gpu_proc_loop completed")
@@ -856,7 +856,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
 
             in_item.add_marker(self._proc_command_queue)
             self.engine.free_in_item(in_item)
-        # When the stream is closed, if the sender loop is waiting for a tx item,
+        # When the stream is closed, if the sender loop is waiting for an out item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can
         # stop waiting and exit.
         logger.debug("gpu_proc_loop completed")
