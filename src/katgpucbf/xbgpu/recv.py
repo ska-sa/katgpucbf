@@ -172,7 +172,7 @@ def make_stream(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
-    src_affinity: int,
+    recv_affinity: int,
     max_active_chunks: int,
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
@@ -187,7 +187,7 @@ def make_stream(
         Output ringbuffer to which chunks will be sent.
     free_ringbuffer
         Ringbuffer for holding chunks for recycling once they've been used.
-    src_affinity
+    recv_affinity
         CPU core affinity for the worker thread.
     max_active_chunks
         Maximum number of chunks under construction.
@@ -199,7 +199,7 @@ def make_stream(
         max_active_chunks=max_active_chunks,
         data_ringbuffer=data_ringbuffer,
         free_ringbuffer=free_ringbuffer,
-        affinity=src_affinity,
+        affinity=recv_affinity,
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
         substreams=layout.n_ants,
         stop_on_stop_item=False,  # By default, a heap containing a stream control stop item will terminate the stream

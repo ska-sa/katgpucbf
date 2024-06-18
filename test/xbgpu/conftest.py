@@ -21,22 +21,22 @@ import spead2
 
 
 @pytest.fixture
-def n_src_streams() -> int:  # noqa: D401
+def n_recv_streams() -> int:  # noqa: D401
     """Number of source streams for an xbgpu instance."""
     return 1
 
 
 @pytest.fixture
-def mock_recv_streams(mocker, n_src_streams: int) -> list[spead2.InprocQueue]:
+def mock_recv_streams(mocker, n_recv_streams: int) -> list[spead2.InprocQueue]:
     """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
 
     Returns
     -------
     queues
         A list of in-process queue to use for sending data. The number of queues
-        in the list is determined by ``n_src_streams``.
+        in the list is determined by ``n_recv_streams``.
     """
-    queues = [spead2.InprocQueue() for _ in range(n_src_streams)]
+    queues = [spead2.InprocQueue() for _ in range(n_recv_streams)]
     queue_iter = iter(queues)  # Each call to add_reader gets the next queue
 
     def add_reader(

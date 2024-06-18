@@ -394,7 +394,7 @@ def add_reader(
         stream.add_udp_pcap_file_reader(src)
     elif ibv:
         if interface is None:
-            raise ValueError("--src-interface is required with --src-ibv")
+            raise ValueError("--recv-interface is required with --recv-ibv")
         ibv_config = spead2.recv.UdpIbvConfig(
             endpoints=src,
             interface_address=interface,

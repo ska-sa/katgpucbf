@@ -354,7 +354,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         template = BeamformTemplate(
             context,
             [output.pol for output in outputs],
-            n_spectra_per_batch=engine.src_layout.n_spectra_per_heap,
+            n_spectra_per_batch=engine.recv_layout.n_spectra_per_heap,
         )
         self._beamform = template.instantiate(
             self._proc_command_queue,
@@ -393,21 +393,21 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             n_chunks=self.n_out_items,
             n_channels=engine.n_channels,
             n_channels_per_substream=engine.n_channels_per_substream,
-            spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+            spectra_per_heap=engine.recv_layout.n_spectra_per_heap,
             adc_sample_rate=engine.adc_sample_rate,
             timestamp_step=engine.recv_heap_timestamp_step,
             send_rate_factor=engine.send_rate_factor,
             channel_offset=engine.channel_offset_value,
             context=context,
-            packet_payload=engine.dst_packet_payload,
+            packet_payload=engine.send_packet_payload,
             stream_factory=lambda stream_config, buffers: make_bstream(
                 output_names=[output.name for output in outputs],
                 endpoints=[output.dst for output in outputs],
-                interface=engine.dst_interface,
-                ttl=engine.dst_ttl,
-                use_ibv=engine.dst_ibv,
-                affinity=engine.dst_affinity,
-                comp_vector=engine.dst_comp_vector,
+                interface=engine.send_interface,
+                ttl=engine.send_ttl,
+                use_ibv=engine.send_ibv,
+                affinity=engine.send_affinity,
+                comp_vector=engine.send_comp_vector,
                 stream_config=stream_config,
                 buffers=buffers,
             ),
@@ -653,11 +653,11 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             context=context,
             n_ants=engine.n_ants,
             n_channels_per_substream=engine.n_channels_per_substream,
-            n_spectra_per_heap=engine.src_layout.n_spectra_per_heap,
+            n_spectra_per_heap=engine.recv_layout.n_spectra_per_heap,
             input_sample_bits=engine.sample_bits,
         )
         self.correlation = correlation_template.instantiate(
-            self._proc_command_queue, n_batches=engine.src_layout.heaps_per_fengine_per_chunk
+            self._proc_command_queue, n_batches=engine.recv_layout.heaps_per_fengine_per_chunk
         )
 
         allocator = accel.DeviceAllocator(context=context)
@@ -680,16 +680,16 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             send_rate_factor=engine.send_rate_factor,
             channel_offset=engine.channel_offset_value,
             context=context,
-            packet_payload=engine.dst_packet_payload,
+            packet_payload=engine.send_packet_payload,
             stream_factory=lambda stream_config, buffers: make_xstream(
                 output_name=output.name,
                 dest_ip=output.dst.host,
                 dest_port=output.dst.port,
-                interface_ip=engine.dst_interface,
-                ttl=engine.dst_ttl,
-                use_ibv=engine.dst_ibv,
-                affinity=engine.dst_affinity,
-                comp_vector=engine.dst_comp_vector,
+                interface_ip=engine.send_interface,
+                ttl=engine.send_ttl,
+                use_ibv=engine.send_ibv,
+                affinity=engine.send_affinity,
+                comp_vector=engine.send_comp_vector,
                 stream_config=stream_config,
                 buffers=buffers,
             ),
@@ -1011,36 +1011,36 @@ class XBEngine(DeviceServer):
         Output streams to generate.
     src
         Endpoint for the incoming data.
-    src_interface
+    recv_interface
         IP address of the network device to use for input.
-    src_ibv
+    recv_ibv
         Use ibverbs for input.
-    src_affinity
+    recv_affinity
         Specific CPU core to assign the receive stream processing thread to.
-    src_comp_vector
+    recv_comp_vector
         Completion vector for source stream, or -1 for polling.
         See :class:`spead2.recv.UdpIbvConfig` for further information.
-    src_buffer
+    recv_buffer
         The size of the network receive buffer.
     heaps_per_fengine_per_chunk
         The number of consecutive batches to store in the same chunk. The higher
         this value is, the more GPU and system RAM is allocated, the lower,
         the more work the Python processing thread is required to do.
-    src_reorder_tol
+    recv_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
-    dst_interface
+    send_interface
         IP address of the network device to use for output.
-    dst_ttl
+    send_ttl
         TTL for outgoing packets.
-    dst_ibv
+    send_ibv
         Use ibverbs for output.
-    dst_packet_payload
+    send_packet_payload
         Size for output packets (correlation product payload only, headers and padding are
         added to this).
-    dst_affinity
+    send_affinity
         CPU core for output-handling thread.
-    dst_comp_vector
+    send_comp_vector
         Completion vector for transmission, or -1 for polling.
         See :class:`spead2.send.UdpIbvConfig` for further information.
     send_enabled
@@ -1077,19 +1077,19 @@ class XBEngine(DeviceServer):
         channel_offset_value: int,
         outputs: list[Output],
         src: list[tuple[str, int]],  # It's a list but it should be length 1 in xbgpu case.
-        src_interface: str,
-        src_ibv: bool,
-        src_affinity: int,
-        src_comp_vector: int,
-        src_buffer: int,
-        dst_interface: str,
-        dst_ttl: int,
-        dst_ibv: bool,
-        dst_packet_payload: int,
-        dst_affinity: int,
-        dst_comp_vector: int,
+        recv_interface: str,
+        recv_ibv: bool,
+        recv_affinity: int,
+        recv_comp_vector: int,
+        recv_buffer: int,
+        send_interface: str,
+        send_ttl: int,
+        send_ibv: bool,
+        send_packet_payload: int,
+        send_affinity: int,
+        send_comp_vector: int,
         heaps_per_fengine_per_chunk: int,  # Used for GPU memory tuning
-        src_reorder_tol: int,
+        recv_reorder_tol: int,
         send_enabled: bool,
         monitor: Monitor,
         context: AbstractContext,
@@ -1113,17 +1113,17 @@ class XBEngine(DeviceServer):
         self.channel_offset_value = channel_offset_value
 
         self._src = src
-        self._src_interface = src_interface
-        self._src_ibv = src_ibv
-        self._src_buffer = src_buffer
-        self._src_comp_vector = src_comp_vector
+        self._recv_interface = recv_interface
+        self._recv_ibv = recv_ibv
+        self._recv_buffer = recv_buffer
+        self._recv_comp_vector = recv_comp_vector
 
-        self.dst_interface = dst_interface
-        self.dst_ttl = dst_ttl
-        self.dst_ibv = dst_ibv
-        self.dst_packet_payload = dst_packet_payload
-        self.dst_affinity = dst_affinity
-        self.dst_comp_vector = dst_comp_vector
+        self.send_interface = send_interface
+        self.send_ttl = send_ttl
+        self.send_ibv = send_ibv
+        self.send_packet_payload = send_packet_payload
+        self.send_affinity = send_affinity
+        self.send_comp_vector = send_comp_vector
         self.send_rate_factor = send_rate_factor
 
         self.monitor = monitor
@@ -1152,7 +1152,7 @@ class XBEngine(DeviceServer):
         # most tests cases up until now. If the pipeline starts bottlenecking,
         # then maybe look at increasing these values.
         self.max_active_chunks: int = (
-            math.ceil(src_reorder_tol / self.recv_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
+            math.ceil(recv_reorder_tol / self.recv_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
         )
         n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
 
@@ -1160,7 +1160,7 @@ class XBEngine(DeviceServer):
             self.max_active_chunks, name="recv_data_ringbuffer", task_name=RECV_TASK_NAME, monitor=monitor
         )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(n_free_chunks)
-        self.src_layout = recv.Layout(
+        self.recv_layout = recv.Layout(
             n_ants=n_ants,
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
@@ -1169,10 +1169,10 @@ class XBEngine(DeviceServer):
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
         )
         self.receiver_stream = recv.make_stream(
-            layout=self.src_layout,
+            layout=self.recv_layout,
             data_ringbuffer=data_ringbuffer,
             free_ringbuffer=free_ringbuffer,
-            src_affinity=src_affinity,
+            recv_affinity=recv_affinity,
             max_active_chunks=self.max_active_chunks,
         )
 
@@ -1272,7 +1272,7 @@ class XBEngine(DeviceServer):
         """
         async for chunk in recv.recv_chunks(
             self.receiver_stream,
-            self.src_layout,
+            self.recv_layout,
             self.sensors,
             self.time_converter,
         ):
@@ -1449,10 +1449,10 @@ class XBEngine(DeviceServer):
         base_recv.add_reader(
             self.receiver_stream,
             src=self._src,
-            interface=self._src_interface,
-            ibv=self._src_ibv,
-            comp_vector=self._src_comp_vector,
-            buffer=self._src_buffer,
+            interface=self._recv_interface,
+            ibv=self._recv_ibv,
+            comp_vector=self._recv_comp_vector,
+            buffer=self._recv_buffer,
         )
 
         self.add_service_task(asyncio.create_task(self._receiver_loop(), name=RECV_TASK_NAME))
