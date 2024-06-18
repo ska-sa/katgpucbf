@@ -24,7 +24,7 @@ tx_affinity=$((affinity + 1))
 tx_comp=$tx_affinity
 other_affinity=$tx_affinity
 src_mcast="239.10.10.$((10 + index)):7148"
-dst_mcast="239.10.11.$((10 + index)):7148"
+send_mcast="239.10.11.$((10 + index)):7148"
 channel_offset=$((channels_per_substream * index))
 katcp_port="$((7140 + index))"
 prom_port="$((7150 + index))"
@@ -67,14 +67,14 @@ fi
 set -x
 
 exec schedrr spead2_net_raw numactl -C $other_affinity xbgpu \
-    --src-affinity $rx_affinity \
-    --src-comp-vector $rx_comp \
-    --dst-affinity $tx_affinity \
-    --dst-comp-vector $tx_comp \
-    --src-interface $iface \
-    --dst-interface $iface \
-    --src-ibv --dst-ibv \
-    --corrprod=name=bcp1,heap_accumulation_threshold=${heap_accumulation_threshold},dst=$dst_mcast \
+    --recv-affinity $rx_affinity \
+    --recv-comp-vector $rx_comp \
+    --send-affinity $tx_affinity \
+    --send-comp-vector $tx_comp \
+    --recv-interface $iface \
+    --send-interface $iface \
+    --recv-ibv --send-ibv \
+    --corrprod=name=bcp1,heap_accumulation_threshold=${heap_accumulation_threshold},dst=$send_mcast \
     "${beam_args[@]}" \
     --adc-sample-rate ${adc_sample_rate} \
     --array-size ${array_size:-64} \

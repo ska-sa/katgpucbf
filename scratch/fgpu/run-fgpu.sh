@@ -9,14 +9,14 @@ nodes=$(lscpu | grep 'NUMA node.*CPU' | wc -l)
 nproc=$(nproc)
 step=$(($nproc / $nodes))
 hstep=$(($step / 2))
-src_idx=$(($1 % 4))
+recv_idx=$(($1 % 4))
 
-src_affinity="$(($step*$1))"
-src_comp=$src_affinity
-dst_affinity="$(($step*$1+$hstep))"
-dst_comp=$dst_affinity
+recv_affinity="$(($step*$1))"
+recv_comp=$recv_affinity
+send_affinity="$(($step*$1+$hstep))"
+send_comp=$send_affinity
 other_affinity="$(($step*$1+$hstep+1))"
-src="239.102.$src_idx.64+15:7148"
+src="239.102.$recv_idx.64+15:7148"
 dst="239.102.$((200+$1)).0+63:7148"
 nb_dst="239.102.$((216+$1)).0+7:7148"
 katcp_port="$(($1+7140))"
@@ -49,10 +49,10 @@ shift
 
 set -x
 exec spead2_net_raw taskset -c $other_affinity fgpu \
-    --src-interface $iface --src-ibv \
-    --dst-interface $iface --dst-ibv \
-    --src-affinity $src_affinity --src-comp-vector=$src_comp \
-    --dst-affinity $dst_affinity --dst-comp-vector=$dst_comp \
+    --recv-interface $iface --recv-ibv \
+    --send-interface $iface --send-ibv \
+    --recv-affinity $recv_affinity --recv-comp-vector=$recv_comp \
+    --send-affinity $send_affinity --send-comp-vector=$send_comp \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
     --jones-per-batch ${jones_per_batch:-1048576} \
     --katcp-port $katcp_port \
