@@ -330,9 +330,7 @@ async def iter_chunks(
                 lost,
             )
             unix_time = time_converter.adc_to_unix(chunk.timestamp)
-            for pol in range(N_POLS):
-                sensors[f"input{pol}.rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
-                sensors[f"input{pol}.rx.unixtime"].set_value(aiokatcp.core.Timestamp(unix_time), timestamp=unix_time)
+            unix_time_katcp = aiokatcp.core.Timestamp(unix_time)
 
             pol_expected_heaps = (chunk.timestamp - first_timestamp + layout.chunk_samples) // layout.heap_samples
             chunks_counter.inc()
@@ -357,8 +355,15 @@ async def iter_chunks(
                     missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
                     n_missing_heaps[pol] = new_missing
                     sensors[f"input{pol}.rx.missing-unixtime"].set_value(
-                        aiokatcp.core.Timestamp(unix_time), timestamp=unix_time, status=aiokatcp.Sensor.Status.ERROR
+                        unix_time_katcp, timestamp=unix_time, status=aiokatcp.Sensor.Status.ERROR
                     )
+            for pol in range(N_POLS):
+                # Note: these must be set AFTER rx.missing-unixtime so that if
+                # the first chunk received is missing data, we don't have an
+                # intermediate state in which all the sensors are NOMINAL
+                # (which would cause rx.device-status to be NOMINAL).
+                sensors[f"input{pol}.rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+                sensors[f"input{pol}.rx.unixtime"].set_value(unix_time_katcp, timestamp=unix_time)
             yield chunk
     finally:
         stats_collector.update()  # Ensure final stats updates are captured

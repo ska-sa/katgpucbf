@@ -312,8 +312,7 @@ async def recv_chunks(
         # TODO: Perhaps make this 'chunk timestamp step' a property of the Layout?
         chunk.timestamp = chunk.chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
         unix_time = time_converter.adc_to_unix(chunk.timestamp)
-        sensors["rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
-        sensors["rx.unixtime"].set_value(Timestamp(unix_time), timestamp=unix_time)
+        unix_time_katcp = Timestamp(unix_time)
 
         # Check if we've missed any chunks
         expected_chunk_id = prev_chunk_id + 1
@@ -327,8 +326,13 @@ async def recv_chunks(
             )
             dropped_heaps += missed_chunks * expected_heaps
 
+        # Note: set rx.missing-unixtime first, so that if the first chunk is
+        # incomplete then we don't pass through a state where all the sensors
+        # are NOMINAL (which would cause rx.device-status to be NOMINAL).
         if dropped_heaps > 0:
-            sensors["rx.missing-unixtime"].set_value(Timestamp(unix_time), Sensor.Status.ERROR, timestamp=unix_time)
+            sensors["rx.missing-unixtime"].set_value(unix_time_katcp, Sensor.Status.ERROR, timestamp=unix_time)
+        sensors["rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+        sensors["rx.unixtime"].set_value(unix_time_katcp, timestamp=unix_time)
 
         # Increment Prometheus counters
         missing_heaps_counter.inc(dropped_heaps)
