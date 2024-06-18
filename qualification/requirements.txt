@@ -390,7 +390,7 @@ tzdata==2023.3
     #   pandas
 tzlocal==5.2
     # via dateparser
-urllib3==2.1.0
+urllib3==2.2.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   requests
