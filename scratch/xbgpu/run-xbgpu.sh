@@ -87,5 +87,5 @@ exec schedrr spead2_net_raw numactl -C $other_affinity xbgpu \
     --sync-time 0 \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
-    --tx-enabled \
+    --send-enabled \
     $src_mcast

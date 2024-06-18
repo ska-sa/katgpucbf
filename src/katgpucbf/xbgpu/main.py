@@ -293,7 +293,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "is required to do. [%(default)s]",
     )
     parser.add_argument(
-        "--rx-reorder-tol",
+        "--src-reorder-tol",
         type=int,
         default=2**29,
         help="Maximum time (in ADC ticks) that packets can be delayed relative to others "
@@ -352,7 +352,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dst-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
     parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no].")
     parser.add_argument(
-        "--tx-enabled",
+        "--send-enabled",
         action="store_true",
         help="Start with correlator output transmission enabled, without having to issue a katcp command.",
     )
@@ -429,8 +429,8 @@ def make_engine(
         dst_affinity=args.dst_affinity,
         dst_comp_vector=args.dst_comp_vector,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
-        rx_reorder_tol=args.rx_reorder_tol,
-        tx_enabled=args.tx_enabled,
+        src_reorder_tol=args.src_reorder_tol,
+        send_enabled=args.send_enabled,
         monitor=monitor,
         context=context,
         vkgdr_handle=vkgdr_handle,

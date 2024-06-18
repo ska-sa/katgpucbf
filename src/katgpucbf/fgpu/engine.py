@@ -49,7 +49,7 @@ from .. import recv as base_recv
 from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
-from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
+from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import (
@@ -195,11 +195,11 @@ class InQueueItem(QueueItem):
     present_cumsum: np.ndarray
     #: Chunk to return to recv after processing (used with vkgdr only).
     chunk: recv.Chunk | None = None
-    #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
+    #: Number of samples for each polarisation in :attr:`samples`.
     n_samples: int
-    #: Bitwidth of the data in :attr:`PolInItem.samples`
+    #: Bitwidth of the data in :attr:`samples`.
     dig_sample_bits: int
-    #: Number of pipelines still using this item
+    #: Number of pipelines still using this item.
     refcount: int
 
     def __init__(
@@ -1196,7 +1196,7 @@ class Engine(aiokatcp.DeviceServer):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
         self._populate_sensors(
-            self.sensors, max(RX_SENSOR_TIMEOUT_MIN, RX_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
+            self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
 
         # Attributes copied or initialised from arguments
@@ -1300,7 +1300,7 @@ class Engine(aiokatcp.DeviceServer):
             )
             chunk.recycle()  # Make available to the stream
 
-    def _populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
+    def _populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
             sensors.add(
@@ -1326,7 +1326,7 @@ class Engine(aiokatcp.DeviceServer):
                 )
             )
 
-        for sensor in recv.make_sensors(rx_sensor_timeout).values():
+        for sensor in recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
         sensors.add(steady_state_timestamp_sensor())
         sensors.add(DeviceStatusSensor(sensors))

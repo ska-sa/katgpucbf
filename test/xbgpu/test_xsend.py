@@ -154,7 +154,7 @@ class TestXSend:
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
                 spead2.ThreadPool(), [queue], stream_config
             ),
-            tx_enabled=True,
+            send_enabled=True,
         )
         await self._send_data(send_stream)
         # Stop the queue, to ensure that if recv_data tries to read more heaps

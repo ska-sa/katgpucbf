@@ -54,7 +54,7 @@ from .. import recv as base_recv
 from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
-from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
+from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, steady_state_timestamp_sensor
@@ -346,7 +346,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         engine: "XBEngine",
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
-        init_tx_enabled: bool,
+        init_send_enabled: bool,
         name: str = DEFAULT_BPIPELINE_NAME,
     ) -> None:
         super().__init__(outputs, name, engine, context)
@@ -395,7 +395,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             n_channels_per_substream=engine.n_channels_per_substream,
             spectra_per_heap=engine.src_layout.n_spectra_per_heap,
             adc_sample_rate=engine.adc_sample_rate,
-            timestamp_step=engine.rx_heap_timestamp_step,
+            timestamp_step=engine.recv_heap_timestamp_step,
             send_rate_factor=engine.send_rate_factor,
             channel_offset=engine.channel_offset_value,
             context=context,
@@ -411,7 +411,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 stream_config=stream_config,
                 buffers=buffers,
             ),
-            tx_enabled=init_tx_enabled,
+            send_enabled=init_send_enabled,
         )
 
         self._populate_sensors()
@@ -500,7 +500,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             # After this point it's too late for set_weights etc to update
             # the weights for this timestamp.
             self._weights_steady = (
-                in_item.timestamp + self.engine.heaps_per_fengine_per_chunk * self.engine.rx_heap_timestamp_step
+                in_item.timestamp + self.engine.heaps_per_fengine_per_chunk * self.engine.recv_heap_timestamp_step
             )
 
             # Recompute the weights and delays if necessary
@@ -542,7 +542,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             # Finish with the in_item
             in_item.add_marker(self._proc_command_queue)
             self.engine.free_in_item(in_item)
-        # When the stream is closed, if the sender loop is waiting for a tx item,
+        # When the stream is closed, if the sender loop is waiting for an out item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can
         # stop waiting and exit.
         logger.debug("gpu_proc_loop completed")
@@ -636,11 +636,11 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         engine: "XBEngine",
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
-        init_tx_enabled: bool,
+        init_send_enabled: bool,
         name: str = DEFAULT_XPIPELINE_NAME,
     ) -> None:
         super().__init__([output], name, engine, context)
-        self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.rx_heap_timestamp_step
+        self.timestamp_increment_per_accumulation = output.heap_accumulation_threshold * engine.recv_heap_timestamp_step
 
         # NOTE: This value staggers the send so that packets within a heap are
         # transmitted onto the network across the entire time between dumps.
@@ -693,7 +693,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                 stream_config=stream_config,
                 buffers=buffers,
             ),
-            tx_enabled=init_tx_enabled,
+            send_enabled=init_send_enabled,
         )
 
         self._populate_sensors()
@@ -773,7 +773,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         return out_item
 
     async def gpu_proc_loop(self) -> None:  # noqa: D102
-        # NOTE: The ratio of in_items to tx_items is not one-to-one; there are expected
+        # NOTE: The ratio of in_items to out_items is not one-to-one; there are expected
         # to be many more in_items in for every out_item out. For this reason, and in
         # addition to the steps outlined in :meth:`.Pipeline.gpu_proc_loop`, data is
         # only transferred to a `XOutQueueItem` once sufficient correlations have occurred.
@@ -837,12 +837,12 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                 # batch. This check is the equivalent of the MeerKAT SKARAB
                 # X-Engine auto-resync logic.
                 current_accum = current_timestamp // self.timestamp_increment_per_accumulation
-                tx_accum = out_item.timestamp // self.timestamp_increment_per_accumulation
-                if current_accum != tx_accum:
+                send_accum = out_item.timestamp // self.timestamp_increment_per_accumulation
+                if current_accum != send_accum:
                     do_correlation()
                     out_item = await self._flush_accumulation(out_item, current_accum)
                 self.correlation.last_batch = i + 1
-                current_timestamp += self.engine.rx_heap_timestamp_step
+                current_timestamp += self.engine.recv_heap_timestamp_step
 
             do_correlation()
             # If the last batch of the chunk was also the last batch of the
@@ -850,13 +850,13 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             # This is mostly a convenience for unit tests, since in practice
             # we'd expect to see more data soon.
             current_accum = current_timestamp // self.timestamp_increment_per_accumulation
-            tx_accum = out_item.timestamp // self.timestamp_increment_per_accumulation
-            if current_accum != tx_accum:
+            send_accum = out_item.timestamp // self.timestamp_increment_per_accumulation
+            if current_accum != send_accum:
                 out_item = await self._flush_accumulation(out_item, current_accum)
 
             in_item.add_marker(self._proc_command_queue)
             self.engine.free_in_item(in_item)
-        # When the stream is closed, if the sender loop is waiting for a tx item,
+        # When the stream is closed, if the sender loop is waiting for an out item,
         # it will never exit. Upon receiving this NoneType, the sender_loop can
         # stop waiting and exit.
         logger.debug("gpu_proc_loop completed")
@@ -925,7 +925,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                         logger.warning("All Antennas had a break in data during this accumulation")
 
                 heap.timestamp = item.timestamp
-                if self.send_stream.tx_enabled:
+                if self.send_stream.send_enabled:
                     # Convert timestamp for the *end* of the heap (not the start)
                     # to a UNIX time for the sensor update. NB: this should be done
                     # *before* send_heap, because that gives away ownership of the
@@ -942,7 +942,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         logger.debug("sender_loop completed")
 
     def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
-        self.send_stream.tx_enabled = enable
+        self.send_stream.send_enabled = enable
 
 
 class XBEngine(DeviceServer):
@@ -1016,7 +1016,7 @@ class XBEngine(DeviceServer):
     src_ibv
         Use ibverbs for input.
     src_affinity
-        Specific CPU core to assign the RX stream processing thread to.
+        Specific CPU core to assign the receive stream processing thread to.
     src_comp_vector
         Completion vector for source stream, or -1 for polling.
         See :class:`spead2.recv.UdpIbvConfig` for further information.
@@ -1026,7 +1026,7 @@ class XBEngine(DeviceServer):
         The number of consecutive batches to store in the same chunk. The higher
         this value is, the more GPU and system RAM is allocated, the lower,
         the more work the Python processing thread is required to do.
-    rx_reorder_tol
+    src_reorder_tol
         Maximum tolerance for jitter between received packets, as a time
         expressed in ADC sample ticks.
     dst_interface
@@ -1043,7 +1043,7 @@ class XBEngine(DeviceServer):
     dst_comp_vector
         Completion vector for transmission, or -1 for polling.
         See :class:`spead2.send.UdpIbvConfig` for further information.
-    tx_enabled
+    send_enabled
         Start with correlator output transmission enabled, without having to
         issue a katcp command.
     monitor
@@ -1089,8 +1089,8 @@ class XBEngine(DeviceServer):
         dst_affinity: int,
         dst_comp_vector: int,
         heaps_per_fengine_per_chunk: int,  # Used for GPU memory tuning
-        rx_reorder_tol: int,
-        tx_enabled: bool,
+        src_reorder_tol: int,
+        send_enabled: bool,
         monitor: Monitor,
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
@@ -1129,13 +1129,16 @@ class XBEngine(DeviceServer):
         self.monitor = monitor
 
         self.n_samples_between_spectra = n_samples_between_spectra
-        self.rx_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
+        self.recv_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         self.populate_sensors(
             self.sensors,
             max(
-                RX_SENSOR_TIMEOUT_MIN,
-                RX_SENSOR_TIMEOUT_CHUNKS * heaps_per_fengine_per_chunk * self.rx_heap_timestamp_step / adc_sample_rate,
+                RECV_SENSOR_TIMEOUT_MIN,
+                RECV_SENSOR_TIMEOUT_CHUNKS
+                * heaps_per_fengine_per_chunk
+                * self.recv_heap_timestamp_step
+                / adc_sample_rate,
             ),
         )
 
@@ -1149,7 +1152,7 @@ class XBEngine(DeviceServer):
         # most tests cases up until now. If the pipeline starts bottlenecking,
         # then maybe look at increasing these values.
         self.max_active_chunks: int = (
-            math.ceil(rx_reorder_tol / self.rx_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
+            math.ceil(src_reorder_tol / self.recv_heap_timestamp_step / self.heaps_per_fengine_per_chunk) + 1
         )
         n_free_chunks: int = self.max_active_chunks + 8  # TODO: Abstract this 'naked' constant
 
@@ -1162,7 +1165,7 @@ class XBEngine(DeviceServer):
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=self.sample_bits,
-            timestamp_step=self.rx_heap_timestamp_step,
+            timestamp_step=self.recv_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
         )
         self.receiver_stream = recv.make_stream(
@@ -1181,9 +1184,9 @@ class XBEngine(DeviceServer):
         self._pipelines: list[Pipeline] = []
         x_outputs = [output for output in outputs if isinstance(output, XOutput)]
         b_outputs = [output for output in outputs if isinstance(output, BOutput)]
-        self._pipelines = [XPipeline(x_output, self, context, vkgdr_handle, tx_enabled) for x_output in x_outputs]
+        self._pipelines = [XPipeline(x_output, self, context, vkgdr_handle, send_enabled) for x_output in x_outputs]
         if b_outputs:
-            self._pipelines.append(BPipeline(b_outputs, self, context, vkgdr_handle, tx_enabled))
+            self._pipelines.append(BPipeline(b_outputs, self, context, vkgdr_handle, send_enabled))
         self._upload_command_queue = context.create_command_queue()
 
         # This queue is extended in the monitor class, allowing for the
@@ -1197,7 +1200,7 @@ class XBEngine(DeviceServer):
         # NOTE: Too high means too much GPU memory gets allocate
         self._in_free_queue: asyncio.Queue[InQueueItem] = monitor.make_queue("in_free_queue", DEFAULT_N_IN_ITEMS)
 
-        rx_data_shape = (
+        recv_data_shape = (
             heaps_per_fengine_per_chunk,
             n_ants,
             n_channels_per_substream,
@@ -1207,7 +1210,7 @@ class XBEngine(DeviceServer):
         )
         for _ in range(DEFAULT_N_IN_ITEMS):
             # TODO: NGC-1106 update buffer_device dtype once 4-bit mode is supported
-            buffer_device = accel.DeviceArray(context, rx_data_shape, dtype=np.int8)
+            buffer_device = accel.DeviceArray(context, recv_data_shape, dtype=np.int8)
             present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             in_item = InQueueItem(buffer_device, present)
             self._in_free_queue.put_nowait(in_item)
@@ -1218,10 +1221,10 @@ class XBEngine(DeviceServer):
             chunk = recv.Chunk(data=buf, present=present, sink=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
-    def populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
+    def populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         # Dynamic sensors
-        for sensor in recv.make_sensors(rx_sensor_timeout).values():
+        for sensor in recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
         sensors.add(steady_state_timestamp_sensor())
         sensors.add(DeviceStatusSensor(sensors))
