@@ -577,7 +577,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         logger.debug("sender_loop completed")
 
     def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
-        self.send_stream.enable_substream(stream_id=stream_id, enable=enable)
+        self.send_stream.enable_beam(beam_id=stream_id, enable=enable)
 
     def _weights_updated(self) -> None:
         """Update version tracking when weight-related parameters are updated."""
@@ -994,7 +994,8 @@ class XBEngine(DeviceServer):
     n_channels
         The total number of frequency channels out of the F-Engine.
     n_channels_per_substream
-        The number of frequency channels contained per substream.
+        The number of frequency channels contained in the incoming F-engine
+        data stream.
     n_samples_between_spectra
         The number of samples between frequency spectra received.
     n_spectra_per_heap
