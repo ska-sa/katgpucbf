@@ -58,8 +58,8 @@ class TestKatcpRequests:
         return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
-            "--src-interface=lo",
-            "--dst-interface=lo",
+            "--recv-interface=lo",
+            "--send-interface=lo",
             f"--sync-time={SYNC_TIME}",
             f"--gain={GAIN}",
             "--adc-sample-rate=1.712e9",

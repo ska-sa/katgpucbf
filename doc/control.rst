@@ -148,11 +148,11 @@ instance on ``host2``::
     .
     [Connect to host2 and activate the local virtual environment]
     (katgpucbf) user@host2:~/katgpucbf$ spead2_net_raw numactl -C 1 xbgpu \
-                                        --src-affinity 0 --src-comp-vector 0 \
-                                        --dst-affinity 1 --dst-comp-vector 1 \
-                                        --src-interface <interface name> \
-                                        --dst-interface <interface name> \
-                                        --src-ibv --dst-ibv \
+                                        --recv-affinity 0 --recv-comp-vector 0 \
+                                        --send-affinity 1 --send-comp-vector 1 \
+                                        --recv-interface <interface name> \
+                                        --send-interface <interface name> \
+                                        --recv-ibv --send-ibv \
                                         --adc-sample-rate 1712e6 --array-size 4 \
                                         --channels 4096 \
                                         --channels-per-substream 1024 \

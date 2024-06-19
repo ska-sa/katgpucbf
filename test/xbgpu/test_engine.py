@@ -830,8 +830,8 @@ class TestEngine:
             f"--jones-per-batch={n_jones_per_batch}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
             "--sync-time=1234567890",
-            "--src-interface=lo",
-            "--dst-interface=lo",
+            "--recv-interface=lo",
+            "--send-interface=lo",
             "--send-enabled",
             "239.10.11.4:7149",  # src
         ]

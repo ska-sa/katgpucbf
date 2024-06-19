@@ -173,7 +173,7 @@ def make_stream_group(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
-    src_affinity: Sequence[int],
+    recv_affinity: Sequence[int],
     stride: int,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create SPEAD receiver streams.
@@ -189,7 +189,7 @@ def make_stream_group(
         Output ringbuffer to which chunks will be sent.
     free_ringbuffer
         Ringbuffer for holding chunks for recycling once they've been used.
-    src_affinity
+    recv_affinity
         CPU core affinity for the worker threads (one per thread).
         Use -1 to indicate no affinity for a thread.
     stride
@@ -209,7 +209,7 @@ def make_stream_group(
         max_heap_extra=np.dtype(np.uint16).itemsize,
         data_ringbuffer=data_ringbuffer,
         free_ringbuffer=free_ringbuffer,
-        affinity=src_affinity,
+        affinity=recv_affinity,
         max_heaps=1,  # Digitiser heaps are single-packet, so no need for more
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps"],
         user_data=user_data,
