@@ -122,13 +122,13 @@ class Batch:
     ) -> None:
         self.heaps: list[spead2.send.Heap] = []
         self.data = data
-        n_substreams = data.shape[0]
+        n_beams = data.shape[0]
 
         item_group = make_item_group(data.shape[1:])  # Get rid of the 'beam' dimension
         item_group[FREQUENCY_ID].value = channel_offset
         item_group[TIMESTAMP_ID].value = timestamp
         item_group[BEAM_ANTS_ID].value = present_ants
-        for i in range(n_substreams):
+        for i in range(n_beams):
             item_group[BF_RAW_ID].value = self.data[i, ...]
             heap = item_group.get_heap(descriptors="none", data="all")
             heap.repeat_pointers = True
@@ -353,7 +353,7 @@ class BSend(Send):
     queue for reuse.
 
     This object keeps track of each tied-array-channelised-voltage data stream by
-    means of a substreams in :class:`spead2.send.asyncio.AsyncStream`, allowing
+    means of substreams in :class:`spead2.send.asyncio.AsyncStream`, allowing
     for individual enabling and disabling of the data product.
 
     To allow this class to be used with multiple transports, the constructor
@@ -449,22 +449,22 @@ class BSend(Send):
             descriptor_heap=item_group.get_heap(descriptors="all", data="none"),
         )
 
-    def enable_substream(self, stream_id: int, enable: bool = True) -> None:
-        """Enable/Disable a substream's data transmission.
+    def enable_beam(self, beam_id: int, enable: bool = True) -> None:
+        """Enable/Disable a beam's data transmission.
 
-        :class:`.BSend` operates as a large single stream with multiple
-        substreams. Each substream is its own data product and is required
-        to be enabled/disabled independently.
+        :class:`.BSend` operates as a single, large stream with multiple
+        substreams. Each substream (beam) is its own data product and is
+        required to be enabled/disabled independently.
 
         Parameters
         ----------
-        stream_id
-            Index of the substream's data product.
+        beam_id
+            Index of the beam's data product.
         enable
-            Boolean indicating whether the `stream_id` should be enabled or
+            Boolean indicating whether the `beam_id` should be enabled or
             disabled.
         """
-        self.send_enabled[stream_id] = enable
+        self.send_enabled[beam_id] = enable
         self.send_enabled_version += 1
 
     async def get_free_chunk(self) -> Chunk:
