@@ -266,7 +266,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         type=comma_split(get_interface_address),
         help="Name(s) of input network device(s)",
     )
-    parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for input [no]")
+    parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for receiving [no]")
     parser.add_argument(
         "--recv-affinity",
         type=comma_split(int),
