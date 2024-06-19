@@ -168,35 +168,47 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         else:
             values = [min(max_antennas, default_antennas)]
         values = [value for value in values if value <= max_antennas]
-        metafunc.parametrize("n_antennas", values, indirect=True)
+        metafunc.parametrize("n_antennas", values)
     if "band" in metafunc.fixturenames:
-        metafunc.parametrize("band", metafunc.config.getini("bands"), indirect=True)
+        metafunc.parametrize("band", metafunc.config.getini("bands"))
     if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
-        # NB: don't try to convert the string-typed values to integers here.
-        # It will generate new int objects each time, causing pytest to treat
-        # them as different and hence it won't reuse the fixture between tests.
-        configs = [(n_channels, "1") for n_channels in metafunc.config.getini("wideband_channels")]
+        configs = [(int(n_channels), 1) for n_channels in metafunc.config.getini("wideband_channels")]
         if not metafunc.definition.get_closest_marker("wideband_only"):
             configs.extend(
-                (n_channels, decimation)
+                (int(n_channels), int(decimation))
                 for decimation in metafunc.config.getini("narrowband_decimation")
                 for n_channels in metafunc.config.getini("narrowband_channels")
             )
-        metafunc.parametrize("n_channels, narrowband_decimation", configs, indirect=True)
+        metafunc.parametrize("n_channels, narrowband_decimation", configs)
 
 
-# Need to redefine this from pytest-asyncio to have it at package scope
-@pytest.fixture(scope="package")
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Reorder the tests to improve :class:`CBFCache` hit rate."""
+
+    def key(item: pytest.Item) -> tuple:
+        # This is a little hacky: we can't access fixture values directly,
+        # only parametrisations. The antenna_channelised_voltage package
+        # overrides the 'n_dsims' fixture, so it will almost always have
+        # different configurations than the other directories. So we just
+        # hard-code that into the sort key.
+        rel_path = item.path.relative_to(config.rootpath)
+        ans: list = [rel_path.parts[0] != "antenna_channelised_voltage"]
+        callspec = getattr(item, "callspec", None)
+        if callspec is not None:
+            for name in ["n_antennas", "narrowband_decimation", "n_channels", "band"]:
+                ans.append((name, callspec.params.get(name)))
+        return tuple(ans)
+
+    items.sort(key=key)
+
+
+# Need to redefine this from pytest-asyncio to have it at session scope
+@pytest.fixture(scope="session")
 def event_loop():  # noqa: D103
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
-
-
-@pytest.fixture(scope="package")
-def n_antennas(request: pytest.FixtureRequest):  # noqa: D401
-    """Number of antennas, i.e. size of the array."""
-    return request.param
 
 
 @pytest.fixture(scope="package")
@@ -205,25 +217,7 @@ def n_dsims() -> int:  # noqa: D401
     return 1
 
 
-@pytest.fixture(scope="package")
-def n_channels(request: pytest.FixtureRequest) -> int:  # noqa: D401
-    """Number of channels for the channeliser."""
-    return int(request.param)
-
-
-@pytest.fixture(scope="package")
-def narrowband_decimation(request: pytest.FixtureRequest) -> int:  # noqa: D401
-    """Narrowband decimation factor, or 1 for wideband."""
-    return int(request.param)
-
-
-@pytest.fixture(scope="package")
-def band(request) -> str:  # noqa: D104
-    """Band ID."""
-    return request.param
-
-
-@pytest.fixture(scope="package")
+@pytest.fixture
 def int_time() -> float:  # noqa: D104
     """Integration time in seconds."""
     return 0.5
@@ -294,13 +288,6 @@ def pytest_runtest_call(item) -> Generator[None, None, None]:
     yield
 
 
-@pytest.fixture(scope="session")
-def host_config_querier(pytestconfig: pytest.Config) -> HostConfigQuerier:
-    """Querier for getting host config."""
-    url = pytestconfig.getini("prometheus_url")
-    return HostConfigQuerier(url)
-
-
 @pytest.fixture(autouse=True)
 def matplotlib_report_style() -> Generator[None, None, None]:
     """Set the style of all matplotlib plots."""
@@ -328,7 +315,7 @@ def quiet_spead2(caplog: pytest.LogCaptureFixture) -> None:
         caplog.set_level(logging.WARN, logger="spead2")
 
 
-@pytest.fixture(scope="package")
+@pytest.fixture
 async def _cbf_config_and_description(
     pytestconfig: pytest.Config,
     n_antennas: int,
@@ -443,14 +430,14 @@ async def _cbf_config_and_description(
     return config, cbf_mode_config
 
 
-@pytest.fixture(scope="package")
-async def cbf_config(_cbf_config_and_description: tuple[dict, str, str]) -> dict:
+@pytest.fixture
+async def cbf_config(_cbf_config_and_description: tuple[dict, dict]) -> dict:
     """Produce the configuration dict from the given parameters."""
     return _cbf_config_and_description[0]
 
 
-@pytest.fixture(scope="package")
-async def cbf_mode_config(_cbf_config_and_description: tuple[dict, str, str]) -> str:
+@pytest.fixture
+async def cbf_mode_config(_cbf_config_and_description: tuple[dict, dict]) -> dict:
     """Produce a dictionary describing the CBF config."""
     return _cbf_config_and_description[1]
 
@@ -546,75 +533,101 @@ async def _report_cbf_config(
     )
 
 
-@pytest.fixture(scope="package")
-async def master_controller_client(pytestconfig: pytest.Config) -> AsyncGenerator[aiokatcp.Client, None]:
-    """Connect to the master controller."""
-    host = pytestconfig.getini("master_controller_host")
-    port = int(pytestconfig.getini("master_controller_port"))
-    try:
-        logger.debug("Connecting to master controller at %s:%d.", host, port)
-        async with timeout(10):
-            async with await aiokatcp.Client.connect(host, port) as master_controller_client:
-                yield master_controller_client
-    except (ConnectionError, asyncio.TimeoutError):
-        logger.exception("unable to connect to master controller!")
-        raise
+class CBFCache:
+    """Obtain a CBF with the given configuration.
 
+    If there is already one running with the identical configuration, use it.
+    Otherwise, shut down any existing one and start a new one.
 
-@pytest.fixture(scope="package")
-async def session_cbf(
-    pytestconfig: pytest.Config,
-    host_config_querier: HostConfigQuerier,
-    master_controller_client: aiokatcp.Client,
-    cbf_config: dict,
-    cbf_mode_config: dict,
-) -> AsyncGenerator[CBFRemoteControl, None]:
-    """Start a CBF using the master controller.
-
-    Shut the CBF down afterwards also.
-
-    Generally this fixture should not be used directly. Use :meth:`cbf`
-    instead, which will reuse the same CBF across multiple tests.
+    Parameters
+    ----------
+    host, port
+        Endpoint for the master controller
     """
-    product_name = pytestconfig.getini("product_name")
-    try:
-        reply, _ = await master_controller_client.request("product-configure", product_name, json.dumps(cbf_config))
 
-    except aiokatcp.FailReply:
-        logger.exception("Something went wrong with starting the CBF!")
-        raise
+    def __init__(self, pytestconfig: pytest.Config) -> None:
+        self._cbf: CBFRemoteControl | None = None
+        self._master_controller_client: aiokatcp.Client | None = None
+        self._pytestconfig = pytestconfig
+        self._host_config_querier = HostConfigQuerier(pytestconfig.getini("prometheus_url"))
 
-    product_controller_host = aiokatcp.decode(str, reply[1])
-    product_controller_port = aiokatcp.decode(int, reply[2])
-    logger.info(
-        "CBF created, connecting to product controller at %s:%d",
-        product_controller_host,
-        product_controller_port,
-    )
-    try:
-        remote_control = await CBFRemoteControl.connect(
+    async def _close_cbf(self) -> None:
+        if self._cbf is not None:
+            name = self._cbf.name
+            logger.info("Tearing down CBF %s.", name)
+            await self._cbf.close()
+            self._cbf = None
+            if self._master_controller_client is not None:
+                await self._master_controller_client.request("product-deconfigure", name)
+
+    async def _get_master_controller_client(self) -> aiokatcp.Client:
+        if self._master_controller_client is not None:
+            return self._master_controller_client
+
+        try:
+            host = self._pytestconfig.getini("master_controller_host")
+            port = int(self._pytestconfig.getini("master_controller_port"))
+            logger.debug("Connecting to master controller at %s:%d.", host, port)
+            async with timeout(10):
+                self._master_controller_client = await aiokatcp.Client.connect(host, port)
+            return self._master_controller_client
+        except (ConnectionError, asyncio.TimeoutError):
+            logger.exception("unable to connect to master controller!")
+            raise
+
+    async def get_cbf(self, cbf_config: dict, cbf_mode_config: dict) -> CBFRemoteControl:
+        """Get a :class:`CBFRemoteControl`, creating it if necessary."""
+        if self._cbf is not None and self._cbf.config == cbf_config:
+            return self._cbf
+
+        await self._close_cbf()
+        master_controller_client = await self._get_master_controller_client()
+        product_name = self._pytestconfig.getini("product_name")
+        try:
+            reply, _ = await master_controller_client.request("product-configure", product_name, json.dumps(cbf_config))
+        except aiokatcp.FailReply:
+            logger.exception("Something went wrong with starting the CBF!")
+            raise
+
+        product_controller_host = aiokatcp.decode(str, reply[1])
+        product_controller_port = aiokatcp.decode(int, reply[2])
+        logger.info(
+            "CBF created, connecting to product controller at %s:%d",
+            product_controller_host,
+            product_controller_port,
+        )
+        self._cbf = await CBFRemoteControl.connect(
             product_name,
             product_controller_host,
             product_controller_port,
             cbf_config,
             cbf_mode_config,
         )
-        await _report_cbf_config(pytestconfig, host_config_querier, remote_control, master_controller_client)
+        await _report_cbf_config(self._pytestconfig, self._host_config_querier, self._cbf, master_controller_client)
+        return self._cbf
 
-        yield remote_control
+    async def close(self) -> None:
+        """Shut down any running CBF and the master controller connection."""
+        await self._close_cbf()
+        if self._master_controller_client is not None:
+            self._master_controller_client.close()
+            await self._master_controller_client.wait_closed()
+            self._master_controller_client = None
 
-        logger.info("Tearing down CBF.")
-        await remote_control.close()
 
-    finally:
-        # In case anything does go wrong, we want to make sure that we the
-        # deconfigure the product.
-        await master_controller_client.request("product-deconfigure", product_name)
+@pytest.fixture(scope="session")
+async def cbf_cache(pytestconfig: pytest.Config) -> AsyncGenerator[CBFCache, None]:
+    """Obtain the session-scoped :class:`CBFCache`."""
+    cache = CBFCache(pytestconfig)
+    yield cache
+    await cache.close()
 
 
 @pytest.fixture
 async def cbf(
-    session_cbf: CBFRemoteControl,
+    cbf_cache: CBFCache,
+    cbf_config: dict,
+    cbf_mode_config: dict,
     pdf_report: Reporter,
 ) -> AsyncGenerator[CBFRemoteControl, None]:
     """Set up a CBF for a single test.
@@ -622,18 +635,19 @@ async def cbf(
     The returned CBF might not be specific to this test, but it will have
     been reset to a default state, with the dsim outputting zeros.
     """
+    cbf = await cbf_cache.get_cbf(cbf_config, cbf_mode_config)
     # Reset the CBF to default state
-    pcc = session_cbf.product_controller_client
-    await asyncio.gather(*[client.request("signals", "0;0;") for client in session_cbf.dsim_clients])
+    pcc = cbf.product_controller_client
+    await asyncio.gather(*[client.request("signals", "0;0;") for client in cbf.dsim_clients])
     capture_types = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
-    for name, conf in session_cbf.config["outputs"].items():
+    for name, conf in cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
-            sync_time = session_cbf.sensors[f"{name}.sync-time"].value
+            sync_time = cbf.sensors[f"{name}.sync-time"].value
             await pcc.request("gain-all", name, "default")
             await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
         elif conf["type"] == "gpucbf.tied_array_channelised_voltage":
-            source_indices = ast.literal_eval(session_cbf.sensors[f"{name}.source-indices"].value.decode())
+            source_indices = ast.literal_eval(cbf.sensors[f"{name}.source-indices"].value.decode())
             n_inputs = len(source_indices)
             await pcc.request("beam-quant-gains", name, 1.0)
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
@@ -641,10 +655,10 @@ async def cbf(
         if conf["type"] in capture_types:
             await pcc.request("capture-start", name)
 
-    pdf_report.config(cbf=str(session_cbf.uuid))
-    yield session_cbf
+    pdf_report.config(cbf=str(cbf.uuid))
+    yield cbf
 
-    for name, conf in session_cbf.config["outputs"].items():
+    for name, conf in cbf.config["outputs"].items():
         if conf["type"] in capture_types:
             await pcc.request("capture-stop", name)
 
