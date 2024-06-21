@@ -320,7 +320,7 @@ class TestEngine:
         first_timestamp
             Timestamp to send with the first sample
         expected_first_timestamp
-            Timestamp expected for the first output heap; if none is provided
+            Timestamp expected for the first output batch; if none is provided
             the first timestamp in the data is not checked.
         src_present
             If present, a bitmask per pol and input heap indicating which heaps
@@ -882,9 +882,9 @@ class TestEngine:
         # The data should have as many samples as the input, minus a reduction
         # from windowing, rounded down to a full heap.
         total_spectra = (n_samples - output.window) // output.spectra_samples
-        total_heaps = total_spectra // spectra_per_heap
-        dst_present = np.ones(total_heaps, bool)
-        # Compute which output heaps should be missing. first_* and last_* are
+        total_batches = total_spectra // spectra_per_heap
+        dst_present = np.ones(total_batches, bool)
+        # Compute which output batches should be missing. first_* and last_* are
         # both inclusive (b is exclusive)
         for a, b in missing_ranges:
             first_sample = a * PACKET_SAMPLES
@@ -892,9 +892,9 @@ class TestEngine:
             assert last_sample < n_samples // 2  # Make sure gaps are restricted to first half
             first_spectrum = max(0, (first_sample - output.window + 1) // output.spectra_samples)
             last_spectrum = last_sample // output.spectra_samples
-            first_heap = first_spectrum // spectra_per_heap
-            last_heap = last_spectrum // spectra_per_heap
-            dst_present[first_heap : last_heap + 1] = False
+            first_batch = first_spectrum // spectra_per_heap
+            last_batch = last_spectrum // spectra_per_heap
+            dst_present[first_batch : last_batch + 1] = False
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             out_data, timestamps = await self._send_data(
@@ -950,19 +950,19 @@ class TestEngine:
             expected_updates = []
             # The sensor is updated once per out_item.
             spectra_per_output_chunk = engine_server.chunk_jones // output.channels
-            heaps_per_output_chunk = spectra_per_output_chunk // spectra_per_heap
+            batches_per_output_chunk = spectra_per_output_chunk // spectra_per_heap
             chunk_timestamp_step = spectra_per_output_chunk * output.spectra_samples
 
-            total_chunks = (total_heaps + heaps_per_output_chunk - 1) // heaps_per_output_chunk
+            total_chunks = (total_batches + batches_per_output_chunk - 1) // batches_per_output_chunk
             for i in range(total_chunks):
-                start_heap = i * heaps_per_output_chunk
-                stop_heap = (i + 1) * heaps_per_output_chunk
-                n_present = np.sum(dst_present[start_heap:stop_heap])
+                start_batch = i * batches_per_output_chunk
+                stop_batch = (i + 1) * batches_per_output_chunk
+                n_present = np.sum(dst_present[start_batch:stop_batch])
                 # The sensor timestamp shows from the previous processed chunk
                 sensor_timestamp = TIME_CONVERTER.adc_to_unix(
-                    timestamps[start_heap * spectra_per_heap] + chunk_timestamp_step
+                    timestamps[start_batch * spectra_per_heap] + chunk_timestamp_step
                 )
-                if n_present == heaps_per_output_chunk:
+                if n_present == batches_per_output_chunk:
                     expected_updates.append((sensor_timestamp, Update.NORMAL))
                 elif n_present > 0:
                     expected_updates.append((sensor_timestamp, Update.FAILURE))
