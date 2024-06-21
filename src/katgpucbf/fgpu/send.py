@@ -107,7 +107,7 @@ class Batch:
     timestamp
         Zero-dimensional array of dtype ``>u8`` holding the timestamp.
     data
-        Payload data for the batch, of shape (channels, spectra_per_heap, N_POLS).
+        Payload data for the batch, of shape (channels, spectra_per_batch, N_POLS).
     saturated
         Saturation data for the batch, of shape (N_POLS,)
     feng_id
@@ -169,7 +169,7 @@ class Chunk:
     ----------
     data
         Storage for voltage data, with shape (n_batches, n_channels,
-        n_spectra_per_heap, N_POLS) and a dtype returned by
+        n_spectra_per_batch, N_POLS) and a dtype returned by
         :func:`.gaussian_dtype`.
     saturated
         Storage for saturation counts, with shape (n_batches, N_POLS)
@@ -194,7 +194,7 @@ class Chunk:
     ) -> None:
         n_batches = data.shape[0]
         n_channels = data.shape[1]
-        n_spectra_per_heap = data.shape[2]
+        n_spectra_per_batch = data.shape[2]
         if n_channels % n_substreams != 0:
             raise ValueError("n_substreams must divide into n_channels")
         self.data = data
@@ -205,7 +205,7 @@ class Chunk:
         self._timestamp = 0
         #: Callback to return the chunk to the appropriate queue
         self.cleanup: Callable[[], None] | None = None
-        self._timestamp_step = n_spectra_per_heap * spectra_samples
+        self._timestamp_step = n_spectra_per_batch * spectra_samples
         #: Storage for timestamps in the SPEAD heaps.
         self._timestamps = (np.arange(n_batches) * self._timestamp_step).astype(IMMEDIATE_DTYPE)
         # The ... in indexing causes numpy to give a 0d array view, rather than
@@ -362,11 +362,11 @@ def make_streams(
 def make_descriptor_heap(
     *,
     channels_per_substream: int,
-    spectra_per_heap: int,
+    spectra_per_batch: int,
     sample_bits: int,
 ) -> "spead2.send.Heap":
     """Create a descriptor heap for output F-Engine data."""
-    raw_kwargs: _FengRawKwargs = {"shape": (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)}
+    raw_kwargs: _FengRawKwargs = {"shape": (channels_per_substream, spectra_per_batch, N_POLS, COMPLEX)}
     try:
         raw_kwargs["dtype"] = np.dtype(f"int{sample_bits}")
     except TypeError:

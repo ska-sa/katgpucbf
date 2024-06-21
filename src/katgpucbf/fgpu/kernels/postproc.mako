@@ -278,10 +278,10 @@ DEVICE_FN int delay_channel(int k)
  *   least channels/2 + 1.
  * - Thread-blocks are block x block x 1.
  * - A set of thread-blocks with the same z coordinate handles transposition of
- *   spectra_per_heap complete spectra.
+ *   spectra_per_batch complete spectra.
  *
  * A note on stride length:
- * `out` is a multi-dimensional array of shape (heaps x channels x spectra_per_heap). If
+ * `out` is a multi-dimensional array of shape (heaps x channels x spectra_per_batch). If
  * it's contiguous then the strides will coincide with these dimensions, but
  * katsdpsigproc may have added some padding to satisfy alignment requirements.
  * At the moment, this isn't the case, but this code aims for robustness against
@@ -298,7 +298,7 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     int out_stride_z,                         // Output stride between heaps
     int out_stride,                           // Output stride between channels within a heap
     int in_stride,                            // Input stride between polarisations
-    int spectra_per_heap)                     // Number of spectra per output heap
+    int spectra_per_batch)                    // Number of spectra per output batch
 {
     LOCAL_DECL scratch_t scratch[n][2];
     LOCAL_DECL cplx l_gains[n][2][2][${block}];  // indexed by p, pol, +/- s
@@ -349,7 +349,7 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
         if (s * 2 <= m)  // Note: <= not <. We need to process m/2 + 1 times
         {
             // Which spectrum within the accumulation.
-            int spectrum = z * spectra_per_heap + ${r};
+            int spectrum = z * spectra_per_batch + ${r};
             int base_addr = spectrum * CHANNELS;
             cplx X[2][2][n];   // Final Fourier transform
 % if complex_pfb:

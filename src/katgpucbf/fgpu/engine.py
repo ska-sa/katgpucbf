@@ -373,7 +373,7 @@ class OutQueueItem(QueueItem):
     @property
     def capacity(self) -> int:  # noqa: D401
         """Number of spectra stored in memory for each polarisation."""
-        # PostProc's __init__ method gives this as (spectra // spectra_per_heap)*(spectra_per_heap), so
+        # PostProc's __init__ method gives this as (spectra // spectra_per_batch)*(spectra_per_batch), so
         # basically, the number of spectra.
         return self.spectra.shape[0] * self.spectra.shape[2]
 
@@ -505,7 +505,7 @@ class Pipeline:
             engine.dst_sample_bits,
             narrowband=narrowband_config,
         )
-        self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, output.spectra_per_heap)
+        self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, output.spectra_per_batch)
         # Pre-allocate the memory for some buffers that we know we won't be
         # explicitly binding.
         self._compute.ensure_bound("fft_work")
@@ -535,7 +535,7 @@ class Pipeline:
 
         self.descriptor_heap = send.make_descriptor_heap(
             channels_per_substream=output.channels // len(output.dst),
-            spectra_per_heap=output.spectra_per_heap,
+            spectra_per_batch=output.spectra_per_batch,
             sample_bits=engine.dst_sample_bits,
         )
 
@@ -609,8 +609,8 @@ class Pipeline:
         spectra = self._compute.spectra
         if not use_peerdirect:
             # When using PeerDirect, the chunks are created along with the items
-            heaps = spectra // self.output.spectra_per_heap
-            send_shape = (heaps, self.output.channels, self.output.spectra_per_heap, N_POLS)
+            heaps = spectra // self.output.spectra_per_batch
+            send_shape = (heaps, self.output.channels, self.output.spectra_per_batch, N_POLS)
             for _ in range(self._send_free_queue.maxsize):
                 send_chunks.append(
                     send.Chunk(
@@ -626,7 +626,7 @@ class Pipeline:
                     )
                 )
                 self._send_free_queue.put_nowait(send_chunks[-1])
-        n_data_heaps = len(send_chunks) * self.spectra // self.output.spectra_per_heap * len(self.output.dst)
+        n_data_heaps = len(send_chunks) * self.spectra // self.output.spectra_per_batch * len(self.output.dst)
         self._send_streams = self.engine.make_send_streams(self.output, n_data_heaps, send_chunks)
 
     @property
@@ -693,10 +693,10 @@ class Pipeline:
         new_timestamp
             The timestamp that will immediately follow the current OutQueueItem.
         """
-        # Round down to a multiple of accs (don't send heap with partial
+        # Round down to a multiple of accs (don't send batch with partial
         # data).
-        accs = self._out_item.n_spectra // self.output.spectra_per_heap
-        self._out_item.n_spectra = accs * self.output.spectra_per_heap
+        accs = self._out_item.n_spectra // self.output.spectra_per_batch
+        self._out_item.n_spectra = accs * self.output.spectra_per_batch
         if self._out_item.n_spectra > 0:
             # Copy the gains to the device if they are out of date.
             if self._out_item.gains_version != self.gains_version:
@@ -741,7 +741,7 @@ class Pipeline:
             start_timestamp = self._out_item.end_timestamp
             orig_start_timestamps = [model(start_timestamp)[0] for model in self.delay_models]
             if min(orig_start_timestamps) < in_item.timestamp:
-                align = self.output.spectra_per_heap * self.output.spectra_samples
+                align = self.output.spectra_per_batch * self.output.spectra_samples
                 # This loop is needed because MultiDelayModel is not necessarily
                 # monotonic, and so simply taking the larger of the two skip
                 # results does not guarantee a suitable timestamp.
@@ -982,19 +982,19 @@ class Pipeline:
 
             chunk.timestamp = out_item.timestamp
             # Each batch is valid if all spectra in it are valid
-            out_item.present.reshape(-1, self.output.spectra_per_heap).all(axis=-1, out=chunk.present)
+            out_item.present.reshape(-1, self.output.spectra_per_batch).all(axis=-1, out=chunk.present)
             download_marker = self._download_queue.enqueue_marker()
             with self.engine.monitor.with_state(func_name, "wait transfer"):
                 await async_wait_for_events([download_marker])
 
             self._update_dig_power_sensors(dig_total_power, out_item)
 
-            n_batches = out_item.n_spectra // self.output.spectra_per_heap
+            n_batches = out_item.n_spectra // self.output.spectra_per_batch
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
-                # Account for heaps skipped between the end of the previous out_item and the
+                # Account for batches skipped between the end of the previous out_item and the
                 # start of the current one.
                 skipped_samples = out_item.timestamp - last_end_timestamp
-                skipped_batches = skipped_samples // (self.output.spectra_per_heap * self.output.spectra_samples)
+                skipped_batches = skipped_samples // (self.output.spectra_per_batch * self.output.spectra_samples)
                 send.skipped_heaps_counter.labels(self.output.name).inc(skipped_batches * len(self.output.dst))
             last_end_timestamp = out_item.end_timestamp
             out_item.reset()  # Safe to call in PeerDirect mode since it doesn't touch the raw data

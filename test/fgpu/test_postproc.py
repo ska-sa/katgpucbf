@@ -34,7 +34,7 @@ pytestmark = [pytest.mark.cuda_only]
 def postproc_host_pol(
     data: np.ndarray,
     spectra: int,
-    spectra_per_heap_out: int,
+    spectra_per_batch_out: int,
     channels: int,
     unzip_factor: int,
     complex_pfb: bool,
@@ -74,7 +74,7 @@ def postproc_host_pol(
     # Count saturation per heap
     qmax = 2 ** (out_bits - 1) - 1
     saturated = np.sum(np.any(np.abs(corrected) > qmax, axis=2), axis=1, dtype=np.uint32)
-    saturated = np.sum(saturated.reshape(-1, spectra_per_heap_out), axis=1)
+    saturated = np.sum(saturated.reshape(-1, spectra_per_batch_out), axis=1)
     # Convert to integral and saturate (still a real dtype though)
     corrected = np.rint(corrected)
     corrected = np.minimum(np.maximum(corrected, -qmax), qmax)
@@ -82,13 +82,13 @@ def postproc_host_pol(
     assert corrected.dtype == np.float32
     corrected = corrected.view(np.complex64)[..., -1]
     # Partial transpose
-    reshaped = corrected.reshape(-1, spectra_per_heap_out, n_out_channels)
+    reshaped = corrected.reshape(-1, spectra_per_batch_out, n_out_channels)
     return reshaped.transpose(0, 2, 1), saturated
 
 
 def postproc_host(
     in_: np.ndarray,
-    spectra_per_heap_out: int,
+    spectra_per_batch_out: int,
     spectra: int,
     channels: int,
     unzip_factor: int,
@@ -105,7 +105,7 @@ def postproc_host(
     for pol in range(N_POLS):
         pol_out, pol_saturated = postproc_host_pol(
             in_[pol],
-            spectra_per_heap_out,
+            spectra_per_batch_out,
             spectra,
             channels,
             unzip_factor,
@@ -147,7 +147,7 @@ def test_postproc(
 ) -> None:
     """Test GPU Postproc for numerical correctness."""
     channels = 4096
-    spectra_per_heap_out = 256
+    spectra_per_batch_out = 256
     spectra = 512
     rng = np.random.default_rng(seed=1)
     in_shape = (N_POLS, spectra, unzip_factor, channels // unzip_factor)
@@ -159,7 +159,7 @@ def test_postproc(
     expected, expected_saturated = postproc_host(
         h_in,
         spectra,
-        spectra_per_heap_out,
+        spectra_per_batch_out,
         channels,
         unzip_factor,
         complex_pfb,
@@ -173,7 +173,7 @@ def test_postproc(
     template = postproc.PostprocTemplate(
         context, channels, unzip_factor, complex_pfb=complex_pfb, out_channels=out_channels, out_bits=out_bits
     )
-    fn = template.instantiate(command_queue, spectra, spectra_per_heap_out)
+    fn = template.instantiate(command_queue, spectra, spectra_per_batch_out)
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
     fn.buffer("fine_delay").set(command_queue, h_fine_delay)

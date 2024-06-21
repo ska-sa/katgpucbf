@@ -44,8 +44,8 @@ async def main() -> None:
     layout = katgpucbf.xbgpu.recv.Layout(
         n_ants=args.array_size,
         n_channels_per_stream=args.channels_per_stream,
-        n_spectra_per_heap=args.spectra_per_heap,
-        timestamp_step=args.samples_between_spectra * args.spectra_per_heap,
+        n_spectra_per_batch=args.spectra_per_batch,
+        timestamp_step=args.samples_between_spectra * args.spectra_per_batch,
         sample_bits=8,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
     )
@@ -57,7 +57,7 @@ async def main() -> None:
             layout.heaps_per_fengine_per_chunk,
             layout.n_ants,
             layout.n_channels_per_stream,
-            layout.n_spectra_per_heap,
+            layout.n_spectra_per_batch,
             N_POLS,
             COMPLEX,
         )
