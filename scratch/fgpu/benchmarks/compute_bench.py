@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -30,12 +30,12 @@ from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
 def main():  # noqa: C901
     parser = argparse.ArgumentParser()
     parser.add_argument("--taps", type=int, default=16)
-    parser.add_argument("--src-chunk-samples", type=int, default=32 * 1024 * 1024)
-    parser.add_argument("--dst-chunk-jones", type=int, default=8 * 1024 * 1024)
+    parser.add_argument("--recv-chunk-samples", type=int, default=32 * 1024 * 1024)
+    parser.add_argument("--send-chunk-jones", type=int, default=8 * 1024 * 1024)
     parser.add_argument("--channels", type=int, default=32768)
     parser.add_argument("--spectra-per-heap", type=int, default=256)
     parser.add_argument("--dig-sample-bits", type=int, default=DIG_SAMPLE_BITS)
-    parser.add_argument("--dst-sample-bits", type=int, default=8, choices=[4, 8])
+    parser.add_argument("--send-sample-bits", type=int, default=8, choices=[4, 8])
     parser.add_argument("--passes", type=int, default=1000)
     parser.add_argument("--ddc-taps", type=int)  # Default is computed from decimation
     parser.add_argument("--narrowband", action="store_true")
@@ -72,15 +72,15 @@ def main():  # noqa: C901
             spectra_samples = 2 * args.channels
             window = args.taps * spectra_samples
         template = ComputeTemplate(
-            context, args.taps, args.channels, args.dig_sample_bits, args.dst_sample_bits, narrowband=narrowband_config
+            context, args.taps, args.channels, args.dig_sample_bits, args.send_sample_bits, narrowband=narrowband_config
         )
         command_queue = context.create_tuning_command_queue()
-        out_spectra = accel.roundup(args.dst_chunk_jones // args.channels, args.spectra_per_batch)
-        frontend_spectra = min(args.src_chunk_samples // spectra_samples, out_spectra)
+        out_spectra = accel.roundup(args.send_chunk_jones // args.channels, args.spectra_per_batch)
+        frontend_spectra = min(args.recv_chunk_samples // spectra_samples, out_spectra)
         extra_samples = window - spectra_samples
         fn = template.instantiate(
             command_queue,
-            samples=args.src_chunk_samples + extra_samples,
+            samples=args.recv_chunk_samples + extra_samples,
             spectra=out_spectra,
             spectra_per_batch=args.spectra_per_batch,
         )

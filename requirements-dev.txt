@@ -149,7 +149,7 @@ katcp-codec==0.1.0
     # via
     #   -c requirements.txt
     #   aiokatcp
-katsdpservices==1.3
+katsdpservices==1.4
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
@@ -423,7 +423,7 @@ tzdata==2023.3
     # via
     #   -c requirements.txt
     #   pandas
-urllib3==2.1.0
+urllib3==2.2.2
     # via requests
 virtualenv==20.25.0
     # via pre-commit

@@ -228,13 +228,13 @@ class TestEngine:
         return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
-            "--src-interface=lo",
-            "--dst-interface=lo",
+            "--recv-interface=lo",
+            "--send-interface=lo",
             f"--sync-time={SYNC_TIME}",
-            f"--src-chunk-samples={CHUNK_SAMPLES}",
-            f"--dst-chunk-jones={CHUNK_JONES}",
+            f"--recv-chunk-samples={CHUNK_SAMPLES}",
+            f"--send-chunk-jones={CHUNK_JONES}",
             f"--max-delay-diff={MAX_DELAY_DIFF}",
-            f"--src-packet-samples={PACKET_SAMPLES}",
+            f"--recv-packet-samples={PACKET_SAMPLES}",
             f"--feng-id={FENG_ID}",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--gain={default_gain}",
@@ -254,8 +254,8 @@ class TestEngine:
           correctly populated.
         """
         assert engine_server._port == 0
-        assert engine_server._src_interface == ["127.0.0.1"]
-        # TODO: `dst_interface` goes to the _sender member, which doesn't have anything we can query.
+        assert engine_server._recv_interface == ["127.0.0.1"]
+        # TODO: `send_interface` goes to the _sender member, which doesn't have anything we can query.
         assert engine_server._pipelines[0].output.channels == CHANNELS
         assert engine_server.time_converter.sync_time == SYNC_TIME
         assert engine_server._srcs == [(f"239.10.10.{i}", 7149) for i in range(16)]
@@ -303,8 +303,8 @@ class TestEngine:
         *,
         first_timestamp: int = 0,
         expected_first_timestamp: int | None = None,
-        src_present: np.ndarray | None = None,
-        dst_present: int | np.ndarray | None = None,
+        recv_present: np.ndarray | None = None,
+        send_present: int | np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Send a contiguous stream of data to the engine and retrieve results.
 
@@ -322,10 +322,10 @@ class TestEngine:
         expected_first_timestamp
             Timestamp expected for the first output batch; if none is provided
             the first timestamp in the data is not checked.
-        src_present
+        recv_present
             If present, a bitmask per pol and input heap indicating which heaps
             will be sent.
-        dst_present
+        send_present
             A bitmask per output batch indicating which batches should be
             present. As a shortcut, specifying an integer indicates the number
             of expected output batches, which must all be present; and specifying
@@ -343,22 +343,22 @@ class TestEngine:
             Labels for the time axis of `data`
         """
         # Reshape into heap-size pieces (now has indices pol, heap, offset)
-        src_layout = engine.src_layout
+        recv_layout = engine.recv_layout
         channels = output.channels
         spectra_per_batch = output.spectra_per_batch
         n_samples = dig_data.shape[1]
         assert dig_data.shape[0] == N_POLS
-        assert n_samples % src_layout.chunk_samples == 0, "samples must be a whole number of chunks"
-        saturation_value = 2 ** (src_layout.sample_bits - 1) - 1
+        assert n_samples % recv_layout.chunk_samples == 0, "samples must be a whole number of chunks"
+        saturation_value = 2 ** (recv_layout.sample_bits - 1) - 1
         saturated = np.abs(dig_data) >= saturation_value
-        saturated = np.sum(saturated.reshape(N_POLS, -1, src_layout.heap_samples), axis=-1, dtype=np.uint16)
-        dig_data = packbits(dig_data, src_layout.sample_bits)
+        saturated = np.sum(saturated.reshape(N_POLS, -1, recv_layout.heap_samples), axis=-1, dtype=np.uint16)
+        dig_data = packbits(dig_data, recv_layout.sample_bits)
         dig_stream = self._make_digitiser(mock_recv_stream)
         heap_gen = gen_heaps(
-            src_layout,
+            recv_layout,
             dig_data,
             first_timestamp,
-            present=src_present,
+            present=recv_present,
             saturated=saturated,
         )
 
@@ -372,16 +372,16 @@ class TestEngine:
         out_tp = spead2.ThreadPool()
 
         timestamp_step = spectra_per_batch * output.spectra_samples
-        if dst_present is None:
+        if send_present is None:
             expected_spectra = (n_samples - output.window) // output.spectra_samples
-            dst_present_mask = np.ones(expected_spectra // spectra_per_batch, dtype=bool)
-        elif isinstance(dst_present, int):
-            dst_present_mask = np.ones(dst_present, dtype=bool)
+            send_present_mask = np.ones(expected_spectra // spectra_per_batch, dtype=bool)
+        elif isinstance(send_present, int):
+            send_present_mask = np.ones(send_present, dtype=bool)
         else:
-            dst_present_mask = dst_present
-        assert np.sum(dst_present_mask) > 0
+            send_present_mask = send_present
+        assert np.sum(send_present_mask) > 0
 
-        data = np.zeros((channels, len(dst_present_mask) * spectra_per_batch, N_POLS, COMPLEX), np.int8)
+        data = np.zeros((channels, len(send_present_mask) * spectra_per_batch, N_POLS, COMPLEX), np.int8)
         channels_per_substream = channels // n_out_streams
         for i, queue in enumerate(mock_send_stream):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
@@ -395,7 +395,7 @@ class TestEngine:
             assert items == {}, "This heap contains data, not just descriptors"
 
             # Now, for the actual processing
-            for j, present in enumerate(dst_present_mask):
+            for j, present in enumerate(send_present_mask):
                 if present:
                     heap = await stream.get()
                     while (updated_items := set(ig.update(heap))) == set():
@@ -433,7 +433,7 @@ class TestEngine:
             (8192.0, 234.5),
             (-42.0, 58.0),
             (42.4, 24.2),
-            pytest.param((42.7, 24.9), marks=[pytest.mark.cmdline_args("--dst-chunk-jones=65536")]),
+            pytest.param((42.7, 24.9), marks=[pytest.mark.cmdline_args("--send-chunk-jones=65536")]),
             pytest.param((42.8, 24.5), marks=[pytest.mark.use_vkgdr]),
         ],
     )
@@ -496,10 +496,10 @@ class TestEngine:
 
         # Don't send the first chunk, to avoid complications with the step
         # change in the delay at SYNC_TIME.
-        src_layout = engine_server.src_layout
+        recv_layout = engine_server.recv_layout
         heap_samples = output.spectra_samples * output.spectra_per_batch
-        first_timestamp = roundup(src_layout.chunk_samples, heap_samples)
-        n_samples = 20 * src_layout.chunk_samples
+        first_timestamp = roundup(recv_layout.chunk_samples, heap_samples)
+        n_samples = 20 * recv_layout.chunk_samples
         tone_timestamps = np.arange(n_samples) + first_timestamp
         dig_data = self._make_tone(tone_timestamps, tones[0], 0) + self._make_tone(tone_timestamps, tones[1], 1)
         dig_data[:, 1::2] *= -1  # Down-convert to baseband
@@ -521,7 +521,7 @@ class TestEngine:
             dig_data,
             first_timestamp=first_timestamp,
             expected_first_timestamp=expected_first_timestamp,
-            dst_present=expected_spectra // output.spectra_per_batch,
+            send_present=expected_spectra // output.spectra_per_batch,
         )
 
         # Check for the tones
@@ -569,7 +569,7 @@ class TestEngine:
         # Add some extra data to align to an input heap, and to fill out the
         # last output chunk.
         output_chunk_samples = engine_server.chunk_jones * 2 * output.decimation
-        padded_size = roundup(dig_data.shape[1] + output_chunk_samples, engine_server.src_layout.chunk_samples)
+        padded_size = roundup(dig_data.shape[1] + output_chunk_samples, engine_server.recv_layout.chunk_samples)
         n_pad = padded_size - dig_data.shape[1]
         padding = np.zeros((2, n_pad), dig_data.dtype)
         dig_data = np.concatenate([dig_data, padding], axis=1)
@@ -606,13 +606,13 @@ class TestEngine:
                 data[CHANNELS // 2 + 1] = 0
             np.testing.assert_equal(data, pytest.approx(0, abs=tol))
 
-    # Just test 2 values for dig_sample_bits and dst_sample_bits; it gets
+    # Just test 2 values for dig_sample_bits and send_sample_bits; it gets
     # expensive otherwise. Also just do it for one test, as a sanity check.
     @pytest.mark.parametrize(
-        "dig_sample_bits,dst_sample_bits",
+        "dig_sample_bits,send_sample_bits",
         [
-            pytest.param(DIG_SAMPLE_BITS, 4, marks=pytest.mark.cmdline_args("--dst-sample-bits=4")),
-            pytest.param(12, 8, marks=pytest.mark.cmdline_args("--dig-sample-bits=12", "--dst-sample-bits=8")),
+            pytest.param(DIG_SAMPLE_BITS, 4, marks=pytest.mark.cmdline_args("--send-sample-bits=4")),
+            pytest.param(12, 8, marks=pytest.mark.cmdline_args("--dig-sample-bits=12", "--send-sample-bits=8")),
         ],
     )
     async def test_delay_phase_rate(
@@ -625,7 +625,7 @@ class TestEngine:
         extra_delay_samples: float,
         extra_phase: float,
         dig_sample_bits: int,
-        dst_sample_bits: int,
+        send_sample_bits: int,
     ) -> None:
         """Test that delay rate and phase rate setting works."""
         # One tone at centre frequency to test the absolute phase, and one at another
@@ -634,14 +634,14 @@ class TestEngine:
         tones = [
             CW(
                 frac_channel=frac_channel(output, channel),
-                magnitude=round(0.4 * 2**dst_sample_bits),
+                magnitude=round(0.4 * 2**send_sample_bits),
                 delay=extra_delay_samples,
                 phase=extra_phase,
             )
             for channel in tone_channels
         ]
-        src_layout = engine_server.src_layout
-        n_samples = 32 * src_layout.chunk_samples
+        recv_layout = engine_server.recv_layout
+        n_samples = 32 * recv_layout.chunk_samples
 
         # Should be high enough to cause multiple coarse delay changes per chunk
         delay_rate = np.array([1e-5, 1.2e-5])
@@ -651,7 +651,7 @@ class TestEngine:
         coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate)]
         await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
 
-        first_timestamp = roundup(100 * src_layout.chunk_samples, output.spectra_samples * output.spectra_per_batch)
+        first_timestamp = roundup(100 * recv_layout.chunk_samples, output.spectra_samples * output.spectra_per_batch)
         end_delay = round(min(delay_rate) * n_samples)
         expected_spectra = (n_samples + end_delay - output.window) // output.spectra_samples
         tone_timestamps = np.arange(n_samples) + first_timestamp
@@ -664,14 +664,14 @@ class TestEngine:
             output,
             dig_data,
             first_timestamp=first_timestamp,
-            # The first output heap would require data from before first_timestamp, so
+            # The first output batch would require data from before first_timestamp, so
             # is omitted.
             expected_first_timestamp=first_timestamp + output.spectra_samples * output.spectra_per_batch,
-            dst_present=expected_spectra // output.spectra_per_batch - 1,
+            send_present=expected_spectra // output.spectra_per_batch - 1,
         )
         # Add a polarisation dimension to timestamps to simplify some
         # broadcasting computations below.
-        atol = 2 * 0.5**dst_sample_bits
+        atol = 2 * 0.5**send_sample_bits
         timestamps = timestamps[:, np.newaxis]
         expected_phase = phase_rate_per_sample * timestamps
         assert_angles_allclose(np.angle(out_data[tone_channels[0]]), expected_phase, atol=atol)
@@ -722,8 +722,8 @@ class TestEngine:
         tone = CW(
             frac_channel=frac_channel(output, tone_channel), magnitude=110, delay=extra_delay_samples, phase=extra_phase
         )
-        src_layout = engine_server.src_layout
-        n_samples = 10 * src_layout.chunk_samples
+        recv_layout = engine_server.recv_layout
+        n_samples = 10 * recv_layout.chunk_samples
         dig_data = self._make_tone(np.arange(n_samples), tone, 0)
 
         # Load some delay models for the future (the last one beyond the end of the data)
@@ -785,12 +785,12 @@ class TestEngine:
         coeffs = ["0.0,0.0:0.0,0.0", f"{delay_s},0.0:0.0,0.0"]
         await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
 
-        src_layout = engine_server.src_layout
+        recv_layout = engine_server.recv_layout
         # Don't send the first chunk, to avoid complications with the step
         # change in the delay at SYNC_TIME.
         heap_samples = output.spectra_samples * output.spectra_per_batch
-        first_timestamp = roundup(src_layout.chunk_samples, heap_samples)
-        n_samples = 20 * src_layout.chunk_samples
+        first_timestamp = roundup(recv_layout.chunk_samples, heap_samples)
+        n_samples = 20 * recv_layout.chunk_samples
         tone_timestamps = np.arange(n_samples) + first_timestamp
 
         rng = np.random.default_rng(123)
@@ -824,7 +824,7 @@ class TestEngine:
             dig_data,
             first_timestamp=first_timestamp,
             expected_first_timestamp=expected_first_timestamp,
-            dst_present=expected_spectra // output.spectra_per_batch,
+            send_present=expected_spectra // output.spectra_per_batch,
         )
 
         # Ensure we haven't saturated
@@ -838,14 +838,14 @@ class TestEngine:
         # There is quite a lot of quantisation noise, so we need a large tolerance
         assert_angles_allclose(orig_phase + phase_ramp, delayed_phase, atol=3e-2)
 
-    # Test with spectra_samples less than, equal to and greater than src-packet-samples
+    # Test with spectra_samples less than, equal to and greater than recv-packet-samples
     @pytest.mark.parametrize("channels", [64, 2048, 8192])
     # Use small jones-per-batch to get finer-grained testing of which spectra
     # were ditched. Fewer would be better, but there are internal alignment
-    # requirements. --src-chunk-samples needs to be increased (from
+    # requirements. --recv-chunk-samples needs to be increased (from
     # CHUNK_SAMPLES) to ensure narrowband windows fit.
     @pytest.mark.spectra_per_batch(32)
-    @pytest.mark.cmdline_args("--src-chunk-samples=4194304")
+    @pytest.mark.cmdline_args("--recv-chunk-samples=4194304")
     async def test_missing_heaps(
         self,
         mock_recv_stream: spead2.InprocQueue,
@@ -864,7 +864,7 @@ class TestEngine:
         sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         spectra_per_batch = output.spectra_per_batch
-        chunk_samples = engine_server.src_layout.chunk_samples
+        chunk_samples = engine_server.recv_layout.chunk_samples
         n_samples = 16 * chunk_samples
         # Half-open ranges of input heaps that are missing
         missing_ranges = [
@@ -875,15 +875,15 @@ class TestEngine:
         ]
         rng = np.random.default_rng(seed=1)
         dig_data = np.tile(rng.integers(-255, 255, size=(2, n_samples // 2), dtype=np.int16), 2)
-        src_present = np.ones((2, n_samples // PACKET_SAMPLES), bool)
+        recv_present = np.ones((2, n_samples // PACKET_SAMPLES), bool)
         for a, b in missing_ranges:
-            assert b < src_present.shape[1]
-            src_present[:, a:b] = False
+            assert b < recv_present.shape[1]
+            recv_present[:, a:b] = False
         # The data should have as many samples as the input, minus a reduction
         # from windowing, rounded down to a full heap.
         total_spectra = (n_samples - output.window) // output.spectra_samples
         total_batches = total_spectra // spectra_per_batch
-        dst_present = np.ones(total_batches, bool)
+        send_present = np.ones(total_batches, bool)
         # Compute which output batches should be missing. first_* and last_* are
         # both inclusive (b is exclusive)
         for a, b in missing_ranges:
@@ -894,7 +894,7 @@ class TestEngine:
             last_spectrum = last_sample // output.spectra_samples
             first_batch = first_spectrum // spectra_per_batch
             last_batch = last_spectrum // spectra_per_batch
-            dst_present[first_batch : last_batch + 1] = False
+            send_present[first_batch : last_batch + 1] = False
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             out_data, timestamps = await self._send_data(
@@ -904,13 +904,13 @@ class TestEngine:
                 output,
                 dig_data,
                 expected_first_timestamp=0,
-                src_present=src_present,
-                dst_present=dst_present,
+                recv_present=recv_present,
+                send_present=send_present,
             )
-        # Position in dst_present corresponding to the second half of dig_data.
+        # Position in send_present corresponding to the second half of dig_data.
         middle = (n_samples // 2) // (output.spectra_samples * spectra_per_batch)
-        for i, p in enumerate(dst_present):
-            if p and i + middle < len(dst_present):
+        for i, p in enumerate(send_present):
+            if p and i + middle < len(send_present):
                 x = out_data[:, i * spectra_per_batch : (i + 1) * spectra_per_batch]
                 y = out_data[:, (i + middle) * spectra_per_batch : (i + middle + 1) * spectra_per_batch]
                 # For narrowband they're only guaranteed to be equal because
@@ -919,24 +919,25 @@ class TestEngine:
 
         for pol in range(N_POLS):
             # Check prometheus counter
-            input_missing_heaps = np.sum(~src_present[pol])
+            input_missing_heaps = np.sum(~recv_present[pol])
             assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
 
         n_substreams = len(mock_send_stream)
-        output_heaps = np.sum(dst_present) * n_substreams
+        output_heaps = np.sum(send_present) * n_substreams
         assert prom_diff.get_sample_diff("output_heaps_total", {"stream": output.name}) == output_heaps
         batch_samples = channels * spectra_per_batch * N_POLS
         batch_size = batch_samples * COMPLEX * np.dtype(np.int8).itemsize
         assert (
-            prom_diff.get_sample_diff("output_bytes_total", {"stream": output.name}) == np.sum(dst_present) * batch_size
+            prom_diff.get_sample_diff("output_bytes_total", {"stream": output.name})
+            == np.sum(send_present) * batch_size
         )
         assert (
             prom_diff.get_sample_diff("output_samples_total", {"stream": output.name})
-            == np.sum(dst_present) * batch_samples
+            == np.sum(send_present) * batch_samples
         )
         assert (
             prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": output.name})
-            == np.sum(~dst_present) * n_substreams
+            == np.sum(~send_present) * n_substreams
         )
 
         # Sensor is not present in the narrowband mode.
@@ -957,7 +958,7 @@ class TestEngine:
             for i in range(total_chunks):
                 start_batch = i * batches_per_output_chunk
                 stop_batch = (i + 1) * batches_per_output_chunk
-                n_present = np.sum(dst_present[start_batch:stop_batch])
+                n_present = np.sum(send_present[start_batch:stop_batch])
                 # The sensor timestamp shows from the previous processed chunk
                 sensor_timestamp = TIME_CONVERTER.adc_to_unix(
                     timestamps[start_batch * spectra_per_batch] + chunk_timestamp_step
@@ -1006,7 +1007,7 @@ class TestEngine:
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 9 * CHUNK_SAMPLES
         dig_data = np.zeros((2, n_samples), np.int16)
-        saturation_value = 2 ** (engine_server.src_layout.sample_bits - 1) - 1
+        saturation_value = 2 ** (engine_server.recv_layout.sample_bits - 1) - 1
         dig_data[0, 10000:15000] = saturation_value
         dig_data[1, 2 * CHUNK_SAMPLES + 50000 : 2 * CHUNK_SAMPLES + 60000] = -saturation_value
         await self._send_data(
@@ -1076,8 +1077,8 @@ class TestEngine:
             # Set gain high enough to make the tone saturate
             await engine_client.request("gain", output.name, pol, default_gain * 2)
 
-        src_layout = engine_server.src_layout
-        n_samples = 20 * src_layout.chunk_samples
+        recv_layout = engine_server.recv_layout
+        n_samples = 20 * recv_layout.chunk_samples
         dig_data = self._make_tone(np.arange(n_samples), tone, tone_pol)
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             _, timestamps = await self._send_data(

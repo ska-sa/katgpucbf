@@ -122,19 +122,19 @@ class Batch:
     ) -> None:
         self.heaps: list[spead2.send.Heap] = []
         self.data = data
-        n_substreams = data.shape[0]
+        n_beams = data.shape[0]
 
         item_group = make_item_group(data.shape[1:])  # Get rid of the 'beam' dimension
         item_group[FREQUENCY_ID].value = channel_offset
         item_group[TIMESTAMP_ID].value = timestamp
         item_group[BEAM_ANTS_ID].value = present_ants
-        for i in range(n_substreams):
+        for i in range(n_beams):
             item_group[BF_RAW_ID].value = self.data[i, ...]
             heap = item_group.get_heap(descriptors="none", data="all")
             heap.repeat_pointers = True
             self.heaps.append(heap)
-        self.tx_enabled_version = -1
-        self.tx_heaps = spead2.send.HeapReferenceList([])
+        self.send_enabled_version = -1
+        self.send_heaps = spead2.send.HeapReferenceList([])
 
 
 class Chunk:
@@ -292,7 +292,7 @@ class Chunk:
         This method returns immediately and sends the data asynchronously. Before
         modifying the chunk, first await :attr:`future`.
         """
-        n_enabled = sum(send_stream.tx_enabled)
+        n_enabled = sum(send_stream.send_enabled)
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         send_futures: list[asyncio.Future] = []
         if n_enabled > 0:
@@ -303,17 +303,17 @@ class Chunk:
                     # that did not have any input data. The updating of the
                     # batch's :class:`HeapReferenceList` is not time-critical.
                     continue
-                if batch.tx_enabled_version != send_stream.tx_enabled_version:
-                    batch.tx_heaps = spead2.send.HeapReferenceList(
+                if batch.send_enabled_version != send_stream.send_enabled_version:
+                    batch.send_heaps = spead2.send.HeapReferenceList(
                         [
                             spead2.send.HeapReference(heap, substream_index=i, rate=rate)
-                            for i, (heap, enabled) in enumerate(zip(batch.heaps, send_stream.tx_enabled))
+                            for i, (heap, enabled) in enumerate(zip(batch.heaps, send_stream.send_enabled))
                             if enabled
                         ]
                     )
-                    batch.tx_enabled_version = send_stream.tx_enabled_version
+                    batch.send_enabled_version = send_stream.send_enabled_version
                 send_futures.append(
-                    send_stream.stream.async_send_heaps(batch.tx_heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
+                    send_stream.stream.async_send_heaps(batch.send_heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
 
             self.future = asyncio.gather(*send_futures)
@@ -329,7 +329,7 @@ class Chunk:
                 len(send_futures),  # Increment counters for as many calls to async_send_heaps
                 self.data.shape[2:],  # Get rid of 'batch' and 'beam' dimensions
                 self.data.dtype,
-                send_stream.tx_enabled,
+                send_stream.send_enabled,
                 send_stream.output_names,
                 self.saturated.copy(),  # Copy since the original may get overwritten
                 sensors,
@@ -353,7 +353,7 @@ class BSend(Send):
     queue for reuse.
 
     This object keeps track of each tied-array-channelised-voltage data stream by
-    means of a substreams in :class:`spead2.send.asyncio.AsyncStream`, allowing
+    means of substreams in :class:`spead2.send.asyncio.AsyncStream`, allowing
     for individual enabling and disabling of the data product.
 
     To allow this class to be used with multiple transports, the constructor
@@ -381,12 +381,12 @@ class BSend(Send):
     packet_payload
         Size, in bytes, for the output packets (tied array channelised voltage
         payload only; headers and padding are added to this).
-    tx_enabled
+    send_enabled
         Enable/Disable transmission.
     """
 
     descriptor_heap: spead2.send.Heap
-    header_size: Final[int] = 72
+    preamble_size: Final[int] = 72
 
     def __init__(
         self,
@@ -403,10 +403,10 @@ class BSend(Send):
         context: AbstractContext,
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
-        tx_enabled: bool = False,
+        send_enabled: bool = False,
     ) -> None:
-        self.tx_enabled = [tx_enabled] * len(outputs)
-        self.tx_enabled_version = 0
+        self.send_enabled = [send_enabled] * len(outputs)
+        self.send_enabled_version = 0
         n_beams = len(outputs)
         self.output_names = [output.name for output in outputs]
 
@@ -426,7 +426,7 @@ class BSend(Send):
 
         heap_payload_size_bytes = n_channels_per_substream * spectra_per_heap * COMPLEX * SEND_DTYPE.itemsize
         self.bytes_per_second_per_beam = send_rate(
-            packet_header=BSend.header_size,
+            packet_header=BSend.preamble_size,
             packet_payload=packet_payload,
             heap_payload=heap_payload_size_bytes,
             heap_interval=timestamp_step / adc_sample_rate,
@@ -434,7 +434,7 @@ class BSend(Send):
         )
 
         stream_config = spead2.send.StreamConfig(
-            max_packet_size=packet_payload + BSend.header_size,
+            max_packet_size=packet_payload + BSend.preamble_size,
             # + 1 below for the descriptor per beam
             max_heaps=(n_chunks * batches_per_chunk + 1) * n_beams,
             rate_method=spead2.send.RateMethod.AUTO,
@@ -449,23 +449,23 @@ class BSend(Send):
             descriptor_heap=item_group.get_heap(descriptors="all", data="none"),
         )
 
-    def enable_substream(self, stream_id: int, enable: bool = True) -> None:
-        """Enable/Disable a substream's data transmission.
+    def enable_beam(self, beam_id: int, enable: bool = True) -> None:
+        """Enable/Disable a beam's data transmission.
 
-        :class:`.BSend` operates as a large single stream with multiple
-        substreams. Each substream is its own data product and is required
-        to be enabled/disabled independently.
+        :class:`.BSend` operates as a single, large stream with multiple
+        substreams. Each substream (beam) is its own data product and is
+        required to be enabled/disabled independently.
 
         Parameters
         ----------
-        stream_id
-            Index of the substream's data product.
+        beam_id
+            Index of the beam's data product.
         enable
-            Boolean indicating whether the `stream_id` should be enabled or
+            Boolean indicating whether the `beam_id` should be enabled or
             disabled.
         """
-        self.tx_enabled[stream_id] = enable
-        self.tx_enabled_version += 1
+        self.send_enabled[beam_id] = enable
+        self.send_enabled_version += 1
 
     async def get_free_chunk(self) -> Chunk:
         """Obtain a :class:`.Chunk` for transmission.

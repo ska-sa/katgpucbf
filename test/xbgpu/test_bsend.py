@@ -37,7 +37,7 @@ from . import test_parameters
 
 BATCHES_PER_CHUNK: Final[int] = 5
 N_CHUNKS: Final[int] = 2
-TX_HEAPS_PER_SUBSTREAM: Final[int] = N_CHUNKS * BATCHES_PER_CHUNK
+SEND_HEAPS_PER_SUBSTREAM: Final[int] = N_CHUNKS * BATCHES_PER_CHUNK
 
 
 @pytest.fixture
@@ -166,7 +166,7 @@ class TestBSend:
             transmitted data.
         """
         # Reshape as we verify *heaps* per substream, not chunks
-        data = data.reshape((TX_HEAPS_PER_SUBSTREAM,) + data.shape[2:])
+        data = data.reshape((SEND_HEAPS_PER_SUBSTREAM,) + data.shape[2:])
 
         out_config = spead2.recv.StreamConfig()
         out_tp = spead2.ThreadPool()
@@ -183,7 +183,7 @@ class TestBSend:
             assert items == {}, "This heap contains item values not just the expected descriptors."
 
             # Check the data heaps
-            for j in range(TX_HEAPS_PER_SUBSTREAM):
+            for j in range(SEND_HEAPS_PER_SUBSTREAM):
                 if j % BATCHES_PER_CHUNK == 0:
                     # See `_send_data` for logic dictating antenna presence
                     continue
@@ -262,7 +262,7 @@ class TestBSend:
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
                 spead2.ThreadPool(1), queues, stream_config
             ),
-            tx_enabled=True,
+            send_enabled=True,
         )
         data = await self._send_data(
             outputs,

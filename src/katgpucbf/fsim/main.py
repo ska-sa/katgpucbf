@@ -90,7 +90,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
     parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
     parser.add_argument(
-        "--dst-packet-payload",
+        "--send-packet-payload",
         type=int,
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         metavar="BYTES",
@@ -207,13 +207,13 @@ def make_stream(args: argparse.Namespace, idx: int, data: np.ndarray) -> "spead2
     data
         All payload data for this destination
     """
-    overhead = 1 + PREAMBLE_SIZE / args.dst_packet_payload
+    overhead = 1 + PREAMBLE_SIZE / args.send_packet_payload
     # Data rate for the entire array, excluding packet overhead
     full_rate = args.adc_sample_rate * N_POLS * DTYPE.itemsize * args.array_size
     rate = full_rate * args.channels_per_substream / args.channels * overhead
     print(f"Rate for {args.dest[idx]}: {rate * 8e-9:.3f} Gbps")
     config = spead2.send.StreamConfig(
-        max_packet_size=args.dst_packet_payload + PREAMBLE_SIZE,
+        max_packet_size=args.send_packet_payload + PREAMBLE_SIZE,
         rate=rate,
         max_heaps=QUEUE_DEPTH * args.array_size + 1,  # + 1 for descriptor heaps
     )

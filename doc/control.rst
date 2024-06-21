@@ -10,15 +10,15 @@ katgpucbf and its constituent engines:
 The first requires a mechanism to orchestrate the simultaneous spin-up of a
 correlator's required components - that is, some combination of dsim(s),
 F-Engine(s) and XB-Engine(s). For this purpose, katgpucbf utilises the
-infrastructure provided by `katsdpcontroller`_ - discussed in the following
+infrastructure provided by `katsdpcontroller`_ — discussed in the following
 section.
 
 Regarding the testing and debugging of individual engines, more detailed
-explanations of their inner-workings are discussed in their respective, more
-dedicated-discussion documents.
+explanations of their inner workings are discussed in their respective, more
+dedicated discussion documents.
 
 The main thing to note is that, in both methods of invocation (via
-orchestration and individually), the engines support control via katcp commands
+orchestration and individually), the engines support control via katcp requests
 issued to their ``<host>:<port>``. ``netcat`` (`nc`_) is likely the most
 readily-available tool for this job, but `ntsh`_ neatens up these exchanges
 and generally makes it easier to interact with.
@@ -92,11 +92,8 @@ options for you to start your correlator; running ``./sim_correlator.py --help``
 gives a brief explanation of the arguments required. Below is an example of a
 full command to run a 4k, 4-antenna, L-band correlator::
 
-    ./sim_correlator -a 4 -c 4096 -i 0.5
-    --adc-sample-rate 1712e6
-    --name my_test_correlator
-    --image-override katgpucbf:harbor.sdp.kat.ac.za/dpp/katgpucbf:latest
-    lab5.sdp.kat.ac.za
+    scratch/sim_correlator.py -a 4 -c 4096 -i 0.5 --band l \
+        --name my_test_correlator lab5.sdp.kat.ac.za
 
 The execution of this command contacts the master controller to request a new
 correlator product to be configured. The master controller figures out how many
@@ -123,8 +120,7 @@ requires an appropriately-configured ``fsim``. Basically, the engines will do
 nothing until explicitly asked to.
 
 .. todo:: ``NGC-730``
-  Update scratch directory to have a single config sub-directory. Also add
-  comments on the scripts themselves to make it easier to follow.
+  Add comments on the scripts themselves to make them easier to follow.
 
 .. note::
     Before considering which engine you intend on testing, note the number of GPUs
@@ -152,11 +148,11 @@ instance on ``host2``::
     .
     [Connect to host2 and activate the local virtual environment]
     (katgpucbf) user@host2:~/katgpucbf$ spead2_net_raw numactl -C 1 xbgpu \
-                                        --src-affinity 0 --src-comp-vector 0 \
-                                        --dst-affinity 1 --dst-comp-vector 1 \
-                                        --src-interface <interface name> \
-                                        --dst-interface <interface name> \
-                                        --src-ibv --dst-ibv \
+                                        --recv-affinity 0 --recv-comp-vector 0 \
+                                        --send-affinity 1 --send-comp-vector 1 \
+                                        --recv-interface <interface name> \
+                                        --send-interface <interface name> \
+                                        --recv-ibv --send-ibv \
                                         --adc-sample-rate 1712e6 --array-size 4 \
                                         --channels 4096 \
                                         --channels-per-substream 1024 \
@@ -204,7 +200,7 @@ data on a machine that doesn't support ibverbs, you could use
 Controlling the correlator
 --------------------------
 The correlator components are controlled using `katcp`_. A user can connect to
-the ``<host>:<port>`` and issue a ``?help`` to see the full range of commands
+the ``<host>:<port>`` and issue a ``?help`` to see the full range of requests
 available. The ``<host>`` and ``<port>`` values for individual engines are
 configurable at runtime, whereas the ``<host>`` and ``<port>`` values for the
 correlator's *product controller* are yielded by the master controller after
@@ -224,7 +220,7 @@ dsim
     period if none is specified.
 
     The dither that is applied is cached on startup, but is independent for
-    the different streams. Repeating the same command thus gives the same
+    the different streams. Repeating the same request thus gives the same
     results, provided any randomised terms (such as ``wgn``) use fixed
     seeds.
 
@@ -242,33 +238,37 @@ fgpu
 ^^^^
 :samp:`?gain {stream} {input} [{values}...]`
     Set the complex gains. This has the same semantics as the equivalent
-    katsdpcontroller command, but :samp:`{input}` must be 0 or 1 to select
+    katsdpcontroller request, but :samp:`{input}` must be 0 or 1 to select
     the input polarisation.
 
 :samp:`?gain-all {stream} {values}...`
     Set the complex gains for both inputs. This has the same semantics as the
-    equivalent katsdpcontroller command.
+    equivalent katsdpcontroller request.
 
 :samp:`?delays {stream} {start-time} {values}...`
     Set the delay polynomials. This has the same semantics as the equivalent
-    katsdpcontroller command, but takes exactly two delay model
+    katsdpcontroller request, but takes exactly two delay model
     specifications (for the two polarisations).
 
 xbgpu
 ^^^^^
-``?capture-start``, ``?capture-stop``
+:samp:`?capture-start {stream}`, :samp:`?capture-stop {stream}`
     Enable or disable transmission of output data. This does not affect
     transmission of descriptors, which cannot be disabled. In the initial
-    state transmission is disabled, unless the :option:`!--tx-enabled`
+    state transmission is disabled, unless the :option:`!--send-enabled`
     command-line option has been passed.
+
+:samp:`?beam-weights {stream} {weights}...`, :samp:`?beam-delays {stream} {delays}...`, :samp:`?beam-quant-gains {stream} {gain}`
+    These have the same semantics as the equivalent katsdpcontroller
+    requests.
 
 Shutting down the correlator
 ----------------------------
 
 End-to-end correlator shutdown
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-A user can issue a ``?product-deconfigure`` command to the correlator's
-product controller by connecting to its ``<host>:<port>``. This command
+A user can issue a ``?product-deconfigure`` request to the correlator's
+product controller by connecting to its ``<host>:<port>``. This request
 triggers the stop procedure of all engines and dsims running in the target
 correlator. More specifically:
 
@@ -295,7 +295,4 @@ confusion, there are two options for engine shutdown:
 #. connect to the engine's ``<host>:<port>`` and issue a ``?halt``.
 
 After either of these approaches are executed, the engine will shutdown cleanly
-and quietly according to their common :ref:`engines-shutdown-procedure`. As the
-:ref:`feng-packet-sim` is a simple CLI utility, the :program:`fsim` just
-requires a ``Ctrl + C`` to end operations - no ``katcp`` commands supported
-here.
+and quietly according to their common :ref:`engines-shutdown-procedure`.

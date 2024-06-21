@@ -16,6 +16,8 @@
 
 """Weights test."""
 
+import asyncio
+
 import numpy as np
 import pytest
 from pytest_check import check
@@ -34,41 +36,44 @@ async def test_weight_mapping(
 
     Verification method
     -------------------
-    Verification by means of test. Configure the dsim with a tone in a random
-    channel for each polarisation. For each input:
+    Verification by means of test. Configure the dsim with Gaussian noise.
+    For each input, set eq gains that zero all but a single channel, using
+    a different channel for each input. Then, for each input:
 
-    - Set the ``?gain`` to 1 for that input and to zero for all other inputs.
     - Set one beam to use only that input, and all other beams to sum the remaining
       inputs.
-    - Check that the tone is found in the correct channel of the chosen beam.
-    - Check that the other beams all output zero.
+    - Check that signal is found in the correct channel of the chosen beam.
+    - Check that the other beams all output zero for that channel.
     """
     receiver = receive_tied_array_channelised_voltage
     client = cbf.product_controller_client
 
+    assert receiver.n_inputs < receiver.n_chans, "Test assumes a unique channel per input"
     rng = np.random.default_rng()
-    channels = rng.integers(1, receiver.n_chans, size=2)
-    freqs = receiver.channel_frequency(channels)
-    amplitude = 0.5  # Will probably saturate the PFB, but we don't care
-    signals = f"cw({amplitude}, {freqs[0]}); cw({amplitude}, {freqs[1]});"
+    # Pick a random channel for each input
+    channels = rng.choice(receiver.n_chans, receiver.n_inputs, replace=False)
+    signals = "common=wgn(0.2); common; common;"
 
-    pdf_report.step("Configure dsim with tones.")
+    pdf_report.step("Configure dsim with Gaussian noise.")
     await cbf.dsim_clients[0].request("signals", signals)
     pdf_report.detail(f"Set dsim signals to {signals!r}.")
 
-    rng = np.random.default_rng()
-    for input_idx in range(receiver.n_inputs):
-        input_label = receiver.input_labels[input_idx]
-        channel = channels[input_idx % 2]
-        pdf_report.step(f"Testing input {input_idx} ({input_label}).")
-        await client.request("gain-all", "antenna-channelised-voltage", 0.0)
-        await client.request("gain", "antenna-channelised-voltage", input_label, 1.0)
-        pdf_report.detail(f"Set gain on {input_label} to 1.0, all others to 0.0.")
+    tasks = []
+    pdf_report.step("Set eq gains to select one channel per input.")
+    for input_label, channel in zip(receiver.input_labels, channels):
+        gains = [0.0] * receiver.n_chans
+        gains[channel] = 1.0
+        tasks.append(asyncio.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *gains)))
+        pdf_report.detail(f"Set input {input_label} to pass through only channel {channel}.")
+    await asyncio.gather(*tasks)
+
+    pdf_report.step("Test all inputs.")
+    for input_idx, (input_label, channel) in enumerate(zip(receiver.input_labels, channels)):
         candidate_beams = [i for i, source_indices in enumerate(receiver.source_indices) if input_idx in source_indices]
         assert candidate_beams, "No beam includes this input"
         test_beam = rng.choice(candidate_beams)
         test_beam_name = receiver.stream_names[test_beam]
-        pdf_report.detail(f"Using beam {test_beam_name} as the test beam.")
+        pdf_report.detail(f"Test input {input_idx} ({input_label}) with channel {channel} and beam {test_beam_name}.")
 
         source_indices = receiver.source_indices[test_beam]
         input_pos = source_indices.index(input_idx)
@@ -84,15 +89,12 @@ async def test_weight_mapping(
 
         timestamp, data = await receiver.next_complete_chunk()
         pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
-        data = data.astype(np.float32).view(np.complex64)[..., 0]  # Convert to complex64
         with check:
-            # Should be much larger than 20.0, but this is enough to reject
-            # noise and spectral leakage.
-            assert np.all(np.abs(data[test_beam, channel]) > 20.0)
-            pdf_report.detail(f"Tone found in channel {channel}.")
+            assert np.sum(np.abs(data[test_beam, channel])) > 0
+            pdf_report.detail(f"Signal found in channel {channel} of the test beam.")
         # Zero out the tone so that we can check that everything else is empty.
         data[test_beam, channel] = 0
 
         with check:
-            assert np.all(np.abs(data[test_beam, channel]) < 2.0)
-            pdf_report.detail("All other data is close to zero.")
+            assert np.all(data[test_beam, channel] == 0)
+            pdf_report.detail("All other beams have no signal in the channel.")
