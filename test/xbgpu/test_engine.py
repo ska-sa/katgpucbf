@@ -334,7 +334,6 @@ def verify_corrprod_data(
 def verify_corrprod_sensors(
     *,
     xpipelines: list[XPipeline],
-    acc_indices: list[list[int]],
     prom_diff: PromDiff,
     actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
     n_channels_per_substream: int,
@@ -347,25 +346,23 @@ def verify_corrprod_sensors(
     ----------
     xpipelines
         List of :class:`XPipeline` that are part of the unit test.
-    acc_indices
-        List of accumulation indices received, per pipeline.
     prom_diff
         Collection of Prometheus metrics observed during the XBEngine's
+        processing of data stimulus.
     actual_sensor_updates
         Dictionary of lists of sensor updates. They dictionary keys are sensor
         names, the values are a list of tuples for each sensor update captured
         via the callback attached to :class:`XPipeline` sensors. Accommodating
         for three value types as there are three different types of sensors in
         the XBEngine.
-        processing of data stimulus.
     n_channels_per_substream
         Unit test fixture.
     n_baselines
         Number of baselines for the array size in the unit test.
     present
-        Array of shape (n_batches, n_ants) indicating which heaps were present.
+        Array of shape (n_batches, n_ants) indicating which input heaps were present.
     """
-    for xpipeline, pipeline_acc_indices in zip(xpipelines, acc_indices):
+    for xpipeline in xpipelines:
         # The assert statements are mainly to force mypy to realise the
         # prom_diff values obtained are the expected data type
         def prom_get(name: str) -> float:
@@ -373,46 +370,48 @@ def verify_corrprod_sensors(
             assert diff is not None, f"{name} is None"
             return diff
 
-        n_accumulations_completed = len(pipeline_acc_indices)
         # Count accumulations for which we expect to receive the accumulation
-        # but have incomplete data.
+        # but have incomplete data. Also calculate expected updates to
+        # rx.synchronised.
+        heap_accumulation_threshold = xpipeline.output.heap_accumulation_threshold
+        # Note: this truncates any partial final accumulation, because it will
+        # not get flushed.
+        n_accs = len(present) // heap_accumulation_threshold
+        expected_sensor_updates = []
+        complete_accs = 0
         incomplete_accs = 0
-        for acc_index in pipeline_acc_indices:
-            batch_start = acc_index * xpipeline.output.heap_accumulation_threshold
-            batch_end = (acc_index + 1) * xpipeline.output.heap_accumulation_threshold
-            if not np.all(present[batch_start:batch_end]):
-                incomplete_accs += 1
+        skipped_accs = 0
+        for acc_index in range(n_accs):
+            batch_start = acc_index * heap_accumulation_threshold
+            batch_end = (acc_index + 1) * heap_accumulation_threshold
+            acc_present = present[batch_start:batch_end]
+            if np.any(acc_present):
+                if acc_present.all():
+                    expected_sensor_updates.append((True, aiokatcp.Sensor.Status.NOMINAL))
+                    complete_accs += 1
+                elif acc_present.all(axis=0).any():
+                    # At least one antenna was present for the entire accumulation
+                    expected_sensor_updates.append((False, aiokatcp.Sensor.Status.ERROR))
+                    incomplete_accs += 1
+                else:
+                    # Some data arrived, but no antenna had complete data. It
+                    # will not be sent.
+                    expected_sensor_updates.append((False, aiokatcp.Sensor.Status.ERROR))
+                    skipped_accs += 1
+        sent_accs = complete_accs + incomplete_accs
+
         assert prom_get("output_x_incomplete_accs_total") == incomplete_accs
-        assert prom_get("output_x_heaps_total") == n_accumulations_completed
+        assert prom_get("output_x_skipped_accs_total") == skipped_accs
+        assert prom_get("output_x_heaps_total") == sent_accs
         assert prom_get("output_x_bytes_total") == (
-            n_channels_per_substream * n_baselines * COMPLEX * xsend.SEND_DTYPE.itemsize * n_accumulations_completed
+            n_channels_per_substream * n_baselines * COMPLEX * xsend.SEND_DTYPE.itemsize * sent_accs
         )
-        assert prom_get("output_x_visibilities_total") == (
-            n_channels_per_substream * n_baselines * n_accumulations_completed
-        )
+        assert prom_get("output_x_visibilities_total") == (n_channels_per_substream * n_baselines * sent_accs)
         assert prom_get("output_x_clipped_visibilities_total") == 0
 
         # Verify sensor updates while we're here
         xsync_sensor_name = f"{xpipeline.output.name}.rx.synchronised"
-        # As per the explanation in :func:`~send_data`, the first accumulation
-        # is expected to be incomplete. We also accommodate any other
-        # incomplete accumulations due to the method of sending data.
-        # The assert statement is to force mypy to realise the prom_diff value
-        # obtained can be cast to int.
-        prom_output_skipped_accs_total = prom_get("output_x_skipped_accs_total")
-        expected_error_updates = int(prom_output_skipped_accs_total) + incomplete_accs
-        expected_nominal_updates = n_accumulations_completed - incomplete_accs
-
-        # TODO: NGC-1308 Update this to check the order of sensor updates, not just the count
-        assert (
-            actual_sensor_updates[xsync_sensor_name].count((False, aiokatcp.Sensor.Status.ERROR))
-            == expected_error_updates
-        )
-        assert (
-            actual_sensor_updates[xsync_sensor_name].count((True, aiokatcp.Sensor.Status.NOMINAL))
-            == expected_nominal_updates
-        )
-        assert len(actual_sensor_updates[xsync_sensor_name]) == expected_error_updates + expected_nominal_updates
+        assert actual_sensor_updates[xsync_sensor_name] == expected_sensor_updates
 
 
 def verify_beam_sensors(
@@ -1042,7 +1041,6 @@ class TestEngine:
         xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
         verify_corrprod_sensors(
             xpipelines=xpipelines,
-            acc_indices=acc_indices,
             prom_diff=prom_diff,
             actual_sensor_updates=actual_sensor_updates,
             n_channels_per_substream=n_channels_per_substream,

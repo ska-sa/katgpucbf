@@ -783,16 +783,14 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             """Apply correlation kernel to all pending batches."""
             first_batch = self.correlation.first_batch
             last_batch = self.correlation.last_batch
-            if first_batch < last_batch:
+            assert in_item is not None
+            present = in_item.present[first_batch:last_batch, :]
+            if first_batch < last_batch and present.any():
                 self.correlation()
                 # Update the present ants tracker one last time
-                assert in_item is not None
-                out_item.present_ants[:] &= in_item.present[first_batch:last_batch, :].all(axis=0)
-                # TODO: NGC-1308 Update the usage of out_item.batches to check
-                # against in_item.present, i.e. whether it's actually received
-                # any data for this batch.
+                out_item.present_ants[:] &= present.all(axis=0)
                 out_item.batches += last_batch - first_batch
-                self.correlation.first_batch = last_batch
+            self.correlation.first_batch = last_batch
 
         out_item = await self._out_free_queue.get()
         await out_item.async_wait_for_events()
@@ -921,8 +919,6 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
 
                 if not np.all(item.present_ants):
                     incomplete_accum_counter.labels(self.output.name).inc(1)
-                    if not np.any(item.present_ants):
-                        logger.warning("All Antennas had a break in data during this accumulation")
 
                 heap.timestamp = item.timestamp
                 if self.send_stream.send_enabled:
