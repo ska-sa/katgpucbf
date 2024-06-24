@@ -18,7 +18,8 @@
 
 from collections import Counter
 from logging import WARNING
-from typing import Any, AsyncGenerator, Callable, Final
+from typing import AsyncGenerator, Callable, Final
+from unittest import mock
 
 import aiokatcp
 import async_timeout
@@ -34,6 +35,7 @@ from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
+from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend, xsend
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.engine import BPipeline, InQueueItem, XBEngine, XPipeline
@@ -49,6 +51,8 @@ pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 get_baseline_index = njit(Correlation.get_baseline_index)
 
 ADC_SAMPLE_RATE: Final[float] = 1712e6  # L-band
+SYNC_TIME: Final[float] = 1234567890
+TIME_CONVERTER = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
@@ -335,9 +339,10 @@ def verify_corrprod_sensors(
     *,
     xpipelines: list[XPipeline],
     prom_diff: PromDiff,
-    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
+    actual_sensor_updates: dict[str, list[aiokatcp.Reading]],
     n_channels_per_substream: int,
     n_baselines: int,
+    timestamp_step: int,
     present: np.ndarray,
 ) -> None:
     """Verify katcp and Prometheus sensors for processed XPipeline data.
@@ -351,14 +356,14 @@ def verify_corrprod_sensors(
         processing of data stimulus.
     actual_sensor_updates
         Dictionary of lists of sensor updates. They dictionary keys are sensor
-        names, the values are a list of tuples for each sensor update captured
-        via the callback attached to :class:`XPipeline` sensors. Accommodating
-        for three value types as there are three different types of sensors in
-        the XBEngine.
+        names, the values are a list of readings for each sensor update captured
+        via the callback attached to :class:`XPipeline` sensors.
     n_channels_per_substream
         Unit test fixture.
     n_baselines
         Number of baselines for the array size in the unit test.
+    timestamp_step
+        Timestamp step between each received heap processed.
     present
         Array of shape (n_batches, n_ants) indicating which input heaps were present.
     """
@@ -386,17 +391,24 @@ def verify_corrprod_sensors(
             batch_end = (acc_index + 1) * heap_accumulation_threshold
             acc_present = present[batch_start:batch_end]
             if np.any(acc_present):
+                sensor_timestamp = TIME_CONVERTER.adc_to_unix(batch_end * timestamp_step)
                 if acc_present.all():
-                    expected_sensor_updates.append((True, aiokatcp.Sensor.Status.NOMINAL))
+                    expected_sensor_updates.append(
+                        aiokatcp.Reading(sensor_timestamp, aiokatcp.Sensor.Status.NOMINAL, True)
+                    )
                     complete_accs += 1
                 elif acc_present.all(axis=0).any():
                     # At least one antenna was present for the entire accumulation
-                    expected_sensor_updates.append((False, aiokatcp.Sensor.Status.ERROR))
+                    expected_sensor_updates.append(
+                        aiokatcp.Reading(sensor_timestamp, aiokatcp.Sensor.Status.ERROR, False)
+                    )
                     incomplete_accs += 1
                 else:
                     # Some data arrived, but no antenna had complete data. It
                     # will not be sent.
-                    expected_sensor_updates.append((False, aiokatcp.Sensor.Status.ERROR))
+                    expected_sensor_updates.append(
+                        aiokatcp.Reading(sensor_timestamp, aiokatcp.Sensor.Status.ERROR, False)
+                    )
                     skipped_accs += 1
         sent_accs = complete_accs + incomplete_accs
 
@@ -420,7 +432,7 @@ def verify_beam_sensors(
     beam_results_shape: tuple[int, ...],
     beam_dtype: np.dtype,
     prom_diff: PromDiff,
-    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
+    actual_sensor_updates: dict[str, list[aiokatcp.Reading]],
     first_timestamp: int,
     last_timestamp: int,
     weights: np.ndarray,
@@ -447,10 +459,8 @@ def verify_beam_sensors(
         processing of data stimulus.
     actual_sensor_updates
         Dictionary of lists of sensor updates. They dictionary keys are sensor
-        names, the values are a list of tuples for each sensor update captured
-        via the callback attached to :class:`BPipeline` sensors. Accommodating
-        for three value types as there are three different types of sensors in
-        the XBEngine.
+        names, the values are a list of readings for each sensor update captured
+        via the callback attached to :class:`BPipeline` sensors.
     first_timestamp, last_timestamp
         Two timestamps indicating the start and end of data processing
         by the :class:`BPipeline`.
@@ -483,9 +493,10 @@ def verify_beam_sensors(
         assert saturated_low[i] <= prom_get("output_b_clipped_samples_total") <= saturated_high[i]
 
         # Check that sensor value matches Prometheus
-        assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == (
-            prom_get("output_b_clipped_samples_total"),
+        assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == aiokatcp.Reading(
+            mock.ANY,
             aiokatcp.Sensor.Status.NOMINAL,
+            prom_get("output_b_clipped_samples_total"),
         )
 
         assert first_timestamp < last_timestamp, (
@@ -493,10 +504,10 @@ def verify_beam_sensors(
             f"has been processed: {first_timestamp} >= {last_timestamp}"
         )
         assert actual_sensor_updates[f"{beam_output.name}.weight"] == [
-            (str(list(weights[i])), aiokatcp.Sensor.Status.NOMINAL)
+            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, str(list(weights[i])))
         ]
         assert actual_sensor_updates[f"{beam_output.name}.quantiser-gain"] == [
-            (quant_gains[i], aiokatcp.Sensor.Status.NOMINAL)
+            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, quant_gains[i])
         ]
 
         delay_updates_str = ", ".join(f"{delay}, {phase}" for delay, phase in delays[i])
@@ -504,7 +515,7 @@ def verify_beam_sensors(
         # receiving/processing data, so the `loadmcnt` is zero (it is
         # applied immediately).
         assert actual_sensor_updates[f"{beam_output.name}.delay"] == [
-            (f"({first_timestamp}, {delay_updates_str})", aiokatcp.Sensor.Status.NOMINAL)
+            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, f"({first_timestamp}, {delay_updates_str})")
         ]
 
 
@@ -828,7 +839,7 @@ class TestEngine:
             f"--channel-offset-value={frequency}",
             f"--jones-per-batch={n_jones_per_batch}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
-            "--sync-time=1234567890",
+            f"--sync-time={SYNC_TIME}",
             "--recv-interface=lo",
             "--send-interface=lo",
             "--send-enabled",
@@ -939,7 +950,7 @@ class TestEngine:
         # Need a method of capturing synchronised aiokatcp.Sensor updates as
         # they happen in the XBEngine
         dynamic_bsensor_names = ["delay", "quantiser-gain", "weight", "beng-clip-cnt"]
-        actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]] = {
+        actual_sensor_updates: dict[str, list[aiokatcp.Reading]] = {
             f"{beam_output.name}.{dynamic_bsensor_name}": list()
             for beam_output in beam_outputs
             for dynamic_bsensor_name in dynamic_bsensor_names
@@ -950,7 +961,7 @@ class TestEngine:
 
         def sensor_observer(sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading):
             """Record sensor updates in a list for later comparison."""
-            actual_sensor_updates[sensor.name].append((sensor_reading.value, sensor_reading.status))
+            actual_sensor_updates[sensor.name].append(sensor_reading)
 
         for sensor_name in actual_sensor_updates.keys():
             xbengine.sensors[sensor_name].attach(sensor_observer)
@@ -1045,6 +1056,7 @@ class TestEngine:
             actual_sensor_updates=actual_sensor_updates,
             n_channels_per_substream=n_channels_per_substream,
             n_baselines=n_baselines,
+            timestamp_step=timestamp_step,
             present=present,
         )
 
