@@ -251,7 +251,7 @@ partd==1.4.1
     #   dask
 pillow==10.3.0
     # via matplotlib
-pluggy==1.5.0
+pluggy==1.3.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   pytest
@@ -286,7 +286,7 @@ pyparsing==3.0.9
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
     #   matplotlib
-pytest==8.2.2
+pytest==8.0.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   -r qualification/requirements.in
