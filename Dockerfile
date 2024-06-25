@@ -20,7 +20,7 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:12.0.1-base-ubuntu22.04 as base
+FROM nvidia/cuda:12.0.1-base-ubuntu22.04 AS base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
@@ -41,9 +41,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcufft-12-0 \
     libvulkan1 \
     libegl1 \
-    libxext6
+    libxext6 \
+    software-properties-common
+RUN apt-add-repository ppa:deadsnakes/ppa
 
-FROM base as build-base
+FROM base AS build-base
 
 # Install system packages:
 # - git is needed for setuptools_scm
@@ -52,11 +54,9 @@ FROM base as build-base
 # DEBIAN_FRONTEND=noninteractive prevents apt-get from asking configuration
 # questions.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    python3-dev \
-    python3-venv \
-    python-is-python3 \
+    python3.12 \
+    python3.12-dev \
+    python3.12-venv \
     git \
     pkg-config \
     ninja-build \
@@ -71,12 +71,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     wget
 
 # Create a virtual environment
-RUN python -m venv /venv
+RUN python3.12 -m venv /venv
 # Activate it
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==22.3.1 setuptools==65.6.3 wheel==0.38.4
+RUN pip install pip==24.1 setuptools==70.1.0 wheel==0.43.0
 
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
@@ -89,7 +89,7 @@ RUN pip install --no-deps -c /tmp/katgpucbf/requirements.txt pycuda && \
 #######################################################################
 
 # Image used by Jenkins
-FROM build-base as jenkins
+FROM build-base AS jenkins
 
 # docker so that Jenkins can build a Docker image
 # All the TeX and font stuff for building the docs and qualification report
@@ -112,7 +112,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
 # for requirements.txt), and is used to form the image for Jenkins
 # testing. We now install the requirements in a new build stage.
 
-FROM build-base as build-py-requirements
+FROM build-base AS build-py-requirements
 
 # Install requirements (already copied to build-base image).
 WORKDIR /tmp/katgpucbf
@@ -120,7 +120,7 @@ RUN pip install -r requirements.txt
 
 #######################################################################
 
-FROM build-base as build-py
+FROM build-base AS build-py
 
 # Build the package. Note that this happens independently of the
 # build-py-requirements image.
@@ -133,7 +133,7 @@ RUN pip install --no-deps --root=/install-root .
 # Separate stage to build C tools. This is in a separate build stage
 # so that changes to the package don't invalidate the build cache for this.
 
-FROM build-base as build-c
+FROM build-base AS build-c
 
 WORKDIR /tmp/tools
 RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker-base-runtime/schedrr.c && \
@@ -144,16 +144,14 @@ RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker
 # The above builds everything. Now install it into a lighter-weight runtime
 # image, without all the stuff needed for the build itself.
 FROM base
-LABEL maintainer="MeerKAT CBF team <cbf@ska.ac.za>"
+LABEL maintainer="MeerKAT CBF team <cbf@sarao.ac.za>"
 
 # curl is needed for running under katsdpcontroller
 # numactl allows CPU and memory affinity to be controlled.
 # netbase provides /etc/protocols, which libpcap depends on in some cases.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python-is-python3 \
+    python3.12 \
+    python3.12-venv \
     curl \
     numactl \
     libibverbs1 \
