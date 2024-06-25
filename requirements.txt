@@ -161,7 +161,6 @@ typing-extensions==4.12.0
     #   aiokatcp
     #   aiomonitor
     #   janus
-    #   katgpucbf (setup.cfg)
     #   katsdpsigproc
 tzdata==2023.3
     # via pandas
