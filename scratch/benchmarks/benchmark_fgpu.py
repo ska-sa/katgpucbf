@@ -37,7 +37,6 @@ from scipy.special import expit
 
 from noisy_search import noisy_search
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
-from sighandler import add_sigint_handler
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
 N_POLS = 2
@@ -418,7 +417,6 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
 
 
 async def main():  # noqa: D103
-    add_sigint_handler()
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")
     parser.add_argument("--channels", type=int, default=1024, help="Wideband channel count [%(default)s]")
