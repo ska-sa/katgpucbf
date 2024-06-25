@@ -19,7 +19,7 @@
 import asyncio
 import functools
 from collections.abc import Callable, Sequence
-from typing import TypedDict, Unpack
+from typing import Required, TypedDict, Unpack
 
 import numpy as np
 import spead2.send
@@ -54,7 +54,7 @@ output_clip_counter = Counter(
 class _FengRawKwargs(TypedDict, total=False):
     """Helper class for type annotations."""
 
-    shape: tuple[int, ...]
+    shape: Required[tuple[int, ...]]
     dtype: np.dtype
     format: list[tuple[str, int]]
 
