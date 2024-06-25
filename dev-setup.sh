@@ -19,7 +19,7 @@
 set -e # So we can stop on a failure instead of bumbling along.
 
 echo "Creating a virtual env for katgpucbf development"
-python3.10 -m venv .venv --prompt katgpucbf
+python3.12 -m venv .venv --prompt katgpucbf
 echo "Activating the virtual env"
 source .venv/bin/activate
 
