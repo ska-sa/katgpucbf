@@ -344,7 +344,7 @@ def verify_corrprod_sensors(
     n_baselines: int,
     timestamp_step: int,
     present: np.ndarray,
-) -> None:
+) -> int:
     """Verify katcp and Prometheus sensors for processed XPipeline data.
 
     Parameters
@@ -366,7 +366,12 @@ def verify_corrprod_sensors(
         Timestamp step between each received heap processed.
     present
         Array of shape (n_batches, n_ants) indicating which input heaps were present.
+
+    Returns
+    -------
+    Total number of skipped accumulations
     """
+    skipped_accs_total = 0
     for xpipeline in xpipelines:
         # The assert statements are mainly to force mypy to realise the
         # prom_diff values obtained are the expected data type
@@ -420,10 +425,13 @@ def verify_corrprod_sensors(
         )
         assert prom_get("output_x_visibilities_total") == (n_channels_per_substream * n_baselines * sent_accs)
         assert prom_get("output_x_clipped_visibilities_total") == 0
+        skipped_accs_total += skipped_accs
 
         # Verify sensor updates while we're here
         xsync_sensor_name = f"{xpipeline.output.name}.rx.synchronised"
         assert actual_sensor_updates[xsync_sensor_name] == expected_sensor_updates
+
+    return skipped_accs_total
 
 
 def verify_beam_sensors(
@@ -1030,16 +1038,6 @@ class TestEngine:
             )
             last_timestamp = present.shape[0] * timestamp_step
 
-        # TODO: NGC-1308 Update this check to be an exact match on the number
-        # of logged messages.
-        assert caplog.record_tuples.count(
-            (
-                "katgpucbf.xbgpu.engine",
-                WARNING,
-                "All Antennas had a break in data during this accumulation",
-            )
-        ) >= len(corrprod_outputs)
-
         verify_corrprod_data(
             corrprod_outputs=corrprod_outputs,
             corrprod_results=corrprod_results,
@@ -1050,7 +1048,7 @@ class TestEngine:
         )
 
         xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
-        verify_corrprod_sensors(
+        skipped_accs_total = verify_corrprod_sensors(
             xpipelines=xpipelines,
             prom_diff=prom_diff,
             actual_sensor_updates=actual_sensor_updates,
@@ -1058,6 +1056,16 @@ class TestEngine:
             n_baselines=n_baselines,
             timestamp_step=timestamp_step,
             present=present,
+        )
+        assert (
+            caplog.record_tuples.count(
+                (
+                    "katgpucbf.xbgpu.engine",
+                    WARNING,
+                    "All Antennas had a break in data during this accumulation",
+                )
+            )
+            == skipped_accs_total
         )
 
         channel_spacing = xbengine.bandwidth / xbengine.n_channels
