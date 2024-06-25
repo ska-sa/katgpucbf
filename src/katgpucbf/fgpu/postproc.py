@@ -107,10 +107,10 @@ class PostprocTemplate:
         self,
         command_queue: AbstractCommandQueue,
         spectra: int,
-        spectra_per_batch: int,
+        spectra_per_heap: int,
     ) -> "Postproc":
         """Generate a :class:`Postproc` object based on this template."""
-        return Postproc(self, command_queue, spectra, spectra_per_batch)
+        return Postproc(self, command_queue, spectra, spectra_per_heap)
 
 
 class Postproc(accel.Operation):
@@ -122,10 +122,10 @@ class Postproc(accel.Operation):
         Input channelised data for the two polarisations. These are formed by
         taking the complex-to-complex Fourier transform of the input
         reinterpreted as a complex input. See :ref:`fgpu-fft` for details.
-    **out** : spectra // spectra_per_batch × out_channels × spectra_per_batch × N_POLS
+    **out** : spectra // spectra_per_heap × out_channels × spectra_per_heap × N_POLS
         Output F-engine data, quantised and corner-turned, ready for
         transmission on the network. See :func:`.gaussian_dtype` for the type.
-    **saturated** : spectra // spectra_per_batch × N_POLS, uint32
+    **saturated** : spectra // spectra_per_heap × N_POLS, uint32
         Number of saturated complex values in **out**.
     **fine_delay** : spectra × N_POLS, float32
         Fine delay in samples (one value per pol).
@@ -143,8 +143,8 @@ class Postproc(accel.Operation):
         actual processing operations are to be scheduled.
     spectra: int
         Number of spectra on which post-prodessing will be performed.
-    spectra_per_batch: int
-        Number of spectra to send out per batch.
+    spectra_per_heap: int
+        Number of spectra to send out per heap.
     """
 
     def __init__(
@@ -152,19 +152,19 @@ class Postproc(accel.Operation):
         template: PostprocTemplate,
         command_queue: AbstractCommandQueue,
         spectra: int,
-        spectra_per_batch: int,
+        spectra_per_heap: int,
     ) -> None:
         super().__init__(command_queue)
-        if spectra % spectra_per_batch != 0:
-            raise ValueError("spectra must be a multiple of spectra_per_batch")
+        if spectra % spectra_per_heap != 0:
+            raise ValueError("spectra must be a multiple of spectra_per_heap")
         block_y = template.block * template.vty
-        if spectra_per_batch % block_y != 0:
-            raise ValueError(f"spectra_per_batch must be a multiple of {block_y}")
+        if spectra_per_heap % block_y != 0:
+            raise ValueError(f"spectra_per_heap must be a multiple of {block_y}")
         self.template = template
         self.spectra = spectra
-        self.spectra_per_batch = spectra_per_batch
+        self.spectra_per_heap = spectra_per_heap
         pols = accel.Dimension(N_POLS, exact=True)
-        heaps = spectra // spectra_per_batch
+        heaps = spectra // spectra_per_heap
 
         in_shape = (
             accel.Dimension(N_POLS),
@@ -175,7 +175,7 @@ class Postproc(accel.Operation):
         n_out_channels = template.out_channels[1] - template.out_channels[0]
         out_dtype = utils.gaussian_dtype(template.out_bits)
         self.slots["in"] = accel.IOSlot(in_shape, np.complex64)
-        self.slots["out"] = accel.IOSlot((heaps, n_out_channels, spectra_per_batch, pols), out_dtype)
+        self.slots["out"] = accel.IOSlot((heaps, n_out_channels, spectra_per_heap, pols), out_dtype)
         self.slots["saturated"] = accel.IOSlot((heaps, pols), np.uint32)
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
@@ -185,8 +185,8 @@ class Postproc(accel.Operation):
         block_x = self.template.block * self.template.vtx
         block_y = self.template.block * self.template.vty
         groups_x = accel.divup(self.template.channels // self.template.unzip_factor // 2 + 1, block_x)
-        groups_y = self.spectra_per_batch // block_y
-        groups_z = self.spectra // self.spectra_per_batch
+        groups_y = self.spectra_per_heap // block_y
+        groups_z = self.spectra // self.spectra_per_heap
         out = self.buffer("out")
         saturated = self.buffer("saturated")
         in_ = self.buffer("in")
@@ -203,7 +203,7 @@ class Postproc(accel.Operation):
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(np.prod(in_.padded_shape[1:])),  # in_stride
-                np.int32(self.spectra_per_batch),  # spectra_per_batch
+                np.int32(self.spectra_per_heap),  # spectra_per_heap
             ],
             global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),
             local_size=(self.template.block, self.template.block, 1),

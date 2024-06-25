@@ -10,9 +10,9 @@ channels_per_substream=${channels_per_substream:-512}
 int_time=${int_time:-0.5}
 adc_sample_rate=${adc_sample_rate:-1712000000.0}
 jones_per_batch=${jones_per_batch:-1048576}
-spectra_per_batch=$((jones_per_batch / channels))
+spectra_per_heap=$((jones_per_batch / channels))
 samples_between_spectra=${samples_between_spectra:-$((channels*2))}
-heap_accumulation_threshold=$(python -c "print(round($int_time * $adc_sample_rate / $samples_between_spectra / $spectra_per_batch))")
+heap_accumulation_threshold=$(python -c "print(round($int_time * $adc_sample_rate / $samples_between_spectra / $spectra_per_heap))")
 
 index="$1"
 nproc=$(nproc)

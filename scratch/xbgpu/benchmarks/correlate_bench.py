@@ -36,7 +36,7 @@ def main():
 
     ctx = katsdpsigproc.accel.create_some_context()
     command_queue = ctx.create_command_queue()
-    template = CorrelationTemplate(ctx, args.array_size, args.channels_per_substream, args.spectra_per_batch, 8)
+    template = CorrelationTemplate(ctx, args.array_size, args.channels_per_substream, args.spectra_per_heap, 8)
     fn = template.instantiate(command_queue, args.heaps_per_fengine_per_chunk)
 
     fn.ensure_all_bound()
@@ -54,7 +54,7 @@ def main():
     voltages = (
         args.array_size
         * args.channels_per_substream
-        * args.spectra_per_batch
+        * args.spectra_per_heap
         * args.heaps_per_fengine_per_chunk
         * args.passes
     )

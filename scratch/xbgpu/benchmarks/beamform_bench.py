@@ -38,7 +38,7 @@ def main():
 
     ctx = katsdpsigproc.accel.create_some_context()
     command_queue = ctx.create_command_queue()
-    template = BeamformTemplate(ctx, [0, 1] * args.beams, n_spectra_per_batch=args.spectra_per_batch)
+    template = BeamformTemplate(ctx, [0, 1] * args.beams, n_spectra_per_batch=args.spectra_per_heap)
     fn = template.instantiate(
         command_queue,
         n_batches=args.heaps_per_fengine_per_chunk,
@@ -71,7 +71,7 @@ def main():
     voltages = (
         args.array_size
         * args.channels_per_substream
-        * args.spectra_per_batch
+        * args.spectra_per_heap
         * args.heaps_per_fengine_per_chunk
         * args.passes
     )

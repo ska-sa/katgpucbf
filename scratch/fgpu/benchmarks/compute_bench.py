@@ -75,14 +75,14 @@ def main():  # noqa: C901
             context, args.taps, args.channels, args.dig_sample_bits, args.send_sample_bits, narrowband=narrowband_config
         )
         command_queue = context.create_tuning_command_queue()
-        out_spectra = accel.roundup(args.send_chunk_jones // args.channels, args.spectra_per_batch)
+        out_spectra = accel.roundup(args.send_chunk_jones // args.channels, args.spectra_per_heap)
         frontend_spectra = min(args.recv_chunk_samples // spectra_samples, out_spectra)
         extra_samples = window - spectra_samples
         fn = template.instantiate(
             command_queue,
             samples=args.recv_chunk_samples + extra_samples,
             spectra=out_spectra,
-            spectra_per_batch=args.spectra_per_batch,
+            spectra_per_heap=args.spectra_per_heap,
         )
         fn.ensure_all_bound()
 

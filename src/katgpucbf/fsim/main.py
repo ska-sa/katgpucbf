@@ -155,7 +155,7 @@ def make_heap_payload(
     Parameters
     ----------
     out
-        Output array, with shape (n_channels_per_substream, n_spectra_per_batch, N_POLS, COMPLEX)
+        Output array, with shape (n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX)
     heap_index
         Heap index on time axis
     feng_id
@@ -164,11 +164,11 @@ def make_heap_payload(
         Number of antennas in the array
     """
     n_channels_per_substream = out.shape[0]
-    n_spectra_per_batch = out.shape[1]
-    initial_offset = heap_index * n_spectra_per_batch
+    n_spectra_per_heap = out.shape[1]
+    initial_offset = heap_index * n_spectra_per_heap
     sample_angle = 2.0 * np.pi / (n_ants * N_POLS) * (feng_id * N_POLS + np.arange(2))
     for c in range(n_channels_per_substream):
-        for t in range(n_spectra_per_batch):
+        for t in range(n_spectra_per_heap):
             sample_amplitude = (initial_offset + c * 10 + t) % 127
             for p in range(N_POLS):
                 out[c][t][p][0] = sample_amplitude * np.cos(sample_angle[p])
@@ -237,19 +237,19 @@ class Sender:
     """Manage sending data to a single XB-engine."""
 
     def __init__(self, args: argparse.Namespace, idx: int) -> None:
-        n_spectra_per_batch = args.jones_per_batch // args.channels
+        n_spectra_per_heap = args.jones_per_batch // args.channels
         self.data = np.empty(
             (
                 QUEUE_DEPTH,
                 args.array_size,
                 args.channels_per_substream,
-                n_spectra_per_batch,
+                n_spectra_per_heap,
                 N_POLS,
                 COMPLEX,
             ),
             DTYPE,
         )
-        self.timestamp_step = args.samples_between_spectra * n_spectra_per_batch
+        self.timestamp_step = args.samples_between_spectra * n_spectra_per_heap
         self.timestamps = np.empty(QUEUE_DEPTH, spead.IMMEDIATE_DTYPE)
         self.batches: list[spead2.send.HeapReferenceList] = []
         for i in range(QUEUE_DEPTH):
@@ -272,7 +272,7 @@ class Sender:
         self.time_converter = TimeConverter(0.0, args.adc_sample_rate)
         self.descriptor_heap = make_descriptor_heap(
             channels_per_substream=args.channels_per_substream,
-            spectra_per_batch=n_spectra_per_batch,
+            spectra_per_heap=n_spectra_per_heap,
             sample_bits=DTYPE.itemsize * BYTE_BITS,
         )
 

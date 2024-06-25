@@ -110,10 +110,10 @@ class ComputeTemplate:
         command_queue: AbstractCommandQueue,
         samples: int,
         spectra: int,
-        spectra_per_batch: int,
+        spectra_per_heap: int,
     ) -> "Compute":  # We have to put the return type in quotes because we haven't declared the `Compute` class yet.
         """Generate a :class:`Compute` object based on the template."""
-        return Compute(self, command_queue, samples, spectra, spectra_per_batch)
+        return Compute(self, command_queue, samples, spectra, spectra_per_heap)
 
 
 class Compute(accel.OperationSequence):
@@ -129,9 +129,9 @@ class Compute(accel.OperationSequence):
     performed. The following constraints are assumed, Bad Things(TM) may happen
     if they aren't followed:
 
-    - spectra_per_batch <= spectra - i.e. a chunk of data must be enough to send out at
-      least one batch.
-    - spectra % spectra_per_batch == 0
+    - spectra_per_heap <= spectra - i.e. a chunk of data must be enough to send out at
+      least one heap.
+    - spectra % spectra_per_heap == 0
     - samples >= output.window (see :class:`.fgpu.output.Output`). An input chunk requires
       at least enough samples to output a single spectrum.
     - samples % 8 == 0
@@ -150,8 +150,8 @@ class Compute(accel.OperationSequence):
         padding samples.
     spectra
         Number of spectra in each output chunk.
-    spectra_per_batch
-        Number of spectra to send in each output batch.
+    spectra_per_heap
+        Number of spectra to send in each output heap.
     """
 
     def __init__(
@@ -160,12 +160,12 @@ class Compute(accel.OperationSequence):
         command_queue: AbstractCommandQueue,
         samples: int,
         spectra: int,
-        spectra_per_batch: int,
+        spectra_per_heap: int,
     ) -> None:
         self.template = template
         self.samples = samples
         self.spectra = spectra
-        self.spectra_per_batch = spectra_per_batch
+        self.spectra_per_heap = spectra_per_heap
 
         operations: list[tuple[str, accel.Operation]] = []
         # DDC, PFB-FIR and FFT each happen for each polarisation.
@@ -193,7 +193,7 @@ class Compute(accel.OperationSequence):
             fft_shape,
         )
         self.fft = fft_template.instantiate(command_queue, fft.FftMode.FORWARD)
-        self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_batch)
+        self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap)
 
         operations.append(("pfb_fir", self.pfb_fir))
         operations.append(("fft", self.fft))

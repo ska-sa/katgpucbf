@@ -36,7 +36,7 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     decimation = 8
     ddc_taps = 128
     pfb_taps = 4
-    spectra_per_batch = 32
+    spectra_per_heap = 32
     subsampling = decimation
     nb_spectra = 64
 
@@ -61,7 +61,7 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
         + ddc_taps
         + ((pfb_taps - 1) * internal_channels - 1) * subsampling,
         spectra,
-        spectra_per_batch,
+        spectra_per_heap,
     )
     fn.ensure_all_bound()
     fn()

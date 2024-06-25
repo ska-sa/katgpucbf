@@ -41,7 +41,7 @@ class Output(ABC):
             raise ValueError("jones_per_batch must be a multiple of channels")
 
     @property
-    def spectra_per_batch(self) -> int:
+    def spectra_per_heap(self) -> int:
         """Number of spectra in each output heap."""
         return self.jones_per_batch // self.channels
 

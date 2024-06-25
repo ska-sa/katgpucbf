@@ -40,7 +40,7 @@ N_SUBSTREAMS = 16
 N_CHUNKS = 5
 N_BATCHES = 7  # batches per chunk
 N_CHANNELS = 1024
-N_SPECTRA_PER_BATCH = 32  # Small to make the test fast
+N_SPECTRA_PER_HEAP = 32  # Small to make the test fast
 SPECTRA_SAMPLES = 2 * N_CHANNELS
 FENG_ID = 3
 NAME = "foo"
@@ -73,7 +73,7 @@ def chunks(sample_bits) -> list[Chunk]:
     dtype = gaussian_dtype(sample_bits)
     return [
         Chunk(
-            np.zeros((N_BATCHES, N_CHANNELS, N_SPECTRA_PER_BATCH, N_POLS), dtype),
+            np.zeros((N_BATCHES, N_CHANNELS, N_SPECTRA_PER_HEAP, N_POLS), dtype),
             np.zeros((N_BATCHES, N_POLS), np.uint32),
             n_substreams=N_SUBSTREAMS,
             feng_id=FENG_ID,
@@ -177,7 +177,7 @@ def test_bad_substreams():
     dtype = gaussian_dtype(8)
     with pytest.raises(ValueError):
         Chunk(
-            np.zeros((N_BATCHES, N_CHANNELS, N_SPECTRA_PER_BATCH, N_POLS), dtype),
+            np.zeros((N_BATCHES, N_CHANNELS, N_SPECTRA_PER_HEAP, N_POLS), dtype),
             np.zeros((N_BATCHES, N_POLS), np.uint32),
             n_substreams=5,
             feng_id=FENG_ID,
@@ -198,7 +198,7 @@ async def test_send(
     # Send descriptors to all the streams
     descriptor_heap = make_descriptor_heap(
         channels_per_substream=N_CHANNELS // N_SUBSTREAMS,
-        spectra_per_batch=N_SPECTRA_PER_BATCH,
+        spectra_per_heap=N_SPECTRA_PER_HEAP,
         sample_bits=sample_bits,
     )
     for send_stream in send_streams:
@@ -214,7 +214,7 @@ async def test_send(
         # That isn't necessary for this test.
         _fill_random(chunk.saturated, rng)
         chunk.present[:] = True
-        timestamp = first_timestamp + i * SPECTRA_SAMPLES * N_SPECTRA_PER_BATCH * N_BATCHES
+        timestamp = first_timestamp + i * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP * N_BATCHES
         chunk.timestamp = timestamp
         # Check that the property works as expected
         assert chunk.timestamp == timestamp
@@ -252,7 +252,7 @@ async def test_send(
                 updated = ig.update(heap)
                 if not updated:
                     continue  # it's a stream control or descriptor heap
-                expected_timestamp = first_timestamp + batch * SPECTRA_SAMPLES * N_SPECTRA_PER_BATCH
+                expected_timestamp = first_timestamp + batch * SPECTRA_SAMPLES * N_SPECTRA_PER_HEAP
                 assert updated["feng_id"].value == FENG_ID
                 assert updated["frequency"].value == i * n_channels_per_substream
                 assert updated["timestamp"].value == expected_timestamp
@@ -273,7 +273,7 @@ async def test_send(
     # Check the sensors and Prometheus metrics
     labels = {"stream": NAME}
     assert prom_diff.get_sample_diff("output_heaps_total", labels) == good_batches * N_SUBSTREAMS
-    expected_samples = good_batches * N_SPECTRA_PER_BATCH * N_CHANNELS * N_POLS
+    expected_samples = good_batches * N_SPECTRA_PER_HEAP * N_CHANNELS * N_POLS
     assert prom_diff.get_sample_diff("output_samples_total", labels) == expected_samples
     expected_bytes = expected_samples * COMPLEX * sample_bits // BYTE_BITS
     assert prom_diff.get_sample_diff("output_bytes_total", labels) == expected_bytes
