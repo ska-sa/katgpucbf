@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING, Literal, overload
 from uuid import UUID, uuid4
 
 import aiokatcp
-import async_timeout
 import numba
 import numpy as np
 import scipy
@@ -307,7 +306,7 @@ class XBReceiver:
         data_ringbuffer = self.stream.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         try:
-            async with async_timeout.timeout(time_limit) as timer:
+            async with asyncio.timeout(time_limit) as timer:
                 async for chunk in data_ringbuffer:
                     assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
                     timestamp = chunk.chunk_id * self.timestamp_step
@@ -327,7 +326,7 @@ class XBReceiver:
                     if all_timestamps:
                         yield timestamp, None
         except TimeoutError:
-            if not timer.expired:
+            if not timer.expired():
                 raise  # The TimeoutError came from something else
 
     async def next_complete_chunk(
@@ -346,7 +345,7 @@ class XBReceiver:
         min_timestamp, max_delay
             See :meth:`complete_chunks`
         """
-        async with async_timeout.timeout(timeout):
+        async with asyncio.timeout(timeout):
             async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
                 with chunk:
                     return timestamp, np.array(chunk.data)  # Makes a copy before we return the chunk
@@ -370,7 +369,7 @@ class XBReceiver:
            with enough chunks and update this comment.
         """
         chunks: list[tuple[int, katgpucbf.recv.Chunk]] = []
-        async with async_timeout.timeout(timeout):
+        async with asyncio.timeout(timeout):
             async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, all_timestamps=True):
                 if chunk is None:
                     # Throw away failed attempt at getting an adjacent set

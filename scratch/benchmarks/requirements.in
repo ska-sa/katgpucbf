@@ -5,7 +5,6 @@
 -c ../../qualification/requirements.txt
 
 asyncssh
-async-timeout
 aiohttp
 numpy
 pandas       # Only needed for fit.py

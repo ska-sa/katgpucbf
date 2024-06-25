@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -22,7 +22,6 @@ from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 
-import async_timeout
 import asyncssh
 
 VERBOSE_PASS_OUTPUT = 2  #: Verbosity level at which process output is passed through
@@ -162,7 +161,7 @@ async def run_tasks(
             stack.push_async_callback(kill_process, procs[-1])
 
         # Wait for the service to be ready by checking the katcp ports
-        async with async_timeout.timeout(timeout):
+        async with asyncio.timeout(timeout):
             for i in range(n):
                 # Wait until either the port is ready or the process dies
                 tasks = [

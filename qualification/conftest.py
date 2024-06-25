@@ -33,7 +33,6 @@ import aiokatcp
 import matplotlib.style
 import pytest
 import pytest_check
-from async_timeout import timeout
 from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
@@ -568,7 +567,7 @@ class CBFCache:
             host = self._pytestconfig.getini("master_controller_host")
             port = int(self._pytestconfig.getini("master_controller_port"))
             logger.debug("Connecting to master controller at %s:%d.", host, port)
-            async with timeout(10):
+            async with asyncio.timeout(10):
                 self._master_controller_client = await aiokatcp.Client.connect(host, port)
             return self._master_controller_client
         except (ConnectionError, TimeoutError):
