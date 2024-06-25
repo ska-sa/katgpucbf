@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, National Research Foundation (SARAO)
+# Copyright (c) 2020-2021, 2024 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -30,9 +30,7 @@ import threading
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from time import monotonic
-from typing import Any, TypeVar
-
-_M = TypeVar("_M", bound="Monitor")
+from typing import Any, Self
 
 
 class Monitor(ABC):
@@ -101,7 +99,7 @@ class Monitor(ABC):
         """
         pass
 
-    def __enter__(self: _M) -> _M:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args) -> None:

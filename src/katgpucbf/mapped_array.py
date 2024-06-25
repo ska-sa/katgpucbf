@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,6 +17,7 @@
 """Implement :class:`MappedArray`."""
 
 from dataclasses import dataclass
+from typing import Self
 
 import katsdpsigproc.cuda
 import numpy as np
@@ -54,7 +55,7 @@ class MappedArray:
     device: accel.DeviceArray
 
     @classmethod
-    def from_slot(cls, vkgdr_handle: vkgdr.Vkgdr, context: AbstractContext, slot: accel.IOSlotBase) -> "MappedArray":
+    def from_slot(cls, vkgdr_handle: vkgdr.Vkgdr, context: AbstractContext, slot: accel.IOSlotBase) -> Self:
         """Allocate a :class:`MappedArray` to match a slot.
 
         Parameters

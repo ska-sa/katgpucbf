@@ -363,7 +363,7 @@ def make_descriptor_heap(
     channels_per_substream: int,
     spectra_per_heap: int,
     sample_bits: int,
-) -> "spead2.send.Heap":
+) -> spead2.send.Heap:
     """Create a descriptor heap for output F-Engine data."""
     raw_kwargs: _FengRawKwargs = {"shape": (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)}
     try:

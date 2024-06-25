@@ -16,6 +16,8 @@
 # limitations under the License.
 ################################################################################
 
+from typing import Self
+
 import numpy as np
 import prometheus_client
 from numpy.typing import NDArray
@@ -51,7 +53,7 @@ class PromDiff:
         self._after: list[prometheus_client.samples.Sample] = []
         self._prefix = namespace + "_" if namespace is not None else ""
 
-    def __enter__(self) -> "PromDiff":
+    def __enter__(self) -> Self:
         self._before = [s for metric in self._registry.collect() for s in metric.samples]
         return self
 
