@@ -21,7 +21,7 @@ import ast
 import asyncio
 import logging
 import sys
-from typing import List, Sequence, Tuple
+from collections.abc import Sequence
 
 import aiokatcp
 import matplotlib
@@ -95,7 +95,7 @@ def make_chunk_place(
     return chunk_place
 
 
-def get_bls_subset(baselines: Sequence[str], bls_ordering: Sequence[Tuple[str, str]]) -> List[int]:
+def get_bls_subset(baselines: Sequence[str], bls_ordering: Sequence[tuple[str, str]]) -> list[int]:
     """Parse the command-line --baseline arguments."""
     if baselines:
         bls_subset = []

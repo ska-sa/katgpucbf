@@ -17,8 +17,9 @@
 """Unit tests for XBEngine module."""
 
 from collections import Counter
+from collections.abc import AsyncGenerator, Callable
 from logging import WARNING
-from typing import Any, AsyncGenerator, Callable, Final
+from typing import Any, Final
 
 import aiokatcp
 import async_timeout

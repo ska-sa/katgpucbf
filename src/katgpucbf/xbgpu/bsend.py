@@ -19,7 +19,8 @@
 import asyncio
 import functools
 import logging
-from typing import Callable, Final, Sequence
+from collections.abc import Callable, Sequence
+from typing import Final
 
 import katsdpsigproc.accel as accel
 import numpy as np

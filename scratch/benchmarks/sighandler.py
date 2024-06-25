@@ -18,7 +18,6 @@
 
 import asyncio
 import signal
-import sys
 
 
 def add_sigint_handler() -> None:
@@ -28,8 +27,7 @@ def add_sigint_handler() -> None:
     :func:`asyncio.run`. On Python 3.11+ it does nothing because Python
     already handles it.
     """
-    if sys.version_info >= (3, 11, 0):
-        return
+    return
 
     def handler(task: asyncio.Task) -> None:
         loop.remove_signal_handler(signal.SIGINT)

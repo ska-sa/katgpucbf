@@ -16,7 +16,8 @@
 
 """Unit tests for the :mod:`katgpucbf.xbgpu.bsend` module."""
 
-from typing import Final, Sequence
+from collections.abc import Sequence
+from typing import Final
 
 import numpy as np
 import pytest

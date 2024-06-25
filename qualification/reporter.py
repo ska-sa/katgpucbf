@@ -19,7 +19,8 @@ import base64
 import io
 import logging
 import time
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import matplotlib.figure
 import matplotlib.ticker

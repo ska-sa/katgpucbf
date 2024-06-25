@@ -26,7 +26,7 @@ import functools
 import itertools
 import os
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
 import katsdpservices
 import numpy as np

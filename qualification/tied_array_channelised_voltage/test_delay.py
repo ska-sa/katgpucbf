@@ -17,7 +17,8 @@
 """Delay test."""
 
 import time
-from typing import Sequence, cast
+from collections.abc import Sequence
+from typing import cast
 
 import numpy as np
 import pytest

@@ -571,7 +571,7 @@ class CBFCache:
             async with timeout(10):
                 self._master_controller_client = await aiokatcp.Client.connect(host, port)
             return self._master_controller_client
-        except (ConnectionError, asyncio.TimeoutError):
+        except (ConnectionError, TimeoutError):
             logger.exception("unable to connect to master controller!")
             raise
 

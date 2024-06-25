@@ -20,7 +20,7 @@ import mmap
 import multiprocessing.connection
 import multiprocessing.reduction
 import os
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import DTypeLike

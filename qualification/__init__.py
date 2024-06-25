@@ -28,9 +28,9 @@ import ctypes
 import logging
 import math
 import re
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Literal, Sequence, overload
+from typing import TYPE_CHECKING, Literal, overload
 from uuid import UUID, uuid4
 
 import aiokatcp
@@ -326,7 +326,7 @@ class XBReceiver:
                     chunk.recycle()
                     if all_timestamps:
                         yield timestamp, None
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if not timer.expired:
                 raise  # The TimeoutError came from something else
 

@@ -18,7 +18,7 @@
 
 import argparse
 import functools
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 from katsdpsigproc import accel, fft

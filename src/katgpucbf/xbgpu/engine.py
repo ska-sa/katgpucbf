@@ -27,7 +27,8 @@ import logging
 import math
 import time
 from abc import abstractmethod
-from typing import Generic, Sequence, TypeVar
+from collections.abc import Sequence
+from typing import Generic, TypeVar
 
 import aiokatcp
 import katsdpsigproc

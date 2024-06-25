@@ -19,8 +19,8 @@
 import asyncio
 import math
 from ast import literal_eval
-from collections.abc import Callable
-from typing import Sequence, cast
+from collections.abc import Callable, Sequence
+from typing import cast
 
 import async_timeout
 import numpy as np
@@ -680,7 +680,7 @@ async def test_group_delay(
                     if i == n_chunks:
                         pdf_report.detail(f"Received all chunks after {attempts} attempt(s).")
                         break
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail("Timed out.")
 
         # Convert Gaussian integers to complex128

@@ -19,7 +19,7 @@
 import asyncio
 import functools
 from collections.abc import Callable, Sequence
-from typing import TypedDict
+from typing import TypedDict, Unpack
 
 import numpy as np
 import spead2.send
@@ -27,7 +27,6 @@ import spead2.send.asyncio
 from aiokatcp import SensorSet
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
-from typing_extensions import Unpack
 
 from .. import COMPLEX, N_POLS
 from ..send import send_rate
