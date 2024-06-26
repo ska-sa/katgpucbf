@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, 2024 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -103,9 +103,10 @@ async def test_sender(
         return ret
 
     # Start descriptor sender and wait for descriptors before awaiting for DSim data
-    descriptor_sender_task = asyncio.create_task(descriptor_sender.run())
-    descriptor_recv_streams_task = asyncio.create_task(descriptor_recv(descriptor_recv_streams, descriptor_sender))
-    _, ig = await asyncio.gather(descriptor_sender_task, descriptor_recv_streams_task)
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(descriptor_sender.run())
+        descriptor_recv_streams_task = tg.create_task(descriptor_recv(descriptor_recv_streams, descriptor_sender))
+    ig = descriptor_recv_streams_task.result()
 
     # Note: only do this after dealing with the descriptors, as otherwise
     # they interfere with the countdown.

@@ -490,9 +490,10 @@ async def _report_cbf_config(
 
     ports = await get_task_details("port", aiokatcp.Address)
     git_version_futures = {}
-    for task_name, address in ports.items():
-        assert address.port is not None
-        git_version_futures[task_name] = asyncio.create_task(_get_git_version(str(address.host), address.port))
+    async with asyncio.TaskGroup() as tg:
+        for task_name, address in ports.items():
+            assert address.port is not None
+            git_version_futures[task_name] = tg.create_task(_get_git_version(str(address.host), address.port))
 
     versions = await get_task_details("version", str)
     hosts = await get_task_details("host", str)
@@ -504,7 +505,7 @@ async def _report_cbf_config(
             "host": hostname,
             "interfaces": {key[0]: value for key, value in task_interfaces.items()},  # Flatten 1-tuple key
             "version": versions[task_name],
-            "git_version": await git_version_futures[task_name],
+            "git_version": git_version_futures[task_name].result(),
         }
     tasks["product_controller"] = {
         "host": await master_controller_client.sensor_value(f"{cbf.name}.host", str),
@@ -637,7 +638,9 @@ async def cbf(
     cbf = await cbf_cache.get_cbf(cbf_config, cbf_mode_config)
     # Reset the CBF to default state
     pcc = cbf.product_controller_client
-    await asyncio.gather(*[client.request("signals", "0;0;") for client in cbf.dsim_clients])
+    async with asyncio.TaskGroup() as tg:
+        for client in cbf.dsim_clients:
+            tg.create_task(client.request("signals", "0;0;"))
     capture_types = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":

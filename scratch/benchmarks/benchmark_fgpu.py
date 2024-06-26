@@ -257,10 +257,11 @@ async def _heap_counts1(session: aiohttp.client.ClientSession, url: str) -> tupl
 
 async def heap_counts(session: aiohttp.client.ClientSession, server: Server, n: int) -> tuple[int, int]:
     """Query the number of heaps received and missing, for all n fgpu instances."""
-    tasks = [
-        asyncio.create_task(_heap_counts1(session, f"http://{server.hostname}:{7250 + i}/metrics")) for i in range(n)
-    ]
-    partials = await asyncio.gather(*tasks)
+    async with asyncio.TaskGroup() as tg:
+        tasks = [
+            tg.create_task(_heap_counts1(session, f"http://{server.hostname}:{7250 + i}/metrics")) for i in range(n)
+        ]
+    partials = [task.result() for task in tasks]
     heaps, missing_heaps = zip(*partials)
     return sum(heaps), sum(missing_heaps)
 
@@ -302,9 +303,11 @@ async def process(
     """Perform a single trial on running engines."""
     async with aiohttp.client.ClientSession() as session:
         await asyncio.sleep(args.startup_time)  # Give a chance for startup losses
-        sleeper = asyncio.create_task(asyncio.sleep(args.runtime))
-        orig_heaps, orig_missing = await heap_counts(session, args.fgpu_server, args.n)
-        await sleeper
+        async with asyncio.TaskGroup() as tg:
+            # Start the sleep *before* entering heap_counts, so that time spent
+            # during heap_counts is considered part of the sleep time.
+            tg.create_task(asyncio.sleep(args.runtime))
+            orig_heaps, orig_missing = await heap_counts(session, args.fgpu_server, args.n)
         new_heaps, new_missing = await heap_counts(session, args.fgpu_server, args.n)
 
     expected_heaps = args.runtime * adc_sample_rate * args.n * N_POLS / args.dig_heap_samples
