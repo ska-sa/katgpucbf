@@ -740,10 +740,11 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
 
     async def _flush_accumulation(self, out_item: XOutQueueItem, next_accum: int) -> XOutQueueItem:
         """Emit the current `out_item` and prepare a new one."""
+        next_timestamp = next_accum * self.timestamp_increment_per_accumulation
         if out_item.batches == 0:
             # We never actually started this accumulation. We can just
             # update the timestamp and continue using it.
-            out_item.timestamp = next_accum * self.timestamp_increment_per_accumulation
+            out_item.timestamp = next_timestamp
             return out_item
 
         # present_ants only takes into account batches that have
@@ -753,7 +754,15 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             out_item.present_ants.fill(False)
 
         # Update the sync sensor (converting np.bool_ to Python bool)
-        self.engine.sensors[f"{self.output.name}.rx.synchronised"].value = bool(out_item.present_ants.all())
+        # Note: the sensor timestamp is made the end of the current
+        # accumulation, which is usually the same as next_timestamp
+        # but might be different if entire accumulations were skipped.
+        self.engine.sensors[f"{self.output.name}.rx.synchronised"].set_value(
+            value=bool(out_item.present_ants.all()),
+            timestamp=self.engine.time_converter.adc_to_unix(
+                out_item.timestamp + self.timestamp_increment_per_accumulation
+            ),
+        )
 
         out_item.update_present_baselines()
         self.correlation.reduce()
@@ -764,7 +773,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         # contiguous with the previous one).
         out_item = await self._out_free_queue.get()
         await out_item.async_wait_for_events()
-        out_item.reset(next_accum * self.timestamp_increment_per_accumulation)
+        out_item.reset(next_timestamp)
         self.correlation.bind(
             out_visibilities=out_item.buffer_device,
             out_saturated=out_item.saturated,
@@ -784,16 +793,14 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             """Apply correlation kernel to all pending batches."""
             first_batch = self.correlation.first_batch
             last_batch = self.correlation.last_batch
-            if first_batch < last_batch:
+            assert in_item is not None
+            present = in_item.present[first_batch:last_batch, :]
+            if first_batch < last_batch and present.any():
                 self.correlation()
                 # Update the present ants tracker one last time
-                assert in_item is not None
-                out_item.present_ants[:] &= in_item.present[first_batch:last_batch, :].all(axis=0)
-                # TODO: NGC-1308 Update the usage of out_item.batches to check
-                # against in_item.present, i.e. whether it's actually received
-                # any data for this batch.
+                out_item.present_ants[:] &= present.all(axis=0)
                 out_item.batches += last_batch - first_batch
-                self.correlation.first_batch = last_batch
+            self.correlation.first_batch = last_batch
 
         out_item = await self._out_free_queue.get()
         await out_item.async_wait_for_events()
@@ -922,8 +929,6 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
 
                 if not np.all(item.present_ants):
                     incomplete_accum_counter.labels(self.output.name).inc(1)
-                    if not np.any(item.present_ants):
-                        logger.warning("All Antennas had a break in data during this accumulation")
 
                 heap.timestamp = item.timestamp
                 if self.send_stream.send_enabled:
