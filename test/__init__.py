@@ -16,7 +16,8 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Self
+import copy
+from typing import Mapping, Self
 
 import numpy as np
 import prometheus_client
@@ -34,12 +35,34 @@ class PromDiff:
             ...  # Do stuff that increments counters
         diff.get_sample_diff(name, labels)
 
+    In some cases one may wish to make many queries with the same labels.
+    In this case, default labels can be passed to the constructor::
+
+        with PromDiff(namespace=METRIC_NAMESPACE) as diff:
+            ...  # Do stuff that increments counters
+        diff.get_sample_diff(name1)
+        diff.get_sample_diff(name2)
+
+    Alternatively, one can create a new :class:`PromDiff` that holds the same
+    data but has additional default labels:
+
+        with PromDiff(namespace=METRIC_NAMESPACE) as diff:
+            ...  # Do stuff that increments counters
+        diff2 = diff.with_labels(labels)
+        diff2.get_sample_diff(name1)
+        diff2.get_sample_diff(name2)
+
+    Labels are cumulative: more labels can be passed to :meth:`get_sample_diff`
+    and they augment the default labels.
+
     Parameters
     ----------
     registry
         Prometheus metric registry
     namespace
         Namespace to prepend to metric names
+    labels
+        Default labels to use in queries
     """
 
     def __init__(
@@ -47,11 +70,13 @@ class PromDiff:
         *,
         registry: prometheus_client.CollectorRegistry = prometheus_client.REGISTRY,
         namespace: str | None = None,
+        labels: Mapping[str, str] | None = None,
     ) -> None:
         self._registry = registry
         self._before: list[prometheus_client.samples.Sample] = []
         self._after: list[prometheus_client.samples.Sample] = []
         self._prefix = namespace + "_" if namespace is not None else ""
+        self._labels = dict(labels) if labels is not None else {}
 
     def __enter__(self) -> Self:
         self._before = [s for metric in self._registry.collect() for s in metric.samples]
@@ -59,6 +84,13 @@ class PromDiff:
 
     def __exit__(self, *args) -> None:
         self._after = [s for metric in self._registry.collect() for s in metric.samples]
+
+    def _get_labels(self, labels: Mapping[str, str] | None) -> dict[str, str]:
+        """Compute effective labels by combining default and per-call labels."""
+        if labels is None:
+            return self._labels
+        else:
+            return {**self._labels, **labels}
 
     def _get_value(
         self, samples: list[prometheus_client.samples.Sample], name: str, labels: dict[str, str]
@@ -68,31 +100,37 @@ class PromDiff:
                 return s.value
         return None
 
-    def get_sample_value(self, name: str, labels: dict[str, str] | None = None) -> float | None:
+    def get_sample_value(self, name: str, labels: Mapping[str, str] | None = None) -> float:
         """Return the value of the metric at the end of the context manager protocol.
 
-        If it is not found, returns ``None``.
+        If it is not found, raises an :exc:`AssertionError`.
         """
-        if labels is None:
-            labels = {}
-        return self._get_value(self._after, name, labels)
+        value = self._get_value(self._after, name, self._get_labels(labels))
+        assert value is not None, f"Metric {name}{labels} does not exist"
+        return value
 
-    def get_sample_diff(self, name: str, labels: dict[str, str] | None = None) -> float | None:
+    def get_sample_diff(self, name: str, labels: Mapping[str, str] | None = None) -> float:
         """Return the increase in the metric during the context manager protocol.
 
-        If it is not found, returns ``None``. If it was not found on entry,
-        raises an exception.
+        If the metric did not exist at the start and end, raises an
+        :exc:`AssertionError`.
         """
-        if labels is None:
-            labels = {}
-        before = self._get_value(self._before, name, labels)
-        after = self._get_value(self._after, name, labels)
-        if before is not None and after is not None:
-            return after - before
-        elif after is not None:
-            raise ValueError(f"Metric {name}{labels} did not exist at start")
-        else:
-            return after
+        effective_labels = self._get_labels(labels)
+        before = self._get_value(self._before, name, effective_labels)
+        after = self._get_value(self._after, name, effective_labels)
+        assert before is not None, f"Metric {name}{labels} did not exist at start"
+        assert after is not None, f"Metric {name}{labels} did not exist at start"
+        return after - before
+
+    def with_labels(self, labels: Mapping[str, str] | None = None) -> Self:
+        """Create a new instance holding the same data but with extra default labels.
+
+        The `labels` are used to update the current default labels rather than
+        completely replacing them.
+        """
+        ret = copy.copy(self)  # Note: shallow copy
+        ret._labels = self._get_labels(labels)
+        return ret
 
 
 def unpackbits(data: NDArray[np.uint8], sample_bits: int = DIG_SAMPLE_BITS) -> np.ndarray:

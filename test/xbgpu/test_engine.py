@@ -374,13 +374,7 @@ def verify_corrprod_sensors(
     """
     skipped_accs_total = 0
     for xpipeline in xpipelines:
-        # The assert statements are mainly to force mypy to realise the
-        # prom_diff values obtained are the expected data type
-        def prom_get(name: str) -> float:
-            diff = prom_diff.get_sample_diff(name, {"stream": xpipeline.output.name})  # noqa: B023
-            assert diff is not None, f"{name} is None"
-            return diff
-
+        stream_diff = prom_diff.with_labels({"stream": xpipeline.output.name})
         # Count accumulations for which we expect to receive the accumulation
         # but have incomplete data. Also calculate expected updates to
         # rx.synchronised.
@@ -418,14 +412,16 @@ def verify_corrprod_sensors(
                     skipped_accs += 1
         sent_accs = complete_accs + incomplete_accs
 
-        assert prom_get("output_x_incomplete_accs_total") == incomplete_accs
-        assert prom_get("output_x_skipped_accs_total") == skipped_accs
-        assert prom_get("output_x_heaps_total") == sent_accs
-        assert prom_get("output_x_bytes_total") == (
+        assert stream_diff.get_sample_diff("output_x_incomplete_accs_total") == incomplete_accs
+        assert stream_diff.get_sample_diff("output_x_skipped_accs_total") == skipped_accs
+        assert stream_diff.get_sample_diff("output_x_heaps_total") == sent_accs
+        assert stream_diff.get_sample_diff("output_x_bytes_total") == (
             n_channels_per_substream * n_baselines * COMPLEX * xsend.SEND_DTYPE.itemsize * sent_accs
         )
-        assert prom_get("output_x_visibilities_total") == (n_channels_per_substream * n_baselines * sent_accs)
-        assert prom_get("output_x_clipped_visibilities_total") == 0
+        assert stream_diff.get_sample_diff("output_x_visibilities_total") == (
+            n_channels_per_substream * n_baselines * sent_accs
+        )
+        assert stream_diff.get_sample_diff("output_x_clipped_visibilities_total") == 0
         skipped_accs_total += skipped_accs
 
         # Verify sensor updates while we're here
@@ -489,23 +485,17 @@ def verify_beam_sensors(
     # number of (COMPLEX) samples.
     heap_samples = np.prod(heap_shape[:-1])
     for i, beam_output in enumerate(beam_outputs):
-        # The assert statements are mainly to force mypy to realise the
-        # prom_diff values obtained are the expected data type
-        def prom_get(name: str) -> float:
-            diff = prom_diff.get_sample_diff(name, {"stream": beam_output.name})  # noqa: B023
-            assert diff is not None, f"{name} is None"
-            return diff
-
-        assert prom_get("output_b_heaps_total") == n_beam_heaps_sent
-        assert prom_get("output_b_bytes_total") == n_beam_heaps_sent * heap_bytes
-        assert prom_get("output_b_samples_total") == n_beam_heaps_sent * heap_samples
-        assert saturated_low[i] <= prom_get("output_b_clipped_samples_total") <= saturated_high[i]
+        stream_diff = prom_diff.with_labels({"stream": beam_output.name})
+        assert stream_diff.get_sample_diff("output_b_heaps_total") == n_beam_heaps_sent
+        assert stream_diff.get_sample_diff("output_b_bytes_total") == n_beam_heaps_sent * heap_bytes
+        assert stream_diff.get_sample_diff("output_b_samples_total") == n_beam_heaps_sent * heap_samples
+        assert saturated_low[i] <= stream_diff.get_sample_diff("output_b_clipped_samples_total") <= saturated_high[i]
 
         # Check that sensor value matches Prometheus
         assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == aiokatcp.Reading(
             mock.ANY,
             aiokatcp.Sensor.Status.NOMINAL,
-            prom_get("output_b_clipped_samples_total"),
+            stream_diff.get_sample_diff("output_b_clipped_samples_total"),
         )
 
         assert first_timestamp < last_timestamp, (
@@ -1159,11 +1149,9 @@ class TestEngine:
 
         n_vis = n_channels_per_substream * n_baselines
         for corrprod_output in corrprod_outputs:
-            assert prom_diff.get_sample_diff("output_x_visibilities_total", {"stream": corrprod_output.name}) == n_vis
-            assert (
-                prom_diff.get_sample_diff("output_x_clipped_visibilities_total", {"stream": corrprod_output.name})
-                == n_vis
-            )
+            stream_diff = prom_diff.with_labels({"stream": corrprod_output.name})
+            assert stream_diff.get_sample_diff("output_x_visibilities_total") == n_vis
+            assert stream_diff.get_sample_diff("output_x_clipped_visibilities_total") == n_vis
             assert xbengine.sensors[f"{corrprod_output.name}.xeng-clip-cnt"].value == n_vis
 
     def _patch_get_in_item(

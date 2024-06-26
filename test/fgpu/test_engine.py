@@ -924,21 +924,13 @@ class TestEngine:
 
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(send_present) * n_substreams
-        assert prom_diff.get_sample_diff("output_heaps_total", {"stream": output.name}) == output_heaps
+        prom_diff = prom_diff.with_labels({"stream": output.name})
+        assert prom_diff.get_sample_diff("output_heaps_total") == output_heaps
         batch_samples = channels * spectra_per_heap * N_POLS
         batch_size = batch_samples * COMPLEX * np.dtype(np.int8).itemsize
-        assert (
-            prom_diff.get_sample_diff("output_bytes_total", {"stream": output.name})
-            == np.sum(send_present) * batch_size
-        )
-        assert (
-            prom_diff.get_sample_diff("output_samples_total", {"stream": output.name})
-            == np.sum(send_present) * batch_samples
-        )
-        assert (
-            prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": output.name})
-            == np.sum(~send_present) * n_substreams
-        )
+        assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(send_present) * batch_size
+        assert prom_diff.get_sample_diff("output_samples_total") == np.sum(send_present) * batch_samples
+        assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~send_present) * n_substreams
 
         # Sensor is not present in the narrowband mode.
         if output.decimation == 1:
@@ -1080,7 +1072,7 @@ class TestEngine:
         recv_layout = engine_server.recv_layout
         n_samples = 20 * recv_layout.chunk_samples
         dig_data = self._make_tone(np.arange(n_samples), tone, tone_pol)
-        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
+        with PromDiff(namespace=METRIC_NAMESPACE, labels={"stream": output.name}) as prom_diff:
             _, timestamps = await self._send_data(
                 mock_recv_stream,
                 mock_send_stream,
@@ -1089,13 +1081,8 @@ class TestEngine:
                 dig_data,
             )
 
-        assert prom_diff.get_sample_diff(
-            "output_clipped_samples_total", {"stream": output.name, "pol": f"{tone_pol}"}
-        ) == len(timestamps)
-        assert (
-            prom_diff.get_sample_diff("output_clipped_samples_total", {"stream": output.name, "pol": f"{1 - tone_pol}"})
-            == 0
-        )
+        assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{tone_pol}"}) == len(timestamps)
+        assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{1 - tone_pol}"}) == 0
 
         # Compute the expected timestamp. The timestamp is associated with the
         # output chunk, so we need to round up to output chunk size.
