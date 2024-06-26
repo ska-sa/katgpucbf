@@ -39,7 +39,7 @@ from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
 from katgpucbf.fgpu.output import NarrowbandOutput, Output
 from katgpucbf.utils import TimeConverter
 
-from .. import PromDiff, packbits
+from .. import PromDiff, PromGetHelp, packbits
 from .test_recv import gen_heaps
 
 logger = logging.getLogger(__name__)
@@ -917,28 +917,21 @@ class TestEngine:
                 # the time difference is a multiple of the mixer wavelength.
                 np.testing.assert_equal(x, y)
 
+        labels = {"stream": output.name}
+        prom_get = PromGetHelp(prom_diff, labels)
         for pol in range(N_POLS):
             # Check prometheus counter
             input_missing_heaps = np.sum(~recv_present[pol])
-            assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
+            assert prom_get.diff("input_missing_heaps_total", label_override={"pol": str(pol)}) == input_missing_heaps
 
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(send_present) * n_substreams
-        assert prom_diff.get_sample_diff("output_heaps_total", {"stream": output.name}) == output_heaps
+        assert prom_get.diff("output_heaps_total") == output_heaps
         batch_samples = channels * spectra_per_heap * N_POLS
         batch_size = batch_samples * COMPLEX * np.dtype(np.int8).itemsize
-        assert (
-            prom_diff.get_sample_diff("output_bytes_total", {"stream": output.name})
-            == np.sum(send_present) * batch_size
-        )
-        assert (
-            prom_diff.get_sample_diff("output_samples_total", {"stream": output.name})
-            == np.sum(send_present) * batch_samples
-        )
-        assert (
-            prom_diff.get_sample_diff("output_skipped_heaps_total", {"stream": output.name})
-            == np.sum(~send_present) * n_substreams
-        )
+        assert prom_get.diff("output_bytes_total") == np.sum(send_present) * batch_size
+        assert prom_get.diff("output_samples_total") == np.sum(send_present) * batch_samples
+        assert prom_get.diff("output_skipped_heaps_total") == np.sum(~send_present) * n_substreams
 
         # Sensor is not present in the narrowband mode.
         if output.decimation == 1:
@@ -1089,13 +1082,11 @@ class TestEngine:
                 dig_data,
             )
 
-        assert prom_diff.get_sample_diff(
-            "output_clipped_samples_total", {"stream": output.name, "pol": f"{tone_pol}"}
-        ) == len(timestamps)
-        assert (
-            prom_diff.get_sample_diff("output_clipped_samples_total", {"stream": output.name, "pol": f"{1 - tone_pol}"})
-            == 0
+        prom_get = PromGetHelp(prom_diff)
+        assert prom_get.diff("output_clipped_samples_total", {"stream": output.name, "pol": f"{tone_pol}"}) == len(
+            timestamps
         )
+        assert prom_get.diff("output_clipped_samples_total", {"stream": output.name, "pol": f"{1 - tone_pol}"}) == 0
 
         # Compute the expected timestamp. The timestamp is associated with the
         # output chunk, so we need to round up to output chunk size.

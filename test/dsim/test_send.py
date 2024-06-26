@@ -31,7 +31,7 @@ from katgpucbf.dsim import send
 from katgpucbf.send import DescriptorSender
 from katgpucbf.utils import TimeConverter
 
-from .. import PromDiff, unpackbits
+from .. import PromDiff, PromGetHelp, unpackbits
 from .conftest import ADC_SAMPLE_RATE, N_ENDPOINTS_PER_POL, N_POLS, SIGNAL_HEAPS
 
 
@@ -148,5 +148,6 @@ async def test_sender(
     assert (await switch_task) == switch_heap * DIG_HEAP_SAMPLES
 
     # Check the Prometheus counters
-    assert prom_diff.get_sample_diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
-    assert prom_diff.get_sample_diff("output_bytes_total") == orig_payload[0].nbytes * repeats
+    prom_get = PromGetHelp(prom_diff)
+    assert prom_get.diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
+    assert prom_get.diff("output_bytes_total") == orig_payload[0].nbytes * repeats

@@ -32,7 +32,7 @@ from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.send import Chunk, make_descriptor_heap, make_streams
 from katgpucbf.utils import TimeConverter, gaussian_dtype
 
-from .. import PromDiff, unpack_complex
+from .. import PromDiff, PromGetHelp, unpack_complex
 
 pytest_mark = pytest.mark.parametrize("bits", [4, 8])
 ADC_SAMPLE_RATE = 1e9
@@ -272,13 +272,14 @@ async def test_send(
 
     # Check the sensors and Prometheus metrics
     labels = {"stream": NAME}
-    assert prom_diff.get_sample_diff("output_heaps_total", labels) == good_batches * N_SUBSTREAMS
+    prom_get = PromGetHelp(prom_diff, labels)
+    assert prom_get.diff("output_heaps_total") == good_batches * N_SUBSTREAMS
     expected_samples = good_batches * N_SPECTRA_PER_HEAP * N_CHANNELS * N_POLS
-    assert prom_diff.get_sample_diff("output_samples_total", labels) == expected_samples
+    assert prom_get.diff("output_samples_total") == expected_samples
     expected_bytes = expected_samples * COMPLEX * sample_bits // BYTE_BITS
-    assert prom_diff.get_sample_diff("output_bytes_total", labels) == expected_bytes
-    assert prom_diff.get_sample_diff("output_skipped_heaps_total", labels) == skip_batches * N_SUBSTREAMS
+    assert prom_get.diff("output_bytes_total") == expected_bytes
+    assert prom_get.diff("output_skipped_heaps_total") == skip_batches * N_SUBSTREAMS
     for pol in range(N_POLS):
         pol_labels = {"stream": NAME, "pol": str(pol)}
-        assert prom_diff.get_sample_diff("output_clipped_samples_total", pol_labels) == saturated[pol]
+        assert prom_get.diff("output_clipped_samples_total", label_override=pol_labels) == saturated[pol]
         assert sensors[f"{NAME}.input{pol}.feng-clip-cnt"].value == saturated[pol]

@@ -95,6 +95,58 @@ class PromDiff:
             return after
 
 
+class PromGetHelp:
+    """Helper class for obtaining Prometheus metric values.
+
+    This is used when the developer is condifent on the return type and aides
+    code readability. It only needs the :class:`PromDiff` upon initialisation
+    and the user can continually obtain metric values against it.
+
+    Typical usage is::
+
+        labels = {"stream": stream_name}
+        promget = PromGetHelp(prom_diff, labels)
+        assert promget.value(name) == expected_value
+        new_labels = {"pol": "0"}
+        assert promget.diff(name, label_override=new_labels) == expected_diff
+
+    Parameters
+    ----------
+    prom_diff
+        Instance of :class:`PromDiff` that is used during a unit test.
+    labels
+        Optional identifiers for Prometheus metrics under test.
+    """
+
+    def __init__(self, prom_diff: PromDiff, labels: dict[str, str] | None = None) -> None:
+        self.prom_diff = prom_diff
+        self.labels = labels
+
+    def value(self, name: str, label_override: dict[str, str] | None = None) -> float:
+        """See :meth:`PromDiff.get_sample_value`.
+
+        This allows the user to override any default metric labels.
+        """
+        if label_override is not None:
+            value = self.prom_diff.get_sample_value(name, labels=label_override)
+        else:
+            value = self.prom_diff.get_sample_value(name, labels=self.labels)
+        assert value is not None, f"{name} is None"
+        return value
+
+    def diff(self, name: str, label_override: dict[str, str] | None = None) -> float:
+        """See :meth:`PromDiff.get_sample_diff`.
+
+        This allows the user to override any default metric labels.
+        """
+        if label_override is not None:
+            diff = self.prom_diff.get_sample_diff(name, labels=label_override)
+        else:
+            diff = self.prom_diff.get_sample_diff(name, labels=self.labels)
+        assert diff is not None, f"{name} is None"
+        return diff
+
+
 def unpackbits(data: NDArray[np.uint8], sample_bits: int = DIG_SAMPLE_BITS) -> np.ndarray:
     """Unpack a bit-packed array of signed big-endian integers.
 
