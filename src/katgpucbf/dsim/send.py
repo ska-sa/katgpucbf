@@ -22,6 +22,7 @@ import ipaddress
 import itertools
 import time
 from collections.abc import Iterable, Sequence
+from typing import Self
 
 import numpy as np
 import spead2.send.asyncio
@@ -76,7 +77,7 @@ class HeapSet:
     @classmethod
     def create(
         cls, timestamps: np.ndarray, n_substreams: Sequence[int], heap_size: int, digitiser_id: Sequence[int]
-    ) -> "HeapSet":
+    ) -> Self:
         """
         Create from shape parameters.
 

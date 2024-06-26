@@ -18,7 +18,7 @@
 
 import asyncio
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 import spead2.send.asyncio
 
@@ -94,7 +94,7 @@ class DescriptorSender:
             try:
                 # wait_for will time out if _halt_event is not set by the deadline.
                 await asyncio.wait_for(self._halt_event.wait(), timeout=delay)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             t = self._interval
 

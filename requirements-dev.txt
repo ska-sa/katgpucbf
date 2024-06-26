@@ -40,7 +40,6 @@ async-timeout==4.0.3
     # via
     #   -c requirements.txt
     #   aiokatcp
-    #   katgpucbf (setup.cfg)
 attrs==23.1.0
     # via
     #   -c requirements.txt
@@ -399,7 +398,6 @@ typing-extensions==4.12.0
     #   aiokatcp
     #   aiomonitor
     #   janus
-    #   katgpucbf (setup.cfg)
     #   katsdpsigproc
 tzdata==2023.3
     # via

@@ -16,13 +16,14 @@
 
 """Unit tests for XBEngine module."""
 
+import asyncio
 from collections import Counter
+from collections.abc import AsyncGenerator, Callable
 from logging import WARNING
-from typing import AsyncGenerator, Callable, Final
+from typing import Final
 from unittest import mock
 
 import aiokatcp
-import async_timeout
 import numpy as np
 import pytest
 import spead2
@@ -878,7 +879,7 @@ class TestEngine:
     @pytest.fixture
     async def client(self, xbengine: XBEngine) -> AsyncGenerator[aiokatcp.Client, None]:
         host, port = xbengine.sockets[0].getsockname()[:2]
-        async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+        async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
             client = await aiokatcp.Client.connect(host, port)
 
         yield client

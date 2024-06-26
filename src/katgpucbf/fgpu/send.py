@@ -19,7 +19,7 @@
 import asyncio
 import functools
 from collections.abc import Callable, Sequence
-from typing import TypedDict
+from typing import Required, TypedDict, Unpack
 
 import numpy as np
 import spead2.send
@@ -27,7 +27,6 @@ import spead2.send.asyncio
 from aiokatcp import SensorSet
 from katsdptelstate.endpoint import Endpoint
 from prometheus_client import Counter
-from typing_extensions import Unpack
 
 from .. import COMPLEX, N_POLS
 from ..send import send_rate
@@ -55,7 +54,7 @@ output_clip_counter = Counter(
 class _FengRawKwargs(TypedDict, total=False):
     """Helper class for type annotations."""
 
-    shape: tuple[int, ...]
+    shape: Required[tuple[int, ...]]
     dtype: np.dtype
     format: list[tuple[str, int]]
 
@@ -364,7 +363,7 @@ def make_descriptor_heap(
     channels_per_substream: int,
     spectra_per_heap: int,
     sample_bits: int,
-) -> "spead2.send.Heap":
+) -> spead2.send.Heap:
     """Create a descriptor heap for output F-Engine data."""
     raw_kwargs: _FengRawKwargs = {"shape": (channels_per_substream, spectra_per_heap, N_POLS, COMPLEX)}
     try:

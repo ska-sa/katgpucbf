@@ -17,7 +17,8 @@
 """Test linearity of gains and weights."""
 
 import itertools
-from typing import Awaitable, Callable, Iterable, Iterator, TypeVar
+from collections.abc import Awaitable, Callable, Iterable, Iterator
+from typing import TypeVar
 
 import aiokatcp
 import numpy as np

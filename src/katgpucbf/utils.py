@@ -24,7 +24,8 @@ import signal
 import time
 import weakref
 from collections import Counter
-from typing import Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
 import aiokatcp
 import numpy as np

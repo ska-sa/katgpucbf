@@ -22,7 +22,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import Any, Self, TypeAlias
 
 import numba.core.ccallback
 import numpy as np
@@ -75,7 +75,7 @@ class Chunk(spead2.recv.Chunk):
         self.timestamp = 0  # Actual value filled in when chunk received
         self.sink = weakref.ref(sink)
 
-    def __enter__(self) -> "Chunk":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:

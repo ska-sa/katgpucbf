@@ -28,10 +28,10 @@ import pathlib
 import re
 import tempfile
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from typing import Iterator, Literal, Union
+from typing import Literal, Union
 from uuid import UUID
 
 import docutils.writers.latex2e
@@ -670,7 +670,7 @@ def collate_results(results: Iterable[Result]) -> list[ResultSet]:
     for result_list in result_lists.values():
         result_set = ResultSet(result_list)
         # Check whether the CBF titles alone give unique subtitles
-        cbf_titles = set(result.cbf.title for result in result_list if result.cbf is not None)
+        cbf_titles = {result.cbf.title for result in result_list if result.cbf is not None}
         if len(cbf_titles) == len(result_list):
             for result in result_list:
                 assert result.cbf is not None
