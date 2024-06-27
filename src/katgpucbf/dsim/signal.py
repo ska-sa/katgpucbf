@@ -26,7 +26,7 @@ import signal
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Self
 
 import dask.array as da
 import numba
@@ -907,7 +907,7 @@ class SignalService:
         )
         await loop.run_in_executor(None, self._make_request, req)
 
-    async def __aenter__(self) -> "SignalService":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *exc_info) -> None:

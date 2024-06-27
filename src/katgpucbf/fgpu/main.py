@@ -262,59 +262,63 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     )
     add_aiomonitor_arguments(parser)
     parser.add_argument(
-        "--src-interface",
+        "--recv-interface",
         type=comma_split(get_interface_address),
         help="Name(s) of input network device(s)",
     )
-    parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no]")
+    parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for receiving [no]")
     parser.add_argument(
-        "--src-affinity",
+        "--recv-affinity",
         type=comma_split(int),
         metavar="CORE,...",
         default=[-1],
         help="Cores for input-handling threads (comma-separated) [not bound]",
     )
     parser.add_argument(
-        "--src-comp-vector",
+        "--recv-comp-vector",
         type=comma_split(int),
         metavar="VECTOR,...",
         default=[0],
         help="Completion vectors for source streams, or -1 for polling [0]",
     )
     parser.add_argument(
-        "--src-packet-samples", type=int, default=4096, help="Number of samples per digitiser packet [%(default)s]"
+        "--recv-packet-samples", type=int, default=4096, help="Number of samples per digitiser packet [%(default)s]"
     )
     parser.add_argument(
-        "--src-buffer",
+        "--recv-buffer",
         type=int,
         default=128 * 1024 * 1024,
         metavar="BYTES",
         help="Size of network receive buffer [128MiB]",
     )
     parser.add_argument(
-        "--dst-interface", type=comma_split(get_interface_address), required=True, help="Name of output network device"
+        "--send-interface", type=comma_split(get_interface_address), required=True, help="Name of output network device"
     )
-    parser.add_argument("--dst-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
-    parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no]")
+    parser.add_argument("--send-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
+    parser.add_argument("--send-ibv", action="store_true", help="Use ibverbs for output [no]")
     parser.add_argument(
-        "--dst-packet-payload",
+        "--send-packet-payload",
         type=int,
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
     )
     parser.add_argument(
-        "--dst-affinity", type=int, default=-1, metavar="CORE,...", help="Cores for output-handling threads [not bound]"
+        "--send-affinity",
+        type=int,
+        default=-1,
+        metavar="CORE,...",
+        help="Cores for output-handling threads [not bound]",
     )
     parser.add_argument(
-        "--dst-comp-vector",
+        "--send-comp-vector",
         type=int,
         default=0,
         metavar="VECTOR",
         help="Completion vector for transmission, or -1 for polling [0]",
     )
     parser.add_argument(
-        "--dst-buffer",
+        "--send-buffer",
         type=int,
         default=1024 * 1024,
         metavar="BYTES",
@@ -355,14 +359,14 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Jones vectors in each output batch [%(default)s]",
     )
     parser.add_argument(
-        "--src-chunk-samples",
+        "--recv-chunk-samples",
         type=int,
         default=2**25,
         metavar="SAMPLES",
         help="Number of digitiser samples to process at a time (per pol). [%(default)s]",
     )
     parser.add_argument(
-        "--dst-chunk-jones",
+        "--send-chunk-jones",
         type=int,
         default=2**23,
         metavar="VECTORS",
@@ -384,7 +388,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Number of bits per digitised sample [%(default)s]",
     )
     parser.add_argument(
-        "--dst-sample-bits",
+        "--send-sample-bits",
         type=int,
         default=8,
         choices=[4, 8],
@@ -416,12 +420,12 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("src", type=parse_source, help="Source endpoints (or pcap file)")
     args = parser.parse_args(arglist)
 
-    if args.use_peerdirect and not args.dst_ibv:
-        parser.error("--use-peerdirect requires --dst-ibv")
-    if not isinstance(args.src, str) and args.src_interface is None:
-        parser.error("Live source requires --src-interface")
-    if args.src_ibv and len(args.src_affinity) != len(args.src_comp_vector):
-        parser.error("--src-comp-vector must have same length as --src-affinity")
+    if args.use_peerdirect and not args.send_ibv:
+        parser.error("--use-peerdirect requires --send-ibv")
+    if not isinstance(args.src, str) and args.recv_interface is None:
+        parser.error("Live source requires --recv-interface")
+    if args.recv_ibv and len(args.recv_affinity) != len(args.recv_comp_vector):
+        parser.error("--recv-comp-vector must have same length as --recv-affinity")
 
     # Convert from _*OutputDict to *Output
     used_names = set()
@@ -431,7 +435,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             name = output.name
             if output.name in used_names:
                 parser.error(f"output name {name} used twice")
-            if len(output.dst) % len(args.dst_interface) != 0:
+            if len(output.dst) % len(args.send_interface) != 0:
                 parser.error(f"{name}: number of destinations must be divisible by number of destination interfaces")
             used_names.add(name)
             args.outputs.append(output)
@@ -461,35 +465,35 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
         monitor = NullMonitor()
 
     batch_jones_lcm = math.lcm(*(output.jones_per_batch for output in args.outputs))
-    chunk_jones = accel.roundup(args.dst_chunk_jones, batch_jones_lcm)
+    chunk_jones = accel.roundup(args.send_chunk_jones, batch_jones_lcm)
     engine = Engine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         context=ctx,
         vkgdr_handle=vkgdr_handle,
         srcs=args.src,
-        src_interface=args.src_interface,
-        src_ibv=args.src_ibv,
-        src_affinity=args.src_affinity,
-        src_comp_vector=args.src_comp_vector,
-        src_packet_samples=args.src_packet_samples,
-        src_buffer=args.src_buffer,
-        dst_interface=args.dst_interface,
-        dst_ttl=args.dst_ttl,
-        dst_ibv=args.dst_ibv,
-        dst_packet_payload=args.dst_packet_payload,
-        dst_affinity=args.dst_affinity,
-        dst_comp_vector=args.dst_comp_vector,
-        dst_buffer=args.dst_buffer,
+        recv_interface=args.recv_interface,
+        recv_ibv=args.recv_ibv,
+        recv_affinity=args.recv_affinity,
+        recv_comp_vector=args.recv_comp_vector,
+        recv_packet_samples=args.recv_packet_samples,
+        recv_buffer=args.recv_buffer,
+        send_interface=args.send_interface,
+        send_ttl=args.send_ttl,
+        send_ibv=args.send_ibv,
+        send_packet_payload=args.send_packet_payload,
+        send_affinity=args.send_affinity,
+        send_comp_vector=args.send_comp_vector,
+        send_buffer=args.send_buffer,
         outputs=args.outputs,
         adc_sample_rate=args.adc_sample_rate,
         send_rate_factor=args.send_rate_factor,
         feng_id=args.feng_id,
         n_ants=args.array_size,
-        chunk_samples=args.src_chunk_samples,
+        chunk_samples=args.recv_chunk_samples,
         chunk_jones=chunk_jones,
         dig_sample_bits=args.dig_sample_bits,
-        dst_sample_bits=args.dst_sample_bits,
+        send_sample_bits=args.send_sample_bits,
         max_delay_diff=args.max_delay_diff,
         gain=args.gain,
         sync_time=args.sync_time,

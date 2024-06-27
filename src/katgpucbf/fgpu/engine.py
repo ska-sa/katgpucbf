@@ -49,7 +49,7 @@ from .. import recv as base_recv
 from ..mapped_array import MappedArray
 from ..monitor import Monitor
 from ..queue_item import QueueItem
-from ..recv import RX_SENSOR_TIMEOUT_CHUNKS, RX_SENSOR_TIMEOUT_MIN
+from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import (
@@ -195,11 +195,11 @@ class InQueueItem(QueueItem):
     present_cumsum: np.ndarray
     #: Chunk to return to recv after processing (used with vkgdr only).
     chunk: recv.Chunk | None = None
-    #: Number of samples in each :class:`~katsdpsigproc.accel.DeviceArray` in :attr:`PolInItem.samples`
+    #: Number of samples for each polarisation in :attr:`samples`.
     n_samples: int
-    #: Bitwidth of the data in :attr:`PolInItem.samples`
+    #: Bitwidth of the data in :attr:`samples`.
     dig_sample_bits: int
-    #: Number of pipelines still using this item
+    #: Number of pipelines still using this item.
     refcount: int
 
     def __init__(
@@ -344,6 +344,7 @@ class OutQueueItem(QueueItem):
         """
         super().reset(timestamp)
         self.n_spectra = 0
+        self.present[:] = False
 
     def reset_all(self, command_queue: AbstractCommandQueue, timestamp: int = 0) -> None:
         """Fully reset the item.
@@ -376,6 +377,11 @@ class OutQueueItem(QueueItem):
         # PostProc's __init__ method gives this as (spectra // spectra_per_heap)*(spectra_per_heap), so
         # basically, the number of spectra.
         return self.spectra.shape[0] * self.spectra.shape[2]
+
+    @property
+    def next_timestamp(self) -> int:  # noqa: D401
+        """Timestamp of the next :class:`OutQueueItem` after this one."""
+        return self.timestamp + self.capacity * self.spectra_samples
 
     @property
     def pols(self) -> int:  # noqa: D401
@@ -485,8 +491,8 @@ class Pipeline:
             context,
             output.taps,
             output.channels,
-            engine.src_layout.sample_bits,
-            engine.dst_sample_bits,
+            engine.recv_layout.sample_bits,
+            engine.send_sample_bits,
             narrowband=narrowband_config,
         )
         self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, output.spectra_per_heap)
@@ -520,7 +526,7 @@ class Pipeline:
         self.descriptor_heap = send.make_descriptor_heap(
             channels_per_substream=output.channels // len(output.dst),
             spectra_per_heap=output.spectra_per_heap,
-            sample_bits=engine.dst_sample_bits,
+            sample_bits=engine.send_sample_bits,
         )
 
     def _populate_sensors(self) -> None:
@@ -600,7 +606,7 @@ class Pipeline:
                     send.Chunk(
                         accel.HostArray(
                             send_shape,
-                            gaussian_dtype(self.engine.dst_sample_bits),
+                            gaussian_dtype(self.engine.send_sample_bits),
                             context=self._compute.template.context,
                         ),
                         accel.HostArray((heaps, N_POLS), np.uint32, context=self._compute.template.context),
@@ -757,7 +763,7 @@ class Pipeline:
             # met, then truncate if we observe a coarse delay change. Note:
             # max_end_in is computed assuming the coarse delay does not change.
             max_end_in = in_item.end_timestamp + min(start_coarse_delays) - self.output.window + 1
-            max_end_out = self._out_item.timestamp + self._out_item.capacity * self.output.spectra_samples
+            max_end_out = self._out_item.next_timestamp
             max_end = min(max_end_in, max_end_out)
             # Speculatively evaluate until one of the first two conditions is met
             timestamps = np.arange(start_timestamp, max_end, self.output.spectra_samples)
@@ -841,9 +847,9 @@ class Pipeline:
                         )
                         # Offset of the last sample (inclusive, rather than past-the-end)
                         last_offset = first_offset + self.output.window - 1
-                        first_packet = first_offset // self.engine.src_layout.heap_samples
+                        first_packet = first_offset // self.engine.recv_layout.heap_samples
                         # last_packet is exclusive
-                        last_packet = last_offset // self.engine.src_layout.heap_samples + 1
+                        last_packet = last_offset // self.engine.recv_layout.heap_samples + 1
                         present_packets = (
                             in_item.present_cumsum[pol, last_packet] - in_item.present_cumsum[pol, first_packet]
                         )
@@ -894,6 +900,30 @@ class Pipeline:
             if chunk.cleanup is not None:
                 chunk.cleanup()
                 chunk.cleanup = None  # Potentially helps break reference cycles
+
+    def _update_dig_power_sensors(self, dig_total_power: accel.HostArray | None, out_item: OutQueueItem) -> None:
+        """Update digitiser power sensors.
+
+        Helper function for keeping the complexity of :meth:`run_transmit` down to manageable levels.
+        """
+        if dig_total_power is not None:
+            update_timestamp = self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
+            if np.all(out_item.present):
+                for pol, trg in enumerate(dig_total_power):
+                    total_power = float(trg)
+                    avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
+                    # Normalise relative to full scale. The factor of 2 is because we
+                    # want 1.0 to correspond to a sine wave rather than a square wave.
+                    avg_power /= ((1 << (self.engine.recv_layout.sample_bits - 1)) - 1) ** 2 / 2
+                    # If for some reason there's zero power, avoid reporting
+                    # -inf dB by assigning the most negative representable value
+                    avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
+                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(avg_power_db, timestamp=update_timestamp)
+            else:
+                for pol in range(N_POLS):
+                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
+                        np.finfo(np.float64).min, status=aiokatcp.Sensor.Status.FAILURE, timestamp=update_timestamp
+                    )
 
     async def run_transmit(self) -> None:
         """Get the processed data from the GPU to the Network.
@@ -947,19 +977,7 @@ class Pipeline:
             with self.engine.monitor.with_state(func_name, "wait transfer"):
                 await async_wait_for_events([download_marker])
 
-            if dig_total_power is not None:
-                for pol, trg in enumerate(dig_total_power):
-                    total_power = float(trg)
-                    avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
-                    # Normalise relative to full scale. The factor of 2 is because we
-                    # want 1.0 to correspond to a sine wave rather than a square wave.
-                    avg_power /= ((1 << (self.engine.src_layout.sample_bits - 1)) - 1) ** 2 / 2
-                    # If for some reason there's zero power, avoid reporting
-                    # -inf dB by assigning the most negative representable value
-                    avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
-                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
-                        avg_power_db, timestamp=self.engine.time_converter.adc_to_unix(out_item.end_timestamp)
-                    )
+            self._update_dig_power_sensors(dig_total_power, out_item)
 
             n_batches = out_item.n_spectra // self.output.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
@@ -1063,35 +1081,35 @@ class Engine(aiokatcp.DeviceServer):
         Handle to vkgdr for the same device as `context`.
     srcs
         A list of source endpoints for the incoming data, or a pcap filename.
-    src_interface
+    recv_interface
         IP addresses of the network devices to use for input.
-    src_ibv
+    recv_ibv
         Use ibverbs for input.
-    src_affinity
+    recv_affinity
         List of CPU cores for input-handling threads. Must be one number per
         pol.
-    src_comp_vector
+    recv_comp_vector
         Completion vectors for source streams, or -1 for polling.
         See :class:`spead2.recv.UdpIbvConfig` for further information.
-    src_packet_samples
+    recv_packet_samples
         The number of samples per digitiser packet.
-    src_buffer
+    recv_buffer
         The size of the network receive buffer.
-    dst_interface
+    send_interface
         IP addresses of the network devices to use for output.
-    dst_ttl
+    send_ttl
         TTL for outgoing packets.
-    dst_ibv
+    send_ibv
         Use ibverbs for output.
-    dst_packet_payload
+    send_packet_payload
         Size for output packets (voltage payload only, headers and padding are
         added to this).
-    dst_affinity
+    send_affinity
         CPU core for output-handling thread.
-    dst_comp_vector
+    send_comp_vector
         Completion vector for transmission, or -1 for polling.
         See :class:`spead2.send.UdpIbvConfig` for further information.
-    dst_buffer
+    send_buffer
         Size of the network send buffer.
     outputs
         Output streams to generate.
@@ -1145,19 +1163,19 @@ class Engine(aiokatcp.DeviceServer):
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
         srcs: str | list[tuple[str, int]],
-        src_interface: list[str] | None,
-        src_ibv: bool,
-        src_affinity: list[int],
-        src_comp_vector: list[int],
-        src_packet_samples: int,
-        src_buffer: int,
-        dst_interface: list[str],
-        dst_ttl: int,
-        dst_ibv: bool,
-        dst_packet_payload: int,
-        dst_affinity: int,
-        dst_comp_vector: int,
-        dst_buffer: int,
+        recv_interface: list[str] | None,
+        recv_ibv: bool,
+        recv_affinity: list[int],
+        recv_comp_vector: list[int],
+        recv_packet_samples: int,
+        recv_buffer: int,
+        send_interface: list[str],
+        send_ttl: int,
+        send_ibv: bool,
+        send_packet_payload: int,
+        send_affinity: int,
+        send_comp_vector: int,
+        send_buffer: int,
         outputs: list[Output],
         adc_sample_rate: float,
         send_rate_factor: float,
@@ -1166,7 +1184,7 @@ class Engine(aiokatcp.DeviceServer):
         chunk_samples: int,
         chunk_jones: int,
         dig_sample_bits: int,
-        dst_sample_bits: int,
+        send_sample_bits: int,
         max_delay_diff: int,
         gain: complex,
         sync_time: float,
@@ -1178,22 +1196,22 @@ class Engine(aiokatcp.DeviceServer):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
         self._populate_sensors(
-            self.sensors, max(RX_SENSOR_TIMEOUT_MIN, RX_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
+            self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
 
         # Attributes copied or initialised from arguments
         self._srcs = copy.copy(srcs)
-        self._src_comp_vector = list(src_comp_vector)
-        self._src_interface = src_interface
-        self._src_buffer = src_buffer
-        self._src_ibv = src_ibv
-        self.src_layout = recv.Layout(dig_sample_bits, src_packet_samples, chunk_samples, mask_timestamp)
-        self._dst_interface = dst_interface
-        self._dst_ttl = dst_ttl
-        self._dst_ibv = dst_ibv
-        self._dst_packet_payload = dst_packet_payload
-        self._dst_comp_vector = dst_comp_vector
-        self._dst_buffer = dst_buffer
+        self._recv_comp_vector = list(recv_comp_vector)
+        self._recv_interface = recv_interface
+        self._recv_buffer = recv_buffer
+        self._recv_ibv = recv_ibv
+        self.recv_layout = recv.Layout(dig_sample_bits, recv_packet_samples, chunk_samples, mask_timestamp)
+        self._send_interface = send_interface
+        self._send_ttl = send_ttl
+        self._send_ibv = send_ibv
+        self._send_packet_payload = send_packet_payload
+        self._send_comp_vector = send_comp_vector
+        self._send_buffer = send_buffer
         self._send_rate_factor = send_rate_factor
         self.adc_sample_rate = adc_sample_rate
         self.feng_id = feng_id
@@ -1204,7 +1222,7 @@ class Engine(aiokatcp.DeviceServer):
         self.monitor = monitor
         self.use_vkgdr = use_vkgdr
         self.use_peerdirect = use_peerdirect
-        self.dst_sample_bits = dst_sample_bits
+        self.send_sample_bits = send_sample_bits
         self.vkgdr_handle = vkgdr_handle
 
         # Tuning knobs not exposed via arguments
@@ -1215,50 +1233,50 @@ class Engine(aiokatcp.DeviceServer):
         self._copy_queue = context.create_command_queue()
 
         extra_samples = max_delay_diff + max(output.window for output in outputs)
-        if extra_samples > self.src_layout.chunk_samples:
+        if extra_samples > self.recv_layout.chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
-        self.n_samples = self.src_layout.chunk_samples + extra_samples
+        self.n_samples = self.recv_layout.chunk_samples + extra_samples
 
         self._in_free_queue: asyncio.Queue[InQueueItem] = monitor.make_queue("in_free_queue", self.n_in)
-        self._init_recv(src_affinity, monitor)
+        self._init_recv(recv_affinity, monitor)
 
         # Prevent multiple chunks from being in flight in pipelines at the same
         # time. This keeps the pipelines synchronised to avoid running out of
         # InItems.
         self._active_in_sem = asyncio.BoundedSemaphore(1)
         self._pipelines = []
-        self._send_thread_pool = spead2.ThreadPool(1, [] if dst_affinity < 0 else [dst_affinity])
+        self._send_thread_pool = spead2.ThreadPool(1, [] if send_affinity < 0 else [send_affinity])
         for i, output in enumerate(outputs):
             # Wideband outputs are always placed first, but we need to consider
             # the case of there being no wideband output at all.
             dig_stats = i == 0 and isinstance(output, WidebandOutput)
             self._pipelines.append(Pipeline(output, self, context, dig_stats))
 
-    def _init_recv(self, src_affinity: list[int], monitor: Monitor) -> None:
+    def _init_recv(self, recv_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
-        src_chunks = 4
-        ringbuffer_capacity = src_chunks * N_POLS
+        recv_chunks = 4
+        ringbuffer_capacity = recv_chunks * N_POLS
 
         context = self._upload_queue.context
         for _ in range(self._in_free_queue.maxsize):
             self._in_free_queue.put_nowait(
-                InQueueItem(context, self.src_layout, self.n_samples, use_vkgdr=self.use_vkgdr)
+                InQueueItem(context, self.recv_layout, self.n_samples, use_vkgdr=self.use_vkgdr)
             )
 
         data_ringbuffer = ChunkRingbuffer(
             ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
         )
-        free_ringbuffer = spead2.recv.ChunkRingbuffer(src_chunks)
+        free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
         if self.use_vkgdr:
             # These quantities are per-pol
-            array_bytes = self.n_samples * self.src_layout.sample_bits // BYTE_BITS
+            array_bytes = self.n_samples * self.recv_layout.sample_bits // BYTE_BITS
             stride = _padded_input_size(array_bytes)
         else:
-            stride = self.src_layout.chunk_bytes
-        self._src_group = recv.make_stream_group(
-            self.src_layout, data_ringbuffer, free_ringbuffer, src_affinity, stride
+            stride = self.recv_layout.chunk_bytes
+        self._recv_group = recv.make_stream_group(
+            self.recv_layout, data_ringbuffer, free_ringbuffer, recv_affinity, stride
         )
-        for _ in range(src_chunks):
+        for _ in range(recv_chunks):
             if self.use_vkgdr:
                 with context:
                     mem = vkgdr.pycuda.Memory(self.vkgdr_handle, N_POLS * stride)
@@ -1276,13 +1294,13 @@ class Engine(aiokatcp.DeviceServer):
             chunk = recv.Chunk(
                 data=buf,
                 device=device_array,
-                present=np.zeros((N_POLS, self.src_layout.chunk_heaps), np.uint8),
-                extra=np.zeros((N_POLS, self.src_layout.chunk_heaps), np.uint16),
-                sink=self._src_group,
+                present=np.zeros((N_POLS, self.recv_layout.chunk_heaps), np.uint8),
+                extra=np.zeros((N_POLS, self.recv_layout.chunk_heaps), np.uint16),
+                sink=self._recv_group,
             )
             chunk.recycle()  # Make available to the stream
 
-    def _populate_sensors(self, sensors: aiokatcp.SensorSet, rx_sensor_timeout: float) -> None:
+    def _populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
             sensors.add(
@@ -1308,7 +1326,7 @@ class Engine(aiokatcp.DeviceServer):
                 )
             )
 
-        for sensor in recv.make_sensors(rx_sensor_timeout).values():
+        for sensor in recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
         sensors.add(steady_state_timestamp_sensor())
         sensors.add(DeviceStatusSensor(sensors))
@@ -1328,12 +1346,12 @@ class Engine(aiokatcp.DeviceServer):
             output_name=output.name,
             thread_pool=self._send_thread_pool,
             endpoints=output.dst,
-            interfaces=self._dst_interface,
-            ttl=self._dst_ttl,
-            ibv=self._dst_ibv,
-            packet_payload=self._dst_packet_payload,
-            comp_vector=self._dst_comp_vector,
-            buffer=self._dst_buffer,
+            interfaces=self._send_interface,
+            ttl=self._send_ttl,
+            ibv=self._send_ibv,
+            packet_payload=self._send_packet_payload,
+            comp_vector=self._send_comp_vector,
+            buffer=self._send_buffer,
             bandwidth=self.adc_sample_rate * 0.5 / output.decimation,
             send_rate_factor=self._send_rate_factor,
             feng_id=self.feng_id,
@@ -1398,10 +1416,10 @@ class Engine(aiokatcp.DeviceServer):
         `prev_item` then the tail of `prev_item` is instead marked as absent.
         This can happen if we lose a whole input chunk from the digitiser.
         """
-        chunk_heaps = prev_item.n_samples // self.src_layout.heap_samples
+        chunk_heaps = prev_item.n_samples // self.recv_layout.heap_samples
         copy_heaps = prev_item.present.shape[1] - chunk_heaps
         if in_item is not None and prev_item.end_timestamp == in_item.timestamp:
-            sample_bits = self.src_layout.sample_bits
+            sample_bits = self.recv_layout.sample_bits
             copy_samples = prev_item.capacity - prev_item.n_samples
             copy_samples = min(copy_samples, in_item.n_samples)
             copy_bytes = copy_samples * sample_bits // BYTE_BITS
@@ -1661,28 +1679,28 @@ class Engine(aiokatcp.DeviceServer):
             self.add_service_task(descriptor_task)
             self._cancel_tasks.append(descriptor_task)
 
-        src_comp_vector_iter = iter(self._src_comp_vector)
-        if self._src_interface is None:
-            src_interface_iter: Iterator[str | None] = itertools.repeat(None)
+        recv_comp_vector_iter = iter(self._recv_comp_vector)
+        if self._recv_interface is None:
+            recv_interface_iter: Iterator[str | None] = itertools.repeat(None)
         else:
-            src_interface_iter = itertools.cycle(self._src_interface)
+            recv_interface_iter = itertools.cycle(self._recv_interface)
         if isinstance(self._srcs, str):
-            self._src_group[0].add_udp_pcap_file_reader(self._srcs)
+            self._recv_group[0].add_udp_pcap_file_reader(self._srcs)
         else:
-            for i, stream in enumerate(self._src_group):
-                first_src = i * len(self._srcs) // len(self._src_group)
-                last_src = (i + 1) * len(self._srcs) // len(self._src_group)
+            for i, stream in enumerate(self._recv_group):
+                first_src = i * len(self._srcs) // len(self._recv_group)
+                last_src = (i + 1) * len(self._srcs) // len(self._recv_group)
                 base_recv.add_reader(
                     stream,
                     src=self._srcs[first_src:last_src],
-                    interface=next(src_interface_iter),
-                    ibv=self._src_ibv,
-                    comp_vector=next(src_comp_vector_iter),
-                    buffer=self._src_buffer // len(self._src_group),
+                    interface=next(recv_interface_iter),
+                    ibv=self._recv_ibv,
+                    comp_vector=next(recv_comp_vector_iter),
+                    buffer=self._recv_buffer // len(self._recv_group),
                 )
 
         recv_task = asyncio.create_task(
-            self._run_receive(self._src_group, self.src_layout),
+            self._run_receive(self._recv_group, self.recv_layout),
             name=RECV_TASK_NAME,
         )
         self.add_service_task(recv_task)
@@ -1711,7 +1729,7 @@ class Engine(aiokatcp.DeviceServer):
         """
         for task in self._cancel_tasks:
             task.cancel()
-        self._src_group.stop()
+        self._recv_group.stop()
         # If any of the tasks are already done then we had an exception, and
         # waiting for the rest may hang as the shutdown path won't proceed
         # neatly.

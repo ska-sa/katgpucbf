@@ -37,7 +37,6 @@ from scipy.special import expit
 
 from noisy_search import noisy_search
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
-from sighandler import add_sigint_handler
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
 N_POLS = 2
@@ -122,25 +121,25 @@ def fgpu_factory(
     qstep = step // 4
     my_cpus = server_info.cpus[index * step : (index + 1) * step]
     if args.use_vkgdr:
-        src_chunk_samples = 2**24 // scaling_n
-        dst_chunk_jones = src_chunk_samples // 2
+        recv_chunk_samples = 2**24 // scaling_n
+        send_chunk_jones = recv_chunk_samples // 2
     else:
-        src_chunk_samples = 2**27 // scaling_n
-        dst_chunk_jones = src_chunk_samples // 4
+        recv_chunk_samples = 2**27 // scaling_n
+        send_chunk_jones = recv_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        src_affinity = f"0,1,{qstep},{qstep + 1}"
-        dst_affinity = f"{2 * qstep}"
+        recv_affinity = f"0,1,{qstep},{qstep + 1}"
+        send_affinity = f"{2 * qstep}"
         other_affinity = f"{3 * qstep}"
     elif n == 2:
         interface = server.interfaces[index % len(server.interfaces)]
-        src_affinity = f"{my_cpus[0]},{my_cpus[hstep]}"
-        dst_affinity = f"{my_cpus[qstep]}"
+        recv_affinity = f"{my_cpus[0]},{my_cpus[hstep]}"
+        send_affinity = f"{my_cpus[qstep]}"
         other_affinity = f"{my_cpus[hstep + qstep]}"
     else:
         interface = server.interfaces[index % len(server.interfaces)]
-        src_affinity = f"{my_cpus[0]}"
-        dst_affinity = f"{my_cpus[hstep]}"
+        recv_affinity = f"{my_cpus[0]}"
+        send_affinity = f"{my_cpus[hstep]}"
         other_affinity = f"{my_cpus[hstep + 1]}"
     gpu = server.gpus[index % len(server.gpus)]
 
@@ -161,13 +160,13 @@ def fgpu_factory(
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm "
         f" {' '.join(args.fgpu_docker_arg)} {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "
-        f"--src-packet-samples={args.dig_heap_samples} "
-        f"--src-chunk-samples={src_chunk_samples} --dst-chunk-jones={dst_chunk_jones} "
-        f"--src-buffer={256 * 1024 * 1024 // scaling_n} "
-        f"--src-interface={interface} --src-ibv "
-        f"--dst-interface={interface} --dst-ibv "
-        f"--src-affinity={src_affinity} --src-comp-vector={src_affinity} "
-        f"--dst-affinity={dst_affinity} --dst-comp-vector={dst_affinity} "
+        f"--recv-packet-samples={args.dig_heap_samples} "
+        f"--recv-chunk-samples={recv_chunk_samples} --send-chunk-jones={send_chunk_jones} "
+        f"--recv-buffer={256 * 1024 * 1024 // scaling_n} "
+        f"--recv-interface={interface} --recv-ibv "
+        f"--send-interface={interface} --send-ibv "
+        f"--recv-affinity={recv_affinity} --recv-comp-vector={recv_affinity} "
+        f"--send-affinity={send_affinity} --send-comp-vector={send_affinity} "
         f"--adc-sample-rate={adc_sample_rate} "
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
@@ -418,7 +417,6 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
 
 
 async def main():  # noqa: D103
-    add_sigint_handler()
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")
     parser.add_argument("--channels", type=int, default=1024, help="Wideband channel count [%(default)s]")

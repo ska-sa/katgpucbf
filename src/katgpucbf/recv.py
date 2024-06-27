@@ -22,7 +22,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import Any, Self, TypeAlias
 
 import numba.core.ccallback
 import numpy as np
@@ -41,9 +41,9 @@ user_data_type = types.Record.make_c_struct(
 )
 
 #: Number of chunks before rx sensor status changes
-RX_SENSOR_TIMEOUT_CHUNKS = 10
-#: Minimum rx sensor status timeout in seconds
-RX_SENSOR_TIMEOUT_MIN = 1.0
+RECV_SENSOR_TIMEOUT_CHUNKS = 10
+#: Minimum recv sensor status timeout in seconds
+RECV_SENSOR_TIMEOUT_MIN = 1.0
 #: Eviction mode to use when some streams fall behind
 EVICTION_MODE = spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY
 
@@ -75,7 +75,7 @@ class Chunk(spead2.recv.Chunk):
         self.timestamp = 0  # Actual value filled in when chunk received
         self.sink = weakref.ref(sink)
 
-    def __enter__(self) -> "Chunk":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -394,7 +394,7 @@ def add_reader(
         stream.add_udp_pcap_file_reader(src)
     elif ibv:
         if interface is None:
-            raise ValueError("--src-interface is required with --src-ibv")
+            raise ValueError("--recv-interface is required with --recv-ibv")
         ibv_config = spead2.recv.UdpIbvConfig(
             endpoints=src,
             interface_address=interface,

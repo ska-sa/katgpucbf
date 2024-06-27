@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,10 +16,10 @@
 
 """Fixtures for use in fgpu unit tests."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 
 import aiokatcp
-import async_timeout
 import pytest
 import spead2
 import vkgdr
@@ -111,7 +111,7 @@ async def engine_server(
 async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client, None]:
     """Create a KATCP client for communicating with the dummy server."""
     host, port = engine_server.sockets[0].getsockname()[:2]
-    async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+    async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
         client = await aiokatcp.Client.connect(host, port)
     yield client
     client.close()

@@ -16,12 +16,14 @@
 
 """Unit tests for XBEngine module."""
 
+import asyncio
 from collections import Counter
+from collections.abc import AsyncGenerator, Callable
 from logging import WARNING
-from typing import Any, AsyncGenerator, Callable, Final
+from typing import Final
+from unittest import mock
 
 import aiokatcp
-import async_timeout
 import numpy as np
 import pytest
 import spead2
@@ -34,6 +36,7 @@ from numba import njit
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.fgpu.send import PREAMBLE_SIZE
+from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend, xsend
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
 from katgpucbf.xbgpu.engine import BPipeline, InQueueItem, XBEngine, XPipeline
@@ -49,6 +52,8 @@ pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 get_baseline_index = njit(Correlation.get_baseline_index)
 
 ADC_SAMPLE_RATE: Final[float] = 1712e6  # L-band
+SYNC_TIME: Final[float] = 1234567890
+TIME_CONVERTER = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
@@ -334,38 +339,41 @@ def verify_corrprod_data(
 def verify_corrprod_sensors(
     *,
     xpipelines: list[XPipeline],
-    acc_indices: list[list[int]],
     prom_diff: PromDiff,
-    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
+    actual_sensor_updates: dict[str, list[aiokatcp.Reading]],
     n_channels_per_substream: int,
     n_baselines: int,
+    timestamp_step: int,
     present: np.ndarray,
-) -> None:
+) -> int:
     """Verify katcp and Prometheus sensors for processed XPipeline data.
 
     Parameters
     ----------
     xpipelines
         List of :class:`XPipeline` that are part of the unit test.
-    acc_indices
-        List of accumulation indices received, per pipeline.
     prom_diff
         Collection of Prometheus metrics observed during the XBEngine's
+        processing of data stimulus.
     actual_sensor_updates
         Dictionary of lists of sensor updates. They dictionary keys are sensor
-        names, the values are a list of tuples for each sensor update captured
-        via the callback attached to :class:`XPipeline` sensors. Accommodating
-        for three value types as there are three different types of sensors in
-        the XBEngine.
-        processing of data stimulus.
+        names, the values are a list of readings for each sensor update captured
+        via the callback attached to :class:`XPipeline` sensors.
     n_channels_per_substream
         Unit test fixture.
     n_baselines
         Number of baselines for the array size in the unit test.
+    timestamp_step
+        Timestamp step between each received heap processed.
     present
-        Array of shape (n_batches, n_ants) indicating which heaps were present.
+        Array of shape (n_batches, n_ants) indicating which input heaps were present.
+
+    Returns
+    -------
+    Total number of skipped accumulations
     """
-    for xpipeline, pipeline_acc_indices in zip(xpipelines, acc_indices):
+    skipped_accs_total = 0
+    for xpipeline in xpipelines:
         # The assert statements are mainly to force mypy to realise the
         # prom_diff values obtained are the expected data type
         def prom_get(name: str) -> float:
@@ -373,46 +381,58 @@ def verify_corrprod_sensors(
             assert diff is not None, f"{name} is None"
             return diff
 
-        n_accumulations_completed = len(pipeline_acc_indices)
         # Count accumulations for which we expect to receive the accumulation
-        # but have incomplete data.
+        # but have incomplete data. Also calculate expected updates to
+        # rx.synchronised.
+        heap_accumulation_threshold = xpipeline.output.heap_accumulation_threshold
+        # Note: this truncates any partial final accumulation, because it will
+        # not get flushed.
+        n_accs = len(present) // heap_accumulation_threshold
+        expected_sensor_updates = []
+        complete_accs = 0
         incomplete_accs = 0
-        for acc_index in pipeline_acc_indices:
-            batch_start = acc_index * xpipeline.output.heap_accumulation_threshold
-            batch_end = (acc_index + 1) * xpipeline.output.heap_accumulation_threshold
-            if not np.all(present[batch_start:batch_end]):
-                incomplete_accs += 1
+        skipped_accs = 0
+        for acc_index in range(n_accs):
+            batch_start = acc_index * heap_accumulation_threshold
+            batch_end = (acc_index + 1) * heap_accumulation_threshold
+            acc_present = present[batch_start:batch_end]
+            if np.any(acc_present):
+                sensor_timestamp = TIME_CONVERTER.adc_to_unix(batch_end * timestamp_step)
+                if acc_present.all():
+                    expected_sensor_updates.append(
+                        aiokatcp.Reading(sensor_timestamp, aiokatcp.Sensor.Status.NOMINAL, True)
+                    )
+                    complete_accs += 1
+                elif acc_present.all(axis=0).any():
+                    # At least one antenna was present for the entire accumulation
+                    expected_sensor_updates.append(
+                        aiokatcp.Reading(sensor_timestamp, aiokatcp.Sensor.Status.ERROR, False)
+                    )
+                    incomplete_accs += 1
+                else:
+                    # Some data arrived, but no antenna had complete data. It
+                    # will not be sent.
+                    expected_sensor_updates.append(
+                        aiokatcp.Reading(sensor_timestamp, aiokatcp.Sensor.Status.ERROR, False)
+                    )
+                    skipped_accs += 1
+        sent_accs = complete_accs + incomplete_accs
+
         assert prom_get("output_x_incomplete_accs_total") == incomplete_accs
-        assert prom_get("output_x_heaps_total") == n_accumulations_completed
+        assert prom_get("output_x_skipped_accs_total") == skipped_accs
+        assert prom_get("output_x_heaps_total") == sent_accs
         assert prom_get("output_x_bytes_total") == (
-            n_channels_per_substream * n_baselines * COMPLEX * xsend.SEND_DTYPE.itemsize * n_accumulations_completed
+            n_channels_per_substream * n_baselines * COMPLEX * xsend.SEND_DTYPE.itemsize * sent_accs
         )
-        assert prom_get("output_x_visibilities_total") == (
-            n_channels_per_substream * n_baselines * n_accumulations_completed
-        )
+        assert prom_get("output_x_visibilities_total") == (n_channels_per_substream * n_baselines * sent_accs)
         assert prom_get("output_x_clipped_visibilities_total") == 0
+        skipped_accs_total += skipped_accs
 
         # Verify sensor updates while we're here
         xsync_sensor_name = f"{xpipeline.output.name}.rx.synchronised"
-        # As per the explanation in :func:`~send_data`, the first accumulation
-        # is expected to be incomplete. We also accommodate any other
-        # incomplete accumulations due to the method of sending data.
-        # The assert statement is to force mypy to realise the prom_diff value
-        # obtained can be cast to int.
-        prom_output_skipped_accs_total = prom_get("output_x_skipped_accs_total")
-        expected_error_updates = int(prom_output_skipped_accs_total) + incomplete_accs
-        expected_nominal_updates = n_accumulations_completed - incomplete_accs
+        assert actual_sensor_updates[xsync_sensor_name] == expected_sensor_updates
 
-        # TODO: NGC-1308 Update this to check the order of sensor updates, not just the count
-        assert (
-            actual_sensor_updates[xsync_sensor_name].count((False, aiokatcp.Sensor.Status.ERROR))
-            == expected_error_updates
-        )
-        assert (
-            actual_sensor_updates[xsync_sensor_name].count((True, aiokatcp.Sensor.Status.NOMINAL))
-            == expected_nominal_updates
-        )
-        assert len(actual_sensor_updates[xsync_sensor_name]) == expected_error_updates + expected_nominal_updates
+    return skipped_accs_total
 
 
 def verify_beam_sensors(
@@ -421,7 +441,7 @@ def verify_beam_sensors(
     beam_results_shape: tuple[int, ...],
     beam_dtype: np.dtype,
     prom_diff: PromDiff,
-    actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]],
+    actual_sensor_updates: dict[str, list[aiokatcp.Reading]],
     first_timestamp: int,
     last_timestamp: int,
     weights: np.ndarray,
@@ -448,10 +468,8 @@ def verify_beam_sensors(
         processing of data stimulus.
     actual_sensor_updates
         Dictionary of lists of sensor updates. They dictionary keys are sensor
-        names, the values are a list of tuples for each sensor update captured
-        via the callback attached to :class:`BPipeline` sensors. Accommodating
-        for three value types as there are three different types of sensors in
-        the XBEngine.
+        names, the values are a list of readings for each sensor update captured
+        via the callback attached to :class:`BPipeline` sensors.
     first_timestamp, last_timestamp
         Two timestamps indicating the start and end of data processing
         by the :class:`BPipeline`.
@@ -484,9 +502,10 @@ def verify_beam_sensors(
         assert saturated_low[i] <= prom_get("output_b_clipped_samples_total") <= saturated_high[i]
 
         # Check that sensor value matches Prometheus
-        assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == (
-            prom_get("output_b_clipped_samples_total"),
+        assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == aiokatcp.Reading(
+            mock.ANY,
             aiokatcp.Sensor.Status.NOMINAL,
+            prom_get("output_b_clipped_samples_total"),
         )
 
         assert first_timestamp < last_timestamp, (
@@ -494,10 +513,10 @@ def verify_beam_sensors(
             f"has been processed: {first_timestamp} >= {last_timestamp}"
         )
         assert actual_sensor_updates[f"{beam_output.name}.weight"] == [
-            (str(list(weights[i])), aiokatcp.Sensor.Status.NOMINAL)
+            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, str(list(weights[i])))
         ]
         assert actual_sensor_updates[f"{beam_output.name}.quantiser-gain"] == [
-            (quant_gains[i], aiokatcp.Sensor.Status.NOMINAL)
+            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, quant_gains[i])
         ]
 
         delay_updates_str = ", ".join(f"{delay}, {phase}" for delay, phase in delays[i])
@@ -505,7 +524,7 @@ def verify_beam_sensors(
         # receiving/processing data, so the `loadmcnt` is zero (it is
         # applied immediately).
         assert actual_sensor_updates[f"{beam_output.name}.delay"] == [
-            (f"({first_timestamp}, {delay_updates_str})", aiokatcp.Sensor.Status.NOMINAL)
+            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, f"({first_timestamp}, {delay_updates_str})")
         ]
 
 
@@ -829,10 +848,10 @@ class TestEngine:
             f"--channel-offset-value={frequency}",
             f"--jones-per-batch={n_jones_per_batch}",
             f"--heaps-per-fengine-per-chunk={HEAPS_PER_FENGINE_PER_CHUNK}",
-            "--sync-time=1234567890",
-            "--src-interface=lo",
-            "--dst-interface=lo",
-            "--tx-enabled",
+            f"--sync-time={SYNC_TIME}",
+            "--recv-interface=lo",
+            "--send-interface=lo",
+            "--send-enabled",
             "239.10.11.4:7149",  # src
         ]
         for corrprod in corrprod_args:
@@ -860,7 +879,7 @@ class TestEngine:
     @pytest.fixture
     async def client(self, xbengine: XBEngine) -> AsyncGenerator[aiokatcp.Client, None]:
         host, port = xbengine.sockets[0].getsockname()[:2]
-        async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+        async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
             client = await aiokatcp.Client.connect(host, port)
 
         yield client
@@ -940,7 +959,7 @@ class TestEngine:
         # Need a method of capturing synchronised aiokatcp.Sensor updates as
         # they happen in the XBEngine
         dynamic_bsensor_names = ["delay", "quantiser-gain", "weight", "beng-clip-cnt"]
-        actual_sensor_updates: dict[str, list[tuple[Any, aiokatcp.Sensor.Status]]] = {
+        actual_sensor_updates: dict[str, list[aiokatcp.Reading]] = {
             f"{beam_output.name}.{dynamic_bsensor_name}": list()
             for beam_output in beam_outputs
             for dynamic_bsensor_name in dynamic_bsensor_names
@@ -951,7 +970,7 @@ class TestEngine:
 
         def sensor_observer(sensor: aiokatcp.Sensor, sensor_reading: aiokatcp.Reading):
             """Record sensor updates in a list for later comparison."""
-            actual_sensor_updates[sensor.name].append((sensor_reading.value, sensor_reading.status))
+            actual_sensor_updates[sensor.name].append(sensor_reading)
 
         for sensor_name in actual_sensor_updates.keys():
             xbengine.sensors[sensor_name].attach(sensor_observer)
@@ -1020,16 +1039,6 @@ class TestEngine:
             )
             last_timestamp = present.shape[0] * timestamp_step
 
-        # TODO: NGC-1308 Update this check to be an exact match on the number
-        # of logged messages.
-        assert caplog.record_tuples.count(
-            (
-                "katgpucbf.xbgpu.engine",
-                WARNING,
-                "All Antennas had a break in data during this accumulation",
-            )
-        ) >= len(corrprod_outputs)
-
         verify_corrprod_data(
             corrprod_outputs=corrprod_outputs,
             corrprod_results=corrprod_results,
@@ -1040,14 +1049,24 @@ class TestEngine:
         )
 
         xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
-        verify_corrprod_sensors(
+        skipped_accs_total = verify_corrprod_sensors(
             xpipelines=xpipelines,
-            acc_indices=acc_indices,
             prom_diff=prom_diff,
             actual_sensor_updates=actual_sensor_updates,
             n_channels_per_substream=n_channels_per_substream,
             n_baselines=n_baselines,
+            timestamp_step=timestamp_step,
             present=present,
+        )
+        assert (
+            caplog.record_tuples.count(
+                (
+                    "katgpucbf.xbgpu.engine",
+                    WARNING,
+                    "All Antennas had a break in data during this accumulation",
+                )
+            )
+            == skipped_accs_total
         )
 
         channel_spacing = xbengine.bandwidth / xbengine.n_channels

@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.abspath("."))
 # -- Project information -----------------------------------------------------
 
 project = "katgpucbf"
-copyright = "2021, National Research Foundation (SARAO)"
+copyright = "2021-2024, National Research Foundation (SARAO)"
 
 # Get the information from the installed package, no need to maintain it in
 # multiple places.

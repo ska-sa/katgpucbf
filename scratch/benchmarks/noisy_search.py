@@ -16,8 +16,9 @@
 
 """Perform a noisy binary search."""
 
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Sequence, TypeVar
+from typing import TypeVar
 
 import numpy as np
 from numpy.typing import ArrayLike

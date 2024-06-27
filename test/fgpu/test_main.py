@@ -96,8 +96,8 @@ class TestParseArgs:
     def test_narrowband_defaults(self) -> None:
         """Test that missing narrowband config is taken from the global config."""
         raw_args = [
-            "--src-interface=lo",
-            "--dst-interface=lo",
+            "--recv-interface=lo",
+            "--send-interface=lo",
             "--adc-sample-rate=1712000000.0",
             "--sync-time=0",
             "--wideband=name=wideband,dst=239.0.3.0+1:7148,channels=1024,taps=64,w_cutoff=0.9,jones_per_batch=262144",

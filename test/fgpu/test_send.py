@@ -17,7 +17,7 @@
 """Unit tests for :mod:`katgpucbf.fgpu.send`."""
 
 import asyncio
-from typing import Sequence
+from collections.abc import Sequence
 from unittest import mock
 
 import aiokatcp

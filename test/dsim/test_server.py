@@ -16,11 +16,11 @@
 
 """Unit tests for katcp server."""
 
+import asyncio
 import re
 from collections.abc import AsyncGenerator, Sequence
 
 import aiokatcp
-import async_timeout
 import numpy as np
 import pytest
 
@@ -61,7 +61,7 @@ async def katcp_server(
 async def katcp_client(katcp_server: DeviceServer) -> AsyncGenerator[aiokatcp.Client, None]:  # noqa: D401
     """A katcp client connection to :func:`katcp_server`."""
     host, port = katcp_server.sockets[0].getsockname()[:2]
-    async with async_timeout.timeout(5):  # To fail the test quickly if unable to connect
+    async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
         client = await aiokatcp.Client.connect(host, port)
     yield client
     client.close()

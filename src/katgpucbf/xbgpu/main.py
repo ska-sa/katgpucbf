@@ -293,7 +293,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "is required to do. [%(default)s]",
     )
     parser.add_argument(
-        "--rx-reorder-tol",
+        "--recv-reorder-tol",
         type=int,
         default=2**29,
         help="Maximum time (in ADC ticks) that packets can be delayed relative to others "
@@ -306,53 +306,53 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="UNIX time at which digitisers were synced.",
     )
     parser.add_argument(
-        "--src-affinity", type=int, default=-1, help="Core to which the receiver thread will be bound [not bound]."
+        "--recv-affinity", type=int, default=-1, help="Core to which the receiver thread will be bound [not bound]."
     )
     parser.add_argument(
-        "--src-comp-vector",
+        "--recv-comp-vector",
         type=int,
         default=0,
         help="Completion vector for source streams, or -1 for polling [%(default)s].",
     )
     parser.add_argument(
-        "--src-interface",
+        "--recv-interface",
         type=get_interface_address,
         required=True,
         help="Name of the interface receiving data from the F-Engines, e.g. eth0.",
     )
-    parser.add_argument("--src-ibv", action="store_true", help="Use ibverbs for input [no].")
+    parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for input [no].")
     parser.add_argument(
-        "--src-buffer",
+        "--recv-buffer",
         type=int,
         default=32 * 1024 * 1024,
         metavar="BYTES",
         help="Size of network receive buffer [32MiB]",
     )
     parser.add_argument(
-        "--dst-affinity", type=int, default=-1, help="Core to which the sender thread will be bound [not bound]."
+        "--send-affinity", type=int, default=-1, help="Core to which the sender thread will be bound [not bound]."
     )
     parser.add_argument(
-        "--dst-comp-vector",
+        "--send-comp-vector",
         type=int,
         default=1,
         help="Completion vector for transmission, or -1 for polling [%(default)s].",
     )
     parser.add_argument(
-        "--dst-interface",
+        "--send-interface",
         type=get_interface_address,
         required=True,
         help="Name of the interface that this engine will transmit data on, e.g. eth1.",
     )
     parser.add_argument(
-        "--dst-packet-payload",
+        "--send-packet-payload",
         type=int,
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         help="Size in bytes for output packets (baseline correlation products payload only) [%(default)s]",
     )
-    parser.add_argument("--dst-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
-    parser.add_argument("--dst-ibv", action="store_true", help="Use ibverbs for output [no].")
+    parser.add_argument("--send-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
+    parser.add_argument("--send-ibv", action="store_true", help="Use ibverbs for output [no].")
     parser.add_argument(
-        "--tx-enabled",
+        "--send-enabled",
         action="store_true",
         help="Start with correlator output transmission enabled, without having to issue a katcp command.",
     )
@@ -417,20 +417,20 @@ def make_engine(
         channel_offset_value=args.channel_offset_value,
         outputs=args.outputs,
         src=args.src,
-        src_interface=args.src_interface,
-        src_ibv=args.src_ibv,
-        src_affinity=args.src_affinity,
-        src_comp_vector=args.src_comp_vector,
-        src_buffer=args.src_buffer,
-        dst_interface=args.dst_interface,
-        dst_ttl=args.dst_ttl,
-        dst_ibv=args.dst_ibv,
-        dst_packet_payload=args.dst_packet_payload,
-        dst_affinity=args.dst_affinity,
-        dst_comp_vector=args.dst_comp_vector,
+        recv_interface=args.recv_interface,
+        recv_ibv=args.recv_ibv,
+        recv_affinity=args.recv_affinity,
+        recv_comp_vector=args.recv_comp_vector,
+        recv_buffer=args.recv_buffer,
+        send_interface=args.send_interface,
+        send_ttl=args.send_ttl,
+        send_ibv=args.send_ibv,
+        send_packet_payload=args.send_packet_payload,
+        send_affinity=args.send_affinity,
+        send_comp_vector=args.send_comp_vector,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
-        rx_reorder_tol=args.rx_reorder_tol,
-        tx_enabled=args.tx_enabled,
+        recv_reorder_tol=args.recv_reorder_tol,
+        send_enabled=args.send_enabled,
         monitor=monitor,
         context=context,
         vkgdr_handle=vkgdr_handle,

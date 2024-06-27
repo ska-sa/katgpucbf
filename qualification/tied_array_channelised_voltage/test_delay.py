@@ -17,7 +17,8 @@
 """Delay test."""
 
 import time
-from typing import Sequence, cast
+from collections.abc import Sequence
+from typing import cast
 
 import numpy as np
 import pytest
@@ -128,9 +129,13 @@ async def test_delay(
     Verification method
     -------------------
     Verification by means of test. Set a delay on one beam (for all inputs)
-    and no delay on another. Check that the results match expectations to
-    within 1.5 ULP. Correlate the beams and check that the angle of the
-    correlation product matches expectations to within 1°.
+    and no delay on another. Check that the results on the test (delayed)
+    beam match expectations computed from the reference (no delay) beam
+    within 2.9 ULP. This allows for 1 ULP tolerance in both the real and
+    imaginary components of both beams.
+
+    Correlate the beams and check that the angle of the correlation product
+    matches expectations to within 1°.
     """
     receiver = receive_tied_array_channelised_voltage
     client = cbf.product_controller_client
@@ -175,7 +180,7 @@ async def test_delay(
         max_error = np.max(np.abs(data[delay_beam] - expected))
         pdf_report.detail(f"Maximum difference from expected is {max_error:.3f} ULP.")
         with check:
-            assert max_error <= 1.5  # A bit more than sqrt(2)
+            assert max_error <= 2.9  # A bit more than 2*sqrt(2)
 
         corr = np.sum(data[delay_beam] * data[ref_beam].conj(), axis=1)
         # Collect more chunks so that quantisation effects average out

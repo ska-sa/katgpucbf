@@ -17,8 +17,9 @@
 """Digital down-conversion."""
 
 import math
+from collections.abc import Callable
 from importlib import resources
-from typing import Callable, TypedDict, cast
+from typing import TypedDict, cast
 
 import numpy as np
 from katsdpsigproc import accel, tune

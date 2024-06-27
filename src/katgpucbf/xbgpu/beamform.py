@@ -16,8 +16,8 @@
 
 """Implement the calculations for beamforming."""
 
+from collections.abc import Sequence
 from importlib import resources
-from typing import Sequence
 
 import numpy as np
 from katsdpsigproc import accel

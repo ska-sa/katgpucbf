@@ -228,12 +228,12 @@ class XSend(Send):
     packet_payload
         Size in bytes for output packets (baseline correlation products
         payload only, headers and padding are then added to this).
-    tx_enabled
+    send_enabled
         Start with output transmission enabled.
     """
 
     # Class static constants
-    header_size: Final[int] = 64
+    preamble_size: Final[int] = 64
 
     def __init__(
         self,
@@ -248,13 +248,13 @@ class XSend(Send):
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         n_send_heaps_in_flight: int = 5,
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
-        tx_enabled: bool = False,
+        send_enabled: bool = False,
     ) -> None:
         if dump_interval_s < 0:
             raise ValueError("Dump interval must be 0 or greater.")
 
         self.output_name = output_name
-        self.tx_enabled = tx_enabled
+        self.send_enabled = send_enabled
 
         # Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
@@ -269,11 +269,11 @@ class XSend(Send):
             buffers.append(heap.buffer)
 
         stream_config = spead2.send.StreamConfig(
-            max_packet_size=packet_payload + XSend.header_size,
+            max_packet_size=packet_payload + XSend.preamble_size,
             max_heaps=n_send_heaps_in_flight + 1,  # + 1 to allow for descriptors
             rate_method=spead2.send.RateMethod.AUTO,
             rate=send_rate(
-                packet_header=XSend.header_size,
+                packet_header=XSend.preamble_size,
                 packet_payload=packet_payload,
                 heap_payload=n_channels_per_substream * n_baselines * COMPLEX * SEND_DTYPE.itemsize,
                 heap_interval=dump_interval_s,
@@ -301,7 +301,7 @@ class XSend(Send):
         heap
             Heap to send
         """
-        if self.tx_enabled:
+        if self.send_enabled:
             saturated = int(heap.saturated)  # Save a copy before giving away the heap
             heap.future = self.stream.async_send_heap(heap.heap)
             self._heaps_queue.put_nowait(heap)

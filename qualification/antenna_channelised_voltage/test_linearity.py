@@ -46,7 +46,7 @@ async def test_linearity(
     sel_channel_centre = receiver.n_chans // 3
     channel_frequency = receiver.channel_frequency(sel_channel_centre)
     pdf_report.detail(
-        f"Channel {sel_channel_centre} selected, with centre frequency " + f"{channel_frequency/1e6:.2f} MHz."
+        f"Channel {sel_channel_centre} selected, with centre frequency {channel_frequency / 1e6:.2f} MHz."
     )
 
     pdf_report.step("Set EQ gain.")

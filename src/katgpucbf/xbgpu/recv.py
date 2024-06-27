@@ -172,7 +172,7 @@ def make_stream(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
-    src_affinity: int,
+    recv_affinity: int,
     max_active_chunks: int,
 ) -> spead2.recv.ChunkRingStream:
     """Create a SPEAD receiver stream.
@@ -187,7 +187,7 @@ def make_stream(
         Output ringbuffer to which chunks will be sent.
     free_ringbuffer
         Ringbuffer for holding chunks for recycling once they've been used.
-    src_affinity
+    recv_affinity
         CPU core affinity for the worker thread.
     max_active_chunks
         Maximum number of chunks under construction.
@@ -199,7 +199,7 @@ def make_stream(
         max_active_chunks=max_active_chunks,
         data_ringbuffer=data_ringbuffer,
         free_ringbuffer=free_ringbuffer,
-        affinity=src_affinity,
+        affinity=recv_affinity,
         stream_stats=["katgpucbf.metadata_heaps", "katgpucbf.bad_timestamp_heaps", "katgpucbf.bad_feng_id_heaps"],
         substreams=layout.n_ants,
         stop_on_stop_item=False,  # By default, a heap containing a stream control stop item will terminate the stream
@@ -312,8 +312,7 @@ async def recv_chunks(
         # TODO: Perhaps make this 'chunk timestamp step' a property of the Layout?
         chunk.timestamp = chunk.chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
         unix_time = time_converter.adc_to_unix(chunk.timestamp)
-        sensors["rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
-        sensors["rx.unixtime"].set_value(Timestamp(unix_time), timestamp=unix_time)
+        unix_time_katcp = Timestamp(unix_time)
 
         # Check if we've missed any chunks
         expected_chunk_id = prev_chunk_id + 1
@@ -327,8 +326,13 @@ async def recv_chunks(
             )
             dropped_heaps += missed_chunks * expected_heaps
 
+        # Note: set rx.missing-unixtime first, so that if the first chunk is
+        # incomplete then we don't pass through a state where all the sensors
+        # are NOMINAL (which would cause rx.device-status to be NOMINAL).
         if dropped_heaps > 0:
-            sensors["rx.missing-unixtime"].set_value(Timestamp(unix_time), Sensor.Status.ERROR, timestamp=unix_time)
+            sensors["rx.missing-unixtime"].set_value(unix_time_katcp, Sensor.Status.ERROR, timestamp=unix_time)
+        sensors["rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+        sensors["rx.unixtime"].set_value(unix_time_katcp, timestamp=unix_time)
 
         # Increment Prometheus counters
         missing_heaps_counter.inc(dropped_heaps)
