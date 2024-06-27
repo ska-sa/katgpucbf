@@ -31,29 +31,30 @@ class PromDiff:
 
     Typical usage is::
 
-        with PromDiff(namespace=METRIC_NAMESPACE) as diff:
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             ...  # Do stuff that increments counters
-        diff.get_sample_diff(name, labels)
+        prom_diff.diff(name, labels)
 
     In some cases one may wish to make many queries with the same labels.
     In this case, default labels can be passed to the constructor::
 
-        with PromDiff(namespace=METRIC_NAMESPACE) as diff:
+        with PromDiff(namespace=METRIC_NAMESPACE, labels={"stream": stream_name}) as prom_diff:
             ...  # Do stuff that increments counters
-        diff.get_sample_diff(name1)
-        diff.get_sample_diff(name2)
+        # Metrics `name1` and `name2` both have the same label
+        prom_diff.diff(name1)
+        prom_diff.diff(name2)
 
     Alternatively, one can create a new :class:`PromDiff` that holds the same
     data but has additional default labels:
 
-        with PromDiff(namespace=METRIC_NAMESPACE) as diff:
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             ...  # Do stuff that increments counters
-        diff2 = diff.with_labels(labels)
-        diff2.get_sample_diff(name1)
-        diff2.get_sample_diff(name2)
+        labelled_diff = diff.with_labels(labels)
+        labelled_diff.diff(name1)
+        labelled_diff.diff(name2)
 
-    Labels are cumulative: more labels can be passed to :meth:`get_sample_diff`
-    and they augment the default labels.
+    Labels are cumulative: more labels can be passed to :meth:`value` or
+    :meth:`diff` and they augment the default labels.
 
     Parameters
     ----------
@@ -100,7 +101,7 @@ class PromDiff:
                 return s.value
         return None
 
-    def get_sample_value(self, name: str, labels: Mapping[str, str] | None = None) -> float:
+    def value(self, name: str, labels: Mapping[str, str] | None = None) -> float:
         """Return the value of the metric at the end of the context manager protocol.
 
         If it is not found, raises an :exc:`AssertionError`.
@@ -109,7 +110,7 @@ class PromDiff:
         assert value is not None, f"Metric {name}{labels} does not exist"
         return value
 
-    def get_sample_diff(self, name: str, labels: Mapping[str, str] | None = None) -> float:
+    def diff(self, name: str, labels: Mapping[str, str] | None = None) -> float:
         """Return the increase in the metric during the context manager protocol.
 
         If the metric did not exist at the start and end, raises an

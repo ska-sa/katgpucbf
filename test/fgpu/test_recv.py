@@ -352,16 +352,16 @@ class TestIterChunks:
 
         # Check metrics
         def get_sample_diffs(name: str) -> list[float | None]:
-            return [prom_diff.get_sample_diff(name, {"pol": str(pol)}) for pol in range(N_POLS)]
+            return [prom_diff.diff(name, {"pol": str(pol)}) for pol in range(N_POLS)]
 
         assert get_sample_diffs("input_heaps_total") == [61, 58]
-        assert prom_diff.get_sample_diff("input_chunks_total") == 5
+        assert prom_diff.diff("input_chunks_total") == 5
         assert get_sample_diffs("input_samples_total") == [61 * 4096, 58 * 4096]
         assert get_sample_diffs("input_bytes_total") == [61 * 5120, 58 * 5120]
-        assert prom_diff.get_sample_diff("input_too_old_heaps_total") == 1222
+        assert prom_diff.diff("input_too_old_heaps_total") == 1222
         assert get_sample_diffs("input_missing_heaps_total") == [12 * 16 - 61, 12 * 16 - 58]
-        assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == 1246
-        assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 1642
+        assert prom_diff.diff("input_bad_timestamp_heaps_total") == 1246
+        assert prom_diff.diff("input_metadata_heaps_total") == 1642
         expected_clip_total = [sum(expected_clip[chunk_id, pol] for chunk_id in expected_ids) for pol in range(N_POLS)]
         assert get_sample_diffs("input_clipped_samples_total") == expected_clip_total
 

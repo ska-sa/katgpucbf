@@ -412,16 +412,16 @@ def verify_corrprod_sensors(
                     skipped_accs += 1
         sent_accs = complete_accs + incomplete_accs
 
-        assert stream_diff.get_sample_diff("output_x_incomplete_accs_total") == incomplete_accs
-        assert stream_diff.get_sample_diff("output_x_skipped_accs_total") == skipped_accs
-        assert stream_diff.get_sample_diff("output_x_heaps_total") == sent_accs
-        assert stream_diff.get_sample_diff("output_x_bytes_total") == (
+        assert stream_diff.diff("output_x_incomplete_accs_total") == incomplete_accs
+        assert stream_diff.diff("output_x_skipped_accs_total") == skipped_accs
+        assert stream_diff.diff("output_x_heaps_total") == sent_accs
+        assert stream_diff.diff("output_x_bytes_total") == (
             n_channels_per_substream * n_baselines * COMPLEX * xsend.SEND_DTYPE.itemsize * sent_accs
         )
-        assert stream_diff.get_sample_diff("output_x_visibilities_total") == (
+        assert stream_diff.diff("output_x_visibilities_total") == (
             n_channels_per_substream * n_baselines * sent_accs
         )
-        assert stream_diff.get_sample_diff("output_x_clipped_visibilities_total") == 0
+        assert stream_diff.diff("output_x_clipped_visibilities_total") == 0
         skipped_accs_total += skipped_accs
 
         # Verify sensor updates while we're here
@@ -486,16 +486,16 @@ def verify_beam_sensors(
     heap_samples = np.prod(heap_shape[:-1])
     for i, beam_output in enumerate(beam_outputs):
         stream_diff = prom_diff.with_labels({"stream": beam_output.name})
-        assert stream_diff.get_sample_diff("output_b_heaps_total") == n_beam_heaps_sent
-        assert stream_diff.get_sample_diff("output_b_bytes_total") == n_beam_heaps_sent * heap_bytes
-        assert stream_diff.get_sample_diff("output_b_samples_total") == n_beam_heaps_sent * heap_samples
-        assert saturated_low[i] <= stream_diff.get_sample_diff("output_b_clipped_samples_total") <= saturated_high[i]
+        assert stream_diff.diff("output_b_heaps_total") == n_beam_heaps_sent
+        assert stream_diff.diff("output_b_bytes_total") == n_beam_heaps_sent * heap_bytes
+        assert stream_diff.diff("output_b_samples_total") == n_beam_heaps_sent * heap_samples
+        assert saturated_low[i] <= stream_diff.diff("output_b_clipped_samples_total") <= saturated_high[i]
 
         # Check that sensor value matches Prometheus
         assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == aiokatcp.Reading(
             mock.ANY,
             aiokatcp.Sensor.Status.NOMINAL,
-            stream_diff.get_sample_diff("output_b_clipped_samples_total"),
+            stream_diff.diff("output_b_clipped_samples_total"),
         )
 
         assert first_timestamp < last_timestamp, (
@@ -1150,8 +1150,8 @@ class TestEngine:
         n_vis = n_channels_per_substream * n_baselines
         for corrprod_output in corrprod_outputs:
             stream_diff = prom_diff.with_labels({"stream": corrprod_output.name})
-            assert stream_diff.get_sample_diff("output_x_visibilities_total") == n_vis
-            assert stream_diff.get_sample_diff("output_x_clipped_visibilities_total") == n_vis
+            assert stream_diff.diff("output_x_visibilities_total") == n_vis
+            assert stream_diff.diff("output_x_clipped_visibilities_total") == n_vis
             assert xbengine.sensors[f"{corrprod_output.name}.xeng-clip-cnt"].value == n_vis
 
     def _patch_get_in_item(

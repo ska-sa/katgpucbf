@@ -148,5 +148,5 @@ async def test_sender(
     assert (await switch_task) == switch_heap * DIG_HEAP_SAMPLES
 
     # Check the Prometheus counters
-    assert prom_diff.get_sample_diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
-    assert prom_diff.get_sample_diff("output_bytes_total") == orig_payload[0].nbytes * repeats
+    assert prom_diff.diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
+    assert prom_diff.diff("output_bytes_total") == orig_payload[0].nbytes * repeats

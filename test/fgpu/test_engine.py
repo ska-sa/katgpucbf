@@ -920,17 +920,17 @@ class TestEngine:
         for pol in range(N_POLS):
             # Check prometheus counter
             input_missing_heaps = np.sum(~recv_present[pol])
-            assert prom_diff.get_sample_diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
+            assert prom_diff.diff("input_missing_heaps_total", {"pol": str(pol)}) == input_missing_heaps
 
         n_substreams = len(mock_send_stream)
         output_heaps = np.sum(send_present) * n_substreams
         prom_diff = prom_diff.with_labels({"stream": output.name})
-        assert prom_diff.get_sample_diff("output_heaps_total") == output_heaps
+        assert prom_diff.diff("output_heaps_total") == output_heaps
         batch_samples = channels * spectra_per_heap * N_POLS
         batch_size = batch_samples * COMPLEX * np.dtype(np.int8).itemsize
-        assert prom_diff.get_sample_diff("output_bytes_total") == np.sum(send_present) * batch_size
-        assert prom_diff.get_sample_diff("output_samples_total") == np.sum(send_present) * batch_samples
-        assert prom_diff.get_sample_diff("output_skipped_heaps_total") == np.sum(~send_present) * n_substreams
+        assert prom_diff.diff("output_bytes_total") == np.sum(send_present) * batch_size
+        assert prom_diff.diff("output_samples_total") == np.sum(send_present) * batch_samples
+        assert prom_diff.diff("output_skipped_heaps_total") == np.sum(~send_present) * n_substreams
 
         # Sensor is not present in the narrowband mode.
         if output.decimation == 1:
@@ -1081,8 +1081,8 @@ class TestEngine:
                 dig_data,
             )
 
-        assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{tone_pol}"}) == len(timestamps)
-        assert prom_diff.get_sample_diff("output_clipped_samples_total", {"pol": f"{1 - tone_pol}"}) == 0
+        assert prom_diff.diff("output_clipped_samples_total", {"pol": f"{tone_pol}"}) == len(timestamps)
+        assert prom_diff.diff("output_clipped_samples_total", {"pol": f"{1 - tone_pol}"}) == 0
 
         # Compute the expected timestamp. The timestamp is associated with the
         # output chunk, so we need to round up to output chunk size.

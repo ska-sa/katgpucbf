@@ -271,13 +271,13 @@ async def test_send(
         assert heaps_per_iface[iface] == N_SUBSTREAMS * good_batches // len(queues)
 
     # Check the sensors and Prometheus metrics
-    assert prom_diff.get_sample_diff("output_heaps_total") == good_batches * N_SUBSTREAMS
+    assert prom_diff.diff("output_heaps_total") == good_batches * N_SUBSTREAMS
     expected_samples = good_batches * N_SPECTRA_PER_HEAP * N_CHANNELS * N_POLS
-    assert prom_diff.get_sample_diff("output_samples_total") == expected_samples
+    assert prom_diff.diff("output_samples_total") == expected_samples
     expected_bytes = expected_samples * COMPLEX * sample_bits // BYTE_BITS
-    assert prom_diff.get_sample_diff("output_bytes_total") == expected_bytes
-    assert prom_diff.get_sample_diff("output_skipped_heaps_total") == skip_batches * N_SUBSTREAMS
+    assert prom_diff.diff("output_bytes_total") == expected_bytes
+    assert prom_diff.diff("output_skipped_heaps_total") == skip_batches * N_SUBSTREAMS
     for pol in range(N_POLS):
         pol_labels = {"pol": str(pol)}
-        assert prom_diff.get_sample_diff("output_clipped_samples_total", pol_labels) == saturated[pol]
+        assert prom_diff.diff("output_clipped_samples_total", pol_labels) == saturated[pol]
         assert sensors[f"{NAME}.input{pol}.feng-clip-cnt"].value == saturated[pol]
