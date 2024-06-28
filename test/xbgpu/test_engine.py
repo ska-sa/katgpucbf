@@ -418,9 +418,7 @@ def verify_corrprod_sensors(
         assert stream_diff.diff("output_x_bytes_total") == (
             n_channels_per_substream * n_baselines * COMPLEX * xsend.SEND_DTYPE.itemsize * sent_accs
         )
-        assert stream_diff.diff("output_x_visibilities_total") == (
-            n_channels_per_substream * n_baselines * sent_accs
-        )
+        assert stream_diff.diff("output_x_visibilities_total") == (n_channels_per_substream * n_baselines * sent_accs)
         assert stream_diff.diff("output_x_clipped_visibilities_total") == 0
         skipped_accs_total += skipped_accs
 
