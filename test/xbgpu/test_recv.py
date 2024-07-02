@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -234,13 +234,13 @@ class TestStream:
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
 
-        assert prom_diff.get_sample_diff("input_chunks_total") == seen + empty_chunks
-        assert prom_diff.get_sample_diff("input_heaps_total") == (seen + empty_chunks) * layout.chunk_heaps
-        assert prom_diff.get_sample_diff("input_bytes_total") == layout.chunk_bytes * seen
-        assert prom_diff.get_sample_diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
-        assert prom_diff.get_sample_diff("input_bad_feng_id_heaps_total") == 1
-        assert prom_diff.get_sample_diff("input_metadata_heaps_total") == 1
-        assert prom_diff.get_sample_diff("input_too_old_heaps_total") == 1
+        assert prom_diff.diff("input_chunks_total") == seen + empty_chunks
+        assert prom_diff.diff("input_heaps_total") == (seen + empty_chunks) * layout.chunk_heaps
+        assert prom_diff.diff("input_bytes_total") == layout.chunk_bytes * seen
+        assert prom_diff.diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
+        assert prom_diff.diff("input_bad_feng_id_heaps_total") == 1
+        assert prom_diff.diff("input_metadata_heaps_total") == 1
+        assert prom_diff.diff("input_too_old_heaps_total") == 1
 
     async def test_missing_heaps(
         self,
@@ -339,9 +339,9 @@ class TestStream:
         np.testing.assert_array_equal(received_chunk_presence.flatten(), expected_chunk_presence_flat)
 
         # Check StatsCollector's values
-        assert prom_diff.get_sample_diff("input_heaps_total") == seen * layout.chunk_heaps - n_single_heaps_to_delete
+        assert prom_diff.diff("input_heaps_total") == seen * layout.chunk_heaps - n_single_heaps_to_delete
         assert (
-            prom_diff.get_sample_diff("input_missing_heaps_total")
+            prom_diff.diff("input_missing_heaps_total")
             == n_chunks_to_delete * layout.chunk_heaps + n_single_heaps_to_delete
         )
 

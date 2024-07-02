@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, 2024 National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, 2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -149,5 +149,5 @@ async def test_sender(
     assert (await switch_task) == switch_heap * DIG_HEAP_SAMPLES
 
     # Check the Prometheus counters
-    assert prom_diff.get_sample_diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
-    assert prom_diff.get_sample_diff("output_bytes_total") == orig_payload[0].nbytes * repeats
+    assert prom_diff.diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
+    assert prom_diff.diff("output_bytes_total") == orig_payload[0].nbytes * repeats
