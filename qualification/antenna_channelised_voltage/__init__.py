@@ -132,11 +132,10 @@ async def sample_tone_response(
 
     async def flush() -> None:
         """Execute all the work in `tasks`."""
-        requests = []
-        for i in range(len(tasks)):
-            signal = tasks[i][1] * N_POLS
-            requests.append(asyncio.create_task(receiver.cbf.dsim_clients[i].request("signals", signal)))
-        await asyncio.gather(*requests)
+        async with asyncio.TaskGroup() as tg:
+            for i in range(len(tasks)):
+                signal = tasks[i][1] * N_POLS
+                tg.create_task(receiver.cbf.dsim_clients[i].request("signals", signal))
         _, data = await receiver.next_complete_chunk()
         for task, bl_idx in zip(tasks, corrs):
             # In the absence of noise this should be purely real, but

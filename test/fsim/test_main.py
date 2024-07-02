@@ -79,12 +79,11 @@ def sender(args: argparse.Namespace, mock_queue) -> Sender:
 @pytest.fixture
 async def sender_run(sender: Sender) -> AsyncGenerator[asyncio.Task, None]:
     """Run the `sender` fixture and also send descriptors, and cancel it at the end of the test."""
-    await sender.stream.async_send_heap(sender.descriptor_heap, rate=0.0)
-    task = asyncio.create_task(sender.run(0, False))
-    yield task
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    async with asyncio.TaskGroup() as tg:
+        await sender.stream.async_send_heap(sender.descriptor_heap, rate=0.0)
+        task = tg.create_task(sender.run(0, False))
+        yield task
+        task.cancel()
 
 
 async def test_sender(

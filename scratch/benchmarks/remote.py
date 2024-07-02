@@ -164,15 +164,14 @@ async def run_tasks(
         async with asyncio.timeout(timeout):
             for i in range(n):
                 # Wait until either the port is ready or the process dies
-                tasks = [
-                    asyncio.create_task(wait_port(server, port_base + i)),
-                    asyncio.create_task(procs[i].wait(check=True)),
-                ]
-                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                for task in pending:
-                    task.cancel()
-                for task in done:
-                    task.result()  # Re-raise any exceptions
+                async with asyncio.TaskGroup() as tg:
+                    tasks = [
+                        tg.create_task(wait_port(server, port_base + i)),
+                        tg.create_task(procs[i].wait(check=True)),
+                    ]
+                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for task in pending:
+                        task.cancel()
                 if tasks[1] in done:
                     raise RuntimeError("process shut down before becoming ready")
         return stack.pop_all()

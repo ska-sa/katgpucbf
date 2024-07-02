@@ -58,14 +58,13 @@ async def test_weight_mapping(
     await cbf.dsim_clients[0].request("signals", signals)
     pdf_report.detail(f"Set dsim signals to {signals!r}.")
 
-    tasks = []
     pdf_report.step("Set eq gains to select one channel per input.")
-    for input_label, channel in zip(receiver.input_labels, channels):
-        gains = [0.0] * receiver.n_chans
-        gains[channel] = 1.0
-        tasks.append(asyncio.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *gains)))
-        pdf_report.detail(f"Set input {input_label} to pass through only channel {channel}.")
-    await asyncio.gather(*tasks)
+    async with asyncio.TaskGroup() as tg:
+        for input_label, channel in zip(receiver.input_labels, channels):
+            gains = [0.0] * receiver.n_chans
+            gains[channel] = 1.0
+            tg.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *gains))
+            pdf_report.detail(f"Set input {input_label} to pass through only channel {channel}.")
 
     pdf_report.step("Test all inputs.")
     for input_idx, (input_label, channel) in enumerate(zip(receiver.input_labels, channels)):

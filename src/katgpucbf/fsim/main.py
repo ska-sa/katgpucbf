@@ -300,8 +300,12 @@ class Sender:
         await asyncio.gather(*futures)
 
 
-async def async_main() -> None:
-    """Run main program."""
+async def _async_main(tg: asyncio.TaskGroup) -> None:
+    """Real implementation of :func:`async_main`.
+
+    This is split into a separate function to avoid having to indent the whole
+    thing inside the `tg` context manager.
+    """
     args = parse_args()
     add_gc_stats()
 
@@ -312,15 +316,23 @@ async def async_main() -> None:
     descriptor_senders = [
         DescriptorSender(sender.stream, sender.descriptor_heap, SPEAD_DESCRIPTOR_INTERVAL_S) for sender in senders
     ]
-    descriptor_tasks = [asyncio.create_task(sender.run()) for sender in descriptor_senders]
+    for descriptor_sender in descriptor_senders:
+        tg.create_task(descriptor_sender.run())
 
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
     sync_time = time.time()
-    await asyncio.gather(*(sender.run(sync_time, args.run_once) for sender in senders))
-    for sender in descriptor_senders:
-        sender.halt()
-    await asyncio.gather(*descriptor_tasks)
+    async with asyncio.TaskGroup() as sender_tg:
+        for sender in senders:
+            sender_tg.create_task(sender.run(sync_time, args.run_once))
+    for descriptor_sender in descriptor_senders:
+        descriptor_sender.halt()
+
+
+async def async_main() -> None:
+    """Run main program."""
+    async with asyncio.TaskGroup() as tg:
+        await _async_main(tg)
 
 
 def main() -> None:

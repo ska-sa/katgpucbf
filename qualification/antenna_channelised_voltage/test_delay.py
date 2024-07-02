@@ -358,12 +358,11 @@ async def _test_delay_phase_fixed(
         signals[i] = f"nodither(delay({base_signal}, {-delay_samples[-1]}));"
         delay_spec[i] = f"{delay},0:{phase},0"
 
-    futures = []
-    for i, client in enumerate(cbf.dsim_clients):
-        signal_spec = "".join(signals[i * N_POLS : (i + 1) * N_POLS])
-        pdf_report.detail(f"Set signal to {signal_spec!r} on dsim {i}.")
-        futures.append(asyncio.create_task(client.request("signals", signal_spec)))
-    await asyncio.gather(*futures)
+    async with asyncio.TaskGroup() as tg:
+        for i, client in enumerate(cbf.dsim_clients):
+            signal_spec = "".join(signals[i * N_POLS : (i + 1) * N_POLS])
+            pdf_report.detail(f"Set signal to {signal_spec!r} on dsim {i}.")
+            tg.create_task(client.request("signals", signal_spec))
     for i in range(len(delay_phases)):
         pdf_report.detail(f"Set delay model to {delay_spec[i]} on input {i}")
     await cbf.product_controller_client.request(
@@ -428,7 +427,9 @@ async def _test_delay_phase_rate(
     # compare accumulations without extraneous noise.
     period = math.gcd(max_period, receiver.n_samples_between_spectra * receiver.n_spectra_per_acc)
     pdf_report.detail(f"Set signal to {signal!r} on all dsims.")
-    await asyncio.gather(*[client.request("signals", signal, period) for client in cbf.dsim_clients])
+    async with asyncio.TaskGroup() as tg:
+        for client in cbf.dsim_clients:
+            tg.create_task(client.request("signals", signal, period))
     delay_spec = ["0,0:0,0"] * receiver.n_inputs
     for i, (delay_rate, phase_rate) in enumerate(rates):
         delay_spec[i] = f"0,{delay_rate}:0,{phase_rate}"

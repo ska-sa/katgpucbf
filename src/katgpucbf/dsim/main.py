@@ -152,8 +152,12 @@ def first_timestamp(time_converter: TimeConverter, now: float, align: int) -> in
     return samples
 
 
-async def async_main() -> None:
-    """Asynchronous main entry point."""
+async def _async_main(tg: asyncio.TaskGroup) -> None:
+    """Real implementation of :func:`async_main`.
+
+    This is split into a separate function to avoid having to indent the whole
+    thing inside the `tg` context manager.
+    """
     args = parse_args()
     heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
 
@@ -190,7 +194,7 @@ async def async_main() -> None:
     # Start descriptor sender first so descriptors are sent before dsim data.
     descriptor_heap = descriptors.create_descriptors_heap()
     descriptor_sender = DescriptorSender(descriptor_stream, descriptor_heap, SPEAD_DESCRIPTOR_INTERVAL_S)
-    descriptor_task = asyncio.create_task(descriptor_sender.run())
+    tg.create_task(descriptor_sender.run())
 
     if args.dither_seed is None:
         args.dither_seed = np.random.SeedSequence().entropy  # Generate a random seed
@@ -259,7 +263,15 @@ async def async_main() -> None:
     # asyncio.sleep, but that's small change.
     await asyncio.sleep(max(0, start_time - time.time()))
     logger.info("Starting transmission")
-    await asyncio.gather(sender.run(timestamp, time_converter), descriptor_task, server.join())
+    tg.create_task(sender.run(timestamp, time_converter))
+    tg.create_task(server.join())
+    # The caller will exit the scope of tg, thus waiting for everything to finish
+
+
+async def async_main() -> None:
+    """Asynchronous main entry point."""
+    async with asyncio.TaskGroup() as tg:
+        await _async_main(tg)
 
 
 def main() -> None:
