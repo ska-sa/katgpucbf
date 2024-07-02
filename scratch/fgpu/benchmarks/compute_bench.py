@@ -55,6 +55,8 @@ def main():  # noqa: C901
             parser.error("--sem must be positive")
         if args.passes % args.sem != 0:
             parser.error("--sem must divide into --passes")
+    if args.kernel == "ddc" and not args.narrowband:
+        parser.error("--kernel=ddc requires --narrowband")
 
     rng = np.random.default_rng(seed=1)
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)

@@ -71,12 +71,35 @@ pipeline {
 
     stage('Parallel stage') {
       parallel {
-        stage('Compile and test memcpy_loop') {
+        stage('Compile and test microbenchmarks') {
+          options { timeout(time: 5, unit: 'MINUTES') }
           steps {
             dir('scratch') {
               sh 'make clean'
               sh 'make'
               sh './memcpy_loop -T'
+
+              // We just want to know if they run without crashing, so we use a small
+              // number of passes to speed things up.
+              sh 'fgpu/benchmarks/compute_bench.py --kernel all --passes 10'
+              sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --narrowband --passes 10'
+              sh 'fgpu/benchmarks/compute_bench.py --kernel pfb_fir --passes 10'
+              sh 'fgpu/benchmarks/compute_bench.py --kernel fft --passes 10'
+              sh 'fgpu/benchmarks/compute_bench.py --kernel postproc --passes 10'
+              sh 'fgpu/benchmarks/compute_bench.py --kernel all --narrowband --passes 10'
+
+              sh 'fgpu/benchmarks/ddc_bench.py --passes 10'
+
+              sh 'fgpu/benchmarks/fft_bench.py --mode r2c --passes 10'
+              sh 'fgpu/benchmarks/fft_bench.py --mode c2c --passes 10'
+
+              sh 'xbgpu/benchmarks/beamform_bench.py --passes 10'
+              sh 'xbgpu/benchmarks/correlate_bench.py --passes 10'
+
+              sh './gpu_copy.py htod --repeat 10'
+              sh './gpu_copy.py dtoh --repeat 10'
+              sh './gpu_copy.py dtod --repeat 10'
+              sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
             }
           }
         }
