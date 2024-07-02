@@ -240,7 +240,7 @@ partd==1.4.1
     #   dask
 pillow==10.3.0
     # via matplotlib
-pluggy==1.3.0
+pluggy==1.5.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   pytest
@@ -275,7 +275,7 @@ pyparsing==3.0.9
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
     #   matplotlib
-pytest==7.4.3
+pytest==8.2.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   -r qualification/requirements.in
@@ -284,7 +284,7 @@ pytest==7.4.3
     #   pytest-check
     #   pytest-custom-exit-code
     #   pytest-reportlog
-pytest-asyncio==0.21.1
+pytest-asyncio==0.21.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (setup.cfg)

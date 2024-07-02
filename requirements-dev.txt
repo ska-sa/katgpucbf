@@ -231,7 +231,7 @@ platformdirs==4.1.0
     #   -c requirements.txt
     #   pytools
     #   virtualenv
-pluggy==1.3.0
+pluggy==1.5.0
     # via pytest
 pre-commit==3.5.0
     # via -r requirements-dev.in
@@ -277,7 +277,7 @@ pyparsing==3.0.9
     #   katgpucbf (setup.cfg)
 pyproject-hooks==1.0.0
     # via build
-pytest==7.4.3
+pytest==8.2.2
     # via
     #   katgpucbf (setup.cfg)
     #   pytest-asyncio
@@ -285,7 +285,7 @@ pytest==7.4.3
     #   pytest-custom-exit-code
     #   pytest-mock
     #   pytest-xdist
-pytest-asyncio==0.21.1
+pytest-asyncio==0.21.2
     # via katgpucbf (setup.cfg)
 pytest-cov==4.1.0
     # via -r requirements-dev.in
