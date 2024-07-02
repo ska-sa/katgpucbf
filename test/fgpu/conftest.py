@@ -32,6 +32,12 @@ from katgpucbf.fgpu.main import make_engine, parse_args
 
 
 @pytest.fixture
+def dig_rms_dbfs_window_chunks() -> int:  # noqa: D401
+    """Number of chunks per window for ``dig-rms-dbfs`` sensors."""
+    return 2
+
+
+@pytest.fixture
 def recv_max_chunks_one(monkeypatch) -> None:
     """Change :data:`.recv.MAX_CHUNKS` to 1 for the test.
 
@@ -73,8 +79,10 @@ def mock_recv_stream(mocker) -> spead2.InprocQueue:
 
 @pytest.fixture
 async def engine_server(
-    request,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
     engine_arglist: list[str],
+    dig_rms_dbfs_window_chunks: int,
     mock_recv_stream,
     mock_send_stream,
     recv_max_chunks_one,
@@ -101,6 +109,18 @@ async def engine_server(
 
     args = parse_args(arglist)
     server, _monitor = make_engine(context, vkgdr_handle, args)
+
+    # Adjust DIG_RMS_DBFS_WINDOW. This is handled here rather than as a
+    # separate fixture to solve a chicken-and-egg issue: the actual
+    # engine.chunk_jones is computed from a formula in make_engine, so that
+    # needs to happen first. But once server.start() has been called, it is too
+    # late to match the change.
+    # Compute the number of digitiser samples per *output* chunk. Each output
+    # complex value takes two incoming real values.
+    chunk_samples = server.chunk_jones * 2
+    monkeypatch.setattr(
+        "katgpucbf.fgpu.engine.DIG_RMS_DBFS_WINDOW", chunk_samples * dig_rms_dbfs_window_chunks / server.adc_sample_rate
+    )
 
     await server.start()
     yield server
