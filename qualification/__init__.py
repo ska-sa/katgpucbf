@@ -135,10 +135,12 @@ class CBFRemoteControl:
         # for the sensor value. So we have to query every device server that we
         # make state changes though.
         clients = [self.product_controller_client] + self.dsim_clients
-        responses = await asyncio.gather(
-            *(client.request("sensor-value", r"/.*steady-state-timestamp$/") for client in clients)
-        )
-        for client, (_, informs) in zip(clients, responses):
+        async with asyncio.TaskGroup() as tg:
+            requests = [
+                tg.create_task(client.request("sensor-value", r"/.*steady-state-timestamp$/")) for client in clients
+            ]
+        for client, request in zip(clients, requests):
+            _, informs = request.result()
             for inform in informs:
                 # In theory there could be multiple sensors per inform, but aiokatcp
                 # never does this because timestamps are seldom shared.
@@ -154,9 +156,10 @@ class CBFRemoteControl:
     async def close(self) -> None:
         """Shut down all the connections."""
         clients = self.dsim_clients + [self.product_controller_client]
-        for client in clients:
-            client.close()
-        await asyncio.gather(*[client.wait_closed() for client in clients])
+        async with asyncio.TaskGroup() as tg:
+            for client in clients:
+                client.close()
+                tg.create_task(client.wait_closed())
 
     async def dsim_time(self, dsim_idx: int = 0) -> float:
         """Get the current UNIX time, as reported by a dsim.

@@ -228,10 +228,9 @@ async def test_send(
         # Send all the chunks, without waiting for the first one to complete
         # transmission (to ensure that the send streams have sufficient
         # capacity).
-        futures = [
-            asyncio.create_task(chunk.send(send_streams, N_BATCHES, time_converter, sensors, NAME)) for chunk in chunks
-        ]
-        await asyncio.gather(*futures)
+        async with asyncio.TaskGroup() as tg:
+            for chunk in chunks:
+                tg.create_task(chunk.send(send_streams, N_BATCHES, time_converter, sensors, NAME))
 
     for queue_list in queues.values():
         for queue in queue_list:
