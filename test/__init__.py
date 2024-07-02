@@ -120,7 +120,7 @@ class PromDiff:
         before = self._get_value(self._before, name, effective_labels)
         after = self._get_value(self._after, name, effective_labels)
         assert before is not None, f"Metric {name}{labels} did not exist at start"
-        assert after is not None, f"Metric {name}{labels} did not exist at start"
+        assert after is not None, f"Metric {name}{labels} did not exist at end"
         return after - before
 
     def with_labels(self, labels: Mapping[str, str] | None = None) -> Self:
