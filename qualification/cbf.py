@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import re
+import traceback
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypedDict, TypeVar
@@ -391,7 +392,7 @@ class CBFCache:
                     "$report_type": "CBFConfiguration",
                     "mode_config": self._cbf.mode_config,
                     "uuid": str(self._cbf.uuid),
-                    "error": repr(self._cbf.exc),
+                    "error": "".join(traceback.format_exception(self._cbf.exc)),
                 },
             )
         return self._cbf
