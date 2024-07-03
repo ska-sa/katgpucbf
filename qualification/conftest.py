@@ -33,8 +33,8 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
 from .cbf import CBFCache, CBFRemoteControl
+from .recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
 from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)

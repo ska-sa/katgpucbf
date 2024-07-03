@@ -21,7 +21,8 @@ import pytest
 from matplotlib.figure import Figure
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
+from ..cbf import CBFRemoteControl
+from ..recv import BaselineCorrelationProductsReceiver
 from ..reporter import POTLocator, Reporter
 from . import sample_tone_response_hdr
 

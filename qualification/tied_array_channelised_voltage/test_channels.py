@@ -21,7 +21,8 @@ import random
 import numpy as np
 from pytest_check import check
 
-from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
+from ..cbf import CBFRemoteControl
+from ..recv import TiedArrayChannelisedVoltageReceiver
 from ..reporter import Reporter
 
 

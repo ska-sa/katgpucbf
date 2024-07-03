@@ -31,7 +31,8 @@ from pytest_check import check
 from katgpucbf import BYTE_BITS, COMPLEX, N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
+from ..cbf import CBFRemoteControl
+from ..recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
 from ..reporter import POTLocator, Reporter
 
 MAX_DELAY = 79.53e-6  # seconds

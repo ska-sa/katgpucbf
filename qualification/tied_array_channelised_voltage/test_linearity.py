@@ -25,7 +25,8 @@ import numpy as np
 import pytest
 from matplotlib.figure import Figure
 
-from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
+from ..cbf import CBFRemoteControl
+from ..recv import TiedArrayChannelisedVoltageReceiver
 from ..reporter import Reporter
 
 _T = TypeVar("_T")

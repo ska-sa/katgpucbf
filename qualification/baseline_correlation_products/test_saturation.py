@@ -22,7 +22,7 @@ import pytest
 import scipy.stats
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver
+from ..recv import BaselineCorrelationProductsReceiver
 from ..reporter import Reporter
 
 

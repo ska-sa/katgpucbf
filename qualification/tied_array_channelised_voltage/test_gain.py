@@ -22,7 +22,8 @@ from pytest_check import check
 
 from katgpucbf import DIG_SAMPLE_BITS
 
-from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
+from ..cbf import CBFRemoteControl
+from ..recv import TiedArrayChannelisedVoltageReceiver
 from ..reporter import Reporter
 
 

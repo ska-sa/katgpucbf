@@ -27,7 +27,8 @@ from numpy.typing import ArrayLike
 
 from katgpucbf import N_POLS
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
+from ..cbf import CBFRemoteControl
+from ..recv import BaselineCorrelationProductsReceiver
 from ..reporter import Reporter
 
 
