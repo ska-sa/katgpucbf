@@ -47,6 +47,17 @@ class CBFBase:
     mode_config: dict  # Configuration values used for MeerKAT mode string
     uuid: UUID
 
+    async def close(self) -> None:
+        """Shut down all the connections."""
+        pass  # Derived classes canoverride
+
+
+@dataclass
+class FailedCBF(CBFBase):
+    """A CBF that we attempted to create, but it failed."""
+
+    error: str
+
 
 @dataclass
 class CBFRemoteControl(CBFBase):
@@ -305,7 +316,7 @@ class CBFCache:
     """
 
     def __init__(self, pytestconfig: pytest.Config) -> None:
-        self._cbf: CBFRemoteControl | None = None
+        self._cbf: CBFBase | None = None
         self._master_controller_client: aiokatcp.Client | None = None
         self._pytestconfig = pytestconfig
         self._host_config_querier = HostConfigQuerier(pytestconfig.getini("prometheus_url"))
@@ -334,35 +345,55 @@ class CBFCache:
             logger.exception("unable to connect to master controller!")
             raise
 
-    async def get_cbf(self, cbf_config: dict, cbf_mode_config: dict) -> CBFRemoteControl:
-        """Get a :class:`CBFRemoteControl`, creating it if necessary."""
+    async def get_cbf(self, cbf_config: dict, cbf_mode_config: dict) -> CBFBase:
+        """Get a :class:`CBFBase`, creating it if necessary."""
         if self._cbf is not None and self._cbf.config == cbf_config:
             return self._cbf
 
         await self._close_cbf()
-        master_controller_client = await self._get_master_controller_client()
-        product_name = self._pytestconfig.getini("product_name")
         try:
-            reply, _ = await master_controller_client.request("product-configure", product_name, json.dumps(cbf_config))
-        except aiokatcp.FailReply:
-            logger.exception("Something went wrong with starting the CBF!")
-            raise
+            master_controller_client = await self._get_master_controller_client()
+            product_name = self._pytestconfig.getini("product_name")
+            try:
+                reply, _ = await master_controller_client.request(
+                    "product-configure", product_name, json.dumps(cbf_config)
+                )
+            except aiokatcp.FailReply:
+                logger.exception("Something went wrong with starting the CBF!")
+                raise
 
-        product_controller_host = aiokatcp.decode(str, reply[1])
-        product_controller_port = aiokatcp.decode(int, reply[2])
-        logger.info(
-            "CBF created, connecting to product controller at %s:%d",
-            product_controller_host,
-            product_controller_port,
-        )
-        self._cbf = await CBFRemoteControl.connect(
-            product_name,
-            product_controller_host,
-            product_controller_port,
-            cbf_config,
-            cbf_mode_config,
-        )
-        await _report_cbf_config(self._pytestconfig, self._host_config_querier, self._cbf, master_controller_client)
+            product_controller_host = aiokatcp.decode(str, reply[1])
+            product_controller_port = aiokatcp.decode(int, reply[2])
+            logger.info(
+                "CBF created, connecting to product controller at %s:%d",
+                product_controller_host,
+                product_controller_port,
+            )
+            self._cbf = await CBFRemoteControl.connect(
+                product_name,
+                product_controller_host,
+                product_controller_port,
+                cbf_config,
+                cbf_mode_config,
+            )
+            await _report_cbf_config(self._pytestconfig, self._host_config_querier, self._cbf, master_controller_client)
+        except Exception as exc:
+            self._cbf = FailedCBF(
+                name=product_name,
+                config=cbf_config,
+                mode_config=cbf_mode_config,
+                uuid=uuid4(),
+                error=str(exc),
+            )
+            custom_report_log(
+                self._pytestconfig,
+                {
+                    "$report_type": "CBFConfiguration",
+                    "mode_config": self._cbf.mode_config,
+                    "uuid": str(self._cbf.uuid),
+                    "error": self._cbf.error,
+                },
+            )
         return self._cbf
 
     async def close(self) -> None:

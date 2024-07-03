@@ -33,7 +33,7 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from .cbf import CBFCache, CBFRemoteControl
+from .cbf import CBFCache, CBFRemoteControl, FailedCBF
 from .recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
 from .reporter import Reporter, custom_report_log
 
@@ -438,6 +438,10 @@ async def cbf(
     been reset to a default state, with the dsim outputting zeros.
     """
     cbf = await cbf_cache.get_cbf(cbf_config, cbf_mode_config)
+    pdf_report.config(cbf=str(cbf.uuid))
+    if isinstance(cbf, FailedCBF):
+        pytest.fail(f"CBF failed to start: {cbf.error}")
+    assert isinstance(cbf, CBFRemoteControl)
     # Reset the CBF to default state
     pcc = cbf.product_controller_client
     async with asyncio.TaskGroup() as tg:
@@ -459,7 +463,6 @@ async def cbf(
         if conf["type"] in capture_types:
             await pcc.request("capture-start", name)
 
-    pdf_report.config(cbf=str(cbf.uuid))
     yield cbf
 
     for name, conf in cbf.config["outputs"].items():
