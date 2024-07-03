@@ -440,7 +440,7 @@ async def cbf(
     cbf = await cbf_cache.get_cbf(cbf_config, cbf_mode_config)
     pdf_report.config(cbf=str(cbf.uuid))
     if isinstance(cbf, FailedCBF):
-        pytest.fail(f"CBF failed to start: {cbf.error}")
+        raise cbf.exc
     assert isinstance(cbf, CBFRemoteControl)
     # Reset the CBF to default state
     pcc = cbf.product_controller_client

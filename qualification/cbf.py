@@ -56,7 +56,7 @@ class CBFBase:
 class FailedCBF(CBFBase):
     """A CBF that we attempted to create, but it failed."""
 
-    error: str
+    exc: Exception
 
 
 @dataclass
@@ -383,7 +383,7 @@ class CBFCache:
                 config=cbf_config,
                 mode_config=cbf_mode_config,
                 uuid=uuid4(),
-                error=str(exc),
+                exc=exc,
             )
             custom_report_log(
                 self._pytestconfig,
@@ -391,7 +391,7 @@ class CBFCache:
                     "$report_type": "CBFConfiguration",
                     "mode_config": self._cbf.mode_config,
                     "uuid": str(self._cbf.uuid),
-                    "error": self._cbf.error,
+                    "error": repr(self._cbf.exc),
                 },
             )
         return self._cbf
