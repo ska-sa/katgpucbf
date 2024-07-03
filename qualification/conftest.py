@@ -20,16 +20,12 @@ import ast
 import asyncio
 import copy
 import inspect
-import json
 import logging
-import re
 import subprocess
 import time
 from collections import namedtuple
 from collections.abc import AsyncGenerator, Generator
-from typing import TypedDict, TypeVar
 
-import aiokatcp
 import matplotlib.style
 import pytest
 import pytest_check
@@ -37,12 +33,11 @@ from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
 
-from . import BaselineCorrelationProductsReceiver, CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
-from .host_config import HostConfigQuerier
-from .reporter import Reporter
+from . import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+from .cbf import CBFCache, CBFRemoteControl
+from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
-_T = TypeVar("_T")
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
 pdf_report_data_key = pytest.StashKey[dict]()
 
@@ -97,15 +92,6 @@ ini_options = [
 ]
 
 
-class TaskDict(TypedDict):
-    """Type annotation for dictionary describing tasks."""
-
-    host: str
-    interfaces: dict[str, str]
-    version: str
-    git_version: str
-
-
 def pytest_addoption(parser, pluginmanager):  # noqa: D103
     # I'm adding the image override as a cmd-line parameter. It seems best (at
     # this stage anyway) that it be explicit which image you're testing.
@@ -128,16 +114,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "wideband_only: do not run the test in narrowband configurations")
     for option in ini_options:
         assert config.getini(option.name) is not None, f"{option.name} missing from pytest.ini"
-
-
-def custom_report_log(pytestconfig: pytest.Config, data) -> None:
-    """Log a custom JSON line in the report log."""
-    # There doesn't seem to be an easy way to avoid using these private interfaces
-    try:
-        report_log_plugin = pytestconfig._report_log_plugin  # type: ignore
-    except AttributeError:
-        pytest.fail("pytest_reportlog plugin not found (possibly you forgot to specify --report-log)")
-    report_log_plugin._write_json_data(data)
 
 
 def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
@@ -439,180 +415,6 @@ async def cbf_config(_cbf_config_and_description: tuple[dict, dict]) -> dict:
 async def cbf_mode_config(_cbf_config_and_description: tuple[dict, dict]) -> dict:
     """Produce a dictionary describing the CBF config."""
     return _cbf_config_and_description[1]
-
-
-async def _get_git_version_conn(conn: aiokatcp.Client) -> str:
-    """Query a katcp server for the katcp-device build-info."""
-    _, informs = await conn.request("version-list")
-    for inform in informs:
-        if aiokatcp.decode(str, inform.arguments[0]) == "katcp-device":
-            return aiokatcp.decode(str, inform.arguments[2])
-    return "unknown"
-
-
-async def _get_git_version(host: str, port: int) -> str:
-    """Query a katcp server for the katcp-device build-info."""
-    async with await aiokatcp.Client.connect(host, port) as conn:
-        return await _get_git_version_conn(conn)
-
-
-async def _report_cbf_config(
-    pytestconfig: pytest.Config,
-    host_config_querier: HostConfigQuerier,
-    cbf: CBFRemoteControl,
-    master_controller_client: aiokatcp.Client,
-) -> None:
-    async def get_task_details_multi(suffix: str, type: type[_T]) -> dict[str, dict[tuple[str, ...], _T]]:
-        """Get values of a task-specific sensor for all tasks.
-
-        The `suffix` is a regular expression, and may contain anonymous capture
-        groups. The return value is a nested dictionary: the outer dictionary is
-        indexed by the task name, the inner one by the capture group values.
-        """
-        regex = rf"^(.*)\.{suffix}$"
-        r = re.compile(regex)
-        _, informs = await cbf.product_controller_client.request("sensor-value", f"/{regex}/")
-        result: dict[str, dict[tuple[str, ...], _T]] = {}
-        for inform in informs:
-            if inform.arguments[3] == b"nominal":
-                m = r.match(aiokatcp.decode(str, inform.arguments[2]))
-                if m is None:
-                    continue  # Should never happen, unless the product controller is buggy
-                task = m[1]
-                key = m.groups()[1:]  # All capture groups except the task name
-                result.setdefault(task, {})[key] = aiokatcp.decode(type, inform.arguments[4])
-        return result
-
-    async def get_task_details(suffix: str, type: type[_T]) -> dict[str, _T]:
-        """Get value of a task-specific sensor for all tasks."""
-        raw = await get_task_details_multi(re.escape(suffix), type)
-        return {key: value[()] for key, value in raw.items()}
-
-    ports = await get_task_details("port", aiokatcp.Address)
-    git_version_futures = {}
-    async with asyncio.TaskGroup() as tg:
-        for task_name, address in ports.items():
-            assert address.port is not None
-            git_version_futures[task_name] = tg.create_task(_get_git_version(str(address.host), address.port))
-
-    versions = await get_task_details("version", str)
-    hosts = await get_task_details("host", str)
-    interfaces = await get_task_details_multi(r"interfaces\.([^.]+)\.name", str)
-    tasks: dict[str, TaskDict] = {}
-    for task_name, hostname in hosts.items():
-        task_interfaces = interfaces.get(task_name, {})
-        tasks[task_name] = {
-            "host": hostname,
-            "interfaces": {key[0]: value for key, value in task_interfaces.items()},  # Flatten 1-tuple key
-            "version": versions[task_name],
-            "git_version": git_version_futures[task_name].result(),
-        }
-    tasks["product_controller"] = {
-        "host": await master_controller_client.sensor_value(f"{cbf.name}.host", str),
-        "interfaces": {},
-        "version": await master_controller_client.sensor_value(f"{cbf.name}.version", str),
-        "git_version": await _get_git_version_conn(cbf.product_controller_client),
-    }
-
-    for task in tasks.values():
-        host_config = host_config_querier.get_config(task["host"])
-        if host_config is not None:
-            logger.info("Logging host config for %s", task["host"])
-            custom_report_log(
-                pytestconfig, {"$report_type": "HostConfiguration", "hostname": task["host"], "config": host_config}
-            )
-
-    custom_report_log(
-        pytestconfig,
-        {
-            "$report_type": "CBFConfiguration",
-            "mode_config": cbf.mode_config,
-            "uuid": str(cbf.uuid),
-            "tasks": tasks,
-        },
-    )
-
-
-class CBFCache:
-    """Obtain a CBF with the given configuration.
-
-    If there is already one running with the identical configuration, use it.
-    Otherwise, shut down any existing one and start a new one.
-
-    Parameters
-    ----------
-    host, port
-        Endpoint for the master controller
-    """
-
-    def __init__(self, pytestconfig: pytest.Config) -> None:
-        self._cbf: CBFRemoteControl | None = None
-        self._master_controller_client: aiokatcp.Client | None = None
-        self._pytestconfig = pytestconfig
-        self._host_config_querier = HostConfigQuerier(pytestconfig.getini("prometheus_url"))
-
-    async def _close_cbf(self) -> None:
-        if self._cbf is not None:
-            name = self._cbf.name
-            logger.info("Tearing down CBF %s.", name)
-            await self._cbf.close()
-            self._cbf = None
-            if self._master_controller_client is not None:
-                await self._master_controller_client.request("product-deconfigure", name)
-
-    async def _get_master_controller_client(self) -> aiokatcp.Client:
-        if self._master_controller_client is not None:
-            return self._master_controller_client
-
-        try:
-            host = self._pytestconfig.getini("master_controller_host")
-            port = int(self._pytestconfig.getini("master_controller_port"))
-            logger.debug("Connecting to master controller at %s:%d.", host, port)
-            async with asyncio.timeout(10):
-                self._master_controller_client = await aiokatcp.Client.connect(host, port)
-            return self._master_controller_client
-        except (ConnectionError, TimeoutError):
-            logger.exception("unable to connect to master controller!")
-            raise
-
-    async def get_cbf(self, cbf_config: dict, cbf_mode_config: dict) -> CBFRemoteControl:
-        """Get a :class:`CBFRemoteControl`, creating it if necessary."""
-        if self._cbf is not None and self._cbf.config == cbf_config:
-            return self._cbf
-
-        await self._close_cbf()
-        master_controller_client = await self._get_master_controller_client()
-        product_name = self._pytestconfig.getini("product_name")
-        try:
-            reply, _ = await master_controller_client.request("product-configure", product_name, json.dumps(cbf_config))
-        except aiokatcp.FailReply:
-            logger.exception("Something went wrong with starting the CBF!")
-            raise
-
-        product_controller_host = aiokatcp.decode(str, reply[1])
-        product_controller_port = aiokatcp.decode(int, reply[2])
-        logger.info(
-            "CBF created, connecting to product controller at %s:%d",
-            product_controller_host,
-            product_controller_port,
-        )
-        self._cbf = await CBFRemoteControl.connect(
-            product_name,
-            product_controller_host,
-            product_controller_port,
-            cbf_config,
-            cbf_mode_config,
-        )
-        await _report_cbf_config(self._pytestconfig, self._host_config_querier, self._cbf, master_controller_client)
-        return self._cbf
-
-    async def close(self) -> None:
-        """Shut down any running CBF and the master controller connection."""
-        await self._close_cbf()
-        if self._master_controller_client is not None:
-            self._master_controller_client.close()
-            await self._master_controller_client.wait_closed()
-            self._master_controller_client = None
 
 
 @pytest.fixture(scope="session")

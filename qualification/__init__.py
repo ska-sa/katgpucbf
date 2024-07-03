@@ -27,13 +27,9 @@ import asyncio
 import ctypes
 import logging
 import math
-import re
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import AsyncGenerator, Callable, Sequence
 from typing import TYPE_CHECKING, Literal, overload
-from uuid import UUID, uuid4
 
-import aiokatcp
 import numba
 import numpy as np
 import scipy
@@ -51,156 +47,10 @@ from katgpucbf import COMPLEX, DIG_SAMPLE_BITS
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
-from .reporter import Reporter
+# TODO stop importing CBFRemoteControl?
+from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
 logger = logging.getLogger(__name__)
-DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
-
-
-@dataclass
-class CBFRemoteControl:
-    """A container class for katcp clients needed by qualification tests."""
-
-    name: str
-    product_controller_client: aiokatcp.Client
-    dsim_clients: list[aiokatcp.Client]
-    config: dict  # JSON dictionary used to configure the CBF
-    mode_config: dict  # Configuration values used for MeerKAT mode string
-    sensor_watcher: aiokatcp.SensorWatcher
-    uuid: UUID = field(default_factory=uuid4)
-
-    @property
-    def sensors(self) -> aiokatcp.SensorSet:  # noqa: D401
-        """Current sensor values from the product controller.
-
-        Note that if a command is issued to a dsim, there will be an unknown
-        delay before any sensors that change as a result are visible in this
-        sensor set, because it comes via the product controller. In such
-        cases it may be necessary to directly query the dsim for the sensor
-        value.
-        """
-        return self.sensor_watcher.sensors
-
-    @classmethod
-    async def connect(cls, name: str, host: str, port: int, config: Mapping, mode_config: dict) -> "CBFRemoteControl":
-        """Connect to a CBF's product controller.
-
-        The function connects and gathers sufficient metadata in order for the
-        user to know how to use the CBF for whatever testing needs to be
-        done.
-        """
-        pcc = aiokatcp.Client(host, port)
-        sensor_watcher = aiokatcp.SensorWatcher(pcc)
-        pcc.add_sensor_watcher(sensor_watcher)
-        await sensor_watcher.synced.wait()  # Implicitly waits for connection too
-
-        dsim_endpoints = []
-        for sensor_name, sensor in sensor_watcher.sensors.items():
-            if match := re.fullmatch(r"sim\.dsim(\d+)\.\d+\.0\.port", sensor_name):
-                idx = int(match.group(1))
-                dsim_endpoints.append((idx, sensor.value))
-        assert dsim_endpoints
-        dsim_endpoints.sort()  # sorts by index
-
-        dsim_clients = []
-        for _, endpoint in dsim_endpoints:
-            dsim_clients.append(await aiokatcp.Client.connect(str(endpoint.host), endpoint.port))
-
-        logger.info("Sensors synchronised; %d dsims found", len(dsim_clients))
-
-        return CBFRemoteControl(
-            name=name,
-            product_controller_client=pcc,
-            dsim_clients=list(dsim_clients),
-            config=dict(config),
-            mode_config=mode_config,
-            sensor_watcher=sensor_watcher,
-        )
-
-    async def steady_state_timestamp(self, *, max_delay: int = DEFAULT_MAX_DELAY) -> int:
-        """Get a timestamp by which the system will be in a steady state.
-
-        In other words, the effects of previous commands will be in place for
-        data with this timestamp.
-
-        Because delays affect timestamps, the caller must provide an upper
-        bound on the delay of any F-engine. The default for this should be
-        acceptable for most cases.
-        """
-        timestamp = 0
-        # Although the dsim sensors will also appear in the product controller,
-        # we can't rely on that due to a race condition: if we make a change
-        # directly on the dsim, the subscription update it sends to the product
-        # controller might not be received before we ask the product controller
-        # for the sensor value. So we have to query every device server that we
-        # make state changes though.
-        clients = [self.product_controller_client] + self.dsim_clients
-        async with asyncio.TaskGroup() as tg:
-            requests = [
-                tg.create_task(client.request("sensor-value", r"/.*steady-state-timestamp$/")) for client in clients
-            ]
-        for client, request in zip(clients, requests):
-            _, informs = request.result()
-            for inform in informs:
-                # In theory there could be multiple sensors per inform, but aiokatcp
-                # never does this because timestamps are seldom shared.
-                sensor_value = int(inform.arguments[4])
-                if client is not self.product_controller_client:
-                    # values returned from the dsim do not account for delay,
-                    # so need to be offset to get an output timestamp.
-                    sensor_value += max_delay
-                timestamp = max(timestamp, sensor_value)
-        logger.debug("steady_state_timestamp: %d", timestamp)
-        return timestamp
-
-    async def close(self) -> None:
-        """Shut down all the connections."""
-        clients = self.dsim_clients + [self.product_controller_client]
-        async with asyncio.TaskGroup() as tg:
-            for client in clients:
-                client.close()
-                tg.create_task(client.wait_closed())
-
-    async def dsim_time(self, dsim_idx: int = 0) -> float:
-        """Get the current UNIX time, as reported by a dsim.
-
-        This helps make tests independent of the clock on the machine running
-        the test; it depends only on the dsims to be synchronised with each other.
-        """
-        reply, _ = await self.dsim_clients[dsim_idx].request("time")
-        return aiokatcp.decode(float, reply[0])
-
-    async def dsim_gaussian(
-        self, amplitude: float, pdf_report: Reporter | None = None, *, dsim_idx: int = 0, period: int | None = None
-    ) -> None:
-        """Configure a dsim with Gaussian noise.
-
-        The identical signal is produced on both polarisations.
-
-        Parameters
-        ----------
-        amplitude
-            Standard deviation, in units of the LSB of the digitiser output
-        pdf_report
-            Reporter to which this process will be reported
-        dsim_idx
-            Index of the dsim to set
-        period
-            If specified, override the period of the dsim signal
-        """
-        if pdf_report is not None:
-            pdf_report.step("Configure the D-sim with Gaussian noise.")
-        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
-        amplitude /= dig_max  # Convert to be relative to full-scale
-        signal = f"common=nodither(wgn({amplitude}));common;common;"
-        if period is None:
-            await self.dsim_clients[0].request("signals", signal)
-            suffix = ""
-        else:
-            await self.dsim_clients[0].request("signals", signal, period)
-            suffix = f" and period={period} samples"
-        if pdf_report is not None:
-            pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}{suffix}.")
 
 
 class XBReceiver:

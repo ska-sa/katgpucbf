@@ -26,6 +26,7 @@ import matplotlib.figure
 import matplotlib.ticker
 import matplotlib.transforms
 import numpy as np
+import pytest
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +141,13 @@ class Reporter:
         if self._raw_data:
             value["data"] = data
         self._cur_step.append(value)
+
+
+def custom_report_log(pytestconfig: pytest.Config, data) -> None:
+    """Log a custom JSON line in the report log."""
+    # There doesn't seem to be an easy way to avoid using these private interfaces
+    try:
+        report_log_plugin = pytestconfig._report_log_plugin  # type: ignore
+    except AttributeError:
+        pytest.fail("pytest_reportlog plugin not found (possibly you forgot to specify --report-log)")
+    report_log_plugin._write_json_data(data)
