@@ -1233,6 +1233,7 @@ class Engine(aiokatcp.DeviceServer):
         self._copy_queue = context.create_command_queue()
 
         extra_samples = max_delay_diff + max(output.window for output in outputs)
+        extra_samples = accel.roundup(extra_samples, BYTE_BITS)
         if extra_samples > self.recv_layout.chunk_samples:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
         self.n_samples = self.recv_layout.chunk_samples + extra_samples
