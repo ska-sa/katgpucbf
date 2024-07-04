@@ -583,7 +583,7 @@ The first three steps are implemented by a "digital down-conversion"
 the following chunk to the tail of the chunk. This does lead to redundant
 down-conversion in the overlap region, and could potentially be optimised.
 
-The PFB FIR kernel has alternations because it needs to consume
+The PFB FIR kernel has alterations because it needs to consume
 single-precision complex inputs rather than packed integers. However, the real
 and imaginary components are independent, and so the input is treated
 internally as if it contained just real values, with an adjustment to correctly
@@ -634,7 +634,7 @@ where
 - :math:`0 \le i < C` is the index into the :math:`C` outputs to produce; and
 - :math:`f` is the frequency of the mixer signal, in cycles per digitiser sample.
 
-The first simplification we make is to pre-compute the weights with the mixer
+The first simplification we make is to pre-multiply the weights with the mixer
 (on the CPU). Let :math:`z_k = h_k e^{2\pi jfk}`. Then the equation
 becomes
 
