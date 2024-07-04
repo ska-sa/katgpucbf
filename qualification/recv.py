@@ -70,7 +70,6 @@ class XBReceiver:
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
-        #
         # We assume the streams all have the same information except for addresses.
         self.n_chans_per_substream = cbf.sensors[f"{stream_names[0]}.n-chans-per-substream"].value
         self.n_spectra_per_heap = cbf.sensors[f"{acv_name}.spectra-per-heap"].value

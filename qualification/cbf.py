@@ -50,7 +50,7 @@ class CBFBase:
 
     async def close(self) -> None:
         """Shut down all the connections."""
-        pass  # Derived classes canoverride
+        pass  # Derived classes can override
 
 
 @dataclass

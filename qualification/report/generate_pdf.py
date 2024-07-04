@@ -244,7 +244,7 @@ class CBFConfiguration:
     mode_config: dict
     uuid: UUID
     tasks: dict[str, Task]  # Empty if the CBF failed
-    error: str | None  # Empty if the CBF started successfully
+    error: str | None  # None if the CBF started successfully
     index: int = -1  # Position in the list of CBFs
     title: str = ""  # Text to use for section name, links etc in the document
 
@@ -1059,8 +1059,8 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
                 procedure_table.add_hline()
 
     if result.cbf is not None and result.cbf.error is not None:
-        # In this case we'll already have details about the failure as part
-        # under the heading for the CBF, so don't repeat the whole thing here.
+        # In this case we'll already have details about the failure under
+        # the heading for the CBF, so don't repeat the whole thing here.
         section.append(TextColor("red", f"CBF failed to start: {result.cbf.error.splitlines()[-1]}"))
     elif result.failure_messages:
         with section.create(LstListing()) as failure_message:
