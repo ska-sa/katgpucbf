@@ -118,12 +118,10 @@ pipeline {
 
         /* This stage actually runs pytest. Pytest has a number of flags that are
          * not required but make life easier:
-         * 1. -n X: Launches X threads and runs the tests in parallel across
-         *     multiple threads. This speeds up testing significantly. NOTE: This
+         * 1. -n X: Launches X processes and runs the tests in parallel across
+         *     multiple processes. This speeds up testing significantly. NOTE: This
          *     can create resource contention over things like GPU RAM. If it
-         *     starts becoming an issue set X to 1. I have noticed an issue once
-         *     where sometimes one thread got stuck and it stalled the pipeline.
-         *     Until this has been solved, I am removing this argument entirely
+         *     starts becoming an issue set X to 1.
          * 2. -v: Increases verbosity
          * 3. --junitxml=reports/result.xml' Writes the results to a file for later
          *    examination.
@@ -132,14 +130,14 @@ pipeline {
           when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
           options { timeout(time: 30, unit: 'MINUTES') }
           steps {
-            sh 'pytest -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
+            sh 'pytest -n 4 -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
           }
         }
         stage('Run pytest (full)') {
           when { anyOf { changeRequest target: 'main'; branch 'main' } }
           options { timeout(time: 60, unit: 'MINUTES') }
           steps {
-            sh 'pytest -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
+            sh 'pytest -n 4 -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
           }
         }
 
