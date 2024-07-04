@@ -22,7 +22,8 @@ from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
+from ..cbf import CBFRemoteControl
+from ..recv import BaselineCorrelationProductsReceiver
 from ..reporter import Reporter
 from . import sample_tone_response_hdr
 

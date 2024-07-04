@@ -28,7 +28,8 @@ from pytest_check import check
 
 from katgpucbf.fgpu.delay import wrap_angle
 
-from .. import CBFRemoteControl, TiedArrayChannelisedVoltageReceiver
+from ..cbf import CBFRemoteControl
+from ..recv import TiedArrayChannelisedVoltageReceiver
 from ..reporter import POTLocator, Reporter
 
 

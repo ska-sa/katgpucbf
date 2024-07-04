@@ -243,7 +243,8 @@ class CBFConfiguration:
 
     mode_config: dict
     uuid: UUID
-    tasks: dict[str, Task]
+    tasks: dict[str, Task]  # Empty if the CBF failed
+    error: str | None  # None if the CBF started successfully
     index: int = -1  # Position in the list of CBFs
     title: str = ""  # Text to use for section name, links etc in the document
 
@@ -557,10 +558,11 @@ def _parse_task(msg: dict) -> Task:
 
 
 def _parse_cbf_configuration(msg: dict) -> CBFConfiguration:
-    tasks = {name: _parse_task(value) for (name, value) in msg["tasks"].items()}
+    tasks = {name: _parse_task(value) for (name, value) in msg.get("tasks", {}).items()}
     mode_config = msg["mode_config"].copy()
     mode_config.setdefault("beams", "0")  # For backwards compatibility with old inputs
-    return CBFConfiguration(mode_config=mode_config, uuid=UUID(msg["uuid"]), tasks=tasks)
+    error = msg.get("error")
+    return CBFConfiguration(mode_config=mode_config, uuid=UUID(msg["uuid"]), tasks=tasks, error=error)
 
 
 def _fix_result_cbfs(test_configuration: TestConfiguration, results: Iterable[Result]) -> None:
@@ -853,25 +855,31 @@ def _doc_cbfs(section: Container, cbfs: Sequence[CBFConfiguration]) -> None:
         with section.create(Subsection(cbf.title)) as subsec:
             subsec.append(Label(Marker(str(cbf.uuid), prefix="cbf")))
             subsec.append(cbf.mode_str(expand=True))
-            with subsec.create(LongTable(r"|l|l|l|")) as table:
-                table.add_hline()
-                for name, pattern in patterns:
-                    tasks = []
-                    for task_name, task in cbf.tasks.items():
-                        if match := pattern.fullmatch(task_name):
-                            try:
-                                tasks.append((int(match.group(1)), task))
-                            except IndexError:  # Pattern has no group 1
-                                tasks.append((0, task))
-                    tasks.sort()
-                    for idx, task in tasks:
-                        table.add_row(
-                            name.format(i=idx),
-                            Hyperref(Marker(task.host, prefix="host"), task.host),
-                            ", ".join(task.interfaces.values()),
-                        )
-                    if tasks:
-                        table.add_hline()
+            if cbf.error is None:
+                with subsec.create(LongTable(r"|l|l|l|")) as table:
+                    table.add_hline()
+                    for name, pattern in patterns:
+                        tasks = []
+                        for task_name, task in cbf.tasks.items():
+                            if match := pattern.fullmatch(task_name):
+                                try:
+                                    tasks.append((int(match.group(1)), task))
+                                except IndexError:  # Pattern has no group 1
+                                    tasks.append((0, task))
+                        tasks.sort()
+                        for idx, task in tasks:
+                            table.add_row(
+                                name.format(i=idx),
+                                Hyperref(Marker(task.host, prefix="host"), task.host),
+                                ", ".join(task.interfaces.values()),
+                            )
+                        if tasks:
+                            table.add_hline()
+            else:
+                subsec.append("\n\n")
+                subsec.append(TextColor("red", "CBF failed to start"))
+                with subsec.create(LstListing()) as failure_message:
+                    failure_message.append(cbf.error)
 
 
 def _doc_requirements_verified(doc: Document, requirements_verified: dict[str, list[ResultSet]]) -> None:
@@ -1050,7 +1058,11 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
                     procedure_table.add_row((MultiColumn(2, align="|c|", data=mp),))
                 procedure_table.add_hline()
 
-    if result.failure_messages:
+    if result.cbf is not None and result.cbf.error is not None:
+        # In this case we'll already have details about the failure under
+        # the heading for the CBF, so don't repeat the whole thing here.
+        section.append(TextColor("red", f"CBF failed to start: {result.cbf.error.splitlines()[-1]}"))
+    elif result.failure_messages:
         with section.create(LstListing()) as failure_message:
             for message in result.failure_messages:
                 failure_message.append(message)

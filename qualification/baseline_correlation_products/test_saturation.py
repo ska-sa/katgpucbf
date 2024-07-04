@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -22,7 +22,7 @@ import pytest
 import scipy.stats
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver
+from ..recv import BaselineCorrelationProductsReceiver
 from ..reporter import Reporter
 
 

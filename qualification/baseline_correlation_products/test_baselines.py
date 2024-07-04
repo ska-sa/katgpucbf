@@ -20,7 +20,8 @@ import numpy as np
 import pytest
 from pytest_check import check
 
-from .. import BaselineCorrelationProductsReceiver, CBFRemoteControl
+from ..cbf import CBFRemoteControl
+from ..recv import BaselineCorrelationProductsReceiver
 from ..reporter import Reporter
 
 
