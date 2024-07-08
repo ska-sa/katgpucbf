@@ -52,8 +52,8 @@ JONES_PER_BATCH = 262144
 # Lower than the default to make tests quicker
 # TODO: use a number that's not a multiple of the number of channels,
 # once _send_data can handle partial chunks.
-CHUNK_SAMPLES = 524288
-CHUNK_JONES = 131072
+CHUNK_SAMPLES = 1048576
+CHUNK_JONES = 262144
 MAX_DELAY_DIFF = 16384  # Needs to be lowered because CHUNK_SAMPLES is lowered
 PACKET_SAMPLES = 4096
 TAPS = 16
@@ -66,9 +66,7 @@ WIDEBAND_ARGS = f"name=test_wideband,dst=239.10.11.0+{DSTS - 1}:7149,taps={TAPS}
 # Centre frequency is not a multiple of the channel width, but it does ensure
 # that the two copies of the same data in test_missing are separated by a
 # whole number of cycles.
-NARROWBAND_ARGS = (
-    f"name=test_narrowband,dst=239.10.12.0+{DSTS - 1}:7149,taps={TAPS},decimation=8,centre_frequency=408173015.5944824"
-)
+NARROWBAND_ARGS = f"name=test_narrowband,dst=239.10.12.0+{DSTS - 1}:7149,taps={TAPS},centre_frequency=408173015.5944824"
 
 
 @pytest.fixture
@@ -149,10 +147,14 @@ class TestEngine:
         """Arguments to pass to the command-line parser for the wideband output."""
         return f"{WIDEBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch}"
 
+    @pytest.fixture(params=[4, 8, 16])
+    def decimation(self, request: pytest.FixtureRequest) -> int:
+        return request.param
+
     @pytest.fixture
-    def narrowband_args(self, channels: int, jones_per_batch: int) -> str:
+    def narrowband_args(self, channels: int, jones_per_batch: int, decimation: int) -> str:
         """Arguments to pass to the command-line parser for the narrowband output."""
-        return f"{NARROWBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch}"
+        return f"{NARROWBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch},decimation={decimation}"
 
     @pytest.fixture(params=["wideband", "narrowband"])
     def output(self, wideband_args: str, narrowband_args: str, request: pytest.FixtureRequest) -> Output:
@@ -882,7 +884,7 @@ class TestEngine:
     # requirements. --recv-chunk-samples needs to be increased (from
     # CHUNK_SAMPLES) to ensure narrowband windows fit.
     @pytest.mark.spectra_per_heap(32)
-    @pytest.mark.cmdline_args("--recv-chunk-samples=4194304")
+    @pytest.mark.cmdline_args("--recv-chunk-samples=8388608")
     async def test_missing_heaps(
         self,
         mock_recv_stream: spead2.InprocQueue,
@@ -1176,7 +1178,7 @@ class TestEngine:
         monkeypatch,
     ) -> None:
         """Test that the ``steady-state-timestamp`` is updated correctly after ``?gain``."""
-        n_samples = max(16 * CHUNK_SAMPLES, output.spectra_samples * output.spectra_per_heap * 3)
+        n_samples = max(20 * CHUNK_SAMPLES, output.spectra_samples * output.spectra_per_heap * 3)
         rng = np.random.default_rng(1)
         dig_data = rng.integers(-255, 255, size=(2, n_samples), dtype=np.int16)
 
@@ -1211,7 +1213,7 @@ class TestEngine:
         monkeypatch,
     ) -> None:
         """Test that the ``steady-state-timestamp`` is updated correctly after ``?delays``."""
-        n_samples = max(16 * CHUNK_SAMPLES, output.spectra_samples * output.spectra_per_heap * 3)
+        n_samples = max(20 * CHUNK_SAMPLES, output.spectra_samples * output.spectra_per_heap * 3)
         tone = CW(frac_channel=frac_channel(output, CHANNELS // 2), magnitude=100)
         dig_data = self._make_tone(np.arange(n_samples), tone, 0)
 
