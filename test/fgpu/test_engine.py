@@ -84,6 +84,12 @@ def jones_per_batch(channels: int, request: pytest.FixtureRequest) -> int:
         return JONES_PER_BATCH
 
 
+@pytest.fixture
+def dig_rms_dbfs_window_chunks() -> int:  # noqa: D401
+    """Number of chunks per window for ``dig-rms-dbfs`` sensors."""
+    return 2
+
+
 @dataclass
 class CW:
     r"""Specification of a cosine wave.
@@ -155,6 +161,37 @@ class TestEngine:
             return parse_wideband(wideband_args)
         else:
             return parse_narrowband(narrowband_args)
+
+    @pytest.fixture
+    def dig_rms_dbfs_window_samples(self) -> list[int]:
+        """The window size for dig-rms-dbfs sensors, in input samples.
+
+        The return value is a list, which will be populated with a single
+        element during engine startup by the
+        :meth:`mock_dig_rms_dbfs_window_samples` fixture. This roundabout
+        mechanism is needed because the actual `chunk_jones` value for the
+        engine is computed when it starts up, but we need the mock in place
+        before that.
+        """
+        return []
+
+    # This is marked autouse to ensure it will be run before the engine_server
+    # fixture.
+    @pytest.fixture(autouse=True)
+    def mock_dig_rms_dbfs_window_samples(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        dig_rms_dbfs_window_samples: list[int],
+        dig_rms_dbfs_window_chunks: int,
+        output: Output,
+    ) -> None:
+        def _dig_rms_dbfs_window_samples(self: Pipeline) -> int:
+            chunk_samples = self.spectra * self.output.spectra_samples
+            window_samples = dig_rms_dbfs_window_chunks * chunk_samples
+            dig_rms_dbfs_window_samples.append(window_samples)
+            return window_samples
+
+        monkeypatch.setattr("katgpucbf.fgpu.engine.Pipeline._dig_rms_dbfs_window_samples", _dig_rms_dbfs_window_samples)
 
     @pytest.fixture
     def mock_send_stream_network(self, output: Output) -> IPv4Network:
@@ -1044,13 +1081,16 @@ class TestEngine:
         output: Output,
         input_voltage: int,
         output_power_dbfs: float,
-        dig_rms_dbfs_window_chunks: int,
+        dig_rms_dbfs_window_samples: list[int],
     ) -> None:
         """Test that the ``dig-rms-dbfs`` sensors are set correctly."""
         sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 10 * CHUNK_SAMPLES
         dig_data = np.full((2, n_samples), input_voltage, np.int16)
+        # Unpack the single-element list that was populated by
+        # mock_dig_rms_dbfs_window_samples.
+        window_size = dig_rms_dbfs_window_samples[0]
 
         await self._send_data(
             mock_recv_stream,
@@ -1059,10 +1099,8 @@ class TestEngine:
             output,
             dig_data,
         )
-        expected_timestamps = [
-            TIME_CONVERTER.adc_to_unix(t * CHUNK_SAMPLES)
-            for t in range(dig_rms_dbfs_window_chunks, 10, dig_rms_dbfs_window_chunks)
-        ]
+        expected_timestamps = [TIME_CONVERTER.adc_to_unix(t) for t in range(window_size, n_samples, window_size)]
+        assert len(expected_timestamps) > 0
         for pol in range(N_POLS):
             assert sensor_update_dict[sensors[pol].name] == [
                 aiokatcp.Reading(t, aiokatcp.Sensor.Status.WARN, output_power_dbfs) for t in expected_timestamps

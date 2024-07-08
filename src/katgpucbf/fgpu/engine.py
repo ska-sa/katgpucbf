@@ -902,6 +902,15 @@ class Pipeline:
                 chunk.cleanup()
                 chunk.cleanup = None  # Potentially helps break reference cycles
 
+    def _dig_rms_dbfs_window_samples(self) -> int:
+        """Compute the window size for the dig-rms-dbfs sensors.
+
+        The unit tests mock out this function to replace the value.
+        """
+        chunk_samples = self.spectra * self.output.spectra_samples
+        window_chunks = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / chunk_samples))
+        return window_chunks * chunk_samples
+
     def _update_dig_power_sensors(
         self,
         dig_total_power_accums: list[Accum],
@@ -962,9 +971,7 @@ class Pipeline:
         func_name = f"{self.output.name}.run_transmit"
         # Scratch space for transferring digitiser power
         if self.dig_stats:
-            chunk_samples = self.spectra * self.output.spectra_samples
-            window_chunks = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / chunk_samples))
-            window_samples = window_chunks * chunk_samples
+            window_samples = self._dig_rms_dbfs_window_samples()
             dig_total_power = self._compute.slots["dig_total_power"].allocate_host(context)
             dig_total_power_windows = [Accum(window_samples, 0) for _ in range(N_POLS)]
         else:
