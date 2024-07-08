@@ -14,51 +14,67 @@
 # limitations under the License.
 ################################################################################
 
-"""Helpers to initialise random state with curand."""
+"""Helpers to initialise random state with curand.
 
-import importlib.resources
+The :c:struct:`curandXORWOW_t` struct define by curand is unnecessarily large
+for our purposes, because it retains state needed to generate Gaussian
+distributions (Box-Muller transform). To reduce global memory traffic, we use
+a different type we define (:c:struct:`randState_t`) to hold random states in
+global memory, together with helpers that save and restore this smaller state
+from a private :c:struct:`curandXORWOW_t` used within a kernel.
+
+Code using this module should thus NOT generate Gaussian distributions without
+understanding the implications.
+"""
+
+from importlib import resources
 
 import numpy as np
-from katsdpsigproc.accel import DeviceArray, roundup
-from katsdpsigproc.cuda import Context
+from katsdpsigproc import accel
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
+
+#: sizeof(randState_t)
+RAND_STATE_SIZE = 24
+#: alignof(randState_t)
+RAND_STATE_ALIGNMENT = 8
+#: dtype corresponding to randState_t
+RAND_STATE_DTYPE = np.dtype(
+    {"names": ["_align"], "formats": [np.dtype(f"u{RAND_STATE_ALIGNMENT}")], "itemsize": RAND_STATE_SIZE}, align=True
+)
+assert RAND_STATE_DTYPE.itemsize == RAND_STATE_SIZE
+assert RAND_STATE_DTYPE.alignment == RAND_STATE_ALIGNMENT
 
 
 class RandomStateBuilder:
     """Build array of initialised random states for curand."""
 
-    def __init__(self, context: Context) -> None:
-        source = (importlib.resources.files(__package__) / "kernels" / "curand_helpers.cu").read_text()
-        program = context.compile(source)
-        size_align_kernel = program.get_kernel("sizeof_alignof_curandStateXORWOW_t")
-        size_align_device = DeviceArray(context, (2,), np.int32)
-        command_queue = context.create_command_queue()
-        command_queue.enqueue_kernel(size_align_kernel, [size_align_device.buffer], (1,), (1,))
-        size_align = size_align_device.get(command_queue)
-
-        self.size = int(size_align[0])
-        self.align = int(size_align[1])
-        self.dtype = np.dtype(
-            {"names": ["_align"], "formats": [np.dtype(f"u{self.align}")], "itemsize": self.size}, align=True
-        )
-        assert self.dtype.itemsize == self.size
-        assert self.dtype.alignment == self.align
-        self.command_queue = command_queue
-        self.init_kernel = program.get_kernel("init_curandStateXORWOW_t")
+    def __init__(self, context: AbstractContext) -> None:
+        with resources.as_file(resources.files(__package__)) as resource_dir:
+            program = accel.build(context, "kernels/curand_init.mako", extra_dirs=[str(resource_dir)])
+        self._init_kernel = program.get_kernel("init_randState_t")
 
     def make_states(
-        self, shape: tuple[int, ...], seed: int, sequence_first: int, sequence_step: int = 1, offset: int = 0
-    ) -> DeviceArray:
+        self,
+        command_queue: AbstractCommandQueue,
+        shape: tuple[int, ...],
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
+        offset: int = 0,
+    ) -> accel.DeviceArray:
         """Create a multi-dimensional array of random states.
 
         This method is not particularly efficient. It's intended to be used
         just during startup, after which the random states will be persisted in
         global memory and reused.
+
+        The initialisation process is enqueued to `command_queue`.
         """
-        states = DeviceArray(self.command_queue.context, shape, self.dtype)
+        states = accel.DeviceArray(command_queue.context, shape, RAND_STATE_DTYPE)
         n = int(np.prod(shape))
         wgs = 256
-        self.command_queue.enqueue_kernel(
-            self.init_kernel,
+        command_queue.enqueue_kernel(
+            self._init_kernel,
             [
                 states.buffer,
                 np.uint64(seed),
@@ -67,8 +83,7 @@ class RandomStateBuilder:
                 np.uint64(offset),
                 np.uint32(n),
             ],
-            global_size=(roundup(n, wgs),),
+            global_size=(accel.roundup(n, wgs),),
             local_size=(wgs,),
         )
-        self.command_queue.finish()
         return states

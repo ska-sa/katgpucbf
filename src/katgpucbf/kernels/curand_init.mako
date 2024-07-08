@@ -14,21 +14,12 @@
  * limitations under the License.
  ******************************************************************************/
 
-extern "C++"  // PyCUDA wraps the whole file in extern "C"
-{
-#include <curand_kernel.h>
-}
+<%include file="/port.mako"/>
+<%include file="curand_helpers.mako"/>
 
-/// Get sizeof and alignof curandStateXORWOW_t
-__global__ void sizeof_alignof_curandStateXORWOW_t(int *out)
-{
-    out[0] = sizeof(curandStateXORWOW_t);
-    out[1] = alignof(curandStateXORWOW_t);
-}
-
-/// Initialise an array of curandState_t with sequential sequence numbers
-__global__ void init_curandStateXORWOW_t(
-    curandStateXORWOW_t *out,
+/// Initialise an array of randState_t with sequential sequence numbers
+KERNEL void init_randState_t(
+    randState_t *out,
     unsigned long long seed,
     unsigned long long sequence_first,
     unsigned long long sequence_step,
@@ -38,5 +29,7 @@ __global__ void init_curandStateXORWOW_t(
     unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= n)
         return;
-    curand_init(seed, sequence_first + id * sequence_step, offset, out + id);
+    curandStateXORWOW_t tmp;
+    curand_init(seed, sequence_first + id * sequence_step, offset, &tmp);
+    rand_state_save(out + id, &tmp);
 }
