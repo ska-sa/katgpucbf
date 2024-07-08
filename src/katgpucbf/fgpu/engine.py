@@ -59,7 +59,8 @@ from ..utils import (
     gaussian_dtype,
     steady_state_timestamp_sensor,
 )
-from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, INPUT_CHUNK_PADDING, recv, send
+from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, DIG_RMS_DBFS_WINDOW, INPUT_CHUNK_PADDING, recv, send
+from .accum import Accum
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
 from .output import NarrowbandOutput, Output, WidebandOutput
@@ -901,27 +902,51 @@ class Pipeline:
                 chunk.cleanup()
                 chunk.cleanup = None  # Potentially helps break reference cycles
 
-    def _update_dig_power_sensors(self, dig_total_power: accel.HostArray | None, out_item: OutQueueItem) -> None:
+    def _dig_rms_dbfs_window_samples(self) -> int:
+        """Compute the window size for the dig-rms-dbfs sensors.
+
+        The unit tests mock out this function to replace the value.
+        """
+        chunk_samples = self.spectra * self.output.spectra_samples
+        window_chunks = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / chunk_samples))
+        return window_chunks * chunk_samples
+
+    def _update_dig_power_sensors(
+        self,
+        dig_total_power_accums: list[Accum],
+        dig_total_power: accel.HostArray,
+        out_item: OutQueueItem,
+    ) -> None:
         """Update digitiser power sensors.
 
-        Helper function for keeping the complexity of :meth:`run_transmit` down to manageable levels.
+        Parameters
+        ----------
+        dig_total_power_accums
+            Accumulators tracking long-term digitiser total power (one per polarisation)
+        dig_total_power
+            The total power per polarisation in `out_item`
+        out_item
+            The current :class:`OutQueueItem`
         """
-        if dig_total_power is not None:
-            update_timestamp = self.engine.time_converter.adc_to_unix(out_item.next_timestamp)
-            if np.all(out_item.present):
-                for pol, trg in enumerate(dig_total_power):
-                    total_power = float(trg)
-                    avg_power = total_power / (out_item.n_spectra * self.output.spectra_samples)
+        all_present = np.all(out_item.present)
+        for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power)):
+            power: int | None = int(trg)
+            if not all_present:
+                power = None
+            if measurement := accum.add(out_item.timestamp, out_item.next_timestamp, power):
+                sensor = self.engine.sensors[f"input{pol}.dig-rms-dbfs"]
+                update_timestamp = self.engine.time_converter.adc_to_unix(measurement.end_timestamp)
+                if measurement.total is not None:
                     # Normalise relative to full scale. The factor of 2 is because we
                     # want 1.0 to correspond to a sine wave rather than a square wave.
-                    avg_power /= ((1 << (self.engine.recv_layout.sample_bits - 1)) - 1) ** 2 / 2
+                    fs = ((1 << (self.engine.recv_layout.sample_bits - 1)) - 1) ** 2 / 2
+                    avg_power = measurement.total / (measurement.end_timestamp - measurement.start_timestamp) / fs
                     # If for some reason there's zero power, avoid reporting
                     # -inf dB by assigning the most negative representable value
                     avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
-                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(avg_power_db, timestamp=update_timestamp)
-            else:
-                for pol in range(N_POLS):
-                    self.engine.sensors[f"input{pol}.dig-rms-dbfs"].set_value(
+                    sensor.set_value(avg_power_db, timestamp=update_timestamp)
+                else:
+                    sensor.set_value(
                         np.finfo(np.float64).min, status=aiokatcp.Sensor.Status.FAILURE, timestamp=update_timestamp
                     )
 
@@ -946,9 +971,12 @@ class Pipeline:
         func_name = f"{self.output.name}.run_transmit"
         # Scratch space for transferring digitiser power
         if self.dig_stats:
+            window_samples = self._dig_rms_dbfs_window_samples()
             dig_total_power = self._compute.slots["dig_total_power"].allocate_host(context)
+            dig_total_power_windows = [Accum(window_samples, 0) for _ in range(N_POLS)]
         else:
             dig_total_power = None
+            dig_total_power_windows = []
         while True:
             with self.engine.monitor.with_state(func_name, "wait out_queue"):
                 out_item = await self._out_queue.get()
@@ -977,7 +1005,8 @@ class Pipeline:
             with self.engine.monitor.with_state(func_name, "wait transfer"):
                 await async_wait_for_events([download_marker])
 
-            self._update_dig_power_sensors(dig_total_power, out_item)
+            if dig_total_power is not None:
+                self._update_dig_power_sensors(dig_total_power_windows, dig_total_power, out_item)
 
             n_batches = out_item.n_spectra // self.output.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
@@ -1322,8 +1351,6 @@ class Engine(aiokatcp.DeviceServer):
                     "Digitiser ADC average power",
                     units="dBFS",
                     status_func=dig_rms_dbfs_status,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
 

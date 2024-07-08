@@ -84,6 +84,12 @@ def jones_per_batch(channels: int, request: pytest.FixtureRequest) -> int:
         return JONES_PER_BATCH
 
 
+@pytest.fixture
+def dig_rms_dbfs_window_chunks() -> int:  # noqa: D401
+    """Number of chunks per window for ``dig-rms-dbfs`` sensors."""
+    return 2
+
+
 @dataclass
 class CW:
     r"""Specification of a cosine wave.
@@ -155,6 +161,37 @@ class TestEngine:
             return parse_wideband(wideband_args)
         else:
             return parse_narrowband(narrowband_args)
+
+    @pytest.fixture
+    def dig_rms_dbfs_window_samples(self) -> list[int]:
+        """The window size for dig-rms-dbfs sensors, in input samples.
+
+        The return value is a list, which will be populated with a single
+        element during engine startup by the
+        :meth:`mock_dig_rms_dbfs_window_samples` fixture. This roundabout
+        mechanism is needed because the actual `chunk_jones` value for the
+        engine is computed when it starts up, but we need the mock in place
+        before that.
+        """
+        return []
+
+    # This is marked autouse to ensure it will be run before the engine_server
+    # fixture.
+    @pytest.fixture(autouse=True)
+    def mock_dig_rms_dbfs_window_samples(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        dig_rms_dbfs_window_samples: list[int],
+        dig_rms_dbfs_window_chunks: int,
+        output: Output,
+    ) -> None:
+        def _dig_rms_dbfs_window_samples(self: Pipeline) -> int:
+            chunk_samples = self.spectra * self.output.spectra_samples
+            window_samples = dig_rms_dbfs_window_chunks * chunk_samples
+            dig_rms_dbfs_window_samples.append(window_samples)
+            return window_samples
+
+        monkeypatch.setattr("katgpucbf.fgpu.engine.Pipeline._dig_rms_dbfs_window_samples", _dig_rms_dbfs_window_samples)
 
     @pytest.fixture
     def mock_send_stream_network(self, output: Output) -> IPv4Network:
@@ -854,6 +891,7 @@ class TestEngine:
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
+        dig_rms_dbfs_window_chunks: int,
     ) -> None:
         """Test that the right output heaps are omitted when input heaps are missing.
 
@@ -871,7 +909,7 @@ class TestEngine:
             (8, 10),
             (15, 16),
             (117, 133),
-            (6 * chunk_samples // PACKET_SAMPLES, 7 * chunk_samples // PACKET_SAMPLES),
+            (6 * chunk_samples // PACKET_SAMPLES, 8 * chunk_samples // PACKET_SAMPLES),
         ]
         rng = np.random.default_rng(seed=1)
         dig_data = np.tile(rng.integers(-255, 255, size=(2, n_samples // 2), dtype=np.int16), 2)
@@ -880,7 +918,7 @@ class TestEngine:
             assert b < recv_present.shape[1]
             recv_present[:, a:b] = False
         # The data should have as many samples as the input, minus a reduction
-        # from windowing, rounded down to a full heap.
+        # from windowing, rounded down to a full batch.
         total_spectra = (n_samples - output.window) // output.spectra_samples
         total_batches = total_spectra // spectra_per_heap
         send_present = np.ones(total_batches, bool)
@@ -941,30 +979,33 @@ class TestEngine:
                 OPTIONAL_FAILURE = 3
 
             expected_updates = []
-            # The sensor is updated once per out_item.
             spectra_per_output_chunk = engine_server.chunk_jones // output.channels
             batches_per_output_chunk = spectra_per_output_chunk // spectra_per_heap
-            chunk_timestamp_step = spectra_per_output_chunk * output.spectra_samples
+            batches_per_window = batches_per_output_chunk * dig_rms_dbfs_window_chunks
+            window_timestamp_step = spectra_per_output_chunk * output.spectra_samples * dig_rms_dbfs_window_chunks
 
             total_chunks = (total_batches + batches_per_output_chunk - 1) // batches_per_output_chunk
-            for i in range(total_chunks):
-                start_batch = i * batches_per_output_chunk
-                stop_batch = (i + 1) * batches_per_output_chunk
+            # The last windows is only emitted if we observe its final chunk,
+            # so we round down here.
+            total_windows = total_chunks // dig_rms_dbfs_window_chunks
+            for i in range(total_windows):
+                start_batch = i * batches_per_window
+                stop_batch = (i + 1) * batches_per_window
                 n_present = np.sum(send_present[start_batch:stop_batch])
-                # The sensor timestamp shows from the previous processed chunk
+                # The sensor timestamp is the end of the window
                 sensor_timestamp = TIME_CONVERTER.adc_to_unix(
-                    timestamps[start_batch * spectra_per_heap] + chunk_timestamp_step
+                    timestamps[start_batch * spectra_per_heap] + window_timestamp_step
                 )
-                if n_present == batches_per_output_chunk:
+                if n_present == batches_per_window:
                     expected_updates.append((sensor_timestamp, Update.NORMAL))
                 elif n_present > 0:
                     expected_updates.append((sensor_timestamp, Update.FAILURE))
                 else:
-                    # If a chunk is completely missing, it could indicate that
-                    # there was a break in the input (and no OutQueueItem was
+                    # If a window is completely missing, it could indicate that
+                    # there was a break in the input (and no OutQueueItems were
                     # generated), in which case there will be no sensor update.
-                    # On the other hand, it could indicate that an OutQueueItem
-                    # was present but it had no valid heaps.
+                    # On the other hand, there might have been some OutQueueItems
+                    # present but none of them had valid heaps.
                     expected_updates.append((sensor_timestamp, Update.OPTIONAL_FAILURE))
 
             for pol in range(N_POLS):
@@ -1032,12 +1073,16 @@ class TestEngine:
         output: Output,
         input_voltage: int,
         output_power_dbfs: float,
+        dig_rms_dbfs_window_samples: list[int],
     ) -> None:
         """Test that the ``dig-rms-dbfs`` sensors are set correctly."""
         sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 10 * CHUNK_SAMPLES
         dig_data = np.full((2, n_samples), input_voltage, np.int16)
+        # Unpack the single-element list that was populated by
+        # mock_dig_rms_dbfs_window_samples.
+        window_size = dig_rms_dbfs_window_samples[0]
 
         await self._send_data(
             mock_recv_stream,
@@ -1046,7 +1091,8 @@ class TestEngine:
             output,
             dig_data,
         )
-        expected_timestamps = [TIME_CONVERTER.adc_to_unix(t * CHUNK_SAMPLES) for t in range(1, 10)]
+        expected_timestamps = [TIME_CONVERTER.adc_to_unix(t) for t in range(window_size, n_samples, window_size)]
+        assert len(expected_timestamps) > 0
         for pol in range(N_POLS):
             assert sensor_update_dict[sensors[pol].name] == [
                 aiokatcp.Reading(t, aiokatcp.Sensor.Status.WARN, output_power_dbfs) for t in expected_timestamps

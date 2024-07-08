@@ -7,6 +7,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   katgpucbf.fgpu.accum
    katgpucbf.fgpu.compute
    katgpucbf.fgpu.ddc
    katgpucbf.fgpu.delay

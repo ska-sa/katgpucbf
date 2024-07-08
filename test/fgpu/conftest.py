@@ -73,7 +73,7 @@ def mock_recv_stream(mocker) -> spead2.InprocQueue:
 
 @pytest.fixture
 async def engine_server(
-    request,
+    request: pytest.FixtureRequest,
     engine_arglist: list[str],
     mock_recv_stream,
     mock_send_stream,
