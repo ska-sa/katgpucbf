@@ -96,7 +96,8 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     rand_states += (batch * get_num_groups(1) + channel) * n_spectra + spectrum;
 
     curandStateXORWOW_t rand_state;
-    rand_state_load(&rand_state, rand_states);
+    if (valid)
+        rand_state_load(&rand_state, rand_states);
 
     /* It's critical that this loop is unrolled, so that b_batch_size is known at
      * compile time.
@@ -195,5 +196,6 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     }
 
     // Persist the random state for reuse next time
-    rand_state_save(rand_states, &rand_state);
+    if (valid)
+        rand_state_save(rand_states, &rand_state);
 }
