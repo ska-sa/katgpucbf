@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2020-2023, National Research Foundation (SARAO)
+ * Copyright (c) 2020-2024, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -18,6 +18,10 @@
 <%namespace name="transpose" file="/transpose_base.mako"/>
 <%include file="/kernels/complex.mako"/>
 <%include file="/kernels/quant.mako"/>
+
+#ifndef M_PIf
+#define M_PIf 3.14159265358979323846f
+#endif
 
 #define CHANNELS ${channels}
 #define OUT_LOW ${out_low}
@@ -121,9 +125,9 @@ DEVICE_FN void twiddle(int s, cplx Zr[2][2][n])
 {
     for (int r = 1; r < n; r++)  // Skip 0 because it's a no-op
     {
-        float angle = (-2.0f / CHANNELS) * r * s;
+        float angle = (-2.0f * M_PIf / CHANNELS) * r * s;
         cplx t;
-        sincospif(angle, &t.y, &t.x);
+        __sincosf(angle, &t.y, &t.x);
         for (int pol = 0; pol < 2; pol++)
         {
             Zr[pol][0][r] = cmul(Zr[pol][0][r], t);
@@ -194,7 +198,7 @@ DEVICE_FN void finish_fft(int s, const GLOBAL cplx * RESTRICT in, unsigned int i
     {
         cplx rot;
         int k = p * m + s;
-        sincospif(k * (-1.0f / CHANNELS), &rot.y, &rot.x);
+        __sincosf(k * (-M_PIf / CHANNELS), &rot.y, &rot.x);
         for (int pol = 0; pol < 2; pol++)
         {
             cplx Xt[2];  // temporary since X[pol, :, p] is not contiguous
@@ -214,7 +218,7 @@ DEVICE_FN void finish_fft(int s, const GLOBAL cplx * RESTRICT in, unsigned int i
 DEVICE_FN cplx apply_delay_gain(cplx gain, float phase, cplx X)
 {
     cplx rot;
-    sincospif(phase, &rot.y, &rot.x);
+    __sincosf(phase, &rot.y, &rot.x);
     return cmul(cmul(X, rot), gain);
 }
 
@@ -383,7 +387,7 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
                     // Skip processing channels that are not in the output
                     if (!valid_channel(wrap_index(k[i])))
                         continue;
-                    const float delay_scale = -1.0f / CHANNELS;
+                    const float delay_scale = -M_PIf / CHANNELS;
                     float channel_scale = delay_scale * delay_channel(k[i]);
                     cplx out[2];
                     for (int pol = 0; pol < 2; pol++)

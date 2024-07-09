@@ -818,9 +818,7 @@ class Pipeline:
                     if isinstance(self.output, WidebandOutput):
                         phase += 0.5 * np.pi * (np.array(start_coarse_delays) % 4)
                         phase = wrap_angle(phase)
-                    # Divide by pi because the arguments of sincospif() used in the
-                    # kernel are in radians/PI.
-                    self._out_item.phase.host[out_slice] = phase / np.pi
+                    self._out_item.phase.host[out_slice] = phase
                     assert in_item.samples is not None
                     if isinstance(self.output, NarrowbandOutput):
                         self._compute.run_narrowband_frontend(pfb_offsets, self._out_item.n_spectra, batch_spectra)

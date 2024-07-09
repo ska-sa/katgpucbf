@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -177,7 +177,7 @@ def test_postproc(
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
     fn.buffer("fine_delay").set(command_queue, h_fine_delay)
-    fn.buffer("phase").set(command_queue, h_phase / np.pi)
+    fn.buffer("phase").set(command_queue, h_phase)
     fn.buffer("gains").set(command_queue, h_gains)
     fn.buffer("out").zero(command_queue)
     fn()
