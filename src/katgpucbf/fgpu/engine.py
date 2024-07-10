@@ -496,7 +496,17 @@ class Pipeline:
             engine.send_sample_bits,
             narrowband=narrowband_config,
         )
-        self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, output.spectra_per_heap)
+        self._compute = template.instantiate(
+            compute_queue,
+            engine.n_samples,
+            self.spectra,
+            output.spectra_per_heap,
+            # Magic constant is random, and just to ensure the seed isn't the same
+            # as other engines that also use the sync_time for seeding
+            seed=int(engine.time_converter.sync_time) ^ 0x9CC11336C8B170B7,
+            sequence_first=engine.feng_id,
+            sequence_step=engine.n_ants,
+        )
         # Pre-allocate the memory for some buffers that we know we won't be
         # explicitly binding.
         self._compute.ensure_bound("fft_work")

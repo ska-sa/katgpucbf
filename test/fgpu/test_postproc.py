@@ -178,7 +178,7 @@ def test_postproc(
     template = postproc.PostprocTemplate(
         context, channels, unzip_factor, complex_pfb=complex_pfb, out_channels=out_channels, out_bits=out_bits
     )
-    fn = template.instantiate(command_queue, spectra, spectra_per_heap_out)
+    fn = template.instantiate(command_queue, spectra, spectra_per_heap_out, seed=123, sequence_first=456)
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
     fn.buffer("fine_delay").set(command_queue, h_fine_delay)

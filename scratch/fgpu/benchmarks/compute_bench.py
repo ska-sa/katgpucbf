@@ -85,6 +85,8 @@ def main():  # noqa: C901
             samples=args.recv_chunk_samples + extra_samples,
             spectra=out_spectra,
             spectra_per_heap=args.spectra_per_heap,
+            seed=123,
+            sequence_first=456,
         )
         fn.ensure_all_bound()
 

@@ -111,9 +111,21 @@ class PostprocTemplate:
         command_queue: AbstractCommandQueue,
         spectra: int,
         spectra_per_heap: int,
+        *,
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
     ) -> "Postproc":
         """Generate a :class:`Postproc` object based on this template."""
-        return Postproc(self, command_queue, spectra, spectra_per_heap)
+        return Postproc(
+            self,
+            command_queue,
+            spectra,
+            spectra_per_heap,
+            seed=seed,
+            sequence_first=sequence_first,
+            sequence_step=sequence_step,
+        )
 
 
 class Postproc(accel.Operation):
@@ -151,6 +163,8 @@ class Postproc(accel.Operation):
         Number of spectra on which post-prodessing will be performed.
     spectra_per_heap: int
         Number of spectra to send out per heap.
+    seed, sequence_first, sequence_step
+        See :class:`.RandomStateBuilder`.
     """
 
     def __init__(
@@ -159,6 +173,10 @@ class Postproc(accel.Operation):
         command_queue: AbstractCommandQueue,
         spectra: int,
         spectra_per_heap: int,
+        *,
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
     ) -> None:
         super().__init__(command_queue)
         if spectra % spectra_per_heap != 0:
@@ -193,8 +211,9 @@ class Postproc(accel.Operation):
         rand_states_shape = (template.groups_x * self._groups_y * template.block * template.block,)
         self.slots["rand_states"] = accel.IOSlot(rand_states_shape, RAND_STATE_DTYPE)
         builder = RandomStateBuilder(command_queue.context)
-        # TODO: get seed parameters
-        rand_states = builder.make_states(command_queue, rand_states_shape, 1, 0)
+        rand_states = builder.make_states(
+            command_queue, rand_states_shape, seed=seed, sequence_first=sequence_first, sequence_step=sequence_step
+        )
         self.bind(rand_states=rand_states)
 
     def _run(self) -> None:
