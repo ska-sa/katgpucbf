@@ -574,11 +574,13 @@ class TestEngine:
             # consistent across spectra.
             # The accuracy is limited by the quantisation.
             expected_phase = tone_phases[pol] + gain_phase[tone_channels[pol], pol]
-            assert_angles_allclose(np.angle(tone_data), expected_phase, atol=0.01)
-            # Suppress the tone and check that everything is now zero (the
-            # spectral leakage should be below the quantisation threshold).
+            assert_angles_allclose(np.angle(tone_data), expected_phase, atol=0.02)
+            # Suppress the tone and check that everything is now almost zero.
+            # The spectral leakage should be less than 1, but dithering can cause
+            # some values to be 1 rather than 0, and if that happens in both real
+            # and imaginary then the error will be sqrt(2).
             tone_data.fill(0)
-            np.testing.assert_equal(out_data[..., pol], 0)
+            np.testing.assert_allclose(out_data[..., pol], 0, atol=1.5)
 
     async def test_spectral_leakage(
         self,
@@ -710,7 +712,7 @@ class TestEngine:
         )
         # Add a polarisation dimension to timestamps to simplify some
         # broadcasting computations below.
-        atol = 2 * 0.5**send_sample_bits
+        atol = 4 * 0.5**send_sample_bits
         timestamps = timestamps[:, np.newaxis]
         expected_phase = phase_rate_per_sample * timestamps
         assert_angles_allclose(np.angle(out_data[tone_channels[0]]), expected_phase, atol=atol)
@@ -786,7 +788,7 @@ class TestEngine:
             valid = (update_times[i] <= timestamps) & (timestamps < update_times[i + 1])
             assert np.any(valid)
             phases = np.angle(out_data[valid])
-            assert_angles_allclose(phases, update_phases[i], atol=0.01)
+            assert_angles_allclose(phases, update_phases[i], atol=0.02)
 
         for delay_sensor in delay_sensors:
             for expected_time, expected_phase, sensor_update in zip(
@@ -875,7 +877,7 @@ class TestEngine:
         phase_ramp = -2 * np.pi * delay_s * channel_bw * (tone_channels - channels // 2)
         phase_ramp = phase_ramp[:, np.newaxis]
         # There is quite a lot of quantisation noise, so we need a large tolerance
-        assert_angles_allclose(orig_phase + phase_ramp, delayed_phase, atol=3e-2)
+        assert_angles_allclose(orig_phase + phase_ramp, delayed_phase, atol=4e-2)
 
     # Test with spectra_samples less than, equal to and greater than recv-packet-samples
     @pytest.mark.parametrize("channels", [64, 2048, 8192])
@@ -899,7 +901,7 @@ class TestEngine:
 
         The test sends the same set of data twice, with gaps only in the first half.
         It then checks that the heaps successfully received in the first half match
-        the heaps in the second half.
+        the heaps in the second half, up to a tolerance to account for dithering.
         """
         sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
@@ -955,7 +957,8 @@ class TestEngine:
                 y = out_data[:, (i + middle) * spectra_per_heap : (i + middle + 1) * spectra_per_heap]
                 # For narrowband they're only guaranteed to be equal because
                 # the time difference is a multiple of the mixer wavelength.
-                np.testing.assert_equal(x, y)
+                # The tolerance allows for a different of 1 on real and imag.
+                np.testing.assert_allclose(x, y, atol=1.5)
 
         for pol in range(N_POLS):
             # Check prometheus counter

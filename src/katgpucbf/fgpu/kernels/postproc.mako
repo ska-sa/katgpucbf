@@ -17,6 +17,8 @@
 <%include file="/port.mako"/>
 <%namespace name="transpose" file="/transpose_base.mako"/>
 <%include file="/kernels/complex.mako"/>
+<%include file="/kernels/curand_helpers.mako"/>
+<%include file="/kernels/dither.mako"/>
 <%include file="/kernels/quant.mako"/>
 
 #ifndef M_PIf
@@ -54,13 +56,15 @@ DEVICE_FN unsigned char pack_4bit(int2 q)
 #endif // OUT_BITS == 4
 
 // Quantise a Jones vector, and update number of complex values that saturated
-DEVICE_FN qjones quant_jones(const cplx value[2], unsigned int saturated[2])
+DEVICE_FN qjones quant_jones(const cplx value[2], unsigned int saturated[2], curandStateXORWOW_t *rand_state)
 {
     int2 q[2];  // Quantised but not packed values
     for (int i = 0; i < 2; i++)
     {
+        float re = value[i].x + dither(rand_state);
+        float im = value[i].y + dither(rand_state);
         // Note: | not || to avoid short-circuiting
-        saturated[i] += quant(value[i].x, &q[i].x, QMAX) | quant(value[i].y, &q[i].y, QMAX);
+        saturated[i] += quant(re, &q[i].x, QMAX) | quant(im, &q[i].y, QMAX);
     }
 #if OUT_BITS == 4
     return make_uchar2(pack_4bit(q[0]), pack_4bit(q[1]));
@@ -299,6 +303,7 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     const GLOBAL float2 * RESTRICT phase,     // Constant phase offset for fine delay (per pol) [radians]
     // Pre-quantisation scale factor per channel (.xy for pol0, .zw for pol1)
     const GLOBAL cplx2 * RESTRICT gains,
+    GLOBAL randState_t * RESTRICT rand_states, // Random states, indexed by linearised thread ID
     int out_stride_z,                         // Output stride between heaps
     int out_stride,                           // Output stride between channels within a heap
     int in_stride,                            // Input stride between polarisations
@@ -310,6 +315,19 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     transpose_coords_init_simple(&coords);
     int z = get_group_id(2);
     unsigned int saturated[2] = {0, 0};
+
+    /* Pick a unique randState_t to use for this workitem. We start by
+     * computing a workgroup index, then use that to compute a workitem
+     * index (using the fact that coords.lx/ly are the local id).
+     */
+    unsigned int linear_group_id =
+        (get_group_id(2) * get_num_groups(1) + get_group_id(1)) * ${groups_x} + get_group_id(0);
+    unsigned int linear_id =
+        linear_group_id * (${block * block}) + coords.ly * ${block} + coords.lx;
+    rand_states += linear_id;
+
+    curandStateXORWOW_t rand_state;
+    rand_state_load(&rand_state, rand_states);
 
     // Load a block of data
     // The transpose happens per-accumulation.
@@ -398,7 +416,7 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
                     }
 
                     // Interleave polarisations. Quantise at the same time.
-                    scratch[p][i].arr[${lr}][${lc}] = quant_jones(out, saturated);
+                    scratch[p][i].arr[${lr}][${lc}] = quant_jones(out, saturated, &rand_state);
                 }
             }
         }
@@ -435,4 +453,6 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     // per workgroup. It doesn't seem to have much impact though.
     for (int i = 0; i < 2; i++)
         atomicAdd(&out_saturated[z][i], saturated[i]);
+
+    rand_state_save(rand_states, &rand_state);
 }
