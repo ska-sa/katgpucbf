@@ -24,7 +24,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import COMPLEX, N_POLS
-from ..curand_helpers import RandomStateBuilder
+from ..curand_helpers import RAND_STATE_DTYPE, RandomStateBuilder
 
 
 class BeamformTemplate:
@@ -153,9 +153,10 @@ class Beamform(accel.Operation):
                 accel.Dimension(n_channels_per_substream, exact=True),
                 accel.Dimension(n_spectra_per_batch, exact=True),
             ),
-            builder.dtype,
+            RAND_STATE_DTYPE,
         )
         rand_states = builder.make_states(
+            command_queue,
             (n_batches, n_channels_per_substream, n_spectra_per_batch),
             seed=seed,
             sequence_first=sequence_first,

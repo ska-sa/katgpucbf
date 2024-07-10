@@ -14,13 +14,9 @@
  * limitations under the License.
  ******************************************************************************/
 
-extern "C++"  // PyCUDA wraps the whole file in extern "C"
-{
-#include <curand_kernel.h>
-}
-
 <%include file="/port.mako"/>
 <%include file="/kernels/complex.mako"/>
+<%include file="/kernels/curand_helpers.mako"/>
 <%include file="/kernels/quant.mako"/>
 
 <%
@@ -37,7 +33,7 @@ batch_beams = min(16, n_beams)
 #define BATCH_BEAMS ${batch_beams}
 
 /// Generate a random value in (-0.5, 0.5)
-DEVICE_FN float dither(GLOBAL curandStateXORWOW_t *state)
+DEVICE_FN float dither(curandStateXORWOW_t *state)
 {
     /* This magic value is chosen so that the largest possible return value
      * can be added to 127 and still produce 127.49999 rather than 127.5
@@ -64,7 +60,7 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     GLOBAL const char4 * RESTRICT in,        // shape batch, antenna, channel, time, pol
     GLOBAL const cplx * RESTRICT weights,    // shape antenna, beam, tightly packed
     GLOBAL const float * RESTRICT delays,    // shape antenna, beam, tightly packed
-    GLOBAL curandStateXORWOW_t * RESTRICT rand_state,  // shape batch, channel, time (packed)
+    GLOBAL randState_t * RESTRICT rand_states,  // shape batch, channel, time (packed)
     int out_stride,                          // elements between channels
     int out_beam_stride,                     // elements between beams
     int out_batch_stride,                    // elements between batches
@@ -97,7 +93,11 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     // Point to the first input/output handled by this work item
     in += batch * in_batch_stride + channel * in_stride + spectrum;
     out += batch * out_batch_stride + channel * out_stride + spectrum;
-    rand_state += (batch * get_num_groups(1) + channel) * n_spectra + spectrum;
+    rand_states += (batch * get_num_groups(1) + channel) * n_spectra + spectrum;
+
+    curandStateXORWOW_t rand_state;
+    if (valid)
+        rand_state_load(&rand_state, rand_states);
 
     /* It's critical that this loop is unrolled, so that b_batch_size is known at
      * compile time.
@@ -167,8 +167,8 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
                 int beam = i + b_batch;
                 int re, im;
                 bool saturated =
-                    quant_8bit(accum[i].x + dither(rand_state), &re)
-                    | quant_8bit(accum[i].y + dither(rand_state), &im);
+                    quant_8bit(accum[i].x + dither(&rand_state), &re)
+                    | quant_8bit(accum[i].y + dither(&rand_state), &im);
                 out[out_beam_stride * beam] = make_char2(re, im);
                 u.l_saturated[i][lid] = saturated;
             }
@@ -194,4 +194,8 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
         }
         BARRIER(); // switching back to using u.l_weights for the next loop
     }
+
+    // Persist the random state for reuse next time
+    if (valid)
+        rand_state_save(rand_states, &rand_state);
 }
