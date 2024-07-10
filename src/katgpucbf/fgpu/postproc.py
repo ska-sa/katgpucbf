@@ -65,9 +65,9 @@ class PostprocTemplate:
         out_bits: int,
         out_channels: tuple[int, int] | None = None,
     ) -> None:
-        self.block = 32
+        self.block = 16
         self.vtx = 1
-        self.vty = 1
+        self.vty = 2
         self.channels = channels
         self.unzip_factor = unzip_factor
         self.out_bits = out_bits
@@ -171,7 +171,7 @@ class Postproc(accel.Operation):
         self.spectra = spectra
         self.spectra_per_heap = spectra_per_heap
         self._groups_y = spectra_per_heap // block_y
-        self._groups_z = heaps
+        self._heaps = heaps
         pols = accel.Dimension(N_POLS, exact=True)
 
         in_shape = (
@@ -190,7 +190,7 @@ class Postproc(accel.Operation):
         self.slots["gains"] = accel.IOSlot((n_out_channels, pols), np.complex64)
         # This could be seen as multi-dimensional, but we flatten it to 1D as an
         # easy way to guarantee that it is not padded.
-        rand_states_shape = (template.groups_x * self._groups_y * self._groups_z * template.block * template.block,)
+        rand_states_shape = (template.groups_x * self._groups_y * template.block * template.block,)
         self.slots["rand_states"] = accel.IOSlot(rand_states_shape, RAND_STATE_DTYPE)
         builder = RandomStateBuilder(command_queue.context)
         # TODO: get seed parameters
@@ -216,11 +216,12 @@ class Postproc(accel.Operation):
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(np.prod(in_.padded_shape[1:])),  # in_stride
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
+                np.int32(self._heaps),  # heaps
             ],
             global_size=(
                 self.template.block * self.template.groups_x,
                 self.template.block * self._groups_y,
-                self._groups_z,
+                1,
             ),
             local_size=(self.template.block, self.template.block, 1),
         )

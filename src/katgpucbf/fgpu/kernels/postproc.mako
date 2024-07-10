@@ -307,21 +307,19 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     int out_stride_z,                         // Output stride between heaps
     int out_stride,                           // Output stride between channels within a heap
     int in_stride,                            // Input stride between polarisations
-    int spectra_per_heap)                     // Number of spectra per output heap
+    int spectra_per_heap,                     // Number of spectra per output heap
+    int heaps)                                // Number of output heaps
 {
     LOCAL_DECL scratch_t scratch[n][2];
     LOCAL_DECL cplx l_gains[n][2][2][${block}];  // indexed by p, pol, +/- s
     transpose_coords coords;
     transpose_coords_init_simple(&coords);
-    int z = get_group_id(2);
-    unsigned int saturated[2] = {0, 0};
 
     /* Pick a unique randState_t to use for this workitem. We start by
      * computing a workgroup index, then use that to compute a workitem
      * index (using the fact that coords.lx/ly are the local id).
      */
-    unsigned int linear_group_id =
-        (get_group_id(2) * get_num_groups(1) + get_group_id(1)) * ${groups_x} + get_group_id(0);
+    unsigned int linear_group_id = get_group_id(1) * ${groups_x} + get_group_id(0);
     unsigned int linear_id =
         linear_group_id * (${block * block}) + coords.ly * ${block} + coords.lx;
     rand_states += linear_id;
@@ -329,130 +327,136 @@ KERNEL REQD_WORK_GROUP_SIZE(${block}, ${block}, 1) void postproc(
     curandStateXORWOW_t rand_state;
     rand_state_load(&rand_state, rand_states);
 
-    // Load a block of data
-    // The transpose happens per-accumulation.
-    <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
+    for (int z = 0; z < heaps; z++)
     {
-        int s = ${c};
-        /* Load all the necessary gains for the subtile into local memory. This
-         * depends on some implementation details of transpose_load
-         * (specifically that ${c} is coords.lx plus a constant).
-         */
-        if (s * 2 <= m)
+        unsigned int saturated[2] = {0, 0};
+        // Load a block of data
+        // The transpose happens per-accumulation.
+        <%transpose:transpose_load coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
         {
-            for (int p = coords.ly; p < n; p += ${block})
+            int s = ${c};
+            /* Load all the necessary gains for the subtile into local memory. This
+             * depends on some implementation details of transpose_load
+             * (specifically that ${c} is coords.lx plus a constant).
+             */
+            if (s * 2 <= m)
             {
-                int k[2];
-                k[0] = p * m + s;
-                // & to avoid overflow in edge cases.
-                k[1] = (CHANNELS - k[0]) & (CHANNELS - 1);
-                for (int i = 0; i < 2; i++)
+                for (int p = coords.ly; p < n; p += ${block})
                 {
-                    cplx g[2];
-                    int ch = wrap_index(k[i]);
-                    if (valid_channel(ch))
+                    int k[2];
+                    k[0] = p * m + s;
+                    // & to avoid overflow in edge cases.
+                    k[1] = (CHANNELS - k[0]) & (CHANNELS - 1);
+                    for (int i = 0; i < 2; i++)
                     {
-                        float4_to_float2_array(gains[ch], g);
+                        cplx g[2];
+                        int ch = wrap_index(k[i]);
+                        if (valid_channel(ch))
+                        {
+                            float4_to_float2_array(gains[ch], g);
+                        }
+                        else
+                        {
+                            g[0] = make_float2(0.0f, 0.0f);
+                            g[1] = g[0];
+                        }
+                        // TODO: avoid taking up space for unused gains
+                        for (int pol = 0; pol < 2; pol++)
+                            l_gains[p][pol][i][coords.lx] = g[pol];
                     }
-                    else
-                    {
-                        g[0] = make_float2(0.0f, 0.0f);
-                        g[1] = g[0];
-                    }
-                    // TODO: avoid taking up space for unused gains
-                    for (int pol = 0; pol < 2; pol++)
-                        l_gains[p][pol][i][coords.lx] = g[pol];
                 }
             }
-        }
 
-        BARRIER();
+            BARRIER();
 
-        if (s * 2 <= m)  // Note: <= not <. We need to process m/2 + 1 times
-        {
-            // Which spectrum within the accumulation.
-            int spectrum = z * spectra_per_heap + ${r};
-            int base_addr = spectrum * CHANNELS;
-            cplx X[2][2][n];   // Final Fourier transform
+            if (s * 2 <= m)  // Note: <= not <. We need to process m/2 + 1 times
+            {
+                // Which spectrum within the accumulation.
+                int spectrum = z * spectra_per_heap + ${r};
+                int base_addr = spectrum * CHANNELS;
+                cplx X[2][2][n];   // Final Fourier transform
 % if complex_pfb:
-            finish_c2c(s, in + base_addr, in_stride, X);
+                finish_c2c(s, in + base_addr, in_stride, X);
 % else:
-            finish_fft(s, in + base_addr, in_stride, X);
+                finish_fft(s, in + base_addr, in_stride, X);
 % endif
 
-            float delay[2], ph[2];
-            float2_to_array(fine_delay[spectrum], delay);
-            float2_to_array(phase[spectrum], ph);
-            for (int p = 0; p < n; p++)
-            {
-                /* Apply fine delay, phase and gain.
-                 * Fine delay is in fractions of a sample. Gets multiplied by
-                 * delay_scale x channel to scale appropriately for the
-                 * channel, and then constant phase is added.
-                 * TODO: fine_delay and phase are common across channels, so
-                 * could possibly be loaded more efficiently.
-                 */
-                int k[2];
-                k[0] = p * m + s;
-                k[1] = CHANNELS - k[0];
-                for (int i = 0; i < 2; i++)
+                float delay[2], ph[2];
+                float2_to_array(fine_delay[spectrum], delay);
+                float2_to_array(phase[spectrum], ph);
+                for (int p = 0; p < n; p++)
                 {
-                    /* Skip processing duplicates. This is mainly needed to
-                     * avoid double-counting saturation.
+                    /* Apply fine delay, phase and gain.
+                     * Fine delay is in fractions of a sample. Gets multiplied by
+                     * delay_scale x channel to scale appropriately for the
+                     * channel, and then constant phase is added.
+                     * TODO: fine_delay and phase are common across channels, so
+                     * could possibly be loaded more efficiently.
                      */
-                    if (i == 1 && (s == 0 || s * 2 == m))
-                        continue;
-                    // Skip processing channels that are not in the output
-                    if (!valid_channel(wrap_index(k[i])))
-                        continue;
-                    const float delay_scale = -M_PIf / CHANNELS;
-                    float channel_scale = delay_scale * delay_channel(k[i]);
-                    cplx out[2];
-                    for (int pol = 0; pol < 2; pol++)
+                    int k[2];
+                    k[0] = p * m + s;
+                    k[1] = CHANNELS - k[0];
+                    for (int i = 0; i < 2; i++)
                     {
-                        cplx g = l_gains[p][pol][i][coords.lx];
-                        float phase = delay[pol] * channel_scale + ph[pol];
-                        out[pol] = apply_delay_gain(g, phase, X[pol][i][p]);
+                        /* Skip processing duplicates. This is mainly needed to
+                         * avoid double-counting saturation.
+                         */
+                        if (i == 1 && (s == 0 || s * 2 == m))
+                            continue;
+                        // Skip processing channels that are not in the output
+                        if (!valid_channel(wrap_index(k[i])))
+                            continue;
+                        const float delay_scale = -M_PIf / CHANNELS;
+                        float channel_scale = delay_scale * delay_channel(k[i]);
+                        cplx out[2];
+                        for (int pol = 0; pol < 2; pol++)
+                        {
+                            cplx g = l_gains[p][pol][i][coords.lx];
+                            float phase = delay[pol] * channel_scale + ph[pol];
+                            out[pol] = apply_delay_gain(g, phase, X[pol][i][p]);
+                        }
+
+                        // Interleave polarisations. Quantise at the same time.
+                        scratch[p][i].arr[${lr}][${lc}] = quant_jones(out, saturated, &rand_state);
                     }
-
-                    // Interleave polarisations. Quantise at the same time.
-                    scratch[p][i].arr[${lr}][${lc}] = quant_jones(out, saturated, &rand_state);
                 }
             }
+
+            BARRIER(); // ensure l_gains has been consumed before it gets updated
         }
+        </%transpose:transpose_load>
 
-        BARRIER(); // ensure l_gains has been consumed before it gets updated
-    }
-    </%transpose:transpose_load>
-
-    // Write it out
-    <%transpose:transpose_store coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
-    {
-        int s = ${r};
-        if (s * 2 <= m)  // Note: <= not <. We need to process fft_channels/2 + 1 times
+        // Write it out
+        <%transpose:transpose_store coords="coords" block="${block}" vtx="${vtx}" vty="${vty}" args="r, c, lr, lc">
         {
-            qjones *base = out + z * out_stride_z + ${c};
-            for (int p = 0; p < n; p++)
+            int s = ${r};
+            if (s * 2 <= m)  // Note: <= not <. We need to process fft_channels/2 + 1 times
             {
-                int k = p * m + s;
-                int ch = wrap_index(k);
-                if (valid_channel(ch))
-                    base[ch * out_stride] = scratch[p][0].arr[${lr}][${lc}];
-                if (s != 0 && s * 2 != m)  // Skip the duplicates (calculation was skipped)
+                qjones *base = out + z * out_stride_z + ${c};
+                for (int p = 0; p < n; p++)
                 {
-                    ch = wrap_index(CHANNELS - k);
+                    int k = p * m + s;
+                    int ch = wrap_index(k);
                     if (valid_channel(ch))
-                        base[ch * out_stride] = scratch[p][1].arr[${lr}][${lc}];
+                        base[ch * out_stride] = scratch[p][0].arr[${lr}][${lc}];
+                    if (s != 0 && s * 2 != m)  // Skip the duplicates (calculation was skipped)
+                    {
+                        ch = wrap_index(CHANNELS - k);
+                        if (valid_channel(ch))
+                            base[ch * out_stride] = scratch[p][1].arr[${lr}][${lc}];
+                    }
                 }
             }
         }
-    }
-    </%transpose:transpose_store>
+        </%transpose:transpose_store>
 
-    // TODO: could reduce within the workgroup and do only one atomic update
-    // per workgroup. It doesn't seem to have much impact though.
-    for (int i = 0; i < 2; i++)
-        atomicAdd(&out_saturated[z][i], saturated[i]);
+        // TODO: could reduce within the workgroup and do only one atomic update
+        // per workgroup. It doesn't seem to have much impact though.
+        for (int i = 0; i < 2; i++)
+            atomicAdd(&out_saturated[z][i], saturated[i]);
+
+        BARRIER();  // before the next z loop iteration
+    }
 
     rand_state_save(rand_states, &rand_state);
 }
