@@ -16,15 +16,9 @@
 
 """Helpers to initialise random state with curand.
 
-The :c:struct:`curandXORWOW_t` struct defined by curand is unnecessarily large
-for our purposes, because it retains state needed to generate Gaussian
-distributions (Box-Muller transform). To reduce global memory traffic, we use
-a different type we define (:c:struct:`randState_t`) to hold random states in
-global memory, together with helpers that save and restore this smaller state
-from a private :c:struct:`curandXORWOW_t` used within a kernel.
-
-Code using this module should thus NOT generate Gaussian distributions without
-understanding the implications.
+See :ref:`dithering` for an explanation of why we introduce a separate
+:c:struct:`randState_t` structure. Code using this module should **not**
+generate Gaussian distributions without understanding the implications.
 """
 
 from importlib import resources
@@ -37,7 +31,7 @@ from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 RAND_STATE_SIZE = 24
 #: alignof(randState_t)
 RAND_STATE_ALIGNMENT = 8
-#: dtype corresponding to randState_t
+#: opaque dtype corresponding to randState_t (only size and alignment matter)
 RAND_STATE_DTYPE = np.dtype(
     {"names": ["_align"], "formats": [np.dtype(f"u{RAND_STATE_ALIGNMENT}")], "itemsize": RAND_STATE_SIZE}, align=True
 )

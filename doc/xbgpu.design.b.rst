@@ -66,6 +66,8 @@ This does mean that the inputs are loaded multiple times, but caches help
 significantly here, and the kernel tends to be more compute-bound in this
 domain.
 
+.. _dithering:
+
 Dithering
 ^^^^^^^^^
 To improve linearity, a random value in the interval (-0.5, 0.5) is added to
@@ -84,6 +86,13 @@ mapping the :math:`2^{32}` possible return values of :cpp:func:`!curand` to
 the range :math:`(-2^{31}, 2^{31})` with zero represented twice, before
 scaling to convert to a real value in :math:`(-0.5, 0.5)`. While this is
 still a deviation from uniformity, it does give a symmetric distribution.
+
+The :c:struct:`curandStateXORWOW_t` struct defined by curand is unnecessarily large
+for our purposes, because it retains state needed to generate Gaussian
+distributions (Box-Muller transform). To reduce global memory traffic, we use
+a different type we define (:c:struct:`randState_t`) to hold random states in
+global memory, together with helpers that save and restore this smaller state
+from a private :c:struct:`curandStateXORWOW_t` used within a kernel.
 
 .. _curand: https://docs.nvidia.com/cuda/curand/index.html
 
