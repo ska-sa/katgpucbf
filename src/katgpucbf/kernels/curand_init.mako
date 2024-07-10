@@ -18,7 +18,7 @@
 <%include file="curand_helpers.mako"/>
 
 /// Initialise an array of randState_t with sequential sequence numbers
-KERNEL void init_randState_t(
+KERNEL void rand_state_init(
     randState_t *out,
     unsigned long long seed,
     unsigned long long sequence_first,

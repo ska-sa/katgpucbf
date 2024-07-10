@@ -51,7 +51,7 @@ class RandomStateBuilder:
     def __init__(self, context: AbstractContext) -> None:
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(context, "kernels/curand_init.mako", extra_dirs=[str(resource_dir)])
-        self._init_kernel = program.get_kernel("init_randState_t")
+        self._init_kernel = program.get_kernel("rand_state_init")
 
     def make_states(
         self,
