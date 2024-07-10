@@ -16,7 +16,7 @@
 
 """Helpers to initialise random state with curand.
 
-The :c:struct:`curandXORWOW_t` struct define by curand is unnecessarily large
+The :c:struct:`curandXORWOW_t` struct defined by curand is unnecessarily large
 for our purposes, because it retains state needed to generate Gaussian
 distributions (Box-Muller transform). To reduce global memory traffic, we use
 a different type we define (:c:struct:`randState_t`) to hold random states in
