@@ -45,8 +45,11 @@ async def test_delay_small(
     -------------------
     Verification by means of test. Set a delay on one input and form a beam
     from it with a compensating delay. Use a different input with no delay
-    to form a reference beam. Check that the results are consistent to within 2
-    ULP.
+    to form a reference beam. Check that the results are consistent to within 3
+    ULP. This tolerance allows for 1 ULP of F-engine dithering for each input,
+    and 1 ULP for B-engine dithering (the reference beam experiences no
+    dithering because the output simply equals the input and hence no re-quantisation
+    occurs).
 
     This test is only valid for delays of less than half a sample. For larger
     delays, the F-engine delay is done partially in the time domain, while the
@@ -115,7 +118,7 @@ async def test_delay_small(
         data = data.astype(np.int16)
         max_error = np.max(np.abs(data[delay_beam] - data[ref_beam]))
         with check:
-            assert max_error <= 2
+            assert max_error <= 3
         pdf_report.detail(f"Maximum difference is {max_error} ULP")
 
 
