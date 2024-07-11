@@ -73,7 +73,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--array-size", type=int, default=80, help="Number of antennas in the simulated array [%(default)s]"
     )
     parser.add_argument(
-        "--channels", type=int, default=32768, help="Total number of channels in the simulated array [%(default)s]"
+        "--channels", type=int, default=32768, help="Total number of channels in the simulated stream [%(default)s]"
     )
     parser.add_argument(
         "--channels-per-substream", type=int, default=512, help="Number of channels sent by this fsim [%(default)s]"
