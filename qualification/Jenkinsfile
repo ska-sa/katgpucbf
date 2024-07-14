@@ -101,19 +101,39 @@ pipeline {
          junit testResults: 'result.xml', skipPublishingChecks: true
 
          // Compress and publish json file so that at least we have that.
+         // 'includes' specifies which files from the current directory to archive;
+         // we only want the linked file itself
          sh 'xz --keep --force -T 0 report.json'
-         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Intermediate JSON', reportDir: '', reportFiles: 'report.json.xz'])
+         publishHTML(target: [
+           keepAll: true,
+           reportName: 'Qualification Test Intermediate JSON',
+           reportDir: '',
+           reportFiles: 'report.json.xz',
+           includes: 'report.json.xz'
+         ])
 
          script {
            // Generate and publish test report
            COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
            currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
          }
-         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Report', reportDir: '', reportFiles: 'report.pdf'])
+         publishHTML(target: [
+           keepAll: true,
+           reportName: 'Qualification Test Report',
+           reportDir: '',
+           reportFiles: 'report.pdf',
+           includes: 'report.pdf'
+         ])
 
          // If that worked, we can probably generate and publish a procedure as well
          sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
-         publishHTML(target: [keepAll: true, reportName: 'Qualification Test Procedure', reportDir: '', reportFiles: 'procedure.pdf'])
+         publishHTML(target: [
+           keepAll: true,
+           reportName: 'Qualification Test Procedure',
+           reportDir: '',
+           reportFiles: 'procedure.pdf',
+           includes: 'procedure.pdf'
+         ])
        }
      }
    }
