@@ -351,8 +351,8 @@ class CBFCache:
         if self._cbf is not None and self._cbf.config == cbf_config:
             return self._cbf
 
-        await self._close_cbf()
         try:
+            await self._close_cbf()
             master_controller_client = await self._get_master_controller_client()
             product_name = self._pytestconfig.getini("product_name")
             try:
