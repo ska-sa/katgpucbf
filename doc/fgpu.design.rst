@@ -72,15 +72,15 @@ The polyphase filter bank starts with a finite impulse response (FIR) filter,
 with some number of *taps* (e.g., 16), and a *step* size which is twice the
 number of output channels. This can be thought of as organising the samples as
 a 2D array, with *step* columns, and then applying a FIR down each column.
-Since the columns are independent, we map each column to a separate workitem,
+Since the columns are independent, we map each column to a separate work-item,
 which keeps a sliding window of samples in its registers. GPUs generally don't
 allow indirect indexing of registers, so loop unrolling (by the number of
 taps) is used to ensure that the indices are known at compile time.
 
 This might not give enough parallelism, particularly for small channel counts,
-so in fact each column in split into sections and a separate workitem is used
+so in fact each column in split into sections and a separate work-item is used
 for each section. There is a trade-off here as samples at the boundaries
-between sections need to be loaded by both workitems, leading to overheads.
+between sections need to be loaded by both work-items, leading to overheads.
 
 Registers are used to hold both the sliding window and the weights, which
 leads to significant register pressure. This reduces occupancy and leads to
