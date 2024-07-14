@@ -48,8 +48,8 @@ class CBFBase:
     mode_config: dict  # Configuration values used for MeerKAT mode string
     uuid: UUID
 
-    async def close(self) -> None:
-        """Shut down all the connections."""
+    async def close(self, master_controller_client: aiokatcp.Client | None) -> None:
+        """Shut down all the connections and deconfigure the subarray product."""
         pass  # Derived classes can override
 
 
@@ -153,13 +153,15 @@ class CBFRemoteControl(CBFBase):
         logger.debug("steady_state_timestamp: %d", timestamp)
         return timestamp
 
-    async def close(self) -> None:
-        """Shut down all the connections."""
+    async def close(self, master_controller_client: aiokatcp.Client | None) -> None:
+        """Shut down all the connections and deconfigure the subarray product."""
         clients = self.dsim_clients + [self.product_controller_client]
         async with asyncio.TaskGroup() as tg:
             for client in clients:
                 client.close()
                 tg.create_task(client.wait_closed())
+        if master_controller_client is not None:
+            await master_controller_client.request("product-deconfigure", self.name)
 
     async def dsim_time(self, dsim_idx: int = 0) -> float:
         """Get the current UNIX time, as reported by a dsim.
@@ -326,10 +328,8 @@ class CBFCache:
         if self._cbf is not None:
             name = self._cbf.name
             logger.info("Tearing down CBF %s.", name)
-            await self._cbf.close()
+            await self._cbf.close(self._master_controller_client)
             self._cbf = None
-            if self._master_controller_client is not None:
-                await self._master_controller_client.request("product-deconfigure", name)
 
     async def _get_master_controller_client(self) -> aiokatcp.Client:
         if self._master_controller_client is not None:
