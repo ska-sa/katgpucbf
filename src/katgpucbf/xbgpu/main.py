@@ -347,7 +347,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--send-packet-payload",
         type=int,
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
-        help="Size in bytes for output packets (baseline correlation products payload only) [%(default)s]",
+        help="Size in bytes for output packets (payload only) [%(default)s]",
     )
     parser.add_argument("--send-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
     parser.add_argument("--send-ibv", action="store_true", help="Use ibverbs for output [no].")
