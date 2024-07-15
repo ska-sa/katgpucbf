@@ -126,6 +126,10 @@ async def test_sender(
     # Now proceed with DSim data using received descriptors (in ItemGroup)(ig)
     with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
         await sender.run(0, TimeConverter(time.time(), ADC_SAMPLE_RATE))
+        # sender.run can return with some future callbacks (which update
+        # Prometheus counters) still scheduled for the next event loop
+        # iteration. Ensure they get a chance to run before exiting PromDiff.
+        await asyncio.sleep(0)
     for queue in inproc_queues:
         queue.stop()
 
