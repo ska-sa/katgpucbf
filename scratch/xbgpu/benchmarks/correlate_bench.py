@@ -20,6 +20,7 @@ import argparse
 
 import katsdpsigproc.accel
 
+from katgpucbf import DEFAULT_JONES_PER_BATCH
 from katgpucbf.xbgpu.correlation import CorrelationTemplate
 
 
@@ -27,16 +28,27 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--array-size", type=int, default=80, help="Antennas in the array [%(default)s]")
     parser.add_argument(
+        "--channels", type=int, default=1024, help="Total number of channels in the stream [%(default)s]"
+    )
+    parser.add_argument(
         "--channels-per-substream", type=int, default=16, help="Channels processed by one engine [%(default)s]"
     )
-    parser.add_argument("--spectra-per-heap", type=int, default=256, help="Spectra in each batch [%(default)s]")
+    parser.add_argument(
+        "--jones-per-batch",
+        type=int,
+        default=DEFAULT_JONES_PER_BATCH,
+        help="Number of antenna-channelised-voltage Jones vectors in each F-engine batch [%(default)s]",
+    )
     parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=32, help="Frames per chunk [%(default)s]")
     parser.add_argument("--passes", type=int, default=10000, help="Number of times to repeat the test [%(default)s]")
     args = parser.parse_args()
+    if args.jones_per_batch % args.channels != 0:
+        parser.error("--jones-per-batch must be a multiple of --channels")
+    spectra_per_heap = args.jones_per_batch // args.channels
 
     ctx = katsdpsigproc.accel.create_some_context()
     command_queue = ctx.create_command_queue()
-    template = CorrelationTemplate(ctx, args.array_size, args.channels_per_substream, args.spectra_per_heap, 8)
+    template = CorrelationTemplate(ctx, args.array_size, args.channels_per_substream, spectra_per_heap, 8)
     fn = template.instantiate(command_queue, args.heaps_per_fengine_per_chunk)
 
     fn.ensure_all_bound()
@@ -54,7 +66,7 @@ def main():
     voltages = (
         args.array_size
         * args.channels_per_substream
-        * args.spectra_per_heap
+        * spectra_per_heap
         * args.heaps_per_fengine_per_chunk
         * args.passes
     )

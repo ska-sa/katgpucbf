@@ -245,7 +245,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--channels",
         type=int,
         required=True,
-        help="Total number of channels out of the F-Engine PFB.",
+        help="Total number of channels in the stream.",
     )
     parser.add_argument(
         "--channels-per-substream",
