@@ -273,6 +273,8 @@ async def _report_cbf_config(
     interfaces = await get_task_details_multi(r"interfaces\.([^.]+)\.name", str)
     tasks: dict[str, TaskDict] = {}
     for task_name, hostname in hosts.items():
+        if task_name not in git_version_futures:
+            raise RuntimeError(f"could not get katcp port for {task_name}: possible DNS failure")
         task_interfaces = interfaces.get(task_name, {})
         tasks[task_name] = {
             "host": hostname,
