@@ -957,7 +957,7 @@ class TestEngine:
                 y = out_data[:, (i + middle) * spectra_per_heap : (i + middle + 1) * spectra_per_heap]
                 # For narrowband they're only guaranteed to be equal because
                 # the time difference is a multiple of the mixer wavelength.
-                # The tolerance allows for a different of 1 on real and imag.
+                # The tolerance allows for a difference of 1 on real and imag.
                 np.testing.assert_allclose(x, y, atol=1.5)
 
         for pol in range(N_POLS):
