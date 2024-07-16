@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -28,6 +28,7 @@ from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import N_POLS, utils
+from ..curand_helpers import RAND_STATE_DTYPE, RandomStateBuilder
 
 
 class PostprocTemplate:
@@ -64,12 +65,13 @@ class PostprocTemplate:
         out_bits: int,
         out_channels: tuple[int, int] | None = None,
     ) -> None:
-        self.block = 32
+        self.block = 16
         self.vtx = 1
-        self.vty = 1
+        self.vty = 2
         self.channels = channels
         self.unzip_factor = unzip_factor
         self.out_bits = out_bits
+        self.groups_x = accel.divup(channels // unzip_factor // 2 + 1, self.block * self.vtx)
         if channels <= 0 or channels & (channels - 1):
             raise ValueError("channels must be a power of 2")
         if channels % unzip_factor:
@@ -92,6 +94,7 @@ class PostprocTemplate:
                     "block": self.block,
                     "vtx": self.vtx,
                     "vty": self.vty,
+                    "groups_x": self.groups_x,
                     "channels": channels,
                     "out_low": self.out_channels[0],
                     "out_high": self.out_channels[1],
@@ -108,9 +111,21 @@ class PostprocTemplate:
         command_queue: AbstractCommandQueue,
         spectra: int,
         spectra_per_heap: int,
+        *,
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
     ) -> "Postproc":
         """Generate a :class:`Postproc` object based on this template."""
-        return Postproc(self, command_queue, spectra, spectra_per_heap)
+        return Postproc(
+            self,
+            command_queue,
+            spectra,
+            spectra_per_heap,
+            seed=seed,
+            sequence_first=sequence_first,
+            sequence_step=sequence_step,
+        )
 
 
 class Postproc(accel.Operation):
@@ -133,6 +148,9 @@ class Postproc(accel.Operation):
         Fixed phase adjustment in radians (one value per pol).
     **gains** : out_channels × N_POLS, complex64
         Per-channel gain (one value per pol).
+    **rand_states** : implementation-defined
+        Random states. This slot is set up by the constructor and should
+        normally not need to be touched.
 
     Parameters
     ----------
@@ -145,6 +163,8 @@ class Postproc(accel.Operation):
         Number of spectra on which post-prodessing will be performed.
     spectra_per_heap: int
         Number of spectra to send out per heap.
+    seed, sequence_first, sequence_step
+        See :class:`.RandomStateBuilder`.
     """
 
     def __init__(
@@ -153,18 +173,24 @@ class Postproc(accel.Operation):
         command_queue: AbstractCommandQueue,
         spectra: int,
         spectra_per_heap: int,
+        *,
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
     ) -> None:
         super().__init__(command_queue)
         if spectra % spectra_per_heap != 0:
             raise ValueError("spectra must be a multiple of spectra_per_heap")
+        heaps = spectra // spectra_per_heap
         block_y = template.block * template.vty
         if spectra_per_heap % block_y != 0:
             raise ValueError(f"spectra_per_heap must be a multiple of {block_y}")
         self.template = template
         self.spectra = spectra
         self.spectra_per_heap = spectra_per_heap
+        self._groups_y = spectra_per_heap // block_y
+        self._heaps = heaps
         pols = accel.Dimension(N_POLS, exact=True)
-        heaps = spectra // spectra_per_heap
 
         in_shape = (
             accel.Dimension(N_POLS),
@@ -180,13 +206,17 @@ class Postproc(accel.Operation):
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["gains"] = accel.IOSlot((n_out_channels, pols), np.complex64)
+        # This could be seen as multi-dimensional, but we flatten it to 1D as an
+        # easy way to guarantee that it is not padded.
+        rand_states_shape = (template.groups_x * self._groups_y * template.block * template.block,)
+        self.slots["rand_states"] = accel.IOSlot(rand_states_shape, RAND_STATE_DTYPE)
+        builder = RandomStateBuilder(command_queue.context)
+        rand_states = builder.make_states(
+            command_queue, rand_states_shape, seed=seed, sequence_first=sequence_first, sequence_step=sequence_step
+        )
+        self.bind(rand_states=rand_states)
 
     def _run(self) -> None:
-        block_x = self.template.block * self.template.vtx
-        block_y = self.template.block * self.template.vty
-        groups_x = accel.divup(self.template.channels // self.template.unzip_factor // 2 + 1, block_x)
-        groups_y = self.spectra_per_heap // block_y
-        groups_z = self.spectra // self.spectra_per_heap
         out = self.buffer("out")
         saturated = self.buffer("saturated")
         in_ = self.buffer("in")
@@ -200,11 +230,17 @@ class Postproc(accel.Operation):
                 self.buffer("fine_delay").buffer,
                 self.buffer("phase").buffer,
                 self.buffer("gains").buffer,
+                self.buffer("rand_states").buffer,
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(np.prod(in_.padded_shape[1:])),  # in_stride
                 np.int32(self.spectra_per_heap),  # spectra_per_heap
+                np.int32(self._heaps),  # heaps
             ],
-            global_size=(self.template.block * groups_x, self.template.block * groups_y, groups_z),
+            global_size=(
+                self.template.block * self.template.groups_x,
+                self.template.block * self._groups_y,
+                1,
+            ),
             local_size=(self.template.block, self.template.block, 1),
         )

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -71,10 +71,13 @@ def postproc_host_pol(
     corrected = data * phase.astype(np.complex64) * gains[np.newaxis, :].astype(np.complex64)
     # Split complex into real, imaginary
     corrected = corrected.view(np.float32).reshape(spectra, n_out_channels, 2)
-    # Count saturation per heap
+    # Count saturation per heap. Dithering makes this uncertain, so we compute
+    # a range.
     qmax = 2 ** (out_bits - 1) - 1
-    saturated = np.sum(np.any(np.abs(corrected) > qmax, axis=2), axis=1, dtype=np.uint32)
-    saturated = np.sum(saturated.reshape(-1, spectra_per_heap_out), axis=1)
+    saturated_low = np.sum(np.any(np.abs(corrected) > qmax + 0.5, axis=2), axis=1, dtype=np.uint32)
+    saturated_low = np.sum(saturated_low.reshape(-1, spectra_per_heap_out), axis=1)
+    saturated_high = np.sum(np.any(np.abs(corrected) > qmax - 0.5, axis=2), axis=1, dtype=np.uint32)
+    saturated_high = np.sum(saturated_high.reshape(-1, spectra_per_heap_out), axis=1)
     # Convert to integral and saturate (still a real dtype though)
     corrected = np.rint(corrected)
     corrected = np.minimum(np.maximum(corrected, -qmax), qmax)
@@ -83,7 +86,7 @@ def postproc_host_pol(
     corrected = corrected.view(np.complex64)[..., -1]
     # Partial transpose
     reshaped = corrected.reshape(-1, spectra_per_heap_out, n_out_channels)
-    return reshaped.transpose(0, 2, 1), saturated
+    return reshaped.transpose(0, 2, 1), saturated_low, saturated_high
 
 
 def postproc_host(
@@ -101,9 +104,10 @@ def postproc_host(
 ):
     """Aggregate both polarisation's postproc on the host CPU."""
     out = []
-    saturated = []
+    saturated_low = []
+    saturated_high = []
     for pol in range(N_POLS):
-        pol_out, pol_saturated = postproc_host_pol(
+        pol_out, pol_saturated_low, pol_saturated_high = postproc_host_pol(
             in_[pol],
             spectra_per_heap_out,
             spectra,
@@ -117,8 +121,9 @@ def postproc_host(
             gains[:, pol],
         )
         out.append(pol_out)
-        saturated.append(pol_saturated)
-    return np.stack(out, axis=3), np.stack(saturated, axis=1)
+        saturated_low.append(pol_saturated_low)
+        saturated_high.append(pol_saturated_high)
+    return np.stack(out, axis=3), np.stack(saturated_low, axis=1), np.stack(saturated_high, axis=1)
 
 
 def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex64) -> np.ndarray:
@@ -156,7 +161,7 @@ def test_postproc(
     h_phase = rng.uniform(0.0, np.pi / 2, (spectra, N_POLS)).astype(np.float32)
     h_gains = _make_complex(lambda: rng.uniform(-1.5, 1.5, (out_channels[1] - out_channels[0], N_POLS)))
 
-    expected, expected_saturated = postproc_host(
+    expected, saturated_low, saturated_high = postproc_host(
         h_in,
         spectra,
         spectra_per_heap_out,
@@ -173,11 +178,11 @@ def test_postproc(
     template = postproc.PostprocTemplate(
         context, channels, unzip_factor, complex_pfb=complex_pfb, out_channels=out_channels, out_bits=out_bits
     )
-    fn = template.instantiate(command_queue, spectra, spectra_per_heap_out)
+    fn = template.instantiate(command_queue, spectra, spectra_per_heap_out, seed=123, sequence_first=456)
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
     fn.buffer("fine_delay").set(command_queue, h_fine_delay)
-    fn.buffer("phase").set(command_queue, h_phase / np.pi)
+    fn.buffer("phase").set(command_queue, h_phase)
     fn.buffer("gains").set(command_queue, h_gains)
     fn.buffer("out").zero(command_queue)
     fn()
@@ -187,9 +192,8 @@ def test_postproc(
     h_out = unpack_complex(h_out)
     # Tolerance of 1.5 allows for error of 1 in each of real and imaginary
     np.testing.assert_allclose(h_out, expected, atol=1.5)
-    # Rounding differences can occasionally cause a value to be saturated in
-    # one path and not the other, but it should be rare.
-    np.testing.assert_allclose(h_saturated, expected_saturated, atol=5)
+    assert np.all(saturated_low <= h_saturated)
+    assert np.all(saturated_high >= h_saturated)
     # Ensure most negative value gets clamped
     qmax = 2 ** (out_bits - 1) - 1
     assert np.min(h_out.real) == -qmax

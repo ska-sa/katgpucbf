@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -111,9 +111,22 @@ class ComputeTemplate:
         samples: int,
         spectra: int,
         spectra_per_heap: int,
+        *,
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
     ) -> "Compute":  # We have to put the return type in quotes because we haven't declared the `Compute` class yet.
         """Generate a :class:`Compute` object based on the template."""
-        return Compute(self, command_queue, samples, spectra, spectra_per_heap)
+        return Compute(
+            self,
+            command_queue,
+            samples,
+            spectra,
+            spectra_per_heap,
+            seed=seed,
+            sequence_first=sequence_first,
+            sequence_step=sequence_step,
+        )
 
 
 class Compute(accel.OperationSequence):
@@ -152,6 +165,8 @@ class Compute(accel.OperationSequence):
         Number of spectra in each output chunk.
     spectra_per_heap
         Number of spectra to send in each output heap.
+    seed, sequence_first, sequence_step
+        See :class:`.RandomStateBuilder`.
     """
 
     def __init__(
@@ -161,6 +176,10 @@ class Compute(accel.OperationSequence):
         samples: int,
         spectra: int,
         spectra_per_heap: int,
+        *,
+        seed: int,
+        sequence_first: int,
+        sequence_step: int = 1,
     ) -> None:
         self.template = template
         self.samples = samples
@@ -193,7 +212,14 @@ class Compute(accel.OperationSequence):
             fft_shape,
         )
         self.fft = fft_template.instantiate(command_queue, fft.FftMode.FORWARD)
-        self.postproc = template.postproc.instantiate(command_queue, spectra, spectra_per_heap)
+        self.postproc = template.postproc.instantiate(
+            command_queue,
+            spectra,
+            spectra_per_heap,
+            seed=seed,
+            sequence_first=sequence_first,
+            sequence_step=sequence_step,
+        )
 
         operations.append(("pfb_fir", self.pfb_fir))
         operations.append(("fft", self.fft))

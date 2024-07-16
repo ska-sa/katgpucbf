@@ -62,6 +62,8 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
         + ((pfb_taps - 1) * internal_channels - 1) * subsampling,
         spectra,
         spectra_per_heap,
+        seed=123,
+        sequence_first=456,
     )
     fn.ensure_all_bound()
     fn()

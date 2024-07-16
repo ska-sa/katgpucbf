@@ -72,15 +72,15 @@ The polyphase filter bank starts with a finite impulse response (FIR) filter,
 with some number of *taps* (e.g., 16), and a *step* size which is twice the
 number of output channels. This can be thought of as organising the samples as
 a 2D array, with *step* columns, and then applying a FIR down each column.
-Since the columns are independent, we map each column to a separate workitem,
+Since the columns are independent, we map each column to a separate work-item,
 which keeps a sliding window of samples in its registers. GPUs generally don't
 allow indirect indexing of registers, so loop unrolling (by the number of
 taps) is used to ensure that the indices are known at compile time.
 
 This might not give enough parallelism, particularly for small channel counts,
-so in fact each column in split into sections and a separate workitem is used
+so in fact each column in split into sections and a separate work-item is used
 for each section. There is a trade-off here as samples at the boundaries
-between sections need to be loaded by both workitems, leading to overheads.
+between sections need to be loaded by both work-items, leading to overheads.
 
 Registers are used to hold both the sliding window and the weights, which
 leads to significant register pressure. This reduces occupancy and leads to
@@ -219,7 +219,7 @@ We can also re-use some common expressions by computing :math:`X_{N-k}` at the s
 This raises the question: Why compute both :math:`X_{k}` and :math:`X_{N-k}`? After all,
 parameter :math:`k` should range the full channel range initially stated (parameter :math:`N`). The answer:
 compute efficiency. It is costly to compute :math:`U_k` and :math:`V_k` so if we can use them to
-compute two elements of :math:`X`` (:math:`X_{k}` and :math:`X_{N-k}`) at once it is better than producing
+compute two elements of :math:`X` (:math:`X_{k}` and :math:`X_{N-k}`) at once it is better than producing
 only one element of :math:`X`.
 
 Why is doing all this work more efficient that letting cuFFT handle the
@@ -386,10 +386,6 @@ operations are all straightforward. While C++ doesn't have a convert with
 saturation function, we can access the CUDA functionality through inline PTX
 assembly (OpenCL C has an equivalent function).
 
-Fine delays and the twiddle factor for the Cooley-Tukey transformation are
-computed using the ``sincospi`` function, which saves both a multiplication by
-:math:`\pi` and a range reduction.
-
 The gains, fine delays and phases need to be made available to the kernel. We
 found that transferring them through the usual CUDA copy mechanism leads to
 sub-optimal scheduling, because these (small) transfers could end up queued
@@ -397,6 +393,45 @@ behind the much larger transfers of digitiser samples. Instead, we use `vkgdr`_
 to allow the CPU to write directly to the GPU buffers. The buffers are
 replicated per output item, so that it is possible for the CPU to be updating
 the values for one output item while the GPU is computing on another.
+
+Fast sin/cos
+~~~~~~~~~~~~
+CUDA GPUs have hardware units dedicated to computing transcendental functions.
+They are significantly faster than software computation, but have accuracy
+limitations. The larger the absolute value of the argument, the worse the
+accuracy is. For angles in the interval :math:`[-\pi, \pi]`, the maximum
+absolute error in computing :math:`e^{jx}` is 4.21e-07. That's roughly 5×
+worse than using the more accurate function, but far smaller than the errors
+introduced by quantisation. Over larger ranges, the maximum error increases
+roughly linearly with the magnitude. The script
+:file:`scratch/sincos_accuracy` can be used to measure this.
+
+It's therefore important to check the range of the angles we're using before
+blindly using the faster function. There are several places where we compute
+phase rotations:
+
+ 1. In implementing the real-to-complex transform, we compute
+    :math:`e^{\frac{-\pi j}{N}\cdot k}`, where
+    :math:`0 \le k \le \frac{N}{2}`. The angle is thus in the range
+    :math:`[-\frac{\pi}{2}, 0]`.
+
+ 2. In unzipping the FFT, we compute the twiddle factor
+    :math:`e^{\frac{-2\pi j}{mn}\cdot rs}`, where :math:`0 \le r < n` and
+    :math:`0 \le s \le \frac{m}{2}`. The angle is thus in the range
+    :math:`(-\pi, 0]`.
+
+ 3. We also do an order-:math:`n` FFT, but since we only consider small fixed
+    values of :math:`n`, we hard-code the roots of unity rather than computing
+    them at runtime.
+
+ 4. Fine delays and phase rotation are combined to produce a per-channel phase
+    rotation. For wideband, the fine delay is up to half a sample, which
+    translates to a maximum rotation of :math:`\frac{\pi}{4}`. For narrowband
+    the calculation is more complex, but it again becomes a maximum rotation
+    of :math:`\frac{\pi}{4}`. The fixed phase rotation is limited to
+    :math:`[-\pi, \pi]`, so the total angle is in
+    :math:`[-\frac{5\pi}{4}, \frac{5\pi}{4}]`, for which the fast sincos
+    function has a maximum absolute error of 6.67e-07.
 
 Coarse delays
 ^^^^^^^^^^^^^

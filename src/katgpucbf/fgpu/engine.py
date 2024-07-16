@@ -496,7 +496,18 @@ class Pipeline:
             engine.send_sample_bits,
             narrowband=narrowband_config,
         )
-        self._compute = template.instantiate(compute_queue, engine.n_samples, self.spectra, output.spectra_per_heap)
+        self._compute = template.instantiate(
+            compute_queue,
+            engine.n_samples,
+            self.spectra,
+            output.spectra_per_heap,
+            # The magic constant was chosen at random. It ensures that the
+            # seed won't be the same as in other types of engine that also use
+            # sync_time as the basis for seeding.
+            seed=int(engine.time_converter.sync_time) ^ 0x9CC11336C8B170B7,
+            sequence_first=engine.feng_id,
+            sequence_step=engine.n_ants,
+        )
         # Pre-allocate the memory for some buffers that we know we won't be
         # explicitly binding.
         self._compute.ensure_bound("fft_work")
@@ -818,9 +829,7 @@ class Pipeline:
                     if isinstance(self.output, WidebandOutput):
                         phase += 0.5 * np.pi * (np.array(start_coarse_delays) % 4)
                         phase = wrap_angle(phase)
-                    # Divide by pi because the arguments of sincospif() used in the
-                    # kernel are in radians/PI.
-                    self._out_item.phase.host[out_slice] = phase / np.pi
+                    self._out_item.phase.host[out_slice] = phase
                     assert in_item.samples is not None
                     if isinstance(self.output, NarrowbandOutput):
                         self._compute.run_narrowband_frontend(pfb_offsets, self._out_item.n_spectra, batch_spectra)
