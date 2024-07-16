@@ -501,8 +501,9 @@ class Pipeline:
             engine.n_samples,
             self.spectra,
             output.spectra_per_heap,
-            # Magic constant is random, and just to ensure the seed isn't the same
-            # as other engines that also use the sync_time for seeding
+            # The magic constant was chosen at random. It ensures that the
+            # seed won't be the same as in other types of engine that also use
+            # sync_time as the basis for seeding.
             seed=int(engine.time_converter.sync_time) ^ 0x9CC11336C8B170B7,
             sequence_first=engine.feng_id,
             sequence_step=engine.n_ants,

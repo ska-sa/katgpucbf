@@ -362,8 +362,9 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             n_batches=engine.heaps_per_fengine_per_chunk,
             n_ants=engine.n_ants,
             n_channels_per_substream=engine.n_channels_per_substream,
-            # Magic constant is random, and just to ensure the seed isn't the same
-            # as other engines that also use the sync_time for seeding
+            # The magic constant was chosen at random. It ensures that the
+            # seed won't be the same as in other types of engine that also use
+            # sync_time as the basis for seeding.
             seed=int(engine.time_converter.sync_time) ^ 0xFA9D9B2093B458D5,
             sequence_first=engine.channel_offset_value,
             sequence_step=engine.n_channels,
