@@ -1046,7 +1046,7 @@ class XBEngine(DeviceServer):
     send_ibv
         Use ibverbs for output.
     send_packet_payload
-        Size for output packets (correlation product payload only, headers and padding are
+        Size for output packets (payload only; headers and padding are
         added to this).
     send_affinity
         CPU core for output-handling thread.

@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
 
+################################################################################
+# Copyright (c) 2022, 2024, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Compare output of two F-engines.
 
 This can be used to ensure that a change to F-engine code produces
@@ -22,7 +38,7 @@ from katsdptelstate.endpoint import endpoint_parser
 
 import katgpucbf.recv
 import katgpucbf.xbgpu.recv
-from katgpucbf import COMPLEX, N_POLS
+from katgpucbf import COMPLEX, DEFAULT_JONES_PER_BATCH, N_POLS
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,21 +47,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interface", type=get_interface_address, help="Interface on which to listen")
     parser.add_argument("--ibv", action="store_true", help="Use ibverbs")
     parser.add_argument("--array-size", type=int, required=True)
-    parser.add_argument("--channels-per-stream", type=int, required=True)
-    parser.add_argument("--spectra-per-heap", type=int, default=256)
+    parser.add_argument("--channels", type=int, required=True)
+    parser.add_argument("--channels-per-substream", type=int, required=True)
+    parser.add_argument("--jones-per-batch", type=int, default=DEFAULT_JONES_PER_BATCH)
     parser.add_argument("--samples-between-spectra", type=int, required=True)
-    parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=16)
+    parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=32)
     args = parser.parse_args()
+    if args.jones_per_batch % args.channels != 0:
+        parser.error("--jones-per-batch must be a multiple of --channels")
     return args
 
 
 async def main() -> None:
     args = parse_args()
+    spectra_per_heap = args.jones_per_batch // args.channels
     layout = katgpucbf.xbgpu.recv.Layout(
         n_ants=args.array_size,
-        n_channels_per_stream=args.channels_per_stream,
-        n_spectra_per_heap=args.spectra_per_heap,
-        timestamp_step=args.samples_between_spectra * args.spectra_per_heap,
+        n_channels_per_substream=args.channels_per_substream,
+        n_spectra_per_heap=spectra_per_heap,
+        timestamp_step=args.samples_between_spectra * spectra_per_heap,
         sample_bits=8,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
     )
@@ -56,14 +76,14 @@ async def main() -> None:
         shape = (
             layout.heaps_per_fengine_per_chunk,
             layout.n_ants,
-            layout.n_channels_per_stream,
+            layout.n_channels_per_substream,
             layout.n_spectra_per_heap,
             N_POLS,
             COMPLEX,
         )
         data = np.ones(shape, np.int8)
         present = np.zeros(shape[:2], np.uint8)
-        chunk = katgpucbf.recv.Chunk(data=data, present=present, stream=stream)
+        chunk = katgpucbf.recv.Chunk(data=data, present=present, sink=stream)
         chunk.recycle()
 
     srcs = [(ep.host, ep.port) for ep in args.src]

@@ -21,7 +21,7 @@ import argparse
 import numpy as np
 from katsdpsigproc import accel
 
-from katgpucbf import DIG_SAMPLE_BITS
+from katgpucbf import DEFAULT_JONES_PER_BATCH, DIG_SAMPLE_BITS
 from katgpucbf.fgpu.compute import ComputeTemplate, NarrowbandConfig
 from katgpucbf.fgpu.engine import generate_ddc_weights, generate_pfb_weights
 from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
@@ -33,7 +33,7 @@ def main():  # noqa: C901
     parser.add_argument("--recv-chunk-samples", type=int, default=32 * 1024 * 1024)
     parser.add_argument("--send-chunk-jones", type=int, default=8 * 1024 * 1024)
     parser.add_argument("--channels", type=int, default=32768)
-    parser.add_argument("--spectra-per-heap", type=int, default=256)
+    parser.add_argument("--jones-per-batch", type=int, default=DEFAULT_JONES_PER_BATCH)
     parser.add_argument("--dig-sample-bits", type=int, default=DIG_SAMPLE_BITS)
     parser.add_argument("--send-sample-bits", type=int, default=8, choices=[4, 8])
     parser.add_argument("--passes", type=int, default=1000)
@@ -57,6 +57,9 @@ def main():  # noqa: C901
             parser.error("--sem must divide into --passes")
     if args.kernel == "ddc" and not args.narrowband:
         parser.error("--kernel=ddc requires --narrowband")
+    if args.jones_per_batch % args.channels != 0:
+        parser.error("--jones-per-batch must be a multiple of --channels")
+    spectra_per_heap = args.jones_per_batch // args.channels
 
     rng = np.random.default_rng(seed=1)
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
@@ -77,14 +80,14 @@ def main():  # noqa: C901
             context, args.taps, args.channels, args.dig_sample_bits, args.send_sample_bits, narrowband=narrowband_config
         )
         command_queue = context.create_tuning_command_queue()
-        out_spectra = accel.roundup(args.send_chunk_jones // args.channels, args.spectra_per_heap)
+        out_spectra = accel.roundup(args.send_chunk_jones // args.channels, spectra_per_heap)
         frontend_spectra = min(args.recv_chunk_samples // spectra_samples, out_spectra)
         extra_samples = window - spectra_samples
         fn = template.instantiate(
             command_queue,
             samples=args.recv_chunk_samples + extra_samples,
             spectra=out_spectra,
-            spectra_per_heap=args.spectra_per_heap,
+            spectra_per_heap=spectra_per_heap,
             seed=123,
             sequence_first=456,
         )
