@@ -1266,3 +1266,38 @@ class TestEngine:
             await client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:3:3")  # Too many :'s
         with pytest.raises(aiokatcp.FailReply):
             await client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:2j")  # Not float
+
+        # capture-{start, stop} requests with non-existent stream
+        with pytest.raises(aiokatcp.FailReply):
+            await client.request("capture-start", "non-existent-stream")
+        with pytest.raises(aiokatcp.FailReply):
+            await client.request("capture-stop", "non-existent-stream")
+
+    @DEFAULT_PARAMETERS
+    async def test_capture_stop_start(
+        self,
+        client: aiokatcp.Client,
+        corrprod_outputs: list[XOutput],
+        beam_outputs: list[BOutput],
+        xbengine: XBEngine,
+    ) -> None:
+        """Test capture-start and capture-stop requests.
+
+        First issue a capture-stop as `xbengine` is initialised with --send-enabled.
+        """
+
+        def get_stream_status(stream_name: str) -> bool:
+            pipeline, stream_id = xbengine._request_pipeline(stream_name)
+            if isinstance(pipeline, XPipeline):
+                return pipeline.send_stream.send_enabled
+            elif isinstance(pipeline, BPipeline):
+                return pipeline.send_stream.send_enabled[stream_id]
+            else:
+                raise TypeError(f"{stream_name} is of unknown type")
+
+        for output in corrprod_outputs + beam_outputs:
+            await client.request("capture-stop", output.name)
+            assert get_stream_status(output.name) is False, f"Stream {output.name} is still enabled"
+
+            await client.request("capture-start", output.name)
+            assert get_stream_status(output.name) is True, f"Stream {output.name} is still disabled"
