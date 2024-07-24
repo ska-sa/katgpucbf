@@ -59,6 +59,7 @@ and it'll look something like this (but refer to
    [pytest]
    tester = Your Name
    asyncio_mode = auto
+   asyncio_default_fixture_loop_scope = session
    master_controller_host = lab5.sdp.kat.ac.za
    master_controller_port = 5001
    prometheus_url = http://lab5.sdp.kat.ac.za:9090

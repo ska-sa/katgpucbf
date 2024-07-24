@@ -289,7 +289,7 @@ pytest==8.2.2
     #   pytest-custom-exit-code
     #   pytest-mock
     #   pytest-xdist
-pytest-asyncio==0.21.2
+pytest-asyncio==0.24.0
     # via katgpucbf (setup.cfg)
 pytest-cov==4.1.0
     # via -r requirements-dev.in
