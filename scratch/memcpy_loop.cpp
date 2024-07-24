@@ -59,8 +59,13 @@
 #include <unistd.h>
 #include <semaphore.h>
 #include <pthread.h>
-#include <emmintrin.h>
-#include <immintrin.h>
+#ifdef __x86_64__
+# include <emmintrin.h>
+# include <immintrin.h>
+#endif
+#ifdef __ARM_FEATURE_SVE
+# include <arm_sve.h>
+#endif
 
 using namespace std;
 using namespace std::chrono;
@@ -79,6 +84,7 @@ enum class memory_type
 enum class memory_function
 {
     MEMCPY,
+#ifdef __x86_64__
     MEMCPY_SSE2,
     MEMCPY_SSE2_REVERSE,
     MEMCPY_AVX,
@@ -93,8 +99,15 @@ enum class memory_function
     MEMCPY_STREAM_AVX512_REVERSE,
     MEMCPY_REP_MOVSB,
     MEMCPY_REP_MOVSB_REVERSE,
+#endif // __x86_64__
+#ifdef __ARM_FEATURE_SVE
+    MEMCPY_SVE,
+    MEMCPY_STREAM_SVE,
+#endif // __ARM_FEATURE_SVE
     MEMSET,
+#ifdef __x86_64__
     MEMSET_STREAM_SSE2,
+#endif // __x86_64__
     READ
 };
 
@@ -265,6 +278,7 @@ static void *memcpy_generic_reverse(
 }
 #pragma GCC diagnostic pop
 
+#if __x86_64__
 // memcpy, with SSE2
 static void *memcpy_sse2(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
@@ -500,6 +514,48 @@ static void memory_read(const void *src, size_t bytes) noexcept
     (void) sink1;
     (void) sink2;
 }
+#endif // __x86_64__
+
+#ifdef __ARM_FEATURE_SVE
+/* TODO: these implementations are rather simplistic. They could be
+ * improved by
+ * - aligning the destination to a multiple of 16 bytes
+ * - unrolling the loop, which probably requires using separate
+ *   tail handling.
+ */
+static void *memcpy_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    std::uint8_t *destc = (std::uint8_t *) dest;
+    const std::uint8_t *srcc = (const std::uint8_t *) src;
+
+    size_t i = 0;
+    svbool_t pg = svwhilelt_b8(i, n);
+    do
+    {
+        svst1_u8(pg, &destc[i], svld1_u8(pg, &srcc[i]));
+        i += svcntb();
+    } while (svptest_first(svptrue_b8(), pg = svwhilelt_b8(i, n)));
+    return dest;
+}
+
+static void *memcpy_stream_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    // Not clear if this barrier is needed, but for safety
+    __dmb(13);
+
+    std::uint8_t *destc = (std::uint8_t *) dest;
+    const std::uint8_t *srcc = (const std::uint8_t *) src;
+
+    size_t i = 0;
+    svbool_t pg = svwhilelt_b8(i, n);
+    do
+    {
+        svstnt1_u8(pg, &destc[i], svldnt1_u8(pg, &srcc[i]));
+        i += svcntb();
+    } while (svptest_first(svptrue_b8(), pg = svwhilelt_b8(i, n)));
+    return dest;
+}
+#endif // __ARM_FEATURE_SVE
 
 static const struct
 {
@@ -532,6 +588,7 @@ static const struct
         true,
         { .memcpy_impl = &std::memcpy },
     },
+#if __x86_64__
     {
         memory_function::MEMCPY_SSE2,
         memory_function_type::MEMCPY,
@@ -630,6 +687,23 @@ static const struct
         true,
         { .memcpy_impl = &memcpy_rep_movsb_reverse },
     },
+#endif // __x86_64__
+#ifdef __ARM_FEATURE_SVE
+    {
+        memory_function::MEMCPY_SVE,
+        memory_function_type::MEMCPY,
+        "memcpy_sve",
+        true,  // TODO: detect SVE at runtime
+        { .memcpy_impl = &memcpy_sve },
+    },
+    {
+        memory_function::MEMCPY_STREAM_SVE,
+        memory_function_type::MEMCPY,
+        "memcpy_stream_sve",
+        true,  // TODO: detect SVE at runtime
+        { .memcpy_impl = &memcpy_stream_sve },
+    },
+#endif // __ARM_FEATURE_SVE
     {
         memory_function::MEMSET,
         memory_function_type::MEMSET,
@@ -637,6 +711,7 @@ static const struct
         true,
         { .memset_impl = &std::memset },
     },
+#ifdef __x86_64__
     {
         memory_function::MEMSET_STREAM_SSE2,
         memory_function_type::MEMSET,
@@ -651,6 +726,7 @@ static const struct
         true,
         { .read_impl = &memory_read },
     },
+#endif // __x86_64__
 };
 
 template<typename T, typename V>
