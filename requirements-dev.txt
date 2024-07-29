@@ -334,7 +334,7 @@ six==1.16.0
     #   python-dateutil
 snowballstemmer==2.2.0
     # via sphinx
-spead2==4.3.2
+spead2 @ git+https://github.com/ska-sa/spead2.git@packet-size-hack
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)

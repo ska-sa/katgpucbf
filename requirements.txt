@@ -146,7 +146,7 @@ six==1.16.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==4.3.2
+spead2 @ git+https://github.com/ska-sa/spead2.git@packet-size-hack
     # via katgpucbf (setup.cfg)
 terminaltables==3.1.10
     # via aiomonitor
