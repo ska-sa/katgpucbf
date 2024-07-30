@@ -157,6 +157,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     libibverbs1 \
     librdmacm1 \
     ibverbs-providers \
+    libpcap \
     libcap2 \
     libcap2-bin \
     netbase
