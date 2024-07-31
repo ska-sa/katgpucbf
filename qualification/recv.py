@@ -179,7 +179,7 @@ class XBReceiver:
         min_timestamp: int | None = None,
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
-        timeout: float | None = 10.0,
+        timeout: float | None = 13.0,
     ) -> tuple[int, np.ndarray]:
         """Return the data from the next complete chunk from the stream.
 
@@ -202,7 +202,7 @@ class XBReceiver:
         min_timestamp: int | None = None,
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
-        timeout: float | None = 10.0,
+        timeout: float | None = 13.0,
     ) -> list[tuple[int, katgpucbf.recv.Chunk]]:
         """Obtain `n` consecutive complete chunks from the stream.
 
@@ -312,7 +312,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             min_timestamp: int | None = None,
             *,
             max_delay: int = DEFAULT_MAX_DELAY,
-            timeout: float | None = 10.0,
+            timeout: float | None = 13.0,
         ) -> tuple[int, NDArray[np.int32]]:  # noqa: D102
             ...
 
