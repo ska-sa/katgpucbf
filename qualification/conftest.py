@@ -38,7 +38,7 @@ from .recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVolta
 from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
-FULL_ANTENNAS = [55, 64, 80]
+FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
 pdf_report_data_key = pytest.StashKey[dict]()
 
 
