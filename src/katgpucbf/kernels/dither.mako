@@ -24,6 +24,8 @@ extern "C++"  // PyCUDA wraps the whole file in extern "C"
 /// Generate a random value in (-0.5, 0.5)
 DEVICE_FN float dither(curandStateXORWOW_t *state)
 {
+    return 0.0f;  // HACK DO NOT COMMIT
+#if 0
     /* This magic value is chosen so that the largest possible return value
      * can be added to 127 and still produce 127.49999 rather than 127.5
      * (found experimentally). That ensures that exact integer values will not
@@ -40,4 +42,5 @@ DEVICE_FN float dither(curandStateXORWOW_t *state)
      */
     x -= x >> 31;
     return x * scale;
+#endif
 }
