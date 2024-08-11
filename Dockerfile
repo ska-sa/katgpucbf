@@ -49,9 +49,9 @@ FROM base AS build-base
 # DEBIAN_FRONTEND=noninteractive prevents apt-get from asking configuration
 # questions.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    python3.12 \
-    python3.12-dev \
-    python3.12-venv \
+    python3 \
+    python3-dev \
+    python3-venv \
     git \
     pkg-config \
     ninja-build \
@@ -145,8 +145,9 @@ LABEL maintainer="MeerKAT CBF team <cbf@sarao.ac.za>"
 # numactl allows CPU and memory affinity to be controlled.
 # netbase provides /etc/protocols, which libpcap depends on in some cases.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-    python3.12 \
-    python3.12-venv \
+    python3 \
+    python3 \
+    python3-venv \
     curl \
     numactl \
     libibverbs1 \
