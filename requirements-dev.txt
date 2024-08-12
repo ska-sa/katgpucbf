@@ -8,7 +8,11 @@ aioconsole==0.7.0
     # via
     #   -c requirements.txt
     #   aiomonitor
-aiohttp==3.9.5
+aiohappyeyeballs==2.3.5
+    # via
+    #   -c requirements.txt
+    #   aiohttp
+aiohttp==3.10.3
     # via
     #   -c requirements.txt
     #   aiomonitor
