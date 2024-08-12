@@ -10,8 +10,6 @@ are used:
 
 :samp:`i{N}`
   Signed integer or fixed-point with :samp:`{N}` total bits
-:samp:`u{N}`
-  Unsigned integer or fixed-point with :samp:`{N}` bits
 :samp:`f{N}`
   Floating-point with :samp:`{N}` bits, following IEEE 754-2019.
 :samp:`c{X}`
@@ -20,9 +18,9 @@ are used:
 
 Channelisation
 --------------
-The figure below shows the signal path for the wide-band case. The dotted
-boxes and arrows represent control parameters that can be adjusted at
-runtime.
+The figures below shows the signal path for the wide-band and narrow-band
+cases respectively. The dotted boxes and arrows represent control parameters
+that can be adjusted at runtime.
 
 Note that the input and output bit depths (shown as ``i10`` and ``ci8`` on the
 diagram) are configurable. Between unpacking and quantisation, all
@@ -61,7 +59,7 @@ range, overflow is only possible at the quantisation step (which saturates).
      \node[op, on chain, join=by {lbl, edge label=ci8}] (transmit) {Transmit};
    \end{scope}
    \node[control, right=of pfbx] (delays) {Delays};
-   \node[control, below=of delays] (eq) {Eq coefficients};
+   \node[control, right=of eqx] (eq) {Eq coefficients};
    \draw[->] (receive)
      -| node[lbl, very near start, auto, swap] {V}
         node[lbl, near end, auto, swap] {i10} (unpackx);
@@ -69,21 +67,73 @@ range, overflow is only possible at the quantisation step (which saturates).
      -| node[lbl, very near start, auto] {H}
         node[lbl, near end, auto] {i10} (unpacky);
    \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=i32] (cdelayx);
-   \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=f32] (eqx);
+   \draw[->, dotted] (delays) to[lbl, auto, edge label=f32] (eqx);
    \draw[->, dotted] (delays) to[lbl, auto, edge label=i32] (cdelayy);
-   \draw[->, dotted] (delays) to[lbl, auto, edge label=f32] (eqy);
+   \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=f32] (eqy);
    \draw[->, dotted] (eq) to[lbl, auto, swap, edge label=cf32] (eqx);
    \draw[->, dotted] (eq) to[lbl, auto, edge label=cf32] (eqy);
    \draw[->] (quantx) |- node[lbl, auto, swap, near start] {ci8} (pack);
    \draw[->] (quanty) |- node[lbl, auto, near start] {ci8} (pack);
 
-Polyphase filter bank
-^^^^^^^^^^^^^^^^^^^^^
+.. tikz:: Signal path for narrow-band channelisation (with new stages in blue).
+   :libs: chains, positioning
+
+   \tikzset{
+     base/.style={minimum width=2.5cm, minimum height=1cm, align=center},
+     op/.style={draw, base},
+     extra/.style={draw=blue, color=blue},
+     control/.style={draw, base, rounded corners, dotted},
+     lbl/.style={font=\scriptsize},
+     every join/.style={draw,->},
+     >=latex,
+   }
+   \newcommand{\side}[2]{
+     \node[op, extra, on chain, join=by {#2, edge label=f32}] (mix) {Mix};
+     \node[op, extra, on chain, join=by {#2, edge label=cf32}] (ddc) {DDC};
+     \node[op, on chain, join=by {#2, edge label=cf32}] (cdelay#1) {Coarse delay};
+     \node[op, on chain, join=by {#2, edge label=cf32}] (pfb#1) {PFB};
+     \node[op, extra, on chain, join=by {#2, edge label=cf32}] (discard#1) {Discard\\ channels};
+     \node[op, on chain, join=by {#2, edge label=cf32}] (eq#1) {Fine delay\\ Equalisation};
+     \node[op, on chain, join=by {#2, edge label=cf32}] (dither#1) {Dither};
+     \node[op, on chain, join=by {#2, edge label=cf32}] (quant#1) {Quantise};
+   }
+   \node[op] (receive) {Receive};
+   \begin{scope}[start chain=chainx going below]
+     \node[op, below left=of receive, on chain] (unpackx) {Unpack};
+     \side{x}{lbl, swap}
+   \end{scope}
+   \begin{scope}[start chain=chainy going below]
+     \node[op, below right=of receive, on chain] (unpacky) {Unpack};
+     \side{y}{lbl}
+   \end{scope}
+   \begin{scope}[start chain=sink going below]
+     \node[op, on chain, below right=of quantx] (pack) {Corner turn\\ Pack};
+     \node[op, on chain, join=by {lbl, edge label=ci8}] (transmit) {Transmit};
+   \end{scope}
+   \node[control, right=of pfbx] (delays) {Delays};
+   \node[control, right=of eqx] (eq) {Eq coefficients};
+   \draw[->] (receive)
+     -| node[lbl, very near start, auto, swap] {V}
+        node[lbl, near end, auto, swap] {i10} (unpackx);
+   \draw[->] (receive)
+     -| node[lbl, very near start, auto] {H}
+        node[lbl, near end, auto] {i10} (unpacky);
+   \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=i32] (cdelayx);
+   \draw[->, dotted] (delays) to[lbl, auto, edge label=f32] (eqx);
+   \draw[->, dotted] (delays) to[lbl, auto, edge label=i32] (cdelayy);
+   \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=f32] (eqy);
+   \draw[->, dotted] (eq) to[lbl, auto, swap, edge label=cf32] (eqx);
+   \draw[->, dotted] (eq) to[lbl, auto, edge label=cf32] (eqy);
+   \draw[->] (quantx) |- node[lbl, auto, swap, near start] {ci8} (pack);
+   \draw[->] (quanty) |- node[lbl, auto, near start] {ci8} (pack);
+
+Polyphase filter bank (PFB)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 A finite impulse response (FIR) filter is applied to the signal to condition
 the frequency-domain response. The filter is the product of a Hann window (to
 reduce spectral leakage) and a sinc (to broaden the peak to cover the
 frequency bin). Specifically, if there are :math:`n` output channels and
-:math:`t` taps in the polyphase filter bank (PFB), then the filter has length
+:math:`t` taps in the polyphase filter bank, then the filter has length
 :math:`w = 2nt`, with coefficients
 
 .. math::
