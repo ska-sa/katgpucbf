@@ -28,32 +28,6 @@ to have a phasor of
 where :math:`t` is time and :math:`z` is position. In particular, phase
 measured at a fixed position (an antenna) increases with time.
 
-Polyphase filter bank
----------------------
-A finite impulse response (FIR) filter is applied to the signal to condition
-the frequency-domain response. The filter is the product of a Hann window (to
-reduce spectral leakage) and a sinc (to broaden the peak to cover the
-frequency bin). Specifically, if there are :math:`n` output channels and
-:math:`t` taps in the polyphase filter bank, then the filter has length
-:math:`w = 2nt`, with coefficients
-
-.. math::
-
-   x_i = A\sin^2\left(\frac{\pi i}{w - 1}\right)
-         \operatorname{sinc}\left(w_c\cdot \frac{i + \tfrac 12 - nt}{2n}\right),
-
-where :math:`i` runs from 0 to :math:`w - 1`. Here :math:`A` is a
-normalisation factor which is chosen such that :math:`\sum_i x_i^2 = 1`. This
-ensures that given white Gaussian noise as input, the expected output power
-in a channel is the same as the expected input power in a digitised sample.
-Note that the input and output are treated as integers rather than as
-fixed-point values.
-
-The tuning parameter :math:`w_c` (specified by the :option:`!--w-cutoff`
-command-line option) scales the width of the response in the frequency domain.
-The default value is 1, which makes the width of the response (at -6dB)
-approximately equal the channel spacing.
-
 Correlation products
 --------------------
 Given a baseline (p, q) and time-varying channelised voltages :math:`e_p` and

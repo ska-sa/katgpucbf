@@ -9,6 +9,7 @@ Welcome to katgpucbf's documentation!
 
    introduction
    maths
+   signal_path
    changelog
 
 .. toctree::
