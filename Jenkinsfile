@@ -40,15 +40,15 @@ pipeline {
       /* The following argument needs to be specified in order for the container
        * to launch correctly.
        *
-       * --gpus=all: This argument passes the Nvidia driver and devices from the
-       * host to the container. It requires the NVIDIA Container Runtime to be
-       * installed on the host.
+       * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
+       * devices from the host to the container. It requires the NVIDIA Container
+       * Toolkit to be installed on the host.
        *
        * -v /var/run/docker.sock:/var/run/docker.sock: makes the connection to
        * the Docker server available inside the container (for building a Docker
        * image).
        */
-      args '--gpus=all -v /var/run/docker.sock:/var/run/docker.sock'
+      args '--runtime=nvidia --gpus=all -v /var/run/docker.sock:/var/run/docker.sock'
     }
   }
 

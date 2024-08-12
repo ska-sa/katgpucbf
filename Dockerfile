@@ -20,30 +20,25 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:12.0.1-base-ubuntu22.04 AS base
+FROM nvidia/cuda:12.5.1-base-ubuntu24.04 AS base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
-# image. Additionally, for the Vulkan drivers to work one needs
-# libvulkan1, libegl1 and libxext6.
+# image. For the Vulkan drivers to work one needs libvulkan1, libegl1 and
+# libxext6.
 #
 # Some development packages are also installed that are needed for pycuda,
 # as well as libcufft, needed for fgpu.
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
-COPY docker/10_nvidia.json /usr/share/glvnd/egl_vendor.d/10_nvidia.json
-# See also https://github.com/NVIDIA/nvidia-container-toolkit/issues/16
-COPY docker/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cuda-nvcc-12-0 \
-    cuda-profiler-api-12-0 \
-    libcurand-dev-12-0 \
-    libcufft-12-0 \
+    cuda-nvcc-12-5 \
+    cuda-profiler-api-12-5 \
+    libcurand-dev-12-5 \
+    libcufft-12-5 \
     libvulkan1 \
     libegl1 \
-    libxext6 \
-    software-properties-common
-RUN apt-add-repository ppa:deadsnakes/ppa
+    libxext6
 
 FROM base AS build-base
 
@@ -54,9 +49,9 @@ FROM base AS build-base
 # DEBIAN_FRONTEND=noninteractive prevents apt-get from asking configuration
 # questions.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    python3.12 \
-    python3.12-dev \
-    python3.12-venv \
+    python3 \
+    python3-dev \
+    python3-venv \
     git \
     pkg-config \
     ninja-build \
@@ -71,12 +66,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     wget
 
 # Create a virtual environment
-RUN python3.12 -m venv /venv
+RUN python3 -m venv /venv
 # Activate it
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==24.1 setuptools==70.1.0 wheel==0.43.0
+RUN pip install pip==24.2 setuptools==72.1.0 wheel==0.44.0
 
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
@@ -150,8 +145,9 @@ LABEL maintainer="MeerKAT CBF team <cbf@sarao.ac.za>"
 # numactl allows CPU and memory affinity to be controlled.
 # netbase provides /etc/protocols, which libpcap depends on in some cases.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-    python3.12 \
-    python3.12-venv \
+    python3 \
+    python3 \
+    python3-venv \
     curl \
     numactl \
     libibverbs1 \
