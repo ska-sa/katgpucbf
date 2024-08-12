@@ -9,7 +9,12 @@ aioconsole==0.7.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
-aiohttp==3.9.5
+aiohappyeyeballs==2.3.5
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   -c qualification/../requirements.txt
+    #   aiohttp
+aiohttp==3.10.3
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
