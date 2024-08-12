@@ -1,4 +1,4 @@
-XB-engine design
+XB-Engine design
 ================
 
 Similar to the F-engine, the XB-engine supports receiving one set of input and
