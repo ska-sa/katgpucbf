@@ -2,8 +2,9 @@ Signal path overview
 ====================
 
 This section gives a logical overview of the signal path. The actual
-implementation may split or combine steps for efficiency; refer to the
-:doc:`fgpu.design` and :doc:`xbgpu.design` sections for details.
+implementation is mathematically equivalent (when ignoring floating-point
+rounding errors), but it splits, combines, and reorders steps for efficiency;
+refer to the :doc:`fgpu.design` and :doc:`xbgpu.design` sections for details.
 
 Edges in diagrams are annotated to indicate the data type. The following types
 are used:
@@ -16,11 +17,13 @@ are used:
   Complex values formed from real and imaginary components of type :samp:`{X}`
   e.g., ``cf32`` is single-precision floating point complex.
 
+Dotted boxes and arrows represent control parameters that can be adjusted at
+runtime.
+
 Channelisation
 --------------
 The figures below shows the signal path for the wide-band and narrow-band
-cases respectively. The dotted boxes and arrows represent control parameters
-that can be adjusted at runtime.
+cases respectively.
 
 Note that the input and output bit depths (shown as ``i10`` and ``ci8`` on the
 diagram) are configurable. Between unpacking and quantisation, all
@@ -66,11 +69,11 @@ range, overflow is only possible at the quantisation step (which saturates).
    \draw[->] (receive)
      -| node[lbl, very near start, auto] {H}
         node[lbl, near end, auto] {i10} (unpacky);
-   \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=i32] (cdelayx);
+   \draw[->, dotted] (delays) to[lbl, auto, edge label'=i32] (cdelayx);
    \draw[->, dotted] (delays) to[lbl, auto, edge label=f32] (eqx);
    \draw[->, dotted] (delays) to[lbl, auto, edge label=i32] (cdelayy);
-   \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=f32] (eqy);
-   \draw[->, dotted] (eq) to[lbl, auto, swap, edge label=cf32] (eqx);
+   \draw[->, dotted] (delays) to[lbl, auto, edge label'=f32] (eqy);
+   \draw[->, dotted] (eq) to[lbl, auto, edge label'=cf32] (eqx);
    \draw[->, dotted] (eq) to[lbl, auto, edge label=cf32] (eqy);
    \draw[->] (quantx) |- node[lbl, auto, swap, near start] {ci8} (pack);
    \draw[->] (quanty) |- node[lbl, auto, near start] {ci8} (pack);
@@ -118,11 +121,11 @@ range, overflow is only possible at the quantisation step (which saturates).
    \draw[->] (receive)
      -| node[lbl, very near start, auto] {H}
         node[lbl, near end, auto] {i10} (unpacky);
-   \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=i32] (cdelayx);
+   \draw[->, dotted] (delays) to[lbl, auto, edge label'=i32] (cdelayx);
    \draw[->, dotted] (delays) to[lbl, auto, edge label=f32] (eqx);
    \draw[->, dotted] (delays) to[lbl, auto, edge label=i32] (cdelayy);
-   \draw[->, dotted] (delays) to[lbl, auto, swap, edge label=f32] (eqy);
-   \draw[->, dotted] (eq) to[lbl, auto, swap, edge label=cf32] (eqx);
+   \draw[->, dotted] (delays) to[lbl, auto, edge label'=f32] (eqy);
+   \draw[->, dotted] (eq) to[lbl, auto, edge label'=cf32] (eqx);
    \draw[->, dotted] (eq) to[lbl, auto, edge label=cf32] (eqy);
    \draw[->] (quantx) |- node[lbl, auto, swap, near start] {ci8} (pack);
    \draw[->] (quanty) |- node[lbl, auto, near start] {ci8} (pack);
@@ -152,3 +155,62 @@ The tuning parameter :math:`w_c` (specified by the :option:`!--w-cutoff`
 command-line option) scales the width of the response in the frequency domain.
 The default value is 1, which makes the width of the response (at -6dB)
 approximately equal the channel spacing.
+
+Correlation
+-----------
+Given a baseline (p, q) and time-varying channelised voltages :math:`e_p` and
+:math:`e_q`, the correlation product is the sum of :math:`e_p \overline{e_q}`
+over the accumulation period. This is computed in integer arithmetic and so is
+lossless except when saturation occurs.
+
+The figure below shows the signal path.
+
+.. tikz:: Signal path for correlation
+   :libs: chains
+
+   \tikzset{
+     base/.style={minimum width=2.5cm, minimum height=1cm, align=center},
+     op/.style={draw, base},
+     control/.style={draw, base, rounded corners, dotted},
+     lbl/.style={font=\scriptsize},
+     every join/.style={draw,->},
+     >=latex,
+   }
+   \begin{scope}[start chain=going right]
+     \node[op, on chain] {Receive};
+     \node[op, on chain, join=by {lbl,edge label=ci8}] {Correlate\\ Accumulate};
+     \node[op, on chain, join=by {lbl,edge label=ci64}] {Saturate};
+     \node[op, on chain, join=by {lbl,edge label=ci32}] {Transmit};
+   \end{scope}
+
+Beamforming
+-----------
+The signal path below is repeated for each single-polarisation beam. Delays
+are computed purely with a phase slope in the frequency domain (similarly to
+the fine delays in the channeliser).
+
+.. tikz:: Signal path for beamforming
+   :libs: chains
+
+   \tikzset{
+     base/.style={minimum width=2.5cm, minimum height=1cm, align=center},
+     op/.style={draw, base},
+     control/.style={draw, base, rounded corners, dotted},
+     lbl/.style={font=\scriptsize},
+     every join/.style={draw,->},
+     >=latex,
+   }
+   \begin{scope}[start chain=going right]
+     \node[op, on chain] {Receive};
+     \node[op, on chain, join=by {lbl,edge label=ci8}] (mult) {Taper/Scale\\ Delay};
+     \node[op, on chain, join=by {lbl,edge label=cf32}] {Sum};
+     \node[op, on chain, join=by {lbl,edge label=cf32}] {Dither};
+     \node[op, on chain, join=by {lbl,edge label=cf32}] {Quantise};
+     \node[op, on chain, join=by {lbl,edge label=ci8}] {Transmit};
+     \node[control, below left=of mult] (taper) {Tapering\\ coefficients};
+     \node[control, below=of mult] (gain) {Requantisation\\ gain};
+     \node[control, below right=of mult] (delay) {Delays};
+     \draw[->, dotted] (taper) to[lbl, edge label=f32] (mult);
+     \draw[->, dotted] (gain) to[lbl, edge label=f32] (mult);
+     \draw[->, dotted] (delay) to[lbl, edge label'=f32] (mult);
+   \end{scope}

@@ -28,13 +28,6 @@ to have a phasor of
 where :math:`t` is time and :math:`z` is position. In particular, phase
 measured at a fixed position (an antenna) increases with time.
 
-Correlation products
---------------------
-Given a baseline (p, q) and time-varying channelised voltages :math:`e_p` and
-:math:`e_q`, the correlation product is the sum of :math:`e_p \overline{e_q}`
-over the accumulation period. This is computed in integer arithmetic and so is
-lossless except when saturation occurs.
-
 Narrowband
 ----------
 .. todo:: Document the down-conversion filter
