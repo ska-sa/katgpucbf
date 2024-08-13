@@ -23,7 +23,7 @@ METRIC_NAMESPACE: Final = "fgpu"
 # Range in which the dig-rms-dbfs sensor is NOMINAL
 # TODO these thresholds are inherited from MeerKAT. Are they what we want?
 DIG_RMS_DBFS_LOW: Final = -32.0
-DIG_RMS_DBFS_HIGH: Final = -22.0
+DIG_RMS_DBFS_HIGH: Final = -12.0
 DIG_RMS_DBFS_WINDOW: Final = 1.0  # Window length in seconds
 
 #: Valid values for the ``--dig-sample-bits`` command-line option
