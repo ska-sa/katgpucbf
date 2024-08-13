@@ -22,13 +22,12 @@ runtime.
 
 Channelisation
 --------------
-The figures below shows the signal path for the wide-band and narrow-band
-cases respectively.
-
 Note that the input and output bit depths (shown as ``i10`` and ``ci8`` on the
 diagram) are configurable. Between unpacking and quantisation, all
 calculations are performed in single precision. Since the input has a bounded
 range, overflow is only possible at the quantisation step (which saturates).
+
+The figure below shows the signal path for wide-band channelisation.
 
 .. tikz:: Signal path for wide-band channelisation.
    :libs: chains, positioning
@@ -78,6 +77,100 @@ range, overflow is only possible at the quantisation step (which saturates).
    \draw[->] (quantx) |- node[lbl, auto, swap, near start] {ci8} (pack);
    \draw[->] (quanty) |- node[lbl, auto, near start] {ci8} (pack);
 
+Delay
+^^^^^
+Delays may be specified with sub-sample precision. To handle this, the delay
+is split into two components: a :dfn:`coarse` delay (a whole number of
+samples) and a :dfn:`fine` delay (between -0.5 and +0.5 samples). The coarse
+delay is applied as a shift in time, while the fine delay is applied as a
+phase slope in the frequency domain. As noted in :ref:`math-delay`, the user
+provides the overall phase adjustment for the centre frequency, and the
+constant term of the phase slope is computed from that (taking into account
+the effect of the coarse delay on phase).
+
+The fine delay and the fixed phase offset for each spectrum are computed in
+double precision then reduced to single precision for application. Conversion
+of the delay to a per-channel phase correction, and of phases to complex
+phasors are done in single precision.
+
+Polyphase filter bank (PFB)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+A finite impulse response (FIR) filter is applied to the signal to condition
+the frequency-domain response. The filter is the product of a Hann window (to
+reduce spectral leakage) and a sinc (to broaden the peak to cover the
+frequency bin). Specifically, if there are :math:`n` output channels and
+:math:`t` taps in the polyphase filter bank, then the filter has length
+:math:`w = 2nt`, with coefficients
+
+.. math::
+
+   x_i = A\sin^2\left(\frac{\pi i}{w - 1}\right)
+         \operatorname{sinc}\left(w_c\cdot \frac{i + \tfrac 12 - nt}{2n}\right),
+
+where :math:`i` runs from 0 to :math:`w - 1`. Here :math:`A` is a
+normalisation factor which is chosen such that :math:`\sum_i x_i^2 = 1`. This
+ensures that given white Gaussian noise as input, the expected output power
+in a channel is the same as the expected input power in a digitised sample.
+Note that the input and output are treated as integers rather than as
+fixed-point values.
+
+The tuning parameter :math:`w_c` (specified by the :option:`!--w-cutoff`
+command-line option) scales the width of the response in the frequency domain.
+The default value is 1, which makes the width of the response (at -6dB)
+approximately equal the channel spacing.
+
+.. _signal-path.narrow:
+
+Dithering
+^^^^^^^^^
+To improve linearity, a random value selected uniformly from the interval
+(-0.5, 0.5) is added to each component (real and imaginary) before
+quantisation. The random seeds are carefully chosen to ensure that
+random sequences are not shared across antennas.
+
+Narrowband
+^^^^^^^^^^
+Narrowband outputs are those in which only a portion of the digitised
+bandwidth is channelised and output. Typically they have narrower channel
+widths. The overall approach is as follows:
+
+1. The signal is multiplied (:dfn:`mixed`) by a complex tone of the form
+   :math:`e^{2\pi jft}`, to effect a shift in the frequency of the
+   signal. The centre of the desired band is placed at the DC frequency.
+
+2. The signal is convolved with a low-pass filter. This suppresses most
+   of the unwanted parts of the band, to the extent possible with a FIR
+   filter.
+
+3. The signal is subsampled (every Nth sample is retained), reducing the data
+   rate. The low-pass filter above limits aliasing. At this stage, twice as
+   much bandwidth as desired is retained. The steps up to this one are
+   referred to as :dfn:`digital down-conversion` (DDC).
+
+4. The coarse delay and PFB proceed largely as before, but using double the
+   final channel count (since the bandwidth is also doubled, the channel width
+   is as desired). The input is now complex rather than real (due to the
+   mixing), so the PFB is complex-to-complex rather than real-to-complex.
+
+5. Half the channels (the outer half) are discarded.
+
+.. note::
+   To avoid confusion, the "subsampling factor" is the ratio of original to
+   retained samples in the subsampling step, while the "decimation factor" is
+   the factor by which the bandwidth is reduced. Because the mixing turns a
+   real signal into a complex signal, the subsampling factor is twice the
+   decimation factor in step 3 (but equal to the overall decimation
+   factor).
+
+The decimation is thus achieved by a combination of time-domain (steps 2 and
+3) and frequency domain (step 5) techniques. This has better computational
+efficiency than a purely frequency-domain approach (which would require the
+PFB to be run on the full bandwidth), while mitigating many of the filter
+design problems inherent in a purely time-domain approach (the roll-off of the
+FIR filter can be hidden in the discarded outer channels).
+
+The figure below shows the modified signal path.
+
 .. tikz:: Signal path for narrow-band channelisation (with new stages in blue).
    :libs: chains, positioning
 
@@ -91,7 +184,6 @@ range, overflow is only possible at the quantisation step (which saturates).
      >=latex,
    }
    \newcommand{\side}[2]{
-     \node[op, extra, on chain, join=by {#2, edge label=f32}] (mix) {Mix};
      \node[op, extra, on chain, join=by {#2, edge label=cf32}] (ddc) {DDC};
      \node[op, on chain, join=by {#2, edge label=cf32}] (cdelay#1) {Coarse delay};
      \node[op, on chain, join=by {#2, edge label=cf32}] (pfb#1) {PFB};
@@ -130,31 +222,22 @@ range, overflow is only possible at the quantisation step (which saturates).
    \draw[->] (quantx) |- node[lbl, auto, swap, near start] {ci8} (pack);
    \draw[->] (quanty) |- node[lbl, auto, near start] {ci8} (pack);
 
-Polyphase filter bank (PFB)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-A finite impulse response (FIR) filter is applied to the signal to condition
-the frequency-domain response. The filter is the product of a Hann window (to
-reduce spectral leakage) and a sinc (to broaden the peak to cover the
-frequency bin). Specifically, if there are :math:`n` output channels and
-:math:`t` taps in the polyphase filter bank, then the filter has length
-:math:`w = 2nt`, with coefficients
+The mixer frequency is quantised to a 0.32 unsigned fixed-point representation
+of the number of cycles per post-DDC sample. The resolution
+is thus :math:`2^{-31}B` where :math:`B` is the final bandwidth.
 
-.. math::
+Discarding half the channels after channelisation allows for a lot of freedom
+in the design of the DDC FIR filter: the discarded channels can have an
+arbitrary response. This allows for a gradual transition from passband to
+stopband. We use :func:`scipy.signal.remez` to produce a filter that is as
+close as possible to 1 in the passband and 0 in the stopband. A weighting
+factor (which the user can override) balances the priority of the passband
+(ripple) and stopband (alias suppression).
 
-   x_i = A\sin^2\left(\frac{\pi i}{w - 1}\right)
-         \operatorname{sinc}\left(w_c\cdot \frac{i + \tfrac 12 - nt}{2n}\right),
-
-where :math:`i` runs from 0 to :math:`w - 1`. Here :math:`A` is a
-normalisation factor which is chosen such that :math:`\sum_i x_i^2 = 1`. This
-ensures that given white Gaussian noise as input, the expected output power
-in a channel is the same as the expected input power in a digitised sample.
-Note that the input and output are treated as integers rather than as
-fixed-point values.
-
-The tuning parameter :math:`w_c` (specified by the :option:`!--w-cutoff`
-command-line option) scales the width of the response in the frequency domain.
-The default value is 1, which makes the width of the response (at -6dB)
-approximately equal the channel spacing.
+The filter performance is slightly improved by noting that the discarded
+channels have multiple aliases, and the filter response in those aliases is
+also irrelevant. We thus use :func:`scipy.signal.remez` to only optimise the
+response to those channels that alias into the output.
 
 Correlation
 -----------
@@ -186,8 +269,11 @@ The figure below shows the signal path.
 Beamforming
 -----------
 The signal path below is repeated for each single-polarisation beam. Delays
-are computed purely with a phase slope in the frequency domain (similarly to
-the fine delays in the channeliser).
+are computed purely with a phase slope in the frequency domain, similarly to
+the fine delays in the channeliser. Dithering is done the same way as for
+channelisation. Since all calculations are performed in single precision
+floating point and the input has a limited range, overflow can only occur
+during quantisation (which saturates).
 
 .. tikz:: Signal path for beamforming
    :libs: chains

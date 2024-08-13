@@ -1,5 +1,5 @@
-Mathematical background
-=======================
+Mathematical conventions
+========================
 
 This section is not intended as a tutorial for radio astronomy. It briefly
 summarises some key equations, with the intent of illustrating implementation
@@ -27,10 +27,6 @@ to have a phasor of
 
 where :math:`t` is time and :math:`z` is position. In particular, phase
 measured at a fixed position (an antenna) increases with time.
-
-Narrowband
-----------
-.. todo:: Document the down-conversion filter
 
 .. _math-delay:
 
