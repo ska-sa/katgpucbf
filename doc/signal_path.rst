@@ -20,8 +20,8 @@ are used:
 Dotted boxes and arrows represent control parameters that can be adjusted at
 runtime.
 
-Channelisation
---------------
+Channelisation and delay correction
+-----------------------------------
 Note that the input and output bit depths (shown as ``i10`` and ``ci8`` on the
 diagram) are configurable. Between unpacking and quantisation, all
 calculations are performed in single precision. Since the input has a bounded
