@@ -38,6 +38,7 @@ def main():  # noqa: C901
     parser.add_argument("--send-sample-bits", type=int, default=8, choices=[4, 8])
     parser.add_argument("--passes", type=int, default=1000)
     parser.add_argument("--ddc-taps", type=int)  # Default is computed from decimation
+    parser.add_argument("--no-dither", dest="dither", action="store_false")
     parser.add_argument("--narrowband", action="store_true")
     parser.add_argument("--narrowband-decimation", type=int, default=8)
     parser.add_argument("--kernel", choices=["all", "ddc", "pfb_fir", "fft", "postproc"], default="all")
@@ -77,7 +78,13 @@ def main():  # noqa: C901
             spectra_samples = 2 * args.channels
             window = args.taps * spectra_samples
         template = ComputeTemplate(
-            context, args.taps, args.channels, args.dig_sample_bits, args.send_sample_bits, narrowband=narrowband_config
+            context,
+            args.taps,
+            args.channels,
+            args.dig_sample_bits,
+            args.send_sample_bits,
+            dither=args.dither,
+            narrowband=narrowband_config,
         )
         command_queue = context.create_tuning_command_queue()
         out_spectra = accel.roundup(args.send_chunk_jones // args.channels, spectra_per_heap)
