@@ -63,6 +63,8 @@ class ComputeTemplate:
         Number of bits per digitiser sample.
     out_bits
         Number of bits per output real component.
+    dither
+        Whether to add uniform dithering before quantisation.
     narrowband
         Configuration for narrowband operation. If ``None``, wideband is assumed.
     """
@@ -74,6 +76,7 @@ class ComputeTemplate:
         channels: int,
         dig_sample_bits: int,
         out_bits: int,
+        dither: bool,
         narrowband: NarrowbandConfig | None,
     ) -> None:
         self.context = context
@@ -84,7 +87,7 @@ class ComputeTemplate:
         if narrowband is None:
             self.internal_channels = channels
             self.postproc = postproc.PostprocTemplate(
-                context, channels, self.unzip_factor, complex_pfb=False, out_bits=out_bits
+                context, channels, self.unzip_factor, complex_pfb=False, out_bits=out_bits, dither=dither
             )
             self.pfb_fir = pfb.PFBFIRTemplate(
                 context, taps, channels, dig_sample_bits, self.unzip_factor, n_pols=N_POLS
@@ -98,6 +101,7 @@ class ComputeTemplate:
                 self.unzip_factor,
                 complex_pfb=True,
                 out_bits=out_bits,
+                dither=dither,
                 out_channels=(channels // 2, 3 * channels // 2),
             )
             self.pfb_fir = pfb.PFBFIRTemplate(

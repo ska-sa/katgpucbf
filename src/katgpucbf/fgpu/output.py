@@ -33,6 +33,7 @@ class Output(ABC):
     taps: int
     w_cutoff: float
     dst: list[Endpoint]
+    dither: bool
 
     def __post_init__(self) -> None:
         if self.channels % len(self.dst) != 0:

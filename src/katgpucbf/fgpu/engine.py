@@ -494,6 +494,7 @@ class Pipeline:
             output.channels,
             engine.recv_layout.sample_bits,
             engine.send_sample_bits,
+            output.dither,
             narrowband=narrowband_config,
         )
         self._compute = template.instantiate(
