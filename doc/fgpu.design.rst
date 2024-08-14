@@ -575,43 +575,14 @@ From there a number of transformations occur:
 
 Narrowband
 ----------
-Narrowband outputs are those in which only a portion of the digitised
-bandwidth is channelised and output. Typically they have narrower channel
-widths. The overall approach is as follows:
+Refer to the :ref:`Signal path <signal-path.narrow>` section for an overview
+of the approach to narrowband. As a reminder, the steps are:
 
-1. The signal is multiplied (:dfn:`mixed`) by a complex tone of the form
-   :math:`e^{2\pi jft}`, to effect a shift in the frequency of the
-   signal. The centre of the desired band is placed at the DC frequency.
-
-2. The signal is convolved with a low-pass filter. This suppresses most
-   of the unwanted parts of the band, to the extent possible with a FIR
-   filter.
-
-3. The signal is subsampled (every Nth sample is retained), reducing the data
-   rate. The low-pass filter above limits aliasing. At this stage, twice as
-   much bandwidth as desired is retained.
-
-4. The rest of the pipeline proceeds largely as before, but using double the
-   final channel count (since the bandwidth is also doubled, the channel width
-   is as desired). The input is now complex rather than real, so the Fourier
-   transform is a complex-to-complex rather than real-to-complex transform.
-
-5. Half the channels (the outer half) are discarded.
-
-.. note::
-   To avoid confusion, the "subsampling factor" is the ratio of original to
-   retained samples in the subsampling step, while the "decimation factor" is
-   the factor by which the bandwidth is reduced. Because the mixing turns a
-   real signal into a complex signal, the subsampling factor is twice the
-   decimation factor in step 3 (but equal to the overall decimation
-   factor).
-
-The decimation is thus achieved by a combination of time-domain (steps 2 and
-3) and frequency domain (step 5) techniques. This has better computational
-efficiency than a purely frequency-domain approach (which would require the
-PFB to be run on the full bandwidth), while mitigating many of the filter
-design problems inherent in a purely time-domain approach (the roll-off of the
-FIR filter can be hidden in the discarded outer channels).
+1. Mix
+2. Low-pass filter
+3. Subsample
+4. Coarse delay and PFB
+5. Discard channels
 
 The first three steps are implemented by a "digital down-conversion"
 ("DDC") kernel. This is applied to each input chunk, after copying the head of
@@ -628,7 +599,7 @@ the outer channels must be discarded.
 
 An incidental difference between the wideband and narrowband modes is that in
 wideband, the DC frequency of the Fourier transform corresponds to the lowest
-on-sky frequency, while for wideband it corresponds to the centre on-sky
+on-sky frequency, while for narrowband it corresponds to the centre on-sky
 frequency. This difference is also handled in the postprocessing kernel.
 Internally, channels are numbered according to the Fourier transform (0 being
 the DC channel), but different calculations are used in wideband versus
@@ -728,21 +699,6 @@ represented as a fractional number of cycles, scaled by :math:`2^{32}` and
 stored in a 32-bit integer. When performing arithmetic on values encoded this
 way, the values may overflow and wrap. The high bits that are lost represent
 complete cycles, and so have no effect on phase.
-
-Filter design
-^^^^^^^^^^^^^
-Discarding half the channels after channelisation allows for a lot of freedom
-in the design of the DDC FIR filter: the discarded channels, as well as their
-aliases, can have an arbitrary response. This allows for a gradual transition
-from passband to stopband. We use :func:`scipy.signal.remez` to produce a
-filter that is as close as possible to 1 in the passband and 0 in the
-stopband. A weighting factor (which the user can override) balances the
-priority of the passband (ripple) and stopband (alias suppression).
-
-The filter performance is slightly improved by noting that the discarded
-channels have multiple aliases, and the filter response in those aliases is
-also irrelevant. We thus use :func:`scipy.signal.remez` to only optimise the
-response to those channels that alias into the output.
 
 Delays
 ^^^^^^
