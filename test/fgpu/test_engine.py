@@ -1067,7 +1067,7 @@ class TestEngine:
     # It's easier to use a constant voltage. Also need to check the case were
     # the input power is zero.
     @pytest.mark.parametrize(
-        "input_voltage,output_power_dbfs", [(0, np.finfo(np.float64).min), (64, pytest.approx(-15.0345186))]
+        "input_voltage,output_power_dbfs", [(0, np.finfo(np.float64).min), (100, pytest.approx(-11.158118046054))]
     )
     async def test_dig_rms_dbfs_sensors(
         self,
