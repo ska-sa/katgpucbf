@@ -63,10 +63,10 @@ The figure below shows the signal path for wide-band channelisation.
    \node[control, right=of pfbx] (delays) {Delays};
    \node[control, right=of eqx] (eq) {Eq coefficients};
    \draw[->] (receive)
-     -| node[lbl, very near start, auto, swap] {V}
+     -| node[lbl, very near start, auto, swap] {pol0}
         node[lbl, near end, auto, swap] {i10} (unpackx);
    \draw[->] (receive)
-     -| node[lbl, very near start, auto] {H}
+     -| node[lbl, very near start, auto] {pol1}
         node[lbl, near end, auto] {i10} (unpacky);
    \draw[->, dotted] (delays) to[lbl, auto, edge label'=i32] (cdelayx);
    \draw[->, dotted] (delays) to[lbl, auto, edge label=f32] (eqx);
@@ -208,10 +208,10 @@ The figure below shows the modified signal path.
    \node[control, right=of pfbx] (delays) {Delays};
    \node[control, right=of eqx] (eq) {Eq coefficients};
    \draw[->] (receive)
-     -| node[lbl, very near start, auto, swap] {V}
+     -| node[lbl, very near start, auto, swap] {pol0}
         node[lbl, near end, auto, swap] {i10} (unpackx);
    \draw[->] (receive)
-     -| node[lbl, very near start, auto] {H}
+     -| node[lbl, very near start, auto] {pol1}
         node[lbl, near end, auto] {i10} (unpacky);
    \draw[->, dotted] (delays) to[lbl, auto, edge label'=i32] (cdelayx);
    \draw[->, dotted] (delays) to[lbl, auto, edge label=f32] (eqx);
@@ -259,7 +259,7 @@ The figure below shows the signal path.
      every join/.style={draw,->},
      >=latex,
    }
-   \begin{scope}[start chain=going right]
+   \begin{scope}[start chain=going below]
      \node[op, on chain] {Receive};
      \node[op, on chain, join=by {lbl,edge label=ci8}] {Correlate\\ Accumulate};
      \node[op, on chain, join=by {lbl,edge label=ci64}] {Saturate};
@@ -286,17 +286,17 @@ during quantisation (which saturates).
      every join/.style={draw,->},
      >=latex,
    }
-   \begin{scope}[start chain=going right]
+   \begin{scope}[start chain=going below]
      \node[op, on chain] {Receive};
      \node[op, on chain, join=by {lbl,edge label=ci8}] (mult) {Taper/Scale\\ Delay};
      \node[op, on chain, join=by {lbl,edge label=cf32}] {Sum};
      \node[op, on chain, join=by {lbl,edge label=cf32}] {Dither};
      \node[op, on chain, join=by {lbl,edge label=cf32}] {Quantise};
      \node[op, on chain, join=by {lbl,edge label=ci8}] {Transmit};
-     \node[control, below left=of mult] (taper) {Tapering\\ coefficients};
-     \node[control, below=of mult] (gain) {Requantisation\\ gain};
+     \node[control, above right=of mult] (taper) {Tapering\\ coefficients};
+     \node[control, right=of mult] (gain) {Requantisation\\ gain};
      \node[control, below right=of mult] (delay) {Delays};
-     \draw[->, dotted] (taper) to[lbl, edge label=f32] (mult);
+     \draw[->, dotted] (taper) to[lbl, near start, edge label=f32] (mult);
      \draw[->, dotted] (gain) to[lbl, edge label=f32] (mult);
-     \draw[->, dotted] (delay) to[lbl, edge label'=f32] (mult);
+     \draw[->, dotted] (delay) to[lbl, near start, edge label'=f32] (mult);
    \end{scope}
