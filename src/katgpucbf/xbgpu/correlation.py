@@ -292,7 +292,7 @@ class Correlation(accel.Operation):
 
     def zero_visibilities(self) -> None:
         """Zero all the values in the internal buffer."""
-        self.ensure_all_bound()
+        self.ensure_bound("mid_visibilities")
         self.buffer("mid_visibilities").zero(self.command_queue)
 
     @staticmethod
