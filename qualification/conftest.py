@@ -522,7 +522,7 @@ async def receive_baseline_correlation_products(
     receiver = BaselineCorrelationProductsReceiver(
         cbf=cbf,
         stream_name="baseline-correlation-products",
-        core=core_allocator.allocate(1)[0],
+        cores=core_allocator.allocate(2),
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
@@ -531,7 +531,7 @@ async def receive_baseline_correlation_products(
     # tests).
     await receiver.next_complete_chunk(max_delay=0)
     yield receiver
-    receiver.stream.stop()
+    receiver.stop()
 
 
 @pytest.fixture
@@ -569,7 +569,7 @@ async def receive_tied_array_channelised_voltage(
         logger.info("Subscribing to %d beam streams", max_streams)
 
     stream_names = stream_names[:max_streams]
-    cores = core_allocator.allocate(len(stream_names))
+    cores = core_allocator.allocate(len(stream_names) + 1)
     receiver = TiedArrayChannelisedVoltageReceiver(
         cbf=cbf, stream_names=stream_names, cores=cores, interface_address=interface_address, use_ibv=use_ibv
     )
@@ -579,4 +579,4 @@ async def receive_tied_array_channelised_voltage(
     # tests).
     await receiver.next_complete_chunk(max_delay=0)
     yield receiver
-    receiver.stream.stop()
+    receiver.stop()

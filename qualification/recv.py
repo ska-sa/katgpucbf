@@ -21,8 +21,12 @@ import asyncio
 import ctypes
 import logging
 import math
+import os
+import threading
+from collections import deque
 from collections.abc import AsyncGenerator, Callable, Sequence
-from typing import TYPE_CHECKING, Literal, overload
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Self, TypeVar, overload
 
 import numba
 import numpy as np
@@ -44,16 +48,103 @@ from katgpucbf.utils import TimeConverter
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
+
+
+@dataclass
+class _ChunkQueueWaiter:
+    loop: asyncio.AbstractEventLoop
+    future: asyncio.Future[None]
+
+    def _wake(self) -> None:
+        if not self.future.done():
+            self.future.set_result(None)
+
+    def wake(self) -> None:
+        """Notify the waiter to try again."""
+        self.loop.call_soon_threadsafe(self._wake)
+
+
+class ChunkQueue:
+    """Queue where oldest elements are discarded when full.
+
+    Pushing to this queue is non-blocking: if the queue is full, the oldest
+    element is thrown away. This ensures that the consumer always has access
+    to fresh data.
+
+    It is a hybrid of asyncio and threads. The producer and consumer can be
+    run on different threads, but obtaining the next queue element is an
+    asynchronous function.
+    """
+
+    def __init__(self, maxsize: int) -> None:
+        self.maxsize = maxsize
+        self._lock = threading.Lock()
+        # The queue itself (protected by the lock)
+        self._chunks: deque[katgpucbf.recv.Chunk] = deque()
+        # Event loops blocked in `get` (protected by the lock)
+        self._waiters: list[_ChunkQueueWaiter] = list()
+        self._debug = 0
+
+    def put_nowait(self, chunk: katgpucbf.recv.Chunk) -> None:
+        """Add an item to the queue without blocking.
+
+        If the queue is full, discard the oldest chunk.
+        """
+        with self._lock:
+            self._debug += 1
+            if self._debug % 64 == 0:
+                print(np.sum(chunk.present))
+            empty = len(self._chunks) == 0
+            if len(self._chunks) == self.maxsize:
+                self._chunks.popleft().recycle()
+            self._chunks.append(chunk)
+            if empty:
+                # Note: waking up *all* waiters can cause a thundering heard in
+                # general, but we're only expecting a single consumer so it's
+                # not worth trying to optimise.
+                for waiter in self._waiters:
+                    waiter.wake()
+                self._waiters.clear()
+
+    async def get(self) -> katgpucbf.recv.Chunk:
+        """Get an item from the queue."""
+        loop = asyncio.get_running_loop()
+        while True:
+            with self._lock:
+                if self._chunks:
+                    return self._chunks.popleft()
+                future = loop.create_future()
+                self._waiters.append(_ChunkQueueWaiter(loop, future))
+            await future
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> katgpucbf.recv.Chunk:
+        return await self.get()
+
+    def clear(self) -> None:
+        """Erase all items from the queue."""
+        with self._lock:
+            while self._chunks:
+                self._chunks.popleft().recycle()
 
 
 class XBReceiver:
-    """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
+    """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`.
+
+    The design allows for the test not continuously retrieving chunks. To
+    avoid applying back-pressure when it is not needed, the receiver runs a
+    separate worker thread that continuously takes chunks and enqueues them,
+    discarding old chunks if they're not consumed timeously.
+    """
 
     # Attributes instantiated by the derived classes
     stream: spead2.recv.ChunkStreamRingGroup
     timestamp_step: int  # Step (in ADC samples) between chunk timestamps
 
-    def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
+    def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str], worker_core: int) -> None:
         # Some metadata we know already from the config.
         acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
         acv_config = cbf.config["outputs"][acv_name]
@@ -91,6 +182,22 @@ class XBReceiver:
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
         self.cbf = cbf
         self._acv_name = acv_name
+        self._queue = ChunkQueue(maxsize=2)
+        self._worker_thread = threading.Thread(target=self._worker, args=(worker_core,))
+
+    def stop(self) -> None:
+        """Shut down the receiver."""
+        self.stream.stop()
+        self._worker_thread.join()
+        self._queue.clear()
+
+    def _worker(self, core: int) -> None:
+        os.sched_setaffinity(0, [core])
+        data_ringbuffer = self.stream.data_ringbuffer
+        assert isinstance(data_ringbuffer, spead2.recv.ChunkRingbuffer)
+        for chunk in data_ringbuffer:
+            assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
+            self._queue.put_nowait(chunk)
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
@@ -148,12 +255,9 @@ class XBReceiver:
         if min_timestamp is None:
             min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
 
-        data_ringbuffer = self.stream.data_ringbuffer
-        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         try:
             async with asyncio.timeout(time_limit) as timer:
-                async for chunk in data_ringbuffer:
-                    assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
+                async for chunk in self._queue:
                     timestamp = chunk.chunk_id * self.timestamp_step
                     if min_timestamp is not None and timestamp < min_timestamp:
                         logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
@@ -276,9 +380,16 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
     """Wrap a baseline-correlation-products stream with helper functions."""
 
     def __init__(
-        self, cbf: CBFRemoteControl, stream_name: str, core: int, interface_address: str, use_ibv: bool = False
+        self,
+        cbf: CBFRemoteControl,
+        stream_name: str,
+        cores: Sequence[int],
+        interface_address: str,
+        use_ibv: bool = False,
     ) -> None:
-        super().__init__(cbf, [stream_name])
+        if len(cores) != 2:
+            raise ValueError("cores must contain exactly two elements")
+        super().__init__(cbf, [stream_name], cores[0])
 
         # Fill in extra sensors specific to baseline-correlation-products
         self.n_bls = cbf.sensors[f"{stream_name}.n-bls"].value
@@ -291,7 +402,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         self.stream = create_baseline_correlation_product_receive_stream(
             interface_address,
             multicast_endpoints=self.multicast_endpoints[0],
-            core=core,
+            core=cores[1],
             n_bls=self.n_bls,
             n_chans=self.n_chans,
             n_chans_per_substream=self.n_chans_per_substream,
@@ -301,6 +412,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
+        self._worker_thread.start()
 
     def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:  # noqa: D102
         # We need to avoid saturating the signed 32-bit X-engine accumulation as
@@ -331,7 +443,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
         interface_address: str,
         use_ibv: bool = False,
     ) -> None:
-        super().__init__(cbf, stream_names)
+        super().__init__(cbf, stream_names, cores[-1])
 
         self.n_bits_per_sample = cbf.sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
@@ -343,7 +455,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
         self.stream = create_tied_array_channelised_voltage_receive_stream(
             interface_address,
             multicast_endpoints=self.multicast_endpoints,
-            cores=cores,
+            cores=cores[:-1],
             n_chans=self.n_chans,
             n_chans_per_substream=self.n_chans_per_substream,
             n_bits_per_sample=self.n_bits_per_sample,
@@ -352,6 +464,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             decimation_factor=self.decimation_factor,
             use_ibv=use_ibv,
         )
+        self._worker_thread.start()
 
 
 def _create_receive_stream_group(
@@ -398,7 +511,7 @@ def _create_receive_stream_group(
     """
     n_extra_chunks = 2  # Chunks that are being processed
     free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
-    data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_extra_chunks)
+    data_ringbuffer = spead2.recv.ChunkRingbuffer(n_extra_chunks)
     group_config = spead2.recv.ChunkStreamGroupConfig(
         eviction_mode=spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY,
         max_chunks=max_chunks,
