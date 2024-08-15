@@ -21,10 +21,11 @@ import asyncio
 import copy
 import inspect
 import logging
+import os
 import subprocess
 import time
-from collections import namedtuple
-from collections.abc import AsyncGenerator, Generator
+from collections import deque, namedtuple
+from collections.abc import AsyncGenerator, Generator, Iterable, Sequence
 
 import matplotlib.style
 import pytest
@@ -59,6 +60,7 @@ ini_options = [
         name="interface_gbps", help="Maximum bandwidth to subscribe to on 'interface'", type="string", default="90"
     ),
     IniOption(name="use_ibv", help="Use ibverbs", type="bool", default=False),
+    IniOption(name="cores", help="Space-separate list of cores to use for worker threads", type="args", default=[]),
     IniOption(name="product_name", help="Name of subarray product", type="string", default="qualification_cbf"),
     IniOption(name="tester", help="Name of person executing this qualification run", type="string", default="Unknown"),
     IniOption(
@@ -470,9 +472,47 @@ async def cbf(
             await pcc.request("capture-stop", name)
 
 
+class CoreAllocator:
+    """Provide CPU cores to receivers that need them.
+
+    It is initialised with a list of cores (from pytest config), with earlier
+    entries considered better than later ones. Cores are allocated in this
+    order. There is no mechanism to return cores; simplify create a new
+    allocator to start fresh.
+    """
+
+    def __init__(self, cores: Iterable[int]) -> None:
+        self._cores = deque(cores)
+
+    def allocate(self, n: int) -> Sequence[int]:
+        """Request `n` cores.
+
+        Raises
+        ------
+        ValueError
+            If there are insufficient cores available
+        """
+        if n > len(self._cores):
+            raise ValueError(f"{n} cores requested but only {len(self._cores)} cores available")
+        return [self._cores.popleft() for _ in range(n)]
+
+
+@pytest.fixture
+def core_allocator(pytestconfig: pytest.Config) -> CoreAllocator:
+    """Create a core allocator for the test."""
+    cores = [int(x) for x in pytestconfig.getini("cores")]
+    if not cores:
+        cores = sorted(os.sched_getaffinity(0))
+    alloc = CoreAllocator(cores)
+    # Pin the main Python thread to a core, to ensure it won't conflict with
+    # any of the worker threads.
+    os.sched_setaffinity(0, alloc.allocate(1))
+    return alloc
+
+
 @pytest.fixture
 async def receive_baseline_correlation_products(
-    pytestconfig: pytest.Config, cbf: CBFRemoteControl
+    pytestconfig: pytest.Config, cbf: CBFRemoteControl, core_allocator: CoreAllocator
 ) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Create a spead2 receive stream for ingesting X-engine output."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -482,6 +522,7 @@ async def receive_baseline_correlation_products(
     receiver = BaselineCorrelationProductsReceiver(
         cbf=cbf,
         stream_name="baseline-correlation-products",
+        core=core_allocator.allocate(1)[0],
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
@@ -502,6 +543,7 @@ async def receive_tied_array_channelised_voltage(
     n_channels: int,
     int_time: float,
     band: str,
+    core_allocator: CoreAllocator,
 ) -> AsyncGenerator[TiedArrayChannelisedVoltageReceiver, None]:
     """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
     interface_address = get_interface_address(pytestconfig.getini("interface"))
@@ -527,8 +569,9 @@ async def receive_tied_array_channelised_voltage(
         logger.info("Subscribing to %d beam streams", max_streams)
 
     stream_names = stream_names[:max_streams]
+    cores = core_allocator.allocate(len(stream_names))
     receiver = TiedArrayChannelisedVoltageReceiver(
-        cbf=cbf, stream_names=stream_names, interface_address=interface_address, use_ibv=use_ibv
+        cbf=cbf, stream_names=stream_names, cores=cores, interface_address=interface_address, use_ibv=use_ibv
     )
 
     # Ensure that the data is flowing, and that we throw away any data that
