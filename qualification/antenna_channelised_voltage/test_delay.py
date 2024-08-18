@@ -205,8 +205,8 @@ async def test_delay_application_rate(cbf: CBFRemoteControl, pdf_report: Reporte
     enough.
     """
     pdf_report.step("Query rate of spectra.")
-    n_samples_between_spectra = cbf.sensors["antenna-channelised-voltage.n-samples-between-spectra"].value
-    scale_factor_timestamp = cbf.sensors["antenna-channelised-voltage.scale-factor-timestamp"].value
+    n_samples_between_spectra = cbf.init_sensors["antenna-channelised-voltage.n-samples-between-spectra"].value
+    scale_factor_timestamp = cbf.init_sensors["antenna-channelised-voltage.scale-factor-timestamp"].value
     rate = scale_factor_timestamp / n_samples_between_spectra
     pdf_report.detail(f"There are {rate:.3f} spectra per second.")
     assert rate >= 2500.0
@@ -225,6 +225,7 @@ async def test_delay_sensors(
     future. Once that time arrives, check that the sensors report the correct
     values.
     """
+    pcc = cbf.product_controller_client
     receiver = receive_baseline_correlation_products
     delay_tuples = []  # Expected sensor values
     delay_strs = []  # Strings to load
@@ -240,8 +241,8 @@ async def test_delay_sensors(
         delay_strs.append(f"{delay},{delay_rate}:{phase},{phase_rate}")
         delay_tuples.append((load_ts, delay, delay_rate, phase, phase_rate))
 
-    def delay_sensor_value(label: str) -> tuple:
-        return literal_eval(cbf.sensors[f"antenna-channelised-voltage.{label}.delay"].value.decode())
+    async def delay_sensor_value(label: str) -> tuple:
+        return literal_eval(await pcc.sensor_value(f"antenna-channelised-voltage.{label}.delay", str))
 
     pdf_report.step("Load delays.")
     pdf_report.detail(f"Set delays to load at {load_time} (timestamp {load_ts}).")
@@ -249,14 +250,14 @@ async def test_delay_sensors(
     await asyncio.sleep(0.1)  # Allow time for any invalid sensor updates to propagate
     pdf_report.detail("Check that sensors do not reflect the future.")
     for label in receiver.input_labels:
-        value = delay_sensor_value(label)
+        value = await delay_sensor_value(label)
         with check:
             assert value[1:] == (0.0, 0.0, 0.0, 0.0)
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
     await receiver.next_complete_chunk(min_timestamp=load_ts)
     for expected, label in zip(delay_tuples, receiver.input_labels):
-        value = delay_sensor_value(label)
+        value = await delay_sensor_value(label)
         pdf_report.detail(f"Input {label} has delay sensor {value}, expected value {expected}.")
         with check:
             assert value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value"

@@ -71,18 +71,18 @@ class XBReceiver:
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
         # We assume the streams all have the same information except for addresses.
-        self.n_chans_per_substream = cbf.sensors[f"{stream_names[0]}.n-chans-per-substream"].value
-        self.n_spectra_per_heap = cbf.sensors[f"{acv_name}.spectra-per-heap"].value
-        self.n_samples_between_spectra = cbf.sensors[f"{acv_name}.n-samples-between-spectra"].value
-        self.sync_time = cbf.sensors[f"{acv_name}.sync-time"].value
-        self.scale_factor_timestamp = cbf.sensors[f"{acv_name}.scale-factor-timestamp"].value
-        self.bandwidth = cbf.sensors[f"{acv_name}.bandwidth"].value
-        self.center_freq = cbf.sensors[f"{acv_name}.center-freq"].value
+        self.n_chans_per_substream = cbf.init_sensors[f"{stream_names[0]}.n-chans-per-substream"].value
+        self.n_spectra_per_heap = cbf.init_sensors[f"{acv_name}.spectra-per-heap"].value
+        self.n_samples_between_spectra = cbf.init_sensors[f"{acv_name}.n-samples-between-spectra"].value
+        self.sync_time = cbf.init_sensors[f"{acv_name}.sync-time"].value
+        self.scale_factor_timestamp = cbf.init_sensors[f"{acv_name}.scale-factor-timestamp"].value
+        self.bandwidth = cbf.init_sensors[f"{acv_name}.bandwidth"].value
+        self.center_freq = cbf.init_sensors[f"{acv_name}.center-freq"].value
         self.multicast_endpoints = [
             [
                 (endpoint.host, endpoint.port)
                 for endpoint in endpoint_list_parser(DEFAULT_PORT)(
-                    cbf.sensors[f"{stream_name}.destination"].value.decode()
+                    cbf.init_sensors[f"{stream_name}.destination"].value.decode()
                 )
             ]
             for stream_name in stream_names
@@ -279,11 +279,11 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         super().__init__(cbf, [stream_name])
 
         # Fill in extra sensors specific to baseline-correlation-products
-        self.n_bls = cbf.sensors[f"{stream_name}.n-bls"].value
-        self.n_bits_per_sample = cbf.sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
-        self.n_spectra_per_acc = cbf.sensors[f"{stream_name}.n-accs"].value
-        self.int_time = cbf.sensors[f"{stream_name}.int-time"].value
-        self.bls_ordering = ast.literal_eval(cbf.sensors[f"{stream_name}.bls-ordering"].value.decode())
+        self.n_bls = cbf.init_sensors[f"{stream_name}.n-bls"].value
+        self.n_bits_per_sample = cbf.init_sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
+        self.n_spectra_per_acc = cbf.init_sensors[f"{stream_name}.n-accs"].value
+        self.int_time = cbf.init_sensors[f"{stream_name}.int-time"].value
+        self.bls_ordering = ast.literal_eval(cbf.init_sensors[f"{stream_name}.bls-ordering"].value.decode())
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
 
         self.stream = create_baseline_correlation_product_receive_stream(
@@ -325,10 +325,10 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
     ) -> None:
         super().__init__(cbf, stream_names)
 
-        self.n_bits_per_sample = cbf.sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
+        self.n_bits_per_sample = cbf.init_sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
         self.source_indices: list[list[int]] = [
-            ast.literal_eval(cbf.sensors[f"{stream_name}.source-indices"].value.decode())
+            ast.literal_eval(cbf.init_sensors[f"{stream_name}.source-indices"].value.decode())
             for stream_name in stream_names
         ]
 

@@ -69,14 +69,11 @@ class CBFRemoteControl(CBFBase):
     sensor_watcher: aiokatcp.SensorWatcher
 
     @property
-    def sensors(self) -> aiokatcp.SensorSet:  # noqa: D401
-        """Current sensor values from the product controller.
+    def init_sensors(self) -> aiokatcp.SensorSet:  # noqa: D401
+        """Initial sensor values from the product controller.
 
-        Note that if a command is issued to a dsim, there will be an unknown
-        delay before any sensors that change as a result are visible in this
-        sensor set, because it comes via the product controller. In such
-        cases it may be necessary to directly query the dsim for the sensor
-        value.
+        This is initialised once after starting the subarray product and not
+        subsequently updated. Dynamic sensors should be queried directly.
         """
         return self.sensor_watcher.sensors
 
@@ -92,6 +89,9 @@ class CBFRemoteControl(CBFBase):
         sensor_watcher = aiokatcp.SensorWatcher(pcc)
         pcc.add_sensor_watcher(sensor_watcher)
         await sensor_watcher.synced.wait()  # Implicitly waits for connection too
+        # Remove it again: we only want the initial sensor values, not the full
+        # firehose.
+        pcc.remove_sensor_watcher(sensor_watcher)
 
         dsim_endpoints = []
         for sensor_name, sensor in sensor_watcher.sensors.items():
