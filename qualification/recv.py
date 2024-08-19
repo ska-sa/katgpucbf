@@ -355,7 +355,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
         )
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
-        return super().is_complete_chunk(chunk) and (chunk.extra is None or np.min(chunk.extra) < self.n_ants)
+        return super().is_complete_chunk(chunk) and (chunk.extra is None or np.min(chunk.extra) == self.n_ants)
 
 
 def _create_receive_stream_group(
