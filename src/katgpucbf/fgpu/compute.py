@@ -28,6 +28,7 @@ from katsdpsigproc import accel, fft
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import N_POLS
+from ..utils import DitherType
 from . import ddc, pfb, postproc
 
 
@@ -64,7 +65,7 @@ class ComputeTemplate:
     out_bits
         Number of bits per output real component.
     dither
-        Whether to add uniform dithering before quantisation.
+        Type of dithering to apply before quantisation.
     narrowband
         Configuration for narrowband operation. If ``None``, wideband is assumed.
     """
@@ -76,7 +77,7 @@ class ComputeTemplate:
         channels: int,
         dig_sample_bits: int,
         out_bits: int,
-        dither: bool,
+        dither: DitherType,
         narrowband: NarrowbandConfig | None,
     ) -> None:
         self.context = context

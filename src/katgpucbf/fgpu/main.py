@@ -50,7 +50,7 @@ from .. import (
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import add_gc_stats, add_signal_handlers, comma_split, parse_source
+from ..utils import DitherType, add_gc_stats, add_signal_handlers, comma_split, parse_dither, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
 from .output import NarrowbandOutput, WidebandOutput
@@ -79,7 +79,7 @@ class _OutputDict(TypedDict, total=False):
     dst: list[Endpoint]
     taps: int
     w_cutoff: float
-    dither: bool
+    dither: DitherType
 
 
 class _WidebandOutputDict(_OutputDict, total=False):
@@ -112,7 +112,6 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
     `kws`, the key and the value. If it does not recognise the key, it should
     raise ValueError.
     """
-    bool_map = {"false": False, "true": True}
     for part in value.split(","):
         match part.split("=", 1):
             case [key, data]:
@@ -128,16 +127,13 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
                     case "dst":
                         kws[key] = endpoint_list_parser(DEFAULT_PORT)(data)
                     case "dither":
-                        try:
-                            kws[key] = bool_map[data.lower()]
-                        except KeyError:
-                            raise ValueError("dither must be set to 'true' or 'false'") from None
+                        kws[key] = parse_dither(data)
                     case _:
                         field_callback(kws, key, data)
             case _:
                 raise ValueError(f"missing '=' in {part}")
     # ignore due to https://github.com/python/mypy/issues/17674
-    kws.setdefault("dither", True)  # type: ignore
+    kws.setdefault("dither", DitherType.UNIFORM)  # type: ignore
     for key in ["name", "channels", "dst"]:
         if key not in kws:
             raise ValueError(f"{key} is missing")
@@ -237,7 +233,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             "Add a narrowband output (may be repeated). "
             "The required keys are: name, centre_frequency, decimation, channels, dst. "
             f"Optional keys: taps [{DEFAULT_TAPS}], ddc_taps [{DEFAULT_DDC_TAPS_RATIO}*decimation], "
-            f"w_cutoff [{DEFAULT_W_CUTOFF}], weight_pass, dither [true]."
+            f"w_cutoff [{DEFAULT_W_CUTOFF}], weight_pass, dither [uniform]."
         ),
     )
     parser.add_argument(
@@ -248,7 +244,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help=(
             "Add a wideband output (may be repeated). The required keys are: name, channels, dst. "
-            f"Optional keys: taps [{DEFAULT_TAPS}], w_cutoff [{DEFAULT_W_CUTOFF}], dither [true]"
+            f"Optional keys: taps [{DEFAULT_TAPS}], w_cutoff [{DEFAULT_W_CUTOFF}], dither [uniform]"
         ),
     )
     parser.add_argument(

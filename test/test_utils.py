@@ -27,7 +27,14 @@ import async_solipsism
 import pytest
 from aiokatcp import DeviceStatus
 
-from katgpucbf.utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, comma_split
+from katgpucbf.utils import (
+    DeviceStatusSensor,
+    DitherType,
+    TimeConverter,
+    TimeoutSensorStatusObserver,
+    comma_split,
+    parse_dither,
+)
 
 
 class TestDeviceStatusSensor:
@@ -203,3 +210,22 @@ class TestCommaSplit:
         assert splitter("3") == [3, 3]
         with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
             splitter("3,5,7")
+
+
+class TestParseDither:
+    @pytest.mark.parametrize(
+        "input, output",
+        [("none", DitherType.NONE), ("uniform", DitherType.UNIFORM)],
+    )
+    def test_success(self, input: str, output: DitherType) -> None:
+        """Test with valid inputs."""
+        assert parse_dither(input) == output
+
+    @pytest.mark.parametrize("input", ["", "false", "UnIFoRM", "NONE"])
+    def test_invalid(self, input: str) -> None:
+        """Test with invalid inputs."""
+        with pytest.raises(
+            ValueError,
+            match=rf"Invalid dither value {input} \(valid values are \['none', 'uniform'\]\)",
+        ):
+            parse_dither(input)

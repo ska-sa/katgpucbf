@@ -25,6 +25,7 @@ from numpy.typing import DTypeLike
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import postproc
+from katgpucbf.utils import DitherType
 
 from .. import unpack_complex
 
@@ -142,7 +143,7 @@ def _make_complex(func: Callable[[], np.ndarray], dtype: DTypeLike = np.complex6
 @pytest.mark.parametrize("complex_pfb", [False, True])
 @pytest.mark.parametrize("out_channels", [(0, 4096), (1024, 3072), (123, 3456)])
 @pytest.mark.parametrize("out_bits", [4, 8])
-@pytest.mark.parametrize("dither", [True, False])
+@pytest.mark.parametrize("dither", DitherType)
 def test_postproc(
     context: AbstractContext,
     command_queue: AbstractCommandQueue,
@@ -150,7 +151,7 @@ def test_postproc(
     complex_pfb: bool,
     out_channels: tuple[int, int],
     out_bits: int,
-    dither: bool,
+    dither: DitherType,
 ) -> None:
     """Test GPU Postproc for numerical correctness."""
     channels = 4096

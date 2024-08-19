@@ -29,6 +29,7 @@ from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import N_POLS, utils
 from ..curand_helpers import RAND_STATE_DTYPE, RandomStateBuilder
+from ..utils import DitherType
 
 
 class PostprocTemplate:
@@ -52,7 +53,7 @@ class PostprocTemplate:
         Bits per real/imaginary value. Only 4 or 8 are currently supported.
         When 4, the real part is in the most-significant bits.
     dither
-        Whether to add uniform dithering before quantisation.
+        Type of dithering to apply before quantisation.
     out_channels
         Range of channels to write to the output (defaults to all).
     """
@@ -65,9 +66,10 @@ class PostprocTemplate:
         *,
         complex_pfb: bool,
         out_bits: int,
-        dither: bool,
+        dither: DitherType,
         out_channels: tuple[int, int] | None = None,
     ) -> None:
+        assert dither in {DitherType.NONE, DitherType.UNIFORM}
         self.block = 16
         self.vtx = 1
         self.vty = 2
@@ -105,7 +107,7 @@ class PostprocTemplate:
                     "out_bits": self.out_bits,
                     "unzip_factor": unzip_factor,
                     "complex_pfb": complex_pfb,
-                    "dither": dither,
+                    "dither": bool(dither.value),
                 },
                 extra_dirs=[str(resource_dir), str(resource_dir.parent)],
             )
@@ -212,7 +214,7 @@ class Postproc(accel.Operation):
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["gains"] = accel.IOSlot((n_out_channels, pols), np.complex64)
-        if template.dither:
+        if template.dither == DitherType.UNIFORM:
             # This could be seen as multi-dimensional, but we flatten it to 1D as an
             # easy way to guarantee that it is not padded.
             rand_states_shape = (template.groups_x * self._groups_y * template.block * template.block,)
@@ -238,7 +240,7 @@ class Postproc(accel.Operation):
                 self.buffer("phase").buffer,
                 self.buffer("gains").buffer,
             ]
-            + ([self.buffer("rand_states").buffer] if self.template.dither else [])
+            + ([self.buffer("rand_states").buffer] if self.template.dither == DitherType.UNIFORM else [])
             + [
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride

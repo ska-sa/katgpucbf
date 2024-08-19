@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 
 from katsdptelstate.endpoint import Endpoint
 
+from ..utils import DitherType
+
 
 @dataclass
 class Output(ABC):
@@ -33,7 +35,7 @@ class Output(ABC):
     taps: int
     w_cutoff: float
     dst: list[Endpoint]
-    dither: bool
+    dither: DitherType
 
     def __post_init__(self) -> None:
         if self.channels % len(self.dst) != 0:
