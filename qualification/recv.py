@@ -92,6 +92,10 @@ class XBReceiver:
         self.cbf = cbf
         self._acv_name = acv_name
 
+    def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
+        """Check whether this chunk is complete (no missing data)."""
+        return bool(np.all(chunk.present))
+
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
     @overload
@@ -157,12 +161,8 @@ class XBReceiver:
                     timestamp = chunk.chunk_id * self.timestamp_step
                     if min_timestamp is not None and timestamp < min_timestamp:
                         logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
-                    elif not np.all(chunk.present):
+                    elif not self.is_complete_chunk(chunk):
                         logger.debug("Incomplete chunk %d", chunk.chunk_id)
-                    elif (chunk.data.dtype == np.dtype(np.int32) and np.any(chunk.data == -(2**31))) or (
-                        chunk.extra is not None and np.min(chunk.extra) < self.n_ants
-                    ):
-                        logger.debug("Chunk with missing antenna(s) (%d)", chunk.chunk_id)
                     else:
                         yield timestamp, chunk
                         continue
@@ -299,6 +299,16 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             use_ibv=use_ibv,
         )
 
+    def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
+        if not super().is_complete_chunk(chunk):
+            return False
+        # Elements affected by missing antennas are marked with a real part
+        # equal to -2^31. It's expensive to check every element for this
+        # marker, but we know it will apply to all channels in a heap, so we
+        # only need to check the first channel.
+        n_channels_per_substream = chunk.data.shape[0] // chunk.present.shape[0]
+        return np.min(chunk.data[::n_channels_per_substream]) > -(2**31)
+
     def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:  # noqa: D102
         # We need to avoid saturating the signed 32-bit X-engine accumulation as
         # well (2e9 is comfortably less than 2^31).
@@ -343,6 +353,9 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             decimation_factor=self.decimation_factor,
             use_ibv=use_ibv,
         )
+
+    def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
+        return super().is_complete_chunk(chunk) and (chunk.extra is None or np.min(chunk.extra) == self.n_ants)
 
 
 def _create_receive_stream_group(
