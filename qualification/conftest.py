@@ -497,15 +497,24 @@ class CoreAllocator:
         return [self._cores.popleft() for _ in range(n)]
 
 
-@pytest.fixture
-def core_allocator(pytestconfig: pytest.Config) -> CoreAllocator:
-    """Create a core allocator for the test."""
+# Note: it's important that this has session scope, so that it's only run
+# before core_allocator calls os.sched_setaffinity.
+@pytest.fixture(scope="session")
+def cores(pytestconfig: pytest.Config) -> list[int]:
+    """Get the cores to use for core pinning for this test."""
     cores = [int(x) for x in pytestconfig.getini("cores")]
     if not cores:
         cores = sorted(os.sched_getaffinity(0))
+    return cores
+
+
+@pytest.fixture
+def core_allocator(cores: list[int]) -> CoreAllocator:
+    """Create a core allocator for the test."""
     alloc = CoreAllocator(cores)
     # Pin the main Python thread to a core, to ensure it won't conflict with
-    # any of the worker threads.
+    # any of the worker threads. Note that this is repeated for each test,
+    # but that is harmless.
     os.sched_setaffinity(0, alloc.allocate(1))
     return alloc
 
