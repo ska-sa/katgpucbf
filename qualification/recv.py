@@ -275,7 +275,9 @@ class XBReceiver:
 class BaselineCorrelationProductsReceiver(XBReceiver):
     """Wrap a baseline-correlation-products stream with helper functions."""
 
-    def __init__(self, cbf: CBFRemoteControl, stream_name: str, interface_address: str, use_ibv: bool = False) -> None:
+    def __init__(
+        self, cbf: CBFRemoteControl, stream_name: str, core: int, interface_address: str, use_ibv: bool = False
+    ) -> None:
         super().__init__(cbf, [stream_name])
 
         # Fill in extra sensors specific to baseline-correlation-products
@@ -289,6 +291,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         self.stream = create_baseline_correlation_product_receive_stream(
             interface_address,
             multicast_endpoints=self.multicast_endpoints[0],
+            core=core,
             n_bls=self.n_bls,
             n_chans=self.n_chans,
             n_chans_per_substream=self.n_chans_per_substream,
@@ -331,7 +334,12 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
     """Wrap a tied-array-channelised-voltage stream with helper functions."""
 
     def __init__(
-        self, cbf: CBFRemoteControl, stream_names: Sequence[str], interface_address: str, use_ibv: bool = False
+        self,
+        cbf: CBFRemoteControl,
+        stream_names: Sequence[str],
+        cores: Sequence[int],
+        interface_address: str,
+        use_ibv: bool = False,
     ) -> None:
         super().__init__(cbf, stream_names)
 
@@ -345,6 +353,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
         self.stream = create_tied_array_channelised_voltage_receive_stream(
             interface_address,
             multicast_endpoints=self.multicast_endpoints,
+            cores=cores,
             n_chans=self.n_chans,
             n_chans_per_substream=self.n_chans_per_substream,
             n_bits_per_sample=self.n_bits_per_sample,
@@ -360,7 +369,8 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
 
 def _create_receive_stream_group(
     interface_address: str,
-    multicast_endpoints: list[list[tuple[str, int]]],
+    multicast_endpoints: Sequence[list[tuple[str, int]]],
+    cores: Sequence[int],
     use_ibv: bool,
     stream_config: spead2.recv.StreamConfig,
     max_chunks: int,
@@ -377,6 +387,8 @@ def _create_receive_stream_group(
     multicast_endpoints
         List of list of (group, port) pairs. Each list corresponds to a single
         stream.
+    cores
+        CPU cores to bind to, of the same length as `multicast_endpoints`.
     use_ibv
         If true, use ibverbs.
     stream_config
@@ -411,7 +423,7 @@ def _create_receive_stream_group(
 
     # Needed for placing the individual heaps within the chunk.
     items = [FREQUENCY_ID, TIMESTAMP_ID, BEAM_ANTS_ID, spead2.HEAP_LENGTH_ID]
-    for i, endpoints in enumerate(multicast_endpoints):
+    for i, (endpoints, core) in enumerate(zip(multicast_endpoints, cores)):
         user_data = np.array([i], np.int64)
         chunk_stream_config = spead2.recv.ChunkStreamConfig(
             items=items,
@@ -423,11 +435,11 @@ def _create_receive_stream_group(
                 user_data=user_data.ctypes.data_as(ctypes.c_void_p),
             ),
         )
-        stream = group.emplace_back(spead2.ThreadPool(), stream_config, chunk_stream_config)
+        stream = group.emplace_back(spead2.ThreadPool(1, [core]), stream_config, chunk_stream_config)
 
         if use_ibv:
             config = spead2.recv.UdpIbvConfig(
-                endpoints=endpoints, interface_address=interface_address, buffer_size=64 * 1024 * 1024, comp_vector=-1
+                endpoints=endpoints, interface_address=interface_address, buffer_size=64 * 1024 * 1024, comp_vector=core
             )
             stream.add_udp_ibv_reader(config)
         else:
@@ -442,6 +454,7 @@ def _create_receive_stream_group(
 def create_baseline_correlation_product_receive_stream(
     interface_address: str,
     multicast_endpoints: list[tuple[str, int]],
+    core: int,
     n_bls: int,
     n_chans: int,
     n_chans_per_substream: int,
@@ -482,6 +495,7 @@ def create_baseline_correlation_product_receive_stream(
     return _create_receive_stream_group(
         interface_address,
         [multicast_endpoints],
+        [core],
         use_ibv,
         stream_config,
         max_chunks,
@@ -497,7 +511,8 @@ def create_baseline_correlation_product_receive_stream(
 
 def create_tied_array_channelised_voltage_receive_stream(
     interface_address: str,
-    multicast_endpoints: list[list[tuple[str, int]]],
+    multicast_endpoints: Sequence[list[tuple[str, int]]],
+    cores: Sequence[int],
     n_chans: int,
     n_chans_per_substream: int,
     n_bits_per_sample: int,
@@ -544,6 +559,7 @@ def create_tied_array_channelised_voltage_receive_stream(
     return _create_receive_stream_group(
         interface_address,
         multicast_endpoints,
+        cores,
         use_ibv,
         stream_config,
         max_chunks,
