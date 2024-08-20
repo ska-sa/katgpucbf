@@ -453,11 +453,11 @@ async def cbf(
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
-            sync_time = cbf.sensors[f"{name}.sync-time"].value
+            sync_time = cbf.init_sensors[f"{name}.sync-time"].value
             await pcc.request("gain-all", name, "default")
             await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
         elif conf["type"] == "gpucbf.tied_array_channelised_voltage":
-            source_indices = ast.literal_eval(cbf.sensors[f"{name}.source-indices"].value.decode())
+            source_indices = ast.literal_eval(cbf.init_sensors[f"{name}.source-indices"].value.decode())
             n_inputs = len(source_indices)
             await pcc.request("beam-quant-gains", name, 1.0)
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
