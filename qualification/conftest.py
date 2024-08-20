@@ -477,7 +477,7 @@ class CoreAllocator:
 
     It is initialised with a list of cores (from pytest config), with earlier
     entries considered better than later ones. Cores are allocated in this
-    order. There is no mechanism to return cores; simplify create a new
+    order. There is no mechanism to return cores; simply create a new
     allocator to start fresh.
     """
 
