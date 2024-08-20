@@ -17,6 +17,7 @@
 """A collection of utility functions for katgpucbf."""
 
 import asyncio
+import enum
 import gc
 import ipaddress
 import logging
@@ -49,6 +50,13 @@ TIME_MAXERROR_WARN = 10e-3
 TIME_MAXERROR_ERROR = 0.1
 
 logger = logging.getLogger(__name__)
+
+
+class DitherType(enum.Enum):
+    """Type of dithering to apply prior to quantisation."""
+
+    NONE = 0  # Don't change this value: we rely on it being falsey
+    UNIFORM = 1
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
@@ -94,6 +102,15 @@ def add_gc_stats() -> None:
             gc_time.labels(str(info["generation"])).observe(elapsed)
 
     gc.callbacks.append(callback)
+
+
+def parse_dither(value: str) -> DitherType:
+    """Parse a string into a dither type."""
+    table = {member.name.lower(): member for member in DitherType}
+    try:
+        return table[value]
+    except KeyError:
+        raise ValueError(f"Invalid dither value {value} (valid values are {list(table.keys())})") from None
 
 
 def parse_source(value: str) -> list[tuple[str, int]] | str:
