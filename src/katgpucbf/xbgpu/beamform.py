@@ -31,17 +31,11 @@ from ..utils import DitherType
 
 @dataclass
 class Beam:
-    """Compile-time parameters for a single-polarisation beam.
+    """Compile-time parameters for a single-polarisation beam."""
 
-    Attributes
-    ----------
-    pol
-        Either 0 or 1, to indicate which input polarisation to use in the beam.
-    dither
-        The type of dithering to apply before quantisation.
-    """
-
+    #: Either 0 or 1, to indicate which input polarisation to use in the beam.
     pol: int
+    #: The type of dithering to apply before quantisation.
     dither: DitherType
 
     def __post_init__(self) -> None:
