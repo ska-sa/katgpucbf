@@ -221,7 +221,7 @@ class TestParseDither:
         """Test with valid inputs."""
         assert parse_dither(input) == output
 
-    @pytest.mark.parametrize("input", ["", "false", "UnIFoRM", "NONE"])
+    @pytest.mark.parametrize("input", ["", "false", "UnIFoRM", "NONE", "default"])
     def test_invalid(self, input: str) -> None:
         """Test with invalid inputs."""
         with pytest.raises(

@@ -57,6 +57,7 @@ class DitherType(enum.Enum):
 
     NONE = 0  # Don't change this value: we rely on it being falsey
     UNIFORM = 1
+    DEFAULT = 1  # Alias used to determine default when none is specified
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
@@ -106,6 +107,7 @@ def add_gc_stats() -> None:
 
 def parse_dither(value: str) -> DitherType:
     """Parse a string into a dither type."""
+    # Note: this allows only the non-aliases, so excludes DEFAULT
     table = {member.name.lower(): member for member in DitherType}
     try:
         return table[value]
