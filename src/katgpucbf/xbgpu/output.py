@@ -21,6 +21,8 @@ from dataclasses import dataclass
 
 from katsdptelstate.endpoint import Endpoint
 
+from ..utils import DitherType
+
 
 @dataclass
 class Output(ABC):
@@ -42,3 +44,4 @@ class BOutput(Output):
     """Static configuration for an output beam stream."""
 
     pol: int
+    dither: DitherType

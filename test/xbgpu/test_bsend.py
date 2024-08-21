@@ -30,7 +30,7 @@ from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf import COMPLEX
 from katgpucbf.spead import BEAM_ANTS_ID, BF_RAW_ID, FREQUENCY_ID, TIMESTAMP_ID
-from katgpucbf.utils import TimeConverter
+from katgpucbf.utils import DitherType, TimeConverter
 from katgpucbf.xbgpu.bsend import SEND_DTYPE, BSend
 from katgpucbf.xbgpu.output import BOutput
 
@@ -50,8 +50,8 @@ def time_converter() -> TimeConverter:
 def outputs() -> Sequence[BOutput]:
     """Simulate `--beam` configuration."""
     return [
-        BOutput(name="foo", dst=Endpoint("239.10.11.0", 7149), pol=0),
-        BOutput(name="bar", dst=Endpoint("239.10.12.0", 7149), pol=1),
+        BOutput(name="foo", dst=Endpoint("239.10.11.0", 7149), pol=0, dither=DitherType.DEFAULT),
+        BOutput(name="bar", dst=Endpoint("239.10.12.0", 7149), pol=1, dither=DitherType.DEFAULT),
     ]
 
 

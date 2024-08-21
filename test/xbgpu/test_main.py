@@ -19,6 +19,7 @@
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
+from katgpucbf.utils import DitherType
 from katgpucbf.xbgpu.main import parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
@@ -28,10 +29,20 @@ class TestParseBeam:
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
+        assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1,dither=none") == BOutput(
+            name="beam1",
+            dst=Endpoint("239.1.2.3", 7148),
+            pol=1,
+            dither=DitherType.NONE,
+        )
+
+    def test_minimal(self) -> None:
+        """Test with only required arguments."""
         assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1") == BOutput(
             name="beam1",
             dst=Endpoint("239.1.2.3", 7148),
             pol=1,
+            dither=DitherType.DEFAULT,
         )
 
     @pytest.mark.parametrize(
