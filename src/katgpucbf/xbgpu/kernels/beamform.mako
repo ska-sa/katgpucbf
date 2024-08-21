@@ -14,15 +14,10 @@
  * limitations under the License.
  ******************************************************************************/
 
-<%include file="/port.mako"/>
-<%include file="/kernels/complex.mako"/>
-<%include file="/kernels/curand_helpers.mako"/>
-<%include file="/kernels/quant.mako"/>
-<%include file="/kernels/dither.mako"/>
-
 <%
-n_beams = len(beam_pols)
+n_beams = len(beams)
 batch_beams = min(16, n_beams)
+any_dither = any(beam.dither != DitherType.NONE for beam in beams)
 %>
 
 #define N_BEAMS ${n_beams}
@@ -32,6 +27,16 @@ batch_beams = min(16, n_beams)
 #define BATCH_ANTENNAS 16
 // Number of beams processed at a time
 #define BATCH_BEAMS ${batch_beams}
+// Whether any dithering is enabled
+#define DITHER ${int(any_dither)}
+
+<%include file="/port.mako"/>
+<%include file="/kernels/complex.mako"/>
+<%include file="/kernels/quant.mako"/>
+#if DITHER
+<%include file="/kernels/curand_helpers.mako"/>
+<%include file="/kernels/dither.mako"/>
+#endif
 
 // Each thread computes all beams for one (channel, time)
 KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
@@ -40,7 +45,9 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     GLOBAL const char4 * RESTRICT in,        // shape batch, antenna, channel, time, pol
     GLOBAL const cplx * RESTRICT weights,    // shape antenna, beam, tightly packed
     GLOBAL const float * RESTRICT delays,    // shape antenna, beam, tightly packed
+#if DITHER
     GLOBAL randState_t * RESTRICT rand_states,  // shape batch, channel, time (packed)
+#endif
     int out_stride,                          // elements between channels
     int out_beam_stride,                     // elements between beams
     int out_batch_stride,                    // elements between batches
@@ -60,7 +67,11 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
         // The | 1 pads the inner dimension to an odd length, to reduce bank conflicts
         bool l_saturated[BATCH_BEAMS][BLOCK_SPECTRA | 1];
     } u;
-    const int beam_pols[N_BEAMS] = { ${ ", ".join(str(p) for p in beam_pols) } };
+    const int beam_pols[N_BEAMS] = { ${ ", ".join(str(beam.pol) for beam in beams) } };
+#if DITHER
+    const bool beam_dither[N_BEAMS] =
+        { ${ ", ".join(str(beam.dither != DitherType.NONE).lower() for beam in beams) } };
+#endif
     const int lid = get_local_id(0);
     const int spectrum = get_global_id(0);
     const int channel = get_global_id(1);
@@ -73,11 +84,13 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
     // Point to the first input/output handled by this work item
     in += batch * in_batch_stride + channel * in_stride + spectrum;
     out += batch * out_batch_stride + channel * out_stride + spectrum;
+#if DITHER
     rand_states += (batch * get_num_groups(1) + channel) * n_spectra + spectrum;
 
     curandStateXORWOW_t rand_state;
     if (valid)
         rand_state_load(&rand_state, rand_states);
+#endif
 
     /* It's critical that this loop is unrolled, so that b_batch_size is known at
      * compile time.
@@ -145,10 +158,15 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
             for (int i = 0; i < b_batch_size; i++)
             {
                 int beam = i + b_batch;
+#if DITHER
+                if (beam_dither[beam])
+                {
+                    accum[i].x += dither(&rand_state);
+                    accum[i].y += dither(&rand_state);
+                }
+#endif
                 int re, im;
-                bool saturated =
-                    quant_8bit(accum[i].x + dither(&rand_state), &re)
-                    | quant_8bit(accum[i].y + dither(&rand_state), &im);
+                bool saturated = quant_8bit(accum[i].x, &re) | quant_8bit(accum[i].y, &im);
                 out[out_beam_stride * beam] = make_char2(re, im);
                 u.l_saturated[i][lid] = saturated;
             }
@@ -175,7 +193,9 @@ KERNEL REQD_WORK_GROUP_SIZE(BLOCK_SPECTRA, 1, 1) void beamform(
         BARRIER(); // switching back to using u.l_weights for the next loop
     }
 
+#if DITHER
     // Persist the random state for reuse next time
     if (valid)
         rand_state_save(rand_states, &rand_state);
+#endif
 }

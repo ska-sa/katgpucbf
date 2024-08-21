@@ -22,7 +22,8 @@ import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.xbgpu.beamform import BeamformTemplate
+from katgpucbf.utils import DitherType
+from katgpucbf.xbgpu.beamform import Beam, BeamformTemplate
 
 
 @numba.njit
@@ -33,7 +34,11 @@ def quant(x):
 
 @numba.njit
 def beamform_host(
-    in_: np.ndarray, weights: np.ndarray, delays: np.ndarray, beam_pols: np.ndarray
+    in_: np.ndarray,
+    weights: np.ndarray,
+    delays: np.ndarray,
+    beam_pols: np.ndarray,
+    beam_dither: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Implement the beamforming operation on the CPU.
 
@@ -62,25 +67,27 @@ def beamform_host(
                 p = beam_pols[beam]
                 w = weights[:, beam]
                 w = w * np.exp(delays[:, beam] * channel * np.complex64(1j) * np.float32(np.pi))
+                tol = 0.5 if beam_dither[beam] else 0.001  # Allowed deviation from GPU result
                 for time in range(n_times):
                     # .copy() is added because otherwise we get a warning that np.dot is
                     # more efficient on C-contiguous arrays.
                     accum = np.dot(in_c[:, time, p].copy(), w)
                     out[batch, beam, channel, time, 0] = quant(accum.real)
                     out[batch, beam, channel, time, 1] = quant(accum.imag)
-                    if abs(accum.real) > 126.5 or abs(accum.imag) > 126.5:
+                    if abs(accum.real) > 127.0 - tol or abs(accum.imag) > 127.0 - tol:
                         saturated_high[beam] += 1
-                        if abs(accum.real) >= 127.5 or abs(accum.imag) >= 127.5:
+                        if abs(accum.real) >= 127.0 + tol or abs(accum.imag) >= 127.0 + tol:
                             saturated_low[beam] += 1
     return out, saturated_low, saturated_high
 
 
 @pytest.mark.combinations(
-    "n_batches, n_channels_per_substream, n_times, n_antennas",
+    "n_batches, n_channels_per_substream, n_times, n_antennas, any_dither",
     [1, 5],
     [1, 128, 200, 1025],
     [1, 128, 256, 321],
     [1, 4, 19, 80],
+    [False, True],
 )
 def test_beamform(
     context: AbstractContext,
@@ -89,12 +96,17 @@ def test_beamform(
     n_channels_per_substream: int,
     n_times: int,
     n_antennas: int,
+    any_dither: bool,
 ) -> None:
     """Test :class:`.Beamform` by comparing it to a CPU implementation."""
-    beam_pols = [0, 1, 0, 1, 1] + [0, 1] * 20
-    n_beams = len(beam_pols)
+    # The kernel is compiled differently when no beam has dithering enabled,
+    # so ensure that we test that case too.
+    dither_p1 = DitherType.UNIFORM if any_dither else DitherType.NONE
+    beams = [Beam(pol=0, dither=DitherType.NONE), Beam(pol=1, dither=dither_p1)] * 22
+    beams.insert(4, Beam(pol=1, dither=DitherType.NONE))
+    n_beams = len(beams)
 
-    template = BeamformTemplate(context, beam_pols, n_times)
+    template = BeamformTemplate(context, beams, n_times)
     fn = template.instantiate(
         command_queue, n_batches, n_antennas, n_channels_per_substream, seed=321, sequence_first=0
     )
@@ -123,7 +135,9 @@ def test_beamform(
     h_delays[:] = rng.uniform(-100.0 / n_channels_per_substream, 100.0 / n_channels_per_substream, h_delays.shape)
     h_out.fill(0)
     h_saturated.fill(0)
-    e_out, e_saturated_low, e_saturated_high = beamform_host(h_in, h_weights, h_delays, np.array(beam_pols))
+    beam_pols = np.array([beam.pol for beam in beams])
+    beam_dither = np.array([beam.dither.value for beam in beams])
+    e_out, e_saturated_low, e_saturated_high = beamform_host(h_in, h_weights, h_delays, beam_pols, beam_dither)
 
     fn.buffer("out").zero(command_queue)
     fn.buffer("saturated").zero(command_queue)
