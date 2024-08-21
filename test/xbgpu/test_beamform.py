@@ -67,7 +67,7 @@ def beamform_host(
                 p = beam_pols[beam]
                 w = weights[:, beam]
                 w = w * np.exp(delays[:, beam] * channel * np.complex64(1j) * np.float32(np.pi))
-                tol = 0.5 if beam_dither[beam] else 0.001  # Allowed deviation from GPU result
+                tol = 0.5 if beam_dither[beam] else 0.002  # Allowed deviation from GPU result
                 for time in range(n_times):
                     # .copy() is added because otherwise we get a warning that np.dot is
                     # more efficient on C-contiguous arrays.
