@@ -99,7 +99,7 @@ class Beamform(accel.Operation):
         the channel number and :math:`d` is the delay value. Note
         that this will not apply any rotation to the first channel
         in the data; any such rotation needs to be baked into **weights**.
-    **rand_states** : n_batches × n_channels_per_substream × n_spectra_per_batch, curandStateXORWOW_t (packed)
+    **rand_states** : n_batches × n_channels_per_substream × n_spectra_per_batch, randState_t (packed)
         Independent random states for generating dither values. This is set
         up by the constructor and should not normally need to be touched.
 
