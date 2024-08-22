@@ -531,7 +531,7 @@ async def receive_baseline_correlation_products(
     receiver = BaselineCorrelationProductsReceiver(
         cbf=cbf,
         stream_name="baseline-correlation-products",
-        core=core_allocator.allocate(1)[0],
+        cores=core_allocator.allocate(4),
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
