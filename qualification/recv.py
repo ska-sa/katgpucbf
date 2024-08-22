@@ -276,7 +276,12 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
     """Wrap a baseline-correlation-products stream with helper functions."""
 
     def __init__(
-        self, cbf: CBFRemoteControl, stream_name: str, core: int, interface_address: str, use_ibv: bool = False
+        self,
+        cbf: CBFRemoteControl,
+        stream_name: str,
+        cores: Sequence[int],
+        interface_address: str,
+        use_ibv: bool = False,
     ) -> None:
         super().__init__(cbf, [stream_name])
 
@@ -291,7 +296,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         self.stream = create_baseline_correlation_product_receive_stream(
             interface_address,
             multicast_endpoints=self.multicast_endpoints[0],
-            core=core,
+            cores=cores,
             n_bls=self.n_bls,
             n_chans=self.n_chans,
             n_chans_per_substream=self.n_chans_per_substream,
@@ -454,7 +459,7 @@ def _create_receive_stream_group(
 def create_baseline_correlation_product_receive_stream(
     interface_address: str,
     multicast_endpoints: list[tuple[str, int]],
-    core: int,
+    cores: Sequence[int],
     n_bls: int,
     n_chans: int,
     n_chans_per_substream: int,
@@ -492,10 +497,15 @@ def create_baseline_correlation_product_receive_stream(
     # larger array sizes.
     max_chunks = max(round(0.5 / int_time), 1) + 1
 
+    # Use one stream per core, and partition the endpoints between them.
+    multicast_sets: list[list[tuple[str, int]]] = [[] for _ in cores]
+    for i, endpoint in enumerate(multicast_endpoints):
+        multicast_sets[i % len(cores)].append(endpoint)
+
     return _create_receive_stream_group(
         interface_address,
-        [multicast_endpoints],
-        [core],
+        multicast_sets,
+        cores,
         use_ibv,
         stream_config,
         max_chunks,
