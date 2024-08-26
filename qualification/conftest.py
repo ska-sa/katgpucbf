@@ -179,6 +179,8 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         return tuple(ans)
 
     items.sort(key=key)
+    # Make all tests run using the session-scoped event loop, so that they can
+    # use session-scoped asynchronous fixtures.
     scope_marker = pytest.mark.asyncio(loop_scope="session")
     for item in items:
         if pytest_asyncio.is_async_test(item):
