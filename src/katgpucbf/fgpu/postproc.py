@@ -172,7 +172,8 @@ class Postproc(accel.Operation):
     spectra_per_heap: int
         Number of spectra to send out per heap.
     seed, sequence_first, sequence_step
-        See :class:`.RandomStateBuilder`.
+        See :class:`.RandomStateBuilder`. These are ignored if the template
+        disables dithering.
     """
 
     def __init__(

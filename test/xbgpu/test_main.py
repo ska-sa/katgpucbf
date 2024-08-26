@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,6 +19,7 @@
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
+from katgpucbf.utils import DitherType
 from katgpucbf.xbgpu.main import parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
@@ -28,10 +29,20 @@ class TestParseBeam:
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
+        assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1,dither=none") == BOutput(
+            name="beam1",
+            dst=Endpoint("239.1.2.3", 7148),
+            pol=1,
+            dither=DitherType.NONE,
+        )
+
+    def test_minimal(self) -> None:
+        """Test with only required arguments."""
         assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1") == BOutput(
             name="beam1",
             dst=Endpoint("239.1.2.3", 7148),
             pol=1,
+            dither=DitherType.DEFAULT,
         )
 
     @pytest.mark.parametrize(

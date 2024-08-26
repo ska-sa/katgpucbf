@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023-2024, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -20,6 +20,8 @@ from abc import ABC
 from dataclasses import dataclass
 
 from katsdptelstate.endpoint import Endpoint
+
+from ..utils import DitherType
 
 
 @dataclass
@@ -42,3 +44,4 @@ class BOutput(Output):
     """Static configuration for an output beam stream."""
 
     pol: int
+    dither: DitherType

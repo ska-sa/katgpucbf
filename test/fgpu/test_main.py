@@ -45,7 +45,7 @@ class TestParseNarrowband:
             centre_frequency=400e6,
             decimation=8,
             dst=[Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
-            dither=DitherType.UNIFORM,
+            dither=DitherType.DEFAULT,
             weight_pass=DEFAULT_WEIGHT_PASS,
             taps=DEFAULT_TAPS,
             ddc_taps=DEFAULT_DDC_TAPS_RATIO * 8,
@@ -129,7 +129,7 @@ class TestParseArgs:
             NarrowbandOutput(
                 name="nb0",
                 dst=[Endpoint("239.1.0.0", 7148), Endpoint("239.1.0.1", 7148)],
-                dither=DitherType.UNIFORM,
+                dither=DitherType.DEFAULT,
                 channels=32768,
                 centre_frequency=400e6,
                 decimation=8,
@@ -142,7 +142,7 @@ class TestParseArgs:
             NarrowbandOutput(
                 name="nb1",
                 dst=[Endpoint("239.2.0.0", 7149)],
-                dither=DitherType.UNIFORM,
+                dither=DitherType.DEFAULT,
                 channels=8192,
                 centre_frequency=300e6,
                 decimation=16,

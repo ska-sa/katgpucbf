@@ -133,7 +133,7 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
             case _:
                 raise ValueError(f"missing '=' in {part}")
     # ignore due to https://github.com/python/mypy/issues/17674
-    kws.setdefault("dither", DitherType.UNIFORM)  # type: ignore
+    kws.setdefault("dither", DitherType.DEFAULT)  # type: ignore
     for key in ["name", "channels", "dst"]:
         if key not in kws:
             raise ValueError(f"{key} is missing")

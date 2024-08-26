@@ -60,7 +60,7 @@ from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, steady_state_timestamp_sensor
 from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_IN_ITEMS, DEFAULT_N_OUT_ITEMS, DEFAULT_XPIPELINE_NAME, recv
-from .beamform import BeamformTemplate
+from .beamform import Beam, BeamformTemplate
 from .bsend import BSend
 from .bsend import make_stream as make_bstream
 from .correlation import CorrelationTemplate
@@ -354,7 +354,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
 
         template = BeamformTemplate(
             context,
-            [output.pol for output in outputs],
+            [Beam(pol=output.pol, dither=output.dither) for output in outputs],
             n_spectra_per_batch=engine.recv_layout.n_spectra_per_heap,
         )
         self._beamform = template.instantiate(

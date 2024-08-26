@@ -58,7 +58,7 @@ from .. import (
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import add_gc_stats, add_signal_handlers, parse_source
+from ..utils import DitherType, add_gc_stats, add_signal_handlers, parse_dither, parse_source
 from .correlation import device_filter
 from .output import BOutput, XOutput
 
@@ -85,6 +85,7 @@ class _BOutputDict(_OutputDict, total=False):
     """
 
     pol: int
+    dither: DitherType
 
 
 class _XOutputDict(_OutputDict, total=False):
@@ -142,12 +143,15 @@ def parse_beam(value: str) -> BOutput:
                 kws[key] = int(data)
                 if kws[key] not in {0, 1}:
                     raise ValueError("pol must be either 0 or 1")
+            case "dither":
+                kws[key] = parse_dither(data)
             case _:
                 raise ValueError(f"unknown key {key}")
 
     try:
         kws: _BOutputDict = {}
         _parse_stream(value, kws, _field_callback)
+        kws.setdefault("dither", DitherType.DEFAULT)
         if "pol" not in kws:
             raise ValueError("pol is missing")
         return BOutput(**kws)
@@ -193,7 +197,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=[],
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
-        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol.",
+        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol. "
+        "Optional keys: dither.",
     )
     parser.add_argument(
         "--corrprod",

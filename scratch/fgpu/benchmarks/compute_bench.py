@@ -39,7 +39,7 @@ def main():  # noqa: C901
     parser.add_argument("--send-sample-bits", type=int, default=8, choices=[4, 8])
     parser.add_argument("--passes", type=int, default=1000)
     parser.add_argument("--ddc-taps", type=int)  # Default is computed from decimation
-    parser.add_argument("--dither", type=parse_dither, default=DitherType.UNIFORM)
+    parser.add_argument("--dither", type=parse_dither, default=DitherType.DEFAULT)
     parser.add_argument("--narrowband", action="store_true")
     parser.add_argument("--narrowband-decimation", type=int, default=8)
     parser.add_argument("--kernel", choices=["all", "ddc", "pfb_fir", "fft", "postproc"], default="all")
