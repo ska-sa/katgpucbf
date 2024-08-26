@@ -176,7 +176,6 @@ async def test_control(
 
     Additionally, subscribe to all sensor updates to emulate CAM's load.
     """
-    pcc = cbf.product_controller_client
     pdf_report.step("Subscribe to sensors.")
     pdf_report.detail(f"Subscribed to {len(sensor_watcher.sensors)} sensors.")
 
@@ -202,4 +201,6 @@ async def test_control(
 
     pdf_report.step("Check timestamps of received chunks")
     check_timestamps("baseline_correlation_products", receive_baseline_correlation_products, pdf_report, timestamps_bcp)
-    check_timestamps("tied_array_channelised_voltage", receive_tied_array_channelised_voltage, pdf_report, timestamps_tacv)
+    check_timestamps(
+        "tied_array_channelised_voltage", receive_tied_array_channelised_voltage, pdf_report, timestamps_tacv
+    )
