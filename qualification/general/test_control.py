@@ -22,6 +22,7 @@ from collections.abc import AsyncGenerator, Awaitable
 
 import aiokatcp
 import numpy as np
+import pytest
 from pytest_check import check
 
 from katgpucbf.fgpu.delay import wrap_angle
@@ -112,6 +113,20 @@ async def control_tacv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, p
             assert elapsed < 1.0
 
 
+@pytest.fixture
+async def sensor_watcher(cbf: CBFRemoteControl) -> AsyncGenerator[aiokatcp.SensorWatcher, None]:
+    # aiokatcp doesn't currently handle adding watchers after the connection
+    # is already established; SensorWatcher is also somewhat expensive. So
+    # instead we create a separate connection for monitoring sensors.
+    secondary = aiokatcp.Client(*cbf.product_controller_endpoint)
+    sensor_watcher = aiokatcp.SensorWatcher(secondary)
+    secondary.add_sensor_watcher(sensor_watcher)
+    await sensor_watcher.synced.wait()
+    yield sensor_watcher
+    secondary.close()
+    await secondary.wait_closed()
+
+
 # TODO: once requirements spec is finalised, note which requirements
 # this corresponds to.
 async def test_control(
@@ -119,6 +134,7 @@ async def test_control(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
+    sensor_watcher: aiokatcp.SensorWatcher,
 ) -> None:
     """Test that controlling a correlator doesn't cause data to be lost.
 
@@ -135,11 +151,8 @@ async def test_control(
 
     Additionally, subscribe to all sensor updates to emulate CAM's load.
     """
-    pdf_report.step("Subscribe to sensors.")
     pcc = cbf.product_controller_client
-    sensor_watcher = aiokatcp.SensorWatcher(pcc)
-    pcc.add_sensor_watcher(sensor_watcher)
-    await sensor_watcher.synced.wait()
+    pdf_report.step("Subscribe to sensors.")
     pdf_report.detail(f"Subscribed to {len(sensor_watcher.sensors)} sensors.")
 
     pdf_report.step("Set up periodic control.")

@@ -64,6 +64,7 @@ class FailedCBF(CBFBase):
 class CBFRemoteControl(CBFBase):
     """A container class for katcp clients needed by qualification tests."""
 
+    product_controller_endpoint: tuple[str, int]
     product_controller_client: aiokatcp.Client
     dsim_clients: list[aiokatcp.Client]
     sensor_watcher: aiokatcp.SensorWatcher
@@ -109,6 +110,7 @@ class CBFRemoteControl(CBFBase):
 
         return CBFRemoteControl(
             name=name,
+            product_controller_endpoint=(host, port),
             product_controller_client=pcc,
             dsim_clients=list(dsim_clients),
             config=dict(config),
