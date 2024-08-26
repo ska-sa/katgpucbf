@@ -38,7 +38,7 @@ appdirs==1.4.4
     #   pycuda
 asttokens==2.4.1
     # via stack-data
-async-solipsism==0.5
+async-solipsism==0.7
     # via katgpucbf (setup.cfg)
 async-timeout==4.0.3
     # via
