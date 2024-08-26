@@ -29,6 +29,7 @@ from collections.abc import AsyncGenerator, Generator, Iterable, Sequence
 
 import matplotlib.style
 import pytest
+import pytest_asyncio
 import pytest_check
 from katsdpservices import get_interface_address
 
@@ -178,14 +179,12 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         return tuple(ans)
 
     items.sort(key=key)
-
-
-# Need to redefine this from pytest-asyncio to have it at session scope
-@pytest.fixture(scope="session")
-def event_loop():  # noqa: D103
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+    # Make all tests run using the session-scoped event loop, so that they can
+    # use session-scoped asynchronous fixtures.
+    scope_marker = pytest.mark.asyncio(loop_scope="session")
+    for item in items:
+        if pytest_asyncio.is_async_test(item):
+            item.add_marker(scope_marker, append=False)
 
 
 @pytest.fixture(scope="package")
