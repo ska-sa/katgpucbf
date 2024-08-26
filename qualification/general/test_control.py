@@ -127,6 +127,30 @@ async def sensor_watcher(cbf: CBFRemoteControl) -> AsyncGenerator[aiokatcp.Senso
     await secondary.wait_closed()
 
 
+def check_timestamps(
+    name: str,
+    receiver: XBReceiver,
+    pdf_report: Reporter,
+    timestamps: list[int],
+):
+    assert timestamps, f"No {name} chunks received"
+    elapsed = (timestamps[-1] - timestamps[0]) / receiver.scale_factor_timestamp
+    pdf_report.detail(f"{name}: received data over {elapsed:.3f}s.")
+    with check:
+        assert elapsed >= 55.0, f"Less than 55s of data received for {name}"
+    # Trim the first 5 seconds, where we expect to see some losses
+    start = timestamps[0] + 5 * receiver.scale_factor_timestamp
+    start_pos = 0
+    while timestamps[start_pos] < start:
+        start_pos += 1
+    del timestamps[:start_pos]
+    expected = (timestamps[-1] - timestamps[0]) // receiver.timestamp_step + 1
+    missing = expected - len(timestamps)
+    pdf_report.detail(f"{name}: missed {missing} of {expected} chunks (ignoring first 5s).")
+    with check:
+        assert missing <= 1, f"{missing} of {expected} chunks missing for {name}"
+
+
 # TODO: once requirements spec is finalised, note which requirements
 # this corresponds to.
 async def test_control(
@@ -147,7 +171,8 @@ async def test_control(
 
     Check that each request completes in at most 1 second. Receive data from
     the streams over 60s and check that the received chunks span at least 55
-    seconds and have no more than one chunk lost.
+    seconds and have no more than one chunk lost after the first 5 seconds
+    (during which we expect losses as the receiver starts with a backlog).
 
     Additionally, subscribe to all sensor updates to emulate CAM's load.
     """
@@ -176,4 +201,5 @@ async def test_control(
             task.cancel()
 
     pdf_report.step("Check timestamps of received chunks")
-    # TODO
+    check_timestamps("baseline_correlation_products", receive_baseline_correlation_products, pdf_report, timestamps_bcp)
+    check_timestamps("tied_array_channelised_voltage", receive_tied_array_channelised_voltage, pdf_report, timestamps_tacv)
