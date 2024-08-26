@@ -73,11 +73,17 @@ class BeamformTemplate:
                 {
                     "block_spectra": self.block_spectra,
                     "beams": beams,
+                    "dither_enabled": self._dither_enabled,
                     "DitherType": DitherType,
                 },
                 extra_dirs=[str(resource_dir), str(resource_dir.parent)],
             )
         self.kernel = program.get_kernel("beamform")
+
+    @property
+    def _dither_enabled(self) -> bool:
+        """Whether any of the beams has dithering enabled."""
+        return any(beam.dither != DitherType.NONE for beam in self.beams)
 
     def instantiate(
         self,
@@ -169,7 +175,7 @@ class Beamform(accel.Operation):
         weights_dims = (n_ants, accel.Dimension(n_beams, exact=True))
         self.slots["weights"] = accel.IOSlot(weights_dims, np.complex64)
         self.slots["delays"] = accel.IOSlot(weights_dims, np.float32)
-        if self._dither_enabled:
+        if self.template._dither_enabled:
             self.slots["rand_states"] = accel.IOSlot(
                 (
                     accel.Dimension(n_batches, exact=True),
@@ -187,10 +193,6 @@ class Beamform(accel.Operation):
             )
             self.bind(rand_states=rand_states)
 
-    @property
-    def _dither_enabled(self) -> bool:
-        return any(beam.dither != DitherType.NONE for beam in self.template.beams)
-
     def _run(self) -> None:
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
@@ -203,7 +205,7 @@ class Beamform(accel.Operation):
                 self.buffer("weights").buffer,
                 self.buffer("delays").buffer,
             ]
-            + ([self.buffer("rand_states").buffer] if self._dither_enabled else [])
+            + ([self.buffer("rand_states").buffer] if self.template._dither_enabled else [])
             + [
                 np.int32(out_buffer.padded_shape[3]),
                 np.int32(out_buffer.padded_shape[2] * out_buffer.padded_shape[3]),

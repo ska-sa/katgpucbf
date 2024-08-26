@@ -17,7 +17,6 @@
 <%
 n_beams = len(beams)
 batch_beams = min(16, n_beams)
-any_dither = any(beam.dither != DitherType.NONE for beam in beams)
 %>
 
 #define N_BEAMS ${n_beams}
@@ -28,7 +27,7 @@ any_dither = any(beam.dither != DitherType.NONE for beam in beams)
 // Number of beams processed at a time
 #define BATCH_BEAMS ${batch_beams}
 // Whether any dithering is enabled
-#define DITHER ${int(any_dither)}
+#define DITHER ${int(dither_enabled)}
 
 <%include file="/port.mako"/>
 <%include file="/kernels/complex.mako"/>
