@@ -104,19 +104,26 @@ async def control_acv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pd
     phase = rng.uniform(-np.pi, np.pi, n_inputs)
     phase_rate = rng.uniform(-MAX_PHASE_RATE, MAX_PHASE_RATE, n_inputs)
     target_time = time.time() + DELAY_INTERVAL * 0.5
-    async for _ in periodically(rng, DELAY_INTERVAL):
-        coeff = [f"{d},{dr}:{p},{pr}" for d, dr, p, pr in zip(delay, delay_rate, phase, phase_rate)]
-        elapsed = await measure(pcc.request("delays", name, target_time, *coeff))
-        pdf_report.detail(f"Set delays for {name} in {elapsed:.3f} s.")
-        with check:
-            assert elapsed < 1.0
-        # Set next set of delays to be consistent with the old delay and delay_rate
-        delay += delay_rate * DELAY_INTERVAL
-        phase += phase_rate * DELAY_INTERVAL
-        delay = np.clip(delay, 0.0, MAX_DELAY)
-        phase = wrap_angle(phase)
-        delay_rate = rng.uniform(-MAX_DELAY_RATE, MAX_DELAY_RATE, n_inputs)
-        phase_rate = rng.uniform(-MAX_PHASE_RATE, MAX_PHASE_RATE, n_inputs)
+    all_elapsed = []
+    try:
+        async for _ in periodically(rng, DELAY_INTERVAL):
+            coeff = [f"{d},{dr}:{p},{pr}" for d, dr, p, pr in zip(delay, delay_rate, phase, phase_rate)]
+            elapsed = await measure(pcc.request("delays", name, target_time, *coeff))
+            pdf_report.detail(f"Set delays for {name} in {elapsed:.3f} s.")
+            with check:
+                assert elapsed < 1.0
+            all_elapsed.append(elapsed)
+            # Set next set of delays to be consistent with the old delay and delay_rate
+            delay += delay_rate * DELAY_INTERVAL
+            phase += phase_rate * DELAY_INTERVAL
+            delay = np.clip(delay, 0.0, MAX_DELAY)
+            phase = wrap_angle(phase)
+            delay_rate = rng.uniform(-MAX_DELAY_RATE, MAX_DELAY_RATE, n_inputs)
+            phase_rate = rng.uniform(-MAX_PHASE_RATE, MAX_PHASE_RATE, n_inputs)
+    except asyncio.CancelledError:
+        mean_elapsed = np.mean(all_elapsed)
+        pdf_report.detail(f"Average delay-setting time for {name}: {mean_elapsed:.3f} s.")
+        raise
 
 
 async def control_tacv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pdf_report: Reporter, name: str) -> None:
@@ -134,14 +141,21 @@ async def control_tacv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, p
     pcc = cbf.product_controller_client
     src_stream = cbf.config["outputs"][name]["src_streams"][0]
     n_inputs: int = len(cbf.config["outputs"][src_stream]["input_labels"]) // 2
-    async for _ in periodically(rng, BEAM_DELAY_INTERVAL):
-        delay = rng.uniform(-BEAM_MAX_DELAY, BEAM_MAX_DELAY, n_inputs)
-        phase = rng.uniform(-np.pi, np.pi, n_inputs)
-        coeff = [f"{d}:{p}" for d, p in zip(delay, phase)]
-        elapsed = await measure(pcc.request("beam-delays", name, *coeff))
-        pdf_report.detail(f"Set delays for {name} in {elapsed:.3f} s.")
-        with check:
-            assert elapsed < 1.0
+    all_elapsed = []
+    try:
+        async for _ in periodically(rng, BEAM_DELAY_INTERVAL):
+            delay = rng.uniform(-BEAM_MAX_DELAY, BEAM_MAX_DELAY, n_inputs)
+            phase = rng.uniform(-np.pi, np.pi, n_inputs)
+            coeff = [f"{d}:{p}" for d, p in zip(delay, phase)]
+            elapsed = await measure(pcc.request("beam-delays", name, *coeff))
+            pdf_report.detail(f"Set delays for {name} in {elapsed:.3f} s.")
+            with check:
+                assert elapsed < 1.0
+            all_elapsed.append(elapsed)
+    except asyncio.CancelledError:
+        mean_elapsed = np.mean(all_elapsed)
+        pdf_report.detail(f"Average delay-setting time for {name}: {mean_elapsed:.3f} s.")
+        raise
 
 
 @pytest.fixture
