@@ -1500,3 +1500,4 @@ class XBEngine(DeviceServer):
             for task in self.service_tasks:
                 if task not in self._cancel_tasks:
                     await task
+        self._pipelines.clear()  # Breaks circular references
