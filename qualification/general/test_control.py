@@ -203,23 +203,8 @@ async def test_control(
     pdf_report: Reporter,
     sensor_watcher: aiokatcp.SensorWatcher,
 ) -> None:
-    f"""Test that controlling a correlator doesn't cause data to be lost.
-
-    Verification method
-    -------------------
-    Verified by means of test. Issue requests to the configured streams as follows:
-
-    - antenna_channelised_voltage: ``?delays`` every 6 seconds, with 3 seconds lead time.
-    - tied_array_channelised_voltage: ``?beam-delays`` every 3.4 seconds.
-
-    Check that each request completes in at most 1 second. Receive data from
-    the streams over {TEST_TIME}s and check that the received chunks span at
-    least {TEST_TIME - TEST_TIME_TOL} seconds and have no more than one chunk
-    lost after the first {STARTUP_TIME} seconds (during which we expect losses
-    as the receiver starts with a backlog).
-
-    Additionally, subscribe to all sensor updates to emulate CAM's load.
-    """
+    # The docstring is re-assigned after the function so that it can use an
+    # f-string.
     pdf_report.step("Subscribe to sensors.")
     await sensor_watcher.synced.wait()
     pdf_report.detail(f"Subscribed to {len(sensor_watcher.sensors)} sensors.")
@@ -249,3 +234,21 @@ async def test_control(
     check_timestamps(
         "tied_array_channelised_voltage", receive_tied_array_channelised_voltage, pdf_report, timestamps_tacv
     )
+
+test_control.__doc__ = f"""Test that controlling a correlator doesn't cause data to be lost.
+
+    Verification method
+    -------------------
+    Verified by means of test. Issue requests to the configured streams as follows:
+
+    - antenna_channelised_voltage: ``?delays`` every 6 seconds, with 3 seconds lead time.
+    - tied_array_channelised_voltage: ``?beam-delays`` every 3.4 seconds.
+
+    Check that each request completes in at most 1 second. Receive data from
+    the streams over {TEST_TIME}s and check that the received chunks span at
+    least {TEST_TIME - TEST_TIME_TOL} seconds and have no more than one chunk
+    lost after the first {STARTUP_TIME} seconds (during which we expect losses
+    as the receiver starts with a backlog).
+
+    Additionally, subscribe to all sensor updates to emulate CAM's load.
+    """
