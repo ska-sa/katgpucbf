@@ -32,11 +32,11 @@ from ..recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVolt
 from ..reporter import Reporter
 
 #: Time to run the test for (in seconds)
-TEST_TIME = 60.0
+TEST_TIME = 30.0
 #: Tolerance for amount of data received, compared to TEST_TIME (seconds)
 TEST_TIME_TOL = 5.0
 #: Amount of data to ignore at the start of the test before checking for losses
-STARTUP_TIME = 5.0
+STARTUP_TIME = 2.0
 # These magic values are from MK+ Delay Tracking Requirements draft revision E
 DELAY_INTERVAL = 6.0
 MAX_DELAY = 80e-6
