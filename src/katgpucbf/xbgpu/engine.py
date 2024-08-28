@@ -261,7 +261,7 @@ class Pipeline(Generic[_O, _T]):
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
         # - The _in_queue receives items from :meth:`.XBEngine._receiver_loop`
-        #   to be used by :meth:`_gpu_proc_loop`.
+        #   to be used by :meth:`gpu_proc_loop`.
         # - The _out_queue receives items from :meth:`gpu_proc_loop` to be
         #   used by :meth:`sender_loop`.
         # Once the destination function is finished with an item, it will pass
