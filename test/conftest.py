@@ -148,7 +148,9 @@ def mock_send_stream_network() -> IPv4Network:
 
 
 @pytest.fixture
-def mock_send_stream(mocker, mock_send_stream_network: IPv4Network) -> list[spead2.InprocQueue]:
+def mock_send_stream(
+    monkeypatch: pytest.MonkeyPatch, mock_send_stream_network: IPv4Network
+) -> list[spead2.InprocQueue]:
     """Mock out creation of the send stream.
 
     Each time a :class:`spead2.send.asyncio.UdpStream` is created, it instead
@@ -169,7 +171,7 @@ def mock_send_stream(mocker, mock_send_stream_network: IPv4Network) -> list[spea
         )
         return spead2.send.asyncio.InprocStream(thread_pool, stream_queues, config)
 
-    mocker.patch("spead2.send.asyncio.UdpStream", autospec=True, side_effect=constructor)
+    monkeypatch.setattr("spead2.send.asyncio.UdpStream", constructor)
     return queues
 
 

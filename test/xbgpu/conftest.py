@@ -27,7 +27,7 @@ def n_recv_streams() -> int:  # noqa: D401
 
 
 @pytest.fixture
-def mock_recv_streams(mocker, n_recv_streams: int) -> list[spead2.InprocQueue]:
+def mock_recv_streams(monkeypatch: pytest.MonkeyPatch, n_recv_streams: int) -> list[spead2.InprocQueue]:
     """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
 
     Returns
@@ -52,5 +52,5 @@ def mock_recv_streams(mocker, n_recv_streams: int) -> list[spead2.InprocQueue]:
         queue = next(queue_iter)
         stream.add_inproc_reader(queue)
 
-    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
+    monkeypatch.setattr("katgpucbf.recv.add_reader", add_reader)
     return queues
