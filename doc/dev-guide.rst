@@ -127,7 +127,7 @@ The module contains the following boiler-plate files:
   develop. Development requires an additional set of packages which are not
   required for users to run the software (such as pytest). Note that developers
   should install both sets of requirements, not just the development ones.
-- ``setup.cfg`` and ``setup.py`` allow :external+setuptools:doc:`setuptools  <setuptools>`
+- ``setup.cfg`` allows :external+setuptools:doc:`setuptools  <setuptools>`
   to install this package.
 - ``pyproject.toml`` is a standard file included with many Python projects. It
   is used to store some configuration for pre-commit (as described above), some
