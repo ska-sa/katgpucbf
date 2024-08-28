@@ -70,7 +70,7 @@ async def periodically(rng: np.random.Generator, interval: float) -> AsyncGenera
         await asyncio.sleep(target - now)
 
 
-async def consume_chunks(receiver: XBReceiver, timestamps: list[int]):
+async def consume_chunks(receiver: XBReceiver, timestamps: list[int]) -> None:
     async for timestamp, chunk in receiver.complete_chunks():
         with chunk:
             timestamps.append(timestamp)
