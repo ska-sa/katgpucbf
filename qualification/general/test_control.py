@@ -249,6 +249,7 @@ async def test_control(
         "tied_array_channelised_voltage", receive_tied_array_channelised_voltage, pdf_report, timestamps_tacv
     )
 
+
 test_control.__doc__ = f"""Test that controlling a correlator doesn't cause data to be lost.
 
     Verification method
