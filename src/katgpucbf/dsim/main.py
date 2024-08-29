@@ -181,9 +181,10 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
 
+    interface_address = katsdpservices.get_interface_address(args.interface)
+
     if not args.no_descriptors:
         config = descriptors.create_config()
-        interface_address = katsdpservices.get_interface_address(args.interface)
         descriptor_stream = send.make_stream_base(
             endpoints=endpoints,
             config=config,
