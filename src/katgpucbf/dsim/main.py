@@ -89,6 +89,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         help="Network port on which to serve Prometheus metrics [none]",
     )
+    parser.add_argument("--no-descriptors", action="store_true", help="Disable sending of SPEAD descriptors")
     parser.add_argument(
         "dest",
         nargs="+",
@@ -180,21 +181,22 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
 
-    config = descriptors.create_config()
-    interface_address = katsdpservices.get_interface_address(args.interface)
-    descriptor_stream = send.make_stream_base(
-        endpoints=endpoints,
-        config=config,
-        ttl=args.ttl,
-        interface_address=interface_address,
-        ibv=args.ibv,
-    )
-    descriptor_stream.set_cnt_sequence(1, 2)
+    if not args.no_descriptors:
+        config = descriptors.create_config()
+        interface_address = katsdpservices.get_interface_address(args.interface)
+        descriptor_stream = send.make_stream_base(
+            endpoints=endpoints,
+            config=config,
+            ttl=args.ttl,
+            interface_address=interface_address,
+            ibv=args.ibv,
+        )
+        descriptor_stream.set_cnt_sequence(1, 2)
 
-    # Start descriptor sender first so descriptors are sent before dsim data.
-    descriptor_heap = descriptors.create_descriptors_heap()
-    descriptor_sender = DescriptorSender(descriptor_stream, descriptor_heap, SPEAD_DESCRIPTOR_INTERVAL_S)
-    tg.create_task(descriptor_sender.run())
+        # Start descriptor sender first so descriptors are sent before dsim data.
+        descriptor_heap = descriptors.create_descriptors_heap()
+        descriptor_sender = DescriptorSender(descriptor_stream, descriptor_heap, SPEAD_DESCRIPTOR_INTERVAL_S)
+        tg.create_task(descriptor_sender.run())
 
     if args.dither_seed is None:
         args.dither_seed = np.random.SeedSequence().entropy  # Generate a random seed
