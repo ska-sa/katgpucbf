@@ -181,22 +181,21 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
         for ep in pol_dest:
             endpoints.append((ep.host, ep.port))
 
+    config = descriptors.create_config()
     interface_address = katsdpservices.get_interface_address(args.interface)
+    descriptor_stream = send.make_stream_base(
+        endpoints=endpoints,
+        config=config,
+        ttl=args.ttl,
+        interface_address=interface_address,
+        ibv=args.ibv,
+    )
+    descriptor_stream.set_cnt_sequence(1, 2)
 
+    # Start descriptor sender first so descriptors are sent before dsim data.
+    descriptor_heap = descriptors.create_descriptors_heap()
+    descriptor_sender = DescriptorSender(descriptor_stream, descriptor_heap, SPEAD_DESCRIPTOR_INTERVAL_S)
     if not args.no_descriptors:
-        config = descriptors.create_config()
-        descriptor_stream = send.make_stream_base(
-            endpoints=endpoints,
-            config=config,
-            ttl=args.ttl,
-            interface_address=interface_address,
-            ibv=args.ibv,
-        )
-        descriptor_stream.set_cnt_sequence(1, 2)
-
-        # Start descriptor sender first so descriptors are sent before dsim data.
-        descriptor_heap = descriptors.create_descriptors_heap()
-        descriptor_sender = DescriptorSender(descriptor_stream, descriptor_heap, SPEAD_DESCRIPTOR_INTERVAL_S)
         tg.create_task(descriptor_sender.run())
 
     if args.dither_seed is None:
