@@ -580,7 +580,9 @@ class Pipeline:
         """Initialise the delays and gains."""
         for pol in range(N_POLS):
             delay_sensor = self.engine.sensors[f"{self.output.name}.input{pol}.delay"]
-            callback_func = partial(self.update_delay_sensor, delay_sensor=delay_sensor)
+            callback_func = partial(
+                self.update_delay_sensor, delay_sensor=delay_sensor, adc_sample_rate=self.engine.adc_sample_rate
+            )
             delay_model = AlignedDelayModel(MultiDelayModel(callback_func), self.output.subsampling)
             self.delay_models.append(delay_model)
 
@@ -1053,7 +1055,10 @@ class Pipeline:
         # end_timestamp is updated whenever delays are written into the out_item
         return self._out_item.end_timestamp
 
-    def update_delay_sensor(self, delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor) -> None:
+    @staticmethod
+    def update_delay_sensor(
+        delay_models: Sequence[LinearDelayModel], *, delay_sensor: aiokatcp.Sensor, adc_sample_rate: float
+    ) -> None:
         """Update the delay sensor upon loading of a new model.
 
         Accepting the delay_models as a read-only Sequence from the
@@ -1065,9 +1070,9 @@ class Pipeline:
         """
         logger.debug("Updating delay sensor: %s", delay_sensor.name)
 
-        orig_delay = delay_models[0].delay / self.engine.adc_sample_rate
+        orig_delay = delay_models[0].delay / adc_sample_rate
         orig_phase = delay_models[0].phase
-        orig_phase_rate = delay_models[0].phase_rate * self.engine.adc_sample_rate
+        orig_phase_rate = delay_models[0].phase_rate * adc_sample_rate
         delay_sensor.value = (
             f"({delay_models[0].start}, "
             f"{orig_delay}, "
@@ -1775,3 +1780,4 @@ class Engine(aiokatcp.DeviceServer):
             for task in self.service_tasks:
                 if task not in self._cancel_tasks:
                     await task
+        self._pipelines.clear()  # Breaks circular references

@@ -41,7 +41,6 @@ is given a dictionary mapping names to values, and returns true if that
 combination is a candidate.
 """
 
-import gc
 import itertools
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
@@ -148,7 +147,9 @@ def mock_send_stream_network() -> IPv4Network:
 
 
 @pytest.fixture
-def mock_send_stream(mocker, mock_send_stream_network: IPv4Network) -> list[spead2.InprocQueue]:
+def mock_send_stream(
+    monkeypatch: pytest.MonkeyPatch, mock_send_stream_network: IPv4Network
+) -> list[spead2.InprocQueue]:
     """Mock out creation of the send stream.
 
     Each time a :class:`spead2.send.asyncio.UdpStream` is created, it instead
@@ -169,7 +170,7 @@ def mock_send_stream(mocker, mock_send_stream_network: IPv4Network) -> list[spea
         )
         return spead2.send.asyncio.InprocStream(thread_pool, stream_queues, config)
 
-    mocker.patch("spead2.send.asyncio.UdpStream", autospec=True, side_effect=constructor)
+    monkeypatch.setattr("spead2.send.asyncio.UdpStream", constructor)
     return queues
 
 
@@ -181,20 +182,6 @@ def time_converter() -> TimeConverter:
     closely related to make tests easily readable.
     """
     return TimeConverter(1.0, 1000.0)
-
-
-@pytest.fixture(autouse=True)
-def force_gc():
-    """Force garbage collection before each test.
-
-    This is needed because cyclic garbage can keep significant GPU resources
-    tied up, and the memory allocator isn't aware of it and so doesn't try
-    to free any of it when GPU allocations fail.
-    """
-    # Multiple passes because sometimes freeing some garbage allows more
-    # garbage to be detected.
-    for _ in range(3):
-        gc.collect()
 
 
 @pytest.fixture(scope="session")
