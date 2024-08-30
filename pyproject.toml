@@ -36,6 +36,7 @@ testpaths = "test"
 addopts = "--cov-context=test --cov-report html --import-mode=prepend"
 markers = ["mask_timestamp", "use_vkgdr", "cmdline_args", "spectra_per_heap"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
 branch = true

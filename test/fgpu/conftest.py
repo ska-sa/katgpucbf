@@ -32,7 +32,7 @@ from katgpucbf.fgpu.main import make_engine, parse_args
 
 
 @pytest.fixture
-def recv_max_chunks_one(monkeypatch) -> None:
+def recv_max_chunks_one(monkeypatch: pytest.MonkeyPatch) -> None:
     """Change :data:`.recv.MAX_CHUNKS` to 1 for the test.
 
     This simplifies the process of reliably injecting data.
@@ -41,7 +41,7 @@ def recv_max_chunks_one(monkeypatch) -> None:
 
 
 @pytest.fixture
-def mock_recv_stream(mocker) -> spead2.InprocQueue:
+def mock_recv_stream(monkeypatch: pytest.MonkeyPatch) -> spead2.InprocQueue:
     """Mock out :func:`katgpucbf.recv.add_reader` to use an in-process queue.
 
     Returns
@@ -67,7 +67,7 @@ def mock_recv_stream(mocker) -> spead2.InprocQueue:
         stream.add_inproc_reader(queue)
         have_reader = True
 
-    mocker.patch("katgpucbf.recv.add_reader", autospec=True, side_effect=add_reader)
+    monkeypatch.setattr("katgpucbf.recv.add_reader", add_reader)
     return queue
 
 

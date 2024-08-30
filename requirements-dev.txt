@@ -38,7 +38,7 @@ appdirs==1.4.4
     #   pycuda
 asttokens==2.4.1
     # via stack-data
-async-solipsism==0.5
+async-solipsism==0.7
     # via katgpucbf (setup.cfg)
 async-timeout==4.0.3
     # via
@@ -289,7 +289,7 @@ pytest==8.2.2
     #   pytest-custom-exit-code
     #   pytest-mock
     #   pytest-xdist
-pytest-asyncio==0.21.2
+pytest-asyncio==0.24.0
     # via katgpucbf (setup.cfg)
 pytest-cov==4.1.0
     # via -r requirements-dev.in

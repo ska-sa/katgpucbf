@@ -21,7 +21,8 @@ import argparse
 import katsdpsigproc.accel
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH
-from katgpucbf.xbgpu.beamform import BeamformTemplate
+from katgpucbf.utils import DitherType, parse_dither
+from katgpucbf.xbgpu.beamform import Beam, BeamformTemplate
 
 
 def main():
@@ -41,6 +42,12 @@ def main():
     )
     parser.add_argument("--heaps-per-fengine-per-chunk", type=int, default=32, help="Batches per chunk [%(default)s]")
     parser.add_argument("--beams", type=int, default=4, help="Number of dual-pol beams [%(default)s]")
+    parser.add_argument(
+        "--dither",
+        type=parse_dither,
+        default=DitherType.DEFAULT,
+        help=f"Type of dithering to apply [{DitherType.DEFAULT.name.lower()}]",
+    )
     parser.add_argument("--passes", type=int, default=10000, help="Number of times to repeat the test [%(default)s]")
     args = parser.parse_args()
     if args.jones_per_batch % args.channels != 0:
@@ -49,7 +56,8 @@ def main():
 
     ctx = katsdpsigproc.accel.create_some_context()
     command_queue = ctx.create_command_queue()
-    template = BeamformTemplate(ctx, [0, 1] * args.beams, n_spectra_per_batch=spectra_per_heap)
+    beams = [Beam(pol=i % 2, dither=args.dither) for i in range(args.beams)]
+    template = BeamformTemplate(ctx, beams, n_spectra_per_batch=spectra_per_heap)
     fn = template.instantiate(
         command_queue,
         n_batches=args.heaps_per_fengine_per_chunk,

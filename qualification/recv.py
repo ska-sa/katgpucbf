@@ -162,18 +162,18 @@ class XBReceiver:
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
         # We assume the streams all have the same information except for addresses.
-        self.n_chans_per_substream = cbf.sensors[f"{stream_names[0]}.n-chans-per-substream"].value
-        self.n_spectra_per_heap = cbf.sensors[f"{acv_name}.spectra-per-heap"].value
-        self.n_samples_between_spectra = cbf.sensors[f"{acv_name}.n-samples-between-spectra"].value
-        self.sync_time = cbf.sensors[f"{acv_name}.sync-time"].value
-        self.scale_factor_timestamp = cbf.sensors[f"{acv_name}.scale-factor-timestamp"].value
-        self.bandwidth = cbf.sensors[f"{acv_name}.bandwidth"].value
-        self.center_freq = cbf.sensors[f"{acv_name}.center-freq"].value
+        self.n_chans_per_substream = cbf.init_sensors[f"{stream_names[0]}.n-chans-per-substream"].value
+        self.n_spectra_per_heap = cbf.init_sensors[f"{acv_name}.spectra-per-heap"].value
+        self.n_samples_between_spectra = cbf.init_sensors[f"{acv_name}.n-samples-between-spectra"].value
+        self.sync_time = cbf.init_sensors[f"{acv_name}.sync-time"].value
+        self.scale_factor_timestamp = cbf.init_sensors[f"{acv_name}.scale-factor-timestamp"].value
+        self.bandwidth = cbf.init_sensors[f"{acv_name}.bandwidth"].value
+        self.center_freq = cbf.init_sensors[f"{acv_name}.center-freq"].value
         self.multicast_endpoints = [
             [
                 (endpoint.host, endpoint.port)
                 for endpoint in endpoint_list_parser(DEFAULT_PORT)(
-                    cbf.sensors[f"{stream_name}.destination"].value.decode()
+                    cbf.init_sensors[f"{stream_name}.destination"].value.decode()
                 )
             ]
             for stream_name in stream_names
@@ -198,6 +198,10 @@ class XBReceiver:
         for chunk in data_ringbuffer:
             assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
             self._queue.put_nowait(chunk)
+
+    def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
+        """Check whether this chunk is complete (no missing data)."""
+        return bool(np.all(chunk.present))
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
@@ -261,12 +265,8 @@ class XBReceiver:
                     timestamp = chunk.chunk_id * self.timestamp_step
                     if min_timestamp is not None and timestamp < min_timestamp:
                         logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
-                    elif not np.all(chunk.present):
+                    elif not self.is_complete_chunk(chunk):
                         logger.debug("Incomplete chunk %d", chunk.chunk_id)
-                    elif (chunk.data.dtype == np.dtype(np.int32) and np.any(chunk.data == -(2**31))) or (
-                        chunk.extra is not None and np.min(chunk.extra) < self.n_ants
-                    ):
-                        logger.debug("Chunk with missing antenna(s) (%d)", chunk.chunk_id)
                     else:
                         yield timestamp, chunk
                         continue
@@ -387,22 +387,20 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         interface_address: str,
         use_ibv: bool = False,
     ) -> None:
-        if len(cores) != 2:
-            raise ValueError("cores must contain exactly two elements")
-        super().__init__(cbf, [stream_name], cores[0])
+        super().__init__(cbf, [stream_name], cores[-1])
 
         # Fill in extra sensors specific to baseline-correlation-products
-        self.n_bls = cbf.sensors[f"{stream_name}.n-bls"].value
-        self.n_bits_per_sample = cbf.sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
-        self.n_spectra_per_acc = cbf.sensors[f"{stream_name}.n-accs"].value
-        self.int_time = cbf.sensors[f"{stream_name}.int-time"].value
-        self.bls_ordering = ast.literal_eval(cbf.sensors[f"{stream_name}.bls-ordering"].value.decode())
+        self.n_bls = cbf.init_sensors[f"{stream_name}.n-bls"].value
+        self.n_bits_per_sample = cbf.init_sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
+        self.n_spectra_per_acc = cbf.init_sensors[f"{stream_name}.n-accs"].value
+        self.int_time = cbf.init_sensors[f"{stream_name}.int-time"].value
+        self.bls_ordering = ast.literal_eval(cbf.init_sensors[f"{stream_name}.bls-ordering"].value.decode())
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
 
         self.stream = create_baseline_correlation_product_receive_stream(
             interface_address,
             multicast_endpoints=self.multicast_endpoints[0],
-            core=cores[1],
+            cores=cores[:-1],
             n_bls=self.n_bls,
             n_chans=self.n_chans,
             n_chans_per_substream=self.n_chans_per_substream,
@@ -413,6 +411,16 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             use_ibv=use_ibv,
         )
         self._worker_thread.start()
+
+    def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
+        if not super().is_complete_chunk(chunk):
+            return False
+        # Elements affected by missing antennas are marked with a real part
+        # equal to -2^31. It's expensive to check every element for this
+        # marker, but we know it will apply to all channels in a heap, so we
+        # only need to check the first channel.
+        n_channels_per_substream = chunk.data.shape[0] // chunk.present.shape[0]
+        return np.min(chunk.data[::n_channels_per_substream]) > -(2**31)
 
     def compute_tone_gain(self, amplitude: float, target_voltage: float) -> float:  # noqa: D102
         # We need to avoid saturating the signed 32-bit X-engine accumulation as
@@ -445,10 +453,10 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
     ) -> None:
         super().__init__(cbf, stream_names, cores[-1])
 
-        self.n_bits_per_sample = cbf.sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
+        self.n_bits_per_sample = cbf.init_sensors[f"{stream_names[0]}.beng-out-bits-per-sample"].value
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_heap
         self.source_indices: list[list[int]] = [
-            ast.literal_eval(cbf.sensors[f"{stream_name}.source-indices"].value.decode())
+            ast.literal_eval(cbf.init_sensors[f"{stream_name}.source-indices"].value.decode())
             for stream_name in stream_names
         ]
 
@@ -465,6 +473,9 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             use_ibv=use_ibv,
         )
         self._worker_thread.start()
+
+    def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
+        return super().is_complete_chunk(chunk) and (chunk.extra is None or np.min(chunk.extra) == self.n_ants)
 
 
 def _create_receive_stream_group(
@@ -554,7 +565,7 @@ def _create_receive_stream_group(
 def create_baseline_correlation_product_receive_stream(
     interface_address: str,
     multicast_endpoints: list[tuple[str, int]],
-    core: int,
+    cores: Sequence[int],
     n_bls: int,
     n_chans: int,
     n_chans_per_substream: int,
@@ -592,10 +603,15 @@ def create_baseline_correlation_product_receive_stream(
     # larger array sizes.
     max_chunks = max(round(0.5 / int_time), 1) + 1
 
+    # Use one stream per core, and partition the endpoints between them.
+    multicast_sets: list[list[tuple[str, int]]] = [[] for _ in cores]
+    for i, endpoint in enumerate(multicast_endpoints):
+        multicast_sets[i % len(cores)].append(endpoint)
+
     return _create_receive_stream_group(
         interface_address,
-        [multicast_endpoints],
-        [core],
+        multicast_sets,
+        cores,
         use_ibv,
         stream_config,
         max_chunks,

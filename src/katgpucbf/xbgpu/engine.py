@@ -60,7 +60,7 @@ from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, steady_state_timestamp_sensor
 from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_IN_ITEMS, DEFAULT_N_OUT_ITEMS, DEFAULT_XPIPELINE_NAME, recv
-from .beamform import BeamformTemplate
+from .beamform import Beam, BeamformTemplate
 from .bsend import BSend
 from .bsend import make_stream as make_bstream
 from .correlation import CorrelationTemplate
@@ -261,7 +261,7 @@ class Pipeline(Generic[_O, _T]):
         # These queues are extended in the monitor class, allowing for the
         # monitor to track the number of items on each queue.
         # - The _in_queue receives items from :meth:`.XBEngine._receiver_loop`
-        #   to be used by :meth:`_gpu_proc_loop`.
+        #   to be used by :meth:`gpu_proc_loop`.
         # - The _out_queue receives items from :meth:`gpu_proc_loop` to be
         #   used by :meth:`sender_loop`.
         # Once the destination function is finished with an item, it will pass
@@ -354,7 +354,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
 
         template = BeamformTemplate(
             context,
-            [output.pol for output in outputs],
+            [Beam(pol=output.pol, dither=output.dither) for output in outputs],
             n_spectra_per_batch=engine.recv_layout.n_spectra_per_heap,
         )
         self._beamform = template.instantiate(
@@ -1500,3 +1500,4 @@ class XBEngine(DeviceServer):
             for task in self.service_tasks:
                 if task not in self._cancel_tasks:
                     await task
+        self._pipelines.clear()  # Breaks circular references

@@ -20,12 +20,14 @@ from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf.fgpu import compute
 from katgpucbf.fgpu.engine import generate_ddc_weights
+from katgpucbf.utils import DitherType
 
 pytestmark = [pytest.mark.cuda_only]
 
 
 @pytest.mark.parametrize("mode", ["wideband", "narrowband"])
-def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, mode: str) -> None:
+@pytest.mark.parametrize("dither", DitherType)
+def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, mode: str, dither: DitherType) -> None:
     """Test creation and running of :class:`Compute`.
 
     .. todo:: This isn't a proper test, just a smoke test.
@@ -52,7 +54,7 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
         )
         spectra = nb_spectra
         internal_channels = 2 * channels
-    template = compute.ComputeTemplate(context, pfb_taps, channels, dig_sample_bits, out_bits, narrowband)
+    template = compute.ComputeTemplate(context, pfb_taps, channels, dig_sample_bits, out_bits, dither, narrowband)
     # The sample count is the minimum that will produce the required number of
     # output spectra for narrowband mode. For wideband there is more headroom.
     fn = template.instantiate(

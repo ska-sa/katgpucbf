@@ -17,7 +17,6 @@
 """Common fixtures for dsim tests."""
 
 from collections.abc import Generator, Sequence
-from unittest import mock
 
 import numpy as np
 import pytest
@@ -56,7 +55,9 @@ def recv_streams(
 
 
 @pytest.fixture
-def send_stream(inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
+def send_stream(
+    monkeypatch: pytest.MonkeyPatch, inproc_queues: Sequence[spead2.InprocQueue]
+) -> "spead2.send.asyncio.AsyncStream":
     """Stream that feeds data to the :func:`inproc_queues`."""
 
     def mock_udp_stream(thread_pool, endpoints, config, **kwargs):
@@ -64,7 +65,8 @@ def send_stream(inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asy
         config.rate = 0  # Just send as fast as possible
         return spead2.send.asyncio.InprocStream(thread_pool, inproc_queues, config)
 
-    with mock.patch("spead2.send.asyncio.UdpStream", side_effect=mock_udp_stream):
+    with monkeypatch.context() as m:
+        m.setattr("spead2.send.asyncio.UdpStream", mock_udp_stream)
         return send.make_stream(
             endpoints=[("invalid", -1) for _ in inproc_queues],
             heap_sets=[],  # Only needed for UdpIbvStream, which we're not using
@@ -131,14 +133,17 @@ def descriptor_recv_streams(
 
 
 @pytest.fixture
-def descriptor_send_stream(descriptor_inproc_queues: Sequence[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncStream":
+def descriptor_send_stream(
+    monkeypatch: pytest.MonkeyPatch, descriptor_inproc_queues: Sequence[spead2.InprocQueue]
+) -> "spead2.send.asyncio.AsyncStream":
     """Stream that feeds data to the :func:`descriptor_inproc_queues`."""
 
     def mock_udp_stream(thread_pool, endpoints, config, **kwargs):
         return spead2.send.asyncio.InprocStream(thread_pool, descriptor_inproc_queues, config)
 
     config = descriptors.create_config()
-    with mock.patch("spead2.send.asyncio.UdpStream", side_effect=mock_udp_stream):
+    with monkeypatch.context() as m:
+        m.setattr("spead2.send.asyncio.UdpStream", mock_udp_stream)
         return send.make_stream_base(
             endpoints=[("invalid", -1) for _ in descriptor_inproc_queues],
             config=config,

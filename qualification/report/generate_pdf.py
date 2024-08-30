@@ -65,6 +65,7 @@ DEFAULT_PROCEDURE_DOC_ID = "E1200-0000-004"
 RESOURCE_PATH = pathlib.Path(__file__).parent
 UNKNOWN = "unknown"
 GROUP_NAMES = {
+    "general": "General tests",
     "antenna_channelised_voltage": "Antenna channelised voltage tests",
     "baseline_correlation_products": "Baseline correlation products tests",
     "tied_array_channelised_voltage": "Tied-array channelised voltage tests",

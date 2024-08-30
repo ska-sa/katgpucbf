@@ -22,6 +22,7 @@ import time
 from collections.abc import Sequence
 
 import numpy as np
+import pytest
 import spead2.recv.asyncio
 import spead2.send.asyncio
 from spead2 import ItemGroup
@@ -67,7 +68,7 @@ async def test_sender(
     inproc_queues: Sequence[spead2.InprocQueue],
     sender: send.Sender,
     heap_sets: Sequence[send.HeapSet],
-    mocker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Send random data via a :class:`~katgpucbf.dsim.send.Sender` and check it."""
     # Tweak the sending so that we can interrupt the sender after sending a
@@ -110,9 +111,7 @@ async def test_sender(
 
     # Note: only do this after dealing with the descriptors, as otherwise
     # they interfere with the countdown.
-    mocker.patch.object(
-        spead2.send.asyncio.InprocStream, "async_send_heaps", side_effect=wrapped_send_heaps, autospec=True
-    )
+    monkeypatch.setattr(spead2.send.asyncio.InprocStream, "async_send_heaps", wrapped_send_heaps)
 
     # Stop the descriptor queue
     for queue in descriptor_inproc_queues:

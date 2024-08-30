@@ -29,6 +29,7 @@ from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import N_POLS, utils
 from ..curand_helpers import RAND_STATE_DTYPE, RandomStateBuilder
+from ..utils import DitherType
 
 
 class PostprocTemplate:
@@ -51,6 +52,8 @@ class PostprocTemplate:
     out_bits
         Bits per real/imaginary value. Only 4 or 8 are currently supported.
         When 4, the real part is in the most-significant bits.
+    dither
+        Type of dithering to apply before quantisation.
     out_channels
         Range of channels to write to the output (defaults to all).
     """
@@ -63,14 +66,17 @@ class PostprocTemplate:
         *,
         complex_pfb: bool,
         out_bits: int,
+        dither: DitherType,
         out_channels: tuple[int, int] | None = None,
     ) -> None:
+        assert dither in {DitherType.NONE, DitherType.UNIFORM}
         self.block = 16
         self.vtx = 1
         self.vty = 2
         self.channels = channels
         self.unzip_factor = unzip_factor
         self.out_bits = out_bits
+        self.dither = dither
         self.groups_x = accel.divup(channels // unzip_factor // 2 + 1, self.block * self.vtx)
         if channels <= 0 or channels & (channels - 1):
             raise ValueError("channels must be a power of 2")
@@ -101,6 +107,7 @@ class PostprocTemplate:
                     "out_bits": self.out_bits,
                     "unzip_factor": unzip_factor,
                     "complex_pfb": complex_pfb,
+                    "dither": bool(dither.value),
                 },
                 extra_dirs=[str(resource_dir), str(resource_dir.parent)],
             )
@@ -150,7 +157,8 @@ class Postproc(accel.Operation):
         Per-channel gain (one value per pol).
     **rand_states** : implementation-defined
         Random states. This slot is set up by the constructor and should
-        normally not need to be touched.
+        normally not need to be touched. It is only present if dithering
+        is enabled.
 
     Parameters
     ----------
@@ -164,7 +172,8 @@ class Postproc(accel.Operation):
     spectra_per_heap: int
         Number of spectra to send out per heap.
     seed, sequence_first, sequence_step
-        See :class:`.RandomStateBuilder`.
+        See :class:`.RandomStateBuilder`. These are ignored if the template
+        disables dithering.
     """
 
     def __init__(
@@ -206,15 +215,16 @@ class Postproc(accel.Operation):
         self.slots["fine_delay"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["phase"] = accel.IOSlot((spectra, pols), np.float32)
         self.slots["gains"] = accel.IOSlot((n_out_channels, pols), np.complex64)
-        # This could be seen as multi-dimensional, but we flatten it to 1D as an
-        # easy way to guarantee that it is not padded.
-        rand_states_shape = (template.groups_x * self._groups_y * template.block * template.block,)
-        self.slots["rand_states"] = accel.IOSlot(rand_states_shape, RAND_STATE_DTYPE)
-        builder = RandomStateBuilder(command_queue.context)
-        rand_states = builder.make_states(
-            command_queue, rand_states_shape, seed=seed, sequence_first=sequence_first, sequence_step=sequence_step
-        )
-        self.bind(rand_states=rand_states)
+        if template.dither == DitherType.UNIFORM:
+            # This could be seen as multi-dimensional, but we flatten it to 1D as an
+            # easy way to guarantee that it is not padded.
+            rand_states_shape = (template.groups_x * self._groups_y * template.block * template.block,)
+            self.slots["rand_states"] = accel.IOSlot(rand_states_shape, RAND_STATE_DTYPE)
+            builder = RandomStateBuilder(command_queue.context)
+            rand_states = builder.make_states(
+                command_queue, rand_states_shape, seed=seed, sequence_first=sequence_first, sequence_step=sequence_step
+            )
+            self.bind(rand_states=rand_states)
 
     def _run(self) -> None:
         out = self.buffer("out")
@@ -230,7 +240,9 @@ class Postproc(accel.Operation):
                 self.buffer("fine_delay").buffer,
                 self.buffer("phase").buffer,
                 self.buffer("gains").buffer,
-                self.buffer("rand_states").buffer,
+            ]
+            + ([self.buffer("rand_states").buffer] if self.template.dither == DitherType.UNIFORM else [])
+            + [
                 np.int32(out.padded_shape[1] * out.padded_shape[2]),  # out_stride_z
                 np.int32(out.padded_shape[2]),  # out_stride
                 np.int32(np.prod(in_.padded_shape[1:])),  # in_stride

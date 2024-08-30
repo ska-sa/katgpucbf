@@ -29,6 +29,7 @@ from collections.abc import AsyncGenerator, Generator, Iterable, Sequence
 
 import matplotlib.style
 import pytest
+import pytest_asyncio
 import pytest_check
 from katsdpservices import get_interface_address
 
@@ -178,14 +179,12 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         return tuple(ans)
 
     items.sort(key=key)
-
-
-# Need to redefine this from pytest-asyncio to have it at session scope
-@pytest.fixture(scope="session")
-def event_loop():  # noqa: D103
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+    # Make all tests run using the session-scoped event loop, so that they can
+    # use session-scoped asynchronous fixtures.
+    scope_marker = pytest.mark.asyncio(loop_scope="session")
+    for item in items:
+        if pytest_asyncio.is_async_test(item):
+            item.add_marker(scope_marker, append=False)
 
 
 @pytest.fixture(scope="package")
@@ -453,11 +452,11 @@ async def cbf(
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
-            sync_time = cbf.sensors[f"{name}.sync-time"].value
+            sync_time = cbf.init_sensors[f"{name}.sync-time"].value
             await pcc.request("gain-all", name, "default")
             await pcc.request("delays", name, sync_time, *(["0,0:0,0"] * n_inputs))
         elif conf["type"] == "gpucbf.tied_array_channelised_voltage":
-            source_indices = ast.literal_eval(cbf.sensors[f"{name}.source-indices"].value.decode())
+            source_indices = ast.literal_eval(cbf.init_sensors[f"{name}.source-indices"].value.decode())
             n_inputs = len(source_indices)
             await pcc.request("beam-quant-gains", name, 1.0)
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
@@ -477,7 +476,7 @@ class CoreAllocator:
 
     It is initialised with a list of cores (from pytest config), with earlier
     entries considered better than later ones. Cores are allocated in this
-    order. There is no mechanism to return cores; simplify create a new
+    order. There is no mechanism to return cores; simply create a new
     allocator to start fresh.
     """
 
@@ -497,15 +496,24 @@ class CoreAllocator:
         return [self._cores.popleft() for _ in range(n)]
 
 
-@pytest.fixture
-def core_allocator(pytestconfig: pytest.Config) -> CoreAllocator:
-    """Create a core allocator for the test."""
+# Note: it's important that this has session scope, so that it's only run
+# before core_allocator calls os.sched_setaffinity.
+@pytest.fixture(scope="session")
+def cores(pytestconfig: pytest.Config) -> list[int]:
+    """Get the cores to use for core pinning for this test."""
     cores = [int(x) for x in pytestconfig.getini("cores")]
     if not cores:
         cores = sorted(os.sched_getaffinity(0))
+    return cores
+
+
+@pytest.fixture
+def core_allocator(cores: list[int]) -> CoreAllocator:
+    """Create a core allocator for the test."""
     alloc = CoreAllocator(cores)
     # Pin the main Python thread to a core, to ensure it won't conflict with
-    # any of the worker threads.
+    # any of the worker threads. Note that this is repeated for each test,
+    # but that is harmless.
     os.sched_setaffinity(0, alloc.allocate(1))
     return alloc
 
@@ -522,7 +530,7 @@ async def receive_baseline_correlation_products(
     receiver = BaselineCorrelationProductsReceiver(
         cbf=cbf,
         stream_name="baseline-correlation-products",
-        cores=core_allocator.allocate(2),
+        cores=core_allocator.allocate(5),
         interface_address=interface_address,
         use_ibv=use_ibv,
     )

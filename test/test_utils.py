@@ -19,7 +19,7 @@
 import asyncio
 import gc
 import weakref
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 from unittest import mock
 
 import aiokatcp
@@ -27,7 +27,14 @@ import async_solipsism
 import pytest
 from aiokatcp import DeviceStatus
 
-from katgpucbf.utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, comma_split
+from katgpucbf.utils import (
+    DeviceStatusSensor,
+    DitherType,
+    TimeConverter,
+    TimeoutSensorStatusObserver,
+    comma_split,
+    parse_dither,
+)
 
 
 class TestDeviceStatusSensor:
@@ -75,11 +82,9 @@ class TestTimeoutSensorStatus:
     """Tests for :func:`katgpucbf.utils.timeout_sensor_status`."""
 
     @pytest.fixture
-    def event_loop(self) -> Generator[async_solipsism.EventLoop, None, None]:
+    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
         """Use async_solipsism event loop."""
-        loop = async_solipsism.EventLoop()
-        yield loop
-        loop.close()
+        return async_solipsism.EventLoopPolicy()
 
     @pytest.fixture
     def sensor(self) -> aiokatcp.Sensor:
@@ -203,3 +208,22 @@ class TestCommaSplit:
         assert splitter("3") == [3, 3]
         with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
             splitter("3,5,7")
+
+
+class TestParseDither:
+    @pytest.mark.parametrize(
+        "input, output",
+        [("none", DitherType.NONE), ("uniform", DitherType.UNIFORM)],
+    )
+    def test_success(self, input: str, output: DitherType) -> None:
+        """Test with valid inputs."""
+        assert parse_dither(input) == output
+
+    @pytest.mark.parametrize("input", ["", "false", "UnIFoRM", "NONE", "default"])
+    def test_invalid(self, input: str) -> None:
+        """Test with invalid inputs."""
+        with pytest.raises(
+            ValueError,
+            match=rf"Invalid dither value {input} \(valid values are \['none', 'uniform'\]\)",
+        ):
+            parse_dither(input)
