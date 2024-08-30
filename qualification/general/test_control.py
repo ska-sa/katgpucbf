@@ -204,6 +204,17 @@ def check_timestamps(
     expected = (timestamps[-1] - timestamps[0]) // receiver.timestamp_step + 1
     missing = expected - len(timestamps)
     pdf_report.detail(f"{name}: missed {missing} of {expected} chunks (ignoring first {STARTUP_TIME}s).")
+    if missing > 0:
+        last_missing = -1
+        ptr = 0
+        for i in range(expected):
+            t = timestamps[0] + i * receiver.timestamp_step
+            while ptr < len(timestamps) and timestamps[ptr] < t:
+                ptr += 1
+            if ptr == len(timestamps) or timestamps[ptr] > t:
+                last_missing = i
+        last_missing_time = (last_missing + start_pos) * receiver.timestamp_step / receiver.scale_factor_timestamp
+        pdf_report.detail(f"Last missing chunk is #{last_missing} ({last_missing_time:.6f} s after original start).")
     with check:
         assert missing <= 1, f"{missing} of {expected} chunks missing for {name}"
 
