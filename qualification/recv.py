@@ -84,7 +84,6 @@ class ChunkQueue:
         self._chunks: deque[katgpucbf.recv.Chunk] = deque()
         # Event loops blocked in `get` (protected by the lock)
         self._waiters: list[_ChunkQueueWaiter] = list()
-        self._debug = 0
 
     def put_nowait(self, chunk: katgpucbf.recv.Chunk) -> None:
         """Add an item to the queue without blocking.
@@ -92,9 +91,6 @@ class ChunkQueue:
         If the queue is full, discard the oldest chunk.
         """
         with self._lock:
-            self._debug += 1
-            if self._debug % 64 == 0:
-                print(np.sum(chunk.present))
             empty = len(self._chunks) == 0
             if len(self._chunks) == self.maxsize:
                 self._chunks.popleft().recycle()
