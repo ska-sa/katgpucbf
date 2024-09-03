@@ -236,6 +236,10 @@ async def test_control(
     pdf_report.detail(f"Subscribed to {len(sensor_watcher.sensors)} sensors.")
 
     pdf_report.step("Set up periodic control.")
+    # We don't actually care about the gains, but setting it updates the
+    # steady-state timestamp, and ensures that consume_chunks sees only
+    # "fresh" data.
+    await cbf.product_controller_client.request("gain-all", "antenna-channelised-voltage", "default")
     rng = np.random.default_rng(seed=123)
     async with asyncio.TaskGroup() as tg:
         tasks = []
