@@ -17,6 +17,7 @@
 """Test that controlling a correlator doesn't cause data to be lost."""
 
 import asyncio
+import math
 import time
 from collections.abc import AsyncGenerator, Awaitable
 
@@ -79,7 +80,8 @@ async def consume_chunks(receiver: XBReceiver, timestamps: list[int]) -> None:
 
     The timestamps of the complete chunks are appended to `timestamps`.
     """
-    async for timestamp, chunk in receiver.complete_chunks():
+    max_delay = math.ceil(MAX_DELAY * receiver.scale_factor_timestamp)
+    async for timestamp, chunk in receiver.complete_chunks(max_delay=max_delay):
         with chunk:
             timestamps.append(timestamp)
 
