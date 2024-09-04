@@ -21,6 +21,7 @@ import asyncio
 import ctypes
 import logging
 import math
+import os
 from collections.abc import AsyncGenerator, Callable, Sequence
 from typing import TYPE_CHECKING, Literal, overload
 
@@ -440,7 +441,19 @@ def _create_receive_stream_group(
                 user_data=user_data.ctypes.data_as(ctypes.c_void_p),
             ),
         )
+        # Opt in to real-time scheduling just while creating the thread pool,
+        # so that the thread inherits it.
+        scheduling_set = False
+        try:
+            old_policy = os.sched_getscheduler(0)
+            old_param = os.sched_getparam(0)
+            os.sched_setscheduler(0, os.SCHED_RR, os.sched_param(1))
+            scheduling_set = True
+        except PermissionError:
+            logger.warning("Real-time scheduling could not be enabled (permission denied)")
         stream = group.emplace_back(spead2.ThreadPool(1, [core]), stream_config, chunk_stream_config)
+        if scheduling_set:
+            os.sched_setscheduler(0, old_policy, old_param)
 
         if use_ibv:
             config = spead2.recv.UdpIbvConfig(

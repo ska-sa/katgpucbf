@@ -48,14 +48,15 @@ pipeline {
        *
        * --ulimit=memlock=-1: This argument is required when using ibverbs.
        *
+       * --ulimit=rtprio=1: Allows qualification tests to use real-time scheduling.
+       *
        * -e NVIDIA_MOFED=enabled: This will pass the drivers required for ibverbs
        * to the container.
        *
        * --runtime=nvidia': The NVIDIA Container Runtime is used to pass the ibverbs
        * devices into the container.
-       *
        */
-      args '--network=host --ulimit=memlock=-1 -e NVIDIA_MOFED=enabled --runtime=nvidia'
+      args '--network=host --ulimit=memlock=-1 --ulimit=rtprio=1 -e NVIDIA_MOFED=enabled --runtime=nvidia'
     }
   }
 
