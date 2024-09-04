@@ -35,6 +35,7 @@ appdirs==1.4.4
     # via
     #   -c requirements.txt
     #   katsdpsigproc
+    #   pycuda
 asttokens==2.4.1
     # via stack-data
 async-solipsism==0.7
@@ -232,7 +233,6 @@ pip-tools==7.3.0
 platformdirs==4.2.2
     # via
     #   -c requirements.txt
-    #   pycuda
     #   pytools
     #   virtualenv
 pluggy==1.5.0
@@ -263,7 +263,7 @@ pybtex==0.24.0
     #   sphinxcontrib-bibtex
 pybtex-docutils==1.0.3
     # via sphinxcontrib-bibtex
-pycuda==2024.1.2
+pycuda==2023.1
     # via
     #   -c requirements.txt
     #   katsdpsigproc
