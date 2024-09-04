@@ -519,10 +519,13 @@ def core_allocator(cores: list[int]) -> CoreAllocator:
 
 
 @pytest.fixture
-async def receive_baseline_correlation_products(
+def receive_baseline_correlation_products_manual_start(
     pytestconfig: pytest.Config, cbf: CBFRemoteControl, core_allocator: CoreAllocator
-) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
-    """Create a spead2 receive stream for ingesting X-engine output."""
+) -> Generator[BaselineCorrelationProductsReceiver, None, None]:
+    """Create a spead2 receive stream for ingesting X-engine output.
+
+    This fixture does not start the receiver.
+    """
     interface_address = get_interface_address(pytestconfig.getini("interface"))
     # This will require running pytest with spead2_net_raw which is unusual.
     use_ibv = pytestconfig.getini("use_ibv")
@@ -534,16 +537,26 @@ async def receive_baseline_correlation_products(
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
+    yield receiver
+    receiver.stream_group.stop()
+
+
+@pytest.fixture
+async def receive_baseline_correlation_products(
+    receiver_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
+) -> BaselineCorrelationProductsReceiver:
+    """Create a spead2 receive stream for ingesting X-engine output."""
+    receiver = receiver_baseline_correlation_products_manual_start
+    receiver.start()
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests).
     await receiver.next_complete_chunk(max_delay=0)
-    yield receiver
-    receiver.stream.stop()
+    return receiver
 
 
 @pytest.fixture
-async def receive_tied_array_channelised_voltage(
+def receive_tied_array_channelised_voltage_manual_start(
     pytestconfig: pytest.Config,
     cbf: CBFRemoteControl,
     cbf_config: dict,
@@ -552,8 +565,11 @@ async def receive_tied_array_channelised_voltage(
     int_time: float,
     band: str,
     core_allocator: CoreAllocator,
-) -> AsyncGenerator[TiedArrayChannelisedVoltageReceiver, None]:
-    """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
+) -> Generator[TiedArrayChannelisedVoltageReceiver, None, None]:
+    """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams.
+
+    This fixture does not start the receiver.
+    """
     interface_address = get_interface_address(pytestconfig.getini("interface"))
     use_ibv = pytestconfig.getini("use_ibv")
     interface_gbps = float(pytestconfig.getini("interface_gbps"))
@@ -581,10 +597,19 @@ async def receive_tied_array_channelised_voltage(
     receiver = TiedArrayChannelisedVoltageReceiver(
         cbf=cbf, stream_names=stream_names, cores=cores, interface_address=interface_address, use_ibv=use_ibv
     )
+    yield receiver
+    receiver.stream_group.stop()
 
+
+@pytest.fixture
+async def receive_tied_array_channelised_voltage(
+    receive_tied_array_channelised_voltage_manual_start: TiedArrayChannelisedVoltageReceiver,
+) -> TiedArrayChannelisedVoltageReceiver:
+    """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
+    receiver = receive_tied_array_channelised_voltage_manual_start
+    receiver.start()
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests).
     await receiver.next_complete_chunk(max_delay=0)
-    yield receiver
-    receiver.stream.stop()
+    return receiver

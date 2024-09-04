@@ -51,7 +51,7 @@ class XBReceiver:
     """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
 
     # Attributes instantiated by the derived classes
-    stream: spead2.recv.ChunkStreamRingGroup
+    stream_group: spead2.recv.ChunkStreamRingGroup
     timestamp_step: int  # Step (in ADC samples) between chunk timestamps
 
     def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
@@ -92,6 +92,15 @@ class XBReceiver:
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
         self.cbf = cbf
         self._acv_name = acv_name
+
+    def start(self) -> None:
+        """Start receiving data.
+
+        This is not done by the constructor, to allow it to be delayed until a
+        test is ready for the incoming data.
+        """
+        for stream in self.stream_group:
+            stream.start()
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
         """Check whether this chunk is complete (no missing data)."""
@@ -153,7 +162,7 @@ class XBReceiver:
         if min_timestamp is None:
             min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
 
-        data_ringbuffer = self.stream.data_ringbuffer
+        data_ringbuffer = self.stream_group.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         try:
             async with asyncio.timeout(time_limit) as timer:
@@ -294,7 +303,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         self.bls_ordering = ast.literal_eval(cbf.init_sensors[f"{stream_name}.bls-ordering"].value.decode())
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
 
-        self.stream = create_baseline_correlation_product_receive_stream(
+        self.stream_group = create_baseline_correlation_product_receive_stream_group(
             interface_address,
             multicast_endpoints=self.multicast_endpoints[0],
             cores=cores,
@@ -356,7 +365,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             for stream_name in stream_names
         ]
 
-        self.stream = create_tied_array_channelised_voltage_receive_stream(
+        self.stream_group = create_tied_array_channelised_voltage_receive_stream_group(
             interface_address,
             multicast_endpoints=self.multicast_endpoints,
             cores=cores,
@@ -464,12 +473,10 @@ def _create_receive_stream_group(
             for ep in endpoints:
                 stream.add_udp_reader(*ep, interface_address=interface_address)
 
-    for stream in group:
-        stream.start()
     return group
 
 
-def create_baseline_correlation_product_receive_stream(
+def create_baseline_correlation_product_receive_stream_group(
     interface_address: str,
     multicast_endpoints: list[tuple[str, int]],
     cores: Sequence[int],
@@ -525,15 +532,15 @@ def create_baseline_correlation_product_receive_stream(
         0,
         chunk_place.ctypes,
         # np.ones is used to ensure that the memory is paged in
-        lambda stream: katgpucbf.recv.Chunk(
+        lambda stream_group: katgpucbf.recv.Chunk(
             present=np.ones(HEAPS_PER_CHUNK, np.uint8),
             data=np.ones((n_chans, n_bls, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
-            sink=stream,
+            sink=stream_group,
         ),
     )
 
 
-def create_tied_array_channelised_voltage_receive_stream(
+def create_tied_array_channelised_voltage_receive_stream_group(
     interface_address: str,
     multicast_endpoints: Sequence[list[tuple[str, int]]],
     cores: Sequence[int],
@@ -590,10 +597,10 @@ def create_tied_array_channelised_voltage_receive_stream(
         beam_ants_dtype.itemsize,
         chunk_place.ctypes,
         # np.ones is used to ensure that the memory is paged in
-        lambda stream: katgpucbf.recv.Chunk(
+        lambda stream_group: katgpucbf.recv.Chunk(
             present=np.ones((n_beams, n_substreams), np.uint8),
             extra=np.ones((n_beams, n_substreams), beam_ants_dtype),
             data=np.ones((n_beams, n_chans, n_spectra_per_heap, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
-            sink=stream,
+            sink=stream_group,
         ),
     )
