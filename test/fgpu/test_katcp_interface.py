@@ -37,8 +37,8 @@ GAIN = 0.125  # Exactly representable to avoid some rounding issues
 def assert_valid_complex(value: str) -> None:
     """Check that `value` is a valid encoding of a complex number according to the ICD."""
     # This check is actually somewhat stricter e.g. it doesn't allow scientific
-    # notation and requires the decimal point to the present.
-    assert re.fullmatch(r"-?[0-9]+\.[0-9]+[+-][0-9]+\.[0-9]+j", value)
+    # notation.
+    assert re.fullmatch(r"-?[0-9]+(?:\.[0-9]+)?[+-][0-9]+(?:\.[0-9]+)?j", value)
     complex(value)  # The regex should be sufficient, but this provides extra validation
 
 
@@ -71,9 +71,9 @@ class TestKatcpRequests:
     async def test_initial_gain(self, engine_client: aiokatcp.Client, pol: int) -> None:
         """Test that the command-line gain is set correctly."""
         reply, _informs = await engine_client.request("gain", "wideband", pol)
-        assert reply == [b"0.125+0.0j"]
+        assert reply == [b"0.125+0j"]
         sensor_value = await engine_client.sensor_value(f"wideband.input{pol}.eq", str)
-        assert sensor_value == "[0.125+0.0j]"
+        assert sensor_value == "[0.125+0j]"
 
     @pytest.mark.parametrize("pol", range(N_POLS))
     async def test_gain_set_scalar(self, engine_client: aiokatcp.Client, engine_server: Engine, pol: int) -> None:
@@ -174,7 +174,7 @@ class TestKatcpRequests:
         await engine_client.request("gain-all", "wideband", "default")
         for pol in range(N_POLS):
             sensor_value = await engine_client.sensor_value(f"wideband.input{pol}.eq", str)
-            assert sensor_value == "[0.125+0.0j]"
+            assert sensor_value == "[0.125+0j]"
 
     async def test_gain_all_empty(self, engine_client: aiokatcp.Client) -> None:
         """Test that an error is raised if ``?gain-all`` is used with no values."""

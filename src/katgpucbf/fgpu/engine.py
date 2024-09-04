@@ -399,7 +399,10 @@ def format_complex(value: numbers.Complex) -> str:
     enough significant figures for the dtype, which means that reading it back
     as a Python complex may not give exactly the same value.
     """
-    return f"{value.real}{value.imag:+}j"
+    # 17 digits of precision is what Python itself uses for repr(float): it
+    # has enough precision to ambiguously represent all IEEE double-precision
+    # values.
+    return f"{value:.17g}"
 
 
 def dig_rms_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
@@ -1099,7 +1102,9 @@ class Pipeline:
             # All the values are the same, so it can be reported as a single value
             gains = gains[:1]
         sensor = self.engine.sensors[f"{self.output.name}.input{input}.eq"]
-        sensor.value = "[" + ", ".join(format_complex(gain) for gain in gains) + "]"
+        # The .tolist() improves performance by having numpy convert all the
+        # values to Python scalars.
+        sensor.value = "[" + ", ".join(format_complex(gain) for gain in gains.tolist()) + "]"
 
 
 class Engine(aiokatcp.DeviceServer):
@@ -1614,7 +1619,8 @@ class Engine(aiokatcp.DeviceServer):
             gains = pipeline.gains[:, input]
             if np.all(gains == gains[0]):
                 gains = gains[:1]
-            return tuple(format_complex(gain) for gain in gains)
+            # The .tolist() is for performance.
+            return tuple(format_complex(gain) for gain in gains.tolist())
         else:
             gains = _parse_gains(*values, channels=output.channels, default_gain=None)
             pipeline.set_gains(input, gains)
