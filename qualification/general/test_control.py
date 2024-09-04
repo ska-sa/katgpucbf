@@ -17,6 +17,7 @@
 """Test that controlling a correlator doesn't cause data to be lost."""
 
 import asyncio
+import math
 import time
 from collections.abc import AsyncGenerator, Awaitable
 
@@ -79,7 +80,9 @@ async def consume_chunks(receiver: XBReceiver, timestamps: list[int]) -> None:
 
     The timestamps of the complete chunks are appended to `timestamps`.
     """
-    async for timestamp, chunk in receiver.complete_chunks():
+    max_delay = math.ceil(MAX_DELAY * receiver.scale_factor_timestamp)
+    receiver.start()
+    async for timestamp, chunk in receiver.complete_chunks(max_delay=max_delay):
         with chunk:
             timestamps.append(timestamp)
 
@@ -215,8 +218,8 @@ def check_timestamps(
 @pytest.mark.xfail(reason="Not 100% reliable yet (NGC-1265)")
 async def test_control(
     cbf: CBFRemoteControl,
-    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
-    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    receive_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
+    receive_tied_array_channelised_voltage_manual_start: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
     sensor_watcher: aiokatcp.SensorWatcher,
 ) -> None:
@@ -242,8 +245,10 @@ async def test_control(
                     tasks.append(tg.create_task(control_tacv_delays(rng, cbf, pdf_report, name)))
         timestamps_bcp: list[int] = []
         timestamps_tacv: list[int] = []
-        tasks.append(tg.create_task(consume_chunks(receive_baseline_correlation_products, timestamps_bcp)))
-        tasks.append(tg.create_task(consume_chunks(receive_tied_array_channelised_voltage, timestamps_tacv)))
+        tasks.append(tg.create_task(consume_chunks(receive_baseline_correlation_products_manual_start, timestamps_bcp)))
+        tasks.append(
+            tg.create_task(consume_chunks(receive_tied_array_channelised_voltage_manual_start, timestamps_tacv))
+        )
         pdf_report.step(f"Run correlator for {TEST_TIME}s.")
         await asyncio.sleep(TEST_TIME)
         pdf_report.detail("Stop asynchronous tasks.")
@@ -251,9 +256,14 @@ async def test_control(
             task.cancel()
 
     pdf_report.step("Check timestamps of received chunks")
-    check_timestamps("baseline_correlation_products", receive_baseline_correlation_products, pdf_report, timestamps_bcp)
     check_timestamps(
-        "tied_array_channelised_voltage", receive_tied_array_channelised_voltage, pdf_report, timestamps_tacv
+        "baseline_correlation_products", receive_baseline_correlation_products_manual_start, pdf_report, timestamps_bcp
+    )
+    check_timestamps(
+        "tied_array_channelised_voltage",
+        receive_tied_array_channelised_voltage_manual_start,
+        pdf_report,
+        timestamps_tacv,
     )
 
 
