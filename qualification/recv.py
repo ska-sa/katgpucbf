@@ -466,7 +466,10 @@ def _create_receive_stream_group(
 
         if use_ibv:
             config = spead2.recv.UdpIbvConfig(
-                endpoints=endpoints, interface_address=interface_address, buffer_size=64 * 1024 * 1024, comp_vector=core
+                endpoints=endpoints,
+                interface_address=interface_address,
+                buffer_size=128 * 1024 * 1024,
+                comp_vector=core,
             )
             stream.add_udp_ibv_reader(config)
         else:
