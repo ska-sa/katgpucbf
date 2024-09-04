@@ -524,9 +524,10 @@ def create_baseline_correlation_product_receive_stream(
         max_chunks,
         0,
         chunk_place.ctypes,
+        # np.ones is used to ensure that the memory is paged in
         lambda stream: katgpucbf.recv.Chunk(
-            present=np.empty(HEAPS_PER_CHUNK, np.uint8),
-            data=np.empty((n_chans, n_bls, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
+            present=np.ones(HEAPS_PER_CHUNK, np.uint8),
+            data=np.ones((n_chans, n_bls, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
             sink=stream,
         ),
     )
@@ -588,10 +589,11 @@ def create_tied_array_channelised_voltage_receive_stream(
         max_chunks,
         beam_ants_dtype.itemsize,
         chunk_place.ctypes,
+        # np.ones is used to ensure that the memory is paged in
         lambda stream: katgpucbf.recv.Chunk(
-            present=np.empty((n_beams, n_substreams), np.uint8),
-            extra=np.zeros((n_beams, n_substreams), beam_ants_dtype),
-            data=np.empty((n_beams, n_chans, n_spectra_per_heap, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
+            present=np.ones((n_beams, n_substreams), np.uint8),
+            extra=np.ones((n_beams, n_substreams), beam_ants_dtype),
+            data=np.ones((n_beams, n_chans, n_spectra_per_heap, COMPLEX), dtype=np.dtype(f"int{n_bits_per_sample}")),
             sink=stream,
         ),
     )
