@@ -34,7 +34,7 @@ cffi==1.17.0
     # via
     #   -c scratch/benchmarks/../../requirements.txt
     #   cryptography
-cryptography==42.0.4
+cryptography==43.0.1
     # via asyncssh
 frozenlist==1.4.0
     # via
