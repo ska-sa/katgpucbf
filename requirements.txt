@@ -12,7 +12,7 @@ aiohttp==3.10.3
     # via
     #   aiomonitor
     #   prometheus-async
-aiokatcp==2.0.0
+aiokatcp @ git+https://github.com/ska-sa/aiokatcp@NGC-1440-sensor-update-disconnect
     # via katgpucbf (setup.cfg)
 aiomonitor==0.7.0
     # via katsdpservices
