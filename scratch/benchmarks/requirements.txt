@@ -30,11 +30,11 @@ attrs==23.1.0
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   aiohttp
-cffi==1.16.0
+cffi==1.17.0
     # via
     #   -c scratch/benchmarks/../../requirements.txt
     #   cryptography
-cryptography==42.0.4
+cryptography==43.0.1
     # via asyncssh
 frozenlist==1.4.0
     # via
@@ -87,7 +87,7 @@ prometheus-client==0.19.0
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   -r scratch/benchmarks/requirements.in
-pycparser==2.21
+pycparser==2.22
     # via
     #   -c scratch/benchmarks/../../requirements.txt
     #   cffi
