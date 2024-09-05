@@ -543,10 +543,10 @@ def receive_baseline_correlation_products_manual_start(
 
 @pytest.fixture
 async def receive_baseline_correlation_products(
-    receiver_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
+    receive_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
 ) -> BaselineCorrelationProductsReceiver:
     """Create a spead2 receive stream for ingesting X-engine output."""
-    receiver = receiver_baseline_correlation_products_manual_start
+    receiver = receive_baseline_correlation_products_manual_start
     receiver.start()
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
