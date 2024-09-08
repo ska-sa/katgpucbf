@@ -215,7 +215,6 @@ def check_timestamps(
 
 # TODO: once requirements spec is finalised, note which requirements
 # this corresponds to.
-@pytest.mark.xfail(reason="Not 100% reliable yet (NGC-1265)")
 async def test_control(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
