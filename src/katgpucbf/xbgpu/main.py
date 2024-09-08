@@ -329,9 +329,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--recv-buffer",
         type=int,
-        default=32 * 1024 * 1024,
+        default=128 * 1024 * 1024,
         metavar="BYTES",
-        help="Size of network receive buffer [32MiB]",
+        help="Size of network receive buffer [128MiB]",
     )
     parser.add_argument(
         "--send-affinity", type=int, default=-1, help="Core to which the sender thread will be bound [not bound]."
