@@ -26,7 +26,6 @@ from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0096")
-@pytest.mark.xfail(reason="requirement needs to be updated")
 async def test_accum_length(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
