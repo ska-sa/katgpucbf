@@ -206,9 +206,9 @@ class XBReceiver:
         Raises
         ------
         TimeoutError
-            if a complete chunk is not received in time
+            If a complete chunk is not received in time
         RuntimeError
-            if the stream is stopped before a complete chunk is received
+            If the stream is stopped before a complete chunk is received
         """
         async with asyncio.timeout(timeout):
             async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
@@ -239,9 +239,9 @@ class XBReceiver:
         Raises
         ------
         TimeoutError
-            if a complete chunk is not received in time
+            If a complete chunk is not received in time
         RuntimeError
-            if the stream is stopped before a complete chunk is received
+            If the stream is stopped before a complete chunk is received
         """
         async with asyncio.timeout(timeout):
             async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):

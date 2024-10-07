@@ -96,7 +96,7 @@ async def control_acv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pd
     Raises
     ------
     AssertionError
-        if it takes more than 1s to set the delays
+        If it takes more than 1s to set the delays
     """
     pcc = cbf.product_controller_client
     n_inputs = len(cbf.config["outputs"][name]["input_labels"])
@@ -137,7 +137,7 @@ async def control_tacv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, p
     Raises
     ------
     AssertionError
-        if it takes more than 1s to set the delays
+        If it takes more than 1s to set the delays
     """
     pcc = cbf.product_controller_client
     src_stream = cbf.config["outputs"][name]["src_streams"][0]

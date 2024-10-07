@@ -121,11 +121,11 @@ class Accum(Generic[_T]):
         Raises
         ------
         ValueError
-            if `start_timestamp` > `end_timestamp`
+            If `start_timestamp` > `end_timestamp`
         ValueError
-            if the new data overlaps or preceeds previous data
+            If the new data overlaps or preceeds previous data
         ValueError
-            if [start_timestamp, end_timestamp) crosses a window boundary
+            If [start_timestamp, end_timestamp) crosses a window boundary
         """
         if start_timestamp > end_timestamp:
             raise ValueError("start_timestamp ({start_timestamp}) > end_timestamp ({end_timestamp})")
