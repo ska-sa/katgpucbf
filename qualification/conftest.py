@@ -36,7 +36,7 @@ from katsdpservices import get_interface_address
 from katgpucbf.meerkat import BANDS
 
 from .cbf import CBFCache, CBFRemoteControl, FailedCBF
-from .recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
 from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
@@ -550,8 +550,9 @@ async def receive_baseline_correlation_products(
     receiver.start()
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
-    # tests).
-    await receiver.next_complete_chunk(max_delay=0)
+    # tests). The timeout is increased since it may take some time to get the
+    # data flowing at the start.
+    await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver
 
 
@@ -610,6 +611,7 @@ async def receive_tied_array_channelised_voltage(
     receiver.start()
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
-    # tests).
-    await receiver.next_complete_chunk(max_delay=0)
+    # tests). The timeout is increased since it may take some time to get the
+    # data flowing at the start.
+    await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver

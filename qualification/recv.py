@@ -44,6 +44,7 @@ from katgpucbf.utils import TimeConverter
 
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
+DEFAULT_TIMEOUT = 10.0
 logger = logging.getLogger(__name__)
 
 
@@ -189,7 +190,7 @@ class XBReceiver:
         min_timestamp: int | None = None,
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
-        timeout: float | None = 10.0,
+        timeout: float | None = DEFAULT_TIMEOUT,
     ) -> tuple[int, np.ndarray]:
         """Return the data from the next complete chunk from the stream.
 
@@ -199,11 +200,53 @@ class XBReceiver:
         ----------
         min_timestamp, max_delay
             See :meth:`complete_chunks`
+        timeout
+            Maximum time to wait
+
+        Raises
+        ------
+        TimeoutError
+            If a complete chunk is not received in time
+        RuntimeError
+            If the stream is stopped before a complete chunk is received
         """
         async with asyncio.timeout(timeout):
             async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
                 with chunk:
                     return timestamp, np.array(chunk.data)  # Makes a copy before we return the chunk
+        raise RuntimeError("stream was shut down before we received a complete chunk")
+
+    async def wait_complete_chunk(
+        self,
+        min_timestamp: int | None = None,
+        *,
+        max_delay: int = DEFAULT_MAX_DELAY,
+        timeout: float | None = DEFAULT_TIMEOUT,
+    ) -> int:
+        """Wait for a complete chunk, but do not return it.
+
+        Only the timestamp is returned. This is more efficient than
+        :meth:`next_complete_chunk` because it does not need to copy the data
+        from the chunk.
+
+        Parameters
+        ----------
+        min_timestamp, max_delay
+            See :meth:`complete_chunks`
+        timeout
+            Maximum time to wait
+
+        Raises
+        ------
+        TimeoutError
+            If a complete chunk is not received in time
+        RuntimeError
+            If the stream is stopped before a complete chunk is received
+        """
+        async with asyncio.timeout(timeout):
+            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
+                chunk.recycle()
+                return timestamp
         raise RuntimeError("stream was shut down before we received a complete chunk")
 
     async def consecutive_chunks(
@@ -212,7 +255,7 @@ class XBReceiver:
         min_timestamp: int | None = None,
         *,
         max_delay: int = DEFAULT_MAX_DELAY,
-        timeout: float | None = 10.0,
+        timeout: float | None = DEFAULT_TIMEOUT,
     ) -> list[tuple[int, katgpucbf.recv.Chunk]]:
         """Obtain `n` consecutive complete chunks from the stream.
 
@@ -340,7 +383,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             min_timestamp: int | None = None,
             *,
             max_delay: int = DEFAULT_MAX_DELAY,
-            timeout: float | None = 10.0,
+            timeout: float | None = DEFAULT_TIMEOUT,
         ) -> tuple[int, NDArray[np.int32]]:  # noqa: D102
             ...
 
