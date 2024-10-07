@@ -225,7 +225,9 @@ class XBReceiver:
     ) -> int:
         """Wait for a complete chunk, but do not return it.
 
-        Only the timestamp is returned.
+        Only the timestamp is returned. This is more efficient than
+        :meth:`next_complete_chunk` because it does not need to copy the data
+        from the chunk.
 
         Parameters
         ----------
