@@ -68,6 +68,7 @@ class TestXSend:
         n_engines: int,
         n_channels_per_substream: int,
         n_baselines: int,
+        first_heap: int,
     ) -> None:
         """Receive data transmitted from :func:`_send_data`.
 
@@ -83,7 +84,7 @@ class TestXSend:
         assert items == {}, "This heap contains item values not just the expected descriptors."
 
         # Check the data heaps
-        for i in range(TOTAL_HEAPS):
+        for i in range(first_heap, TOTAL_HEAPS):
             heap = await recv_stream.get()
             items = ig.update(heap)
             assert set(items.keys()) == {"timestamp", "frequency", "xeng_raw"}
@@ -156,6 +157,7 @@ class TestXSend:
             ),
             send_enabled=True,
         )
+        send_stream.send_enabled_timestamp = int(TIMESTAMP_SCALE * 1.5)
         await self._send_data(send_stream)
         # Stop the queue, to ensure that if recv_data tries to read more heaps
         # than were sent, it will error out rather than hanging.
@@ -163,4 +165,4 @@ class TestXSend:
 
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig())
         recv_stream.add_inproc_reader(queue)
-        await self._recv_data(recv_stream, n_engines, n_channels_per_substream, n_baselines)
+        await self._recv_data(recv_stream, n_engines, n_channels_per_substream, n_baselines, 2)

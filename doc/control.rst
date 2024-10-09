@@ -252,11 +252,14 @@ fgpu
 
 xbgpu
 ^^^^^
-:samp:`?capture-start {stream}`, :samp:`?capture-stop {stream}`
+:samp:`?capture-start {stream} [{timestamp}]`, :samp:`?capture-stop {stream}`
     Enable or disable transmission of output data. This does not affect
     transmission of descriptors, which cannot be disabled. In the initial
     state transmission is disabled, unless the :option:`!--send-enabled`
     command-line option has been passed.
+
+    If :samp:`{timestamp}` is specified, heaps with timestamps less than this
+    ADC timestamp will not be transmitted.
 
 :samp:`?beam-weights {stream} {weights}...`, :samp:`?beam-delays {stream} {delays}...`, :samp:`?beam-quant-gains {stream} {gain}`
     These have the same semantics as the equivalent katsdpcontroller

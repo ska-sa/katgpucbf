@@ -97,7 +97,7 @@ class Batch:
 
     It does not own its memory - the backing store is in :class:`Chunk`. It keeps
     a cached :class:`spead2.send.HeapReferenceList` with the heaps of the enabled
-    beams, along with a version counter that is used to invalidate it.
+    beams, along with a tuple of the enabled beams.
 
     Parameters
     ----------
@@ -134,7 +134,7 @@ class Batch:
             heap = item_group.get_heap(descriptors="none", data="all")
             heap.repeat_pointers = True
             self.heaps.append(heap)
-        self.send_enabled_version = -1
+        self.send_enabled = (False,) * n_beams
         self.send_heaps = spead2.send.HeapReferenceList([])
 
 
@@ -293,7 +293,11 @@ class Chunk:
         This method returns immediately and sends the data asynchronously. Before
         modifying the chunk, first await :attr:`future`.
         """
-        n_enabled = sum(send_stream.send_enabled)
+        send_enabled = tuple(
+            enabled and self.timestamp >= timestamp
+            for enabled, timestamp in zip(send_stream.send_enabled, send_stream.send_enabled_timestamp)
+        )
+        n_enabled = sum(send_enabled)
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         send_futures: list[asyncio.Future] = []
         if n_enabled > 0:
@@ -304,15 +308,15 @@ class Chunk:
                     # that did not have any input data. The updating of the
                     # batch's :class:`HeapReferenceList` is not time-critical.
                     continue
-                if batch.send_enabled_version != send_stream.send_enabled_version:
+                if batch.send_enabled != send_enabled:
                     batch.send_heaps = spead2.send.HeapReferenceList(
                         [
                             spead2.send.HeapReference(heap, substream_index=i, rate=rate)
-                            for i, (heap, enabled) in enumerate(zip(batch.heaps, send_stream.send_enabled))
+                            for i, (heap, enabled) in enumerate(zip(batch.heaps, send_enabled))
                             if enabled
                         ]
                     )
-                    batch.send_enabled_version = send_stream.send_enabled_version
+                    batch.send_enabled = send_enabled
                 send_futures.append(
                     send_stream.stream.async_send_heaps(batch.send_heaps, mode=spead2.send.GroupMode.ROUND_ROBIN)
                 )
@@ -330,7 +334,7 @@ class Chunk:
                 len(send_futures),  # Increment counters for as many calls to async_send_heaps
                 self.data.shape[2:],  # Get rid of 'batch' and 'beam' dimensions
                 self.data.dtype,
-                send_stream.send_enabled,
+                send_enabled,
                 send_stream.output_names,
                 self.saturated.copy(),  # Copy since the original may get overwritten
                 sensors,
@@ -407,7 +411,7 @@ class BSend(Send):
         send_enabled: bool = False,
     ) -> None:
         self.send_enabled = [send_enabled] * len(outputs)
-        self.send_enabled_version = 0
+        self.send_enabled_timestamp = [0] * len(outputs)
         n_beams = len(outputs)
         self.output_names = [output.name for output in outputs]
 
@@ -450,7 +454,7 @@ class BSend(Send):
             descriptor_heap=item_group.get_heap(descriptors="all", data="none"),
         )
 
-    def enable_beam(self, beam_id: int, enable: bool = True) -> None:
+    def enable_beam(self, beam_id: int, enable: bool = True, timestamp: int = 0) -> None:
         """Enable/Disable a beam's data transmission.
 
         :class:`.BSend` operates as a single, large stream with multiple
@@ -464,9 +468,11 @@ class BSend(Send):
         enable
             Boolean indicating whether the `beam_id` should be enabled or
             disabled.
+        timestamp
+            Minimum timestamp to transmit when enabled.
         """
         self.send_enabled[beam_id] = enable
-        self.send_enabled_version += 1
+        self.send_enabled_timestamp[beam_id] = timestamp
 
     async def get_free_chunk(self) -> Chunk:
         """Obtain a :class:`.Chunk` for transmission.
