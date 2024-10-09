@@ -571,13 +571,12 @@ async def test_phase_rate(
     )
 
 
-@pytest.mark.wideband_only
 async def test_group_delay(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
 ) -> None:
-    r"""Test the ``pfb-group-delay`` sensor.
+    r"""Test the ``filter-group-delay`` sensor.
 
     Verification method
     -------------------
@@ -724,7 +723,7 @@ async def test_group_delay(
     std = std2
     pdf_report.detail(f"Measured delay is {delay} ± {std} samples.")
 
-    reported_delay = await client.sensor_value("antenna-channelised-voltage.pfb-group-delay", float)
+    reported_delay = await client.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
     pdf_report.detail(f"Reported delay is {reported_delay}.")
     assert abs(reported_delay - delay) < 5 * std
     pdf_report.detail("Measured value agrees with reported value to within 5 sigma.")
