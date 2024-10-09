@@ -255,6 +255,7 @@ class XSend(Send):
 
         self.output_name = output_name
         self.send_enabled = send_enabled
+        self.send_enabled_timestamp = 0
 
         # Array Configuration Parameters
         self.n_ants: Final[int] = n_ants
@@ -301,7 +302,7 @@ class XSend(Send):
         heap
             Heap to send
         """
-        if self.send_enabled:
+        if self.send_enabled and heap.timestamp >= self.send_enabled_timestamp:
             saturated = int(heap.saturated)  # Save a copy before giving away the heap
             heap.future = self.stream.async_send_heap(heap.heap)
             self._heaps_queue.put_nowait(heap)
