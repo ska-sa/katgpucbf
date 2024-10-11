@@ -40,7 +40,7 @@ from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArra
 from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
-FULL_ANTENNAS = [1, 4, 5, 8, 10, 13, 16, 20, 24, 27, 32, 39, 40, 53, 55, 61, 64, 65, 71, 76, 80]
+FULL_ANTENNAS = list(range(81))
 pdf_report_data_key = pytest.StashKey[dict]()
 
 
