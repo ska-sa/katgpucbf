@@ -1,3 +1,4 @@
 -c ../requirements.txt
 -c ../requirements-dev.txt
 pytest
+pytest-repeat

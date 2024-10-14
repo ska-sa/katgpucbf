@@ -90,8 +90,8 @@ pipeline {
            --suppress-tests-failed-exit-code \
            --image-override katgpucbf:${katgpucbf_image} \
            --image-override katsdpcontroller:${katsdpcontroller_image} \
-           --junitxml=result.xml
-
+           --junitxml=result.xml \
+           --count 5
          '''
        }
      }

@@ -288,6 +288,7 @@ pytest==8.2.2
     #   pytest-asyncio
     #   pytest-check
     #   pytest-custom-exit-code
+    #   pytest-repeat
     #   pytest-reportlog
 pytest-asyncio==0.24.0
     # via
@@ -299,6 +300,8 @@ pytest-custom-exit-code==0.3.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (setup.cfg)
+pytest-repeat==0.9.3
+    # via -r qualification/requirements.in
 pytest-reportlog==0.4.0
     # via katgpucbf (setup.cfg)
 python-dateutil==2.9.0.post0
