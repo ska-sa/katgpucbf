@@ -429,22 +429,20 @@ def verify_corrprod_sensors(
     return skipped_accs_total
 
 
-def verify_beam_sensors(
+def verify_beam_prom_counters(
     *,
     beam_outputs: list[BOutput],
     beam_results_shape: tuple[int, ...],
     beam_dtype: np.dtype,
     prom_diff: PromDiff,
     actual_sensor_updates: dict[str, list[aiokatcp.Reading]],
-    first_timestamp: int,
-    last_timestamp: int,
-    weights: np.ndarray,
-    quant_gains: np.ndarray,
-    delays: np.ndarray,
     saturated_low: np.ndarray,
     saturated_high: np.ndarray,
 ) -> None:
-    """Verify katcp sensors and Prometheus counters for BPipeline data.
+    """Verify Prometheus counters for BPipeline data.
+
+    This also verifies the saturation count reported by the `beng-clip-cnt`
+    katcp sensor is the same as the equivalent Prometheus counter.
 
     Parameters
     ----------
@@ -461,16 +459,11 @@ def verify_beam_sensors(
         Collection of Prometheus metrics observed during the XBEngine's
         processing of data stimulus.
     actual_sensor_updates
-        Dictionary of lists of sensor updates. They dictionary keys are sensor
+        Dictionary of lists of sensor updates. The dictionary keys are sensor
         names, the values are a list of readings for each sensor update captured
-        via the callback attached to :class:`BPipeline` sensors.
-    first_timestamp, last_timestamp
-        Two timestamps indicating the start and end of data processing
-        by the :class:`BPipeline`.
-    weights, quant_gains, delays
-        The beam weights, quantiser-gains and delays applied to each input of
-        the beam data product. These are real floating-point values generated
-        for the unit test.
+        via the callback attached to :class:`BPipeline` sensors. This test only
+        requires the beng-clip-cnt sensor to verify the corresponding Prometheus
+        counter.
     saturated_low, saturated_high
         Lower and upper bounds on per-beam saturation counts. A range is
         necessary because dithering is not modelled on the host.
@@ -496,24 +489,49 @@ def verify_beam_sensors(
             stream_diff.diff("output_b_clipped_samples_total"),
         )
 
+
+def verify_beam_katcp_sensors(
+    beam_outputs: list[BOutput],
+    actual_sensor_updates: dict[str, list[aiokatcp.Reading]],
+    first_timestamp: int,
+    last_timestamp: int,
+    weights: np.ndarray,
+    quant_gains: np.ndarray,
+    delays: np.ndarray,
+) -> None:
+    """
+    Verify katcp sensors for BPipeline data.
+
+    Parameters
+    ----------
+    first_timestamp, last_timestamp
+        Two timestamps indicating the start and end of data processing
+        by the :class:`BPipeline`.
+    weights, quant_gains, delays
+        The beam weights, quantiser-gains and delays applied to each input of
+        the beam data product. These are real floating-point values generated
+        for the unit test.
+    """
+    for i, beam_output in enumerate(beam_outputs):
         assert first_timestamp < last_timestamp, (
             "Timestamp before katcp requests is not less than timestamp after data"
             f"has been processed: {first_timestamp} >= {last_timestamp}"
         )
-        assert actual_sensor_updates[f"{beam_output.name}.weight"] == [
-            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, str(list(weights[i])))
-        ]
-        assert actual_sensor_updates[f"{beam_output.name}.quantiser-gain"] == [
-            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, quant_gains[i])
-        ]
+        assert actual_sensor_updates[f"{beam_output.name}.weight"][-1] == aiokatcp.Reading(
+            last_timestamp, aiokatcp.Sensor.Status.NOMINAL, str(list(weights[i]))
+        )
+
+        assert actual_sensor_updates[f"{beam_output.name}.quantiser-gain"][-1] == aiokatcp.Reading(
+            last_timestamp, aiokatcp.Sensor.Status.NOMINAL, quant_gains[i]
+        )
 
         delay_updates_str = ", ".join(f"{delay}, {phase}" for delay, phase in delays[i])
         # The ?beam-delay request is submitted before the xbengine starts
         # receiving/processing data, so the `loadmcnt` is zero (it is
-        # applied immediately).
-        assert actual_sensor_updates[f"{beam_output.name}.delay"] == [
-            aiokatcp.Reading(mock.ANY, aiokatcp.Sensor.Status.NOMINAL, f"({first_timestamp}, {delay_updates_str})")
-        ]
+        # applied immediately)
+        assert actual_sensor_updates[f"{beam_output.name}.delay"][-1] == aiokatcp.Reading(
+            last_timestamp, aiokatcp.Sensor.Status.NOMINAL, f"({last_timestamp}, {delay_updates_str})"
+        )
 
 
 class TestEngine:
@@ -1008,11 +1026,11 @@ class TestEngine:
                 # The first timestamp should be zero as the xbengine has not
                 # been given data to process yet. That is, the xbengine is
                 # currently at idle.
-                first_timestamp = 0
                 await client.request("beam-weights", output.name, *weights[i])
                 await client.request("beam-quant-gains", output.name, quant_gains[i])
                 await client.request("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]])
 
+            last_timestamp = timestamp_step * present.shape[0]
             corrprod_results, beam_results, acc_indices, batch_indices = await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
@@ -1025,7 +1043,6 @@ class TestEngine:
                 n_spectra_per_heap=n_spectra_per_heap,
                 present=present,
             )
-            last_timestamp = present.shape[0] * timestamp_step
 
         verify_corrprod_data(
             corrprod_outputs=corrprod_outputs,
@@ -1079,19 +1096,35 @@ class TestEngine:
         # `beam_results` holds results for each heap transmitted by a
         # `beam_output` for all `beam_outputs`. We can reuse its dimensions in
         # the sensor verification below.
-        verify_beam_sensors(
+        verify_beam_prom_counters(
             beam_outputs=beam_outputs,
             beam_results_shape=beam_results.shape,
             beam_dtype=beam_results.dtype,
             prom_diff=prom_diff,
+            actual_sensor_updates=actual_sensor_updates,
+            saturated_low=expected_beam_saturated_low,
+            saturated_high=expected_beam_saturated_high,
+        )
+
+        for i, output in enumerate(beam_outputs):
+            # We only capture the timestamps before and after all katcp
+            # requests are executed as we only need to ensure it has
+            # increased across all three requests (not in between).
+            # The first timestamp should be zero as the xbengine has not
+            # been given data to process yet. That is, the xbengine is
+            # currently at idle.
+            await client.request("beam-weights", output.name, *weights[i])
+            await client.request("beam-quant-gains", output.name, quant_gains[i])
+            await client.request("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]])
+
+        verify_beam_katcp_sensors(
+            beam_outputs=beam_outputs,
             actual_sensor_updates=actual_sensor_updates,
             first_timestamp=first_timestamp,
             last_timestamp=last_timestamp,
             weights=weights,
             quant_gains=quant_gains,
             delays=delays,
-            saturated_low=expected_beam_saturated_low,
-            saturated_high=expected_beam_saturated_high,
         )
 
     @DEFAULT_PARAMETERS
