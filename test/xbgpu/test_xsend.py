@@ -165,4 +165,4 @@ class TestXSend:
 
         recv_stream = spead2.recv.asyncio.Stream(spead2.ThreadPool(), spead2.recv.StreamConfig())
         recv_stream.add_inproc_reader(queue)
-        await self._recv_data(recv_stream, n_engines, n_channels_per_substream, n_baselines, 2)
+        await self._recv_data(recv_stream, n_engines, n_channels_per_substream, n_baselines, first_heap=2)
