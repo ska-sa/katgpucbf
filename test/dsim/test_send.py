@@ -60,6 +60,7 @@ async def descriptor_recv(
     return ig
 
 
+@pytest.mark.slow
 async def test_sender(
     descriptor_recv_streams: Sequence[spead2.recv.asyncio.Stream],
     descriptor_inproc_queues: Sequence[spead2.InprocQueue],

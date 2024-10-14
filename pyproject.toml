@@ -34,7 +34,7 @@ known_local_folder = ["noisy_search", "remote", "sighandler"]
 [tool.pytest.ini_options]
 testpaths = "test"
 addopts = "--cov-context=test --cov-report html --import-mode=prepend"
-markers = ["mask_timestamp", "use_vkgdr", "cmdline_args", "spectra_per_heap"]
+markers = ["mask_timestamp", "use_vkgdr", "cmdline_args", "spectra_per_heap", "slow"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
