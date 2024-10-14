@@ -62,16 +62,16 @@ def make_item_group(bf_raw_shape: tuple[int, ...]) -> spead2.send.ItemGroup:
     """Create an item group (with no values)."""
     item_group = spead2.send.ItemGroup(flavour=FLAVOUR)
     item_group.add_item(
-        FREQUENCY_ID,
-        "frequency",  # Misleading name, but it's what the ICD specifies
-        "Value of the first channel in collections stored here.",
+        TIMESTAMP_ID,
+        "timestamp",
+        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
         shape=[],
         format=IMMEDIATE_FORMAT,
     )
     item_group.add_item(
-        TIMESTAMP_ID,
-        "timestamp",
-        "Timestamp provided by the MeerKAT digitisers and scaled to the digitiser sampling rate.",
+        FREQUENCY_ID,
+        "frequency",  # Misleading name, but it's what the ICD specifies
+        "Value of the first channel in collections stored here.",
         shape=[],
         format=IMMEDIATE_FORMAT,
     )
