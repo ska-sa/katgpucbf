@@ -500,15 +500,19 @@ class Pipeline:
             output.dither,
             narrowband=narrowband_config,
         )
+        if engine.dither_seed is None:
+            # The magic constant was chosen at random. It ensures that the
+            # seed won't be the same as in other types of engine that also use
+            # sync_time as the basis for seeding.
+            seed = int(engine.time_converter.sync_time) ^ 0x9CC11336C8B170B7
+        else:
+            seed = engine.dither_seed
         self._compute = template.instantiate(
             compute_queue,
             engine.n_samples,
             self.spectra,
             output.spectra_per_heap,
-            # The magic constant was chosen at random. It ensures that the
-            # seed won't be the same as in other types of engine that also use
-            # sync_time as the basis for seeding.
-            seed=int(engine.time_converter.sync_time) ^ 0x9CC11336C8B170B7,
+            seed=seed,
             sequence_first=engine.feng_id,
             sequence_step=engine.n_ants,
         )
@@ -1197,6 +1201,9 @@ class Engine(aiokatcp.DeviceServer):
         :class:`Monitor` to use for generating multiple :class:`~asyncio.Queue`
         objects needed to communicate between functions, and handling basic
         reporting for :class:`~asyncio.Queue` sizes and events.
+    dither_seed
+        If provided, this will override the default dither seed for this engine,
+        which is based on the sync time.
     """
 
     # TODO: VERSION means interface version, rather than software version. It
@@ -1241,6 +1248,7 @@ class Engine(aiokatcp.DeviceServer):
         use_vkgdr: bool,
         use_peerdirect: bool,
         monitor: Monitor,
+        dither_seed: int | None = None,
     ) -> None:
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
@@ -1273,6 +1281,7 @@ class Engine(aiokatcp.DeviceServer):
         self.use_peerdirect = use_peerdirect
         self.send_sample_bits = send_sample_bits
         self.vkgdr_handle = vkgdr_handle
+        self.dither_seed = dither_seed
 
         # Tuning knobs not exposed via arguments
         self.n_in = 3

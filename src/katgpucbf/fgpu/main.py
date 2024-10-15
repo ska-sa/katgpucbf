@@ -407,6 +407,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="UNIX time at which digitisers were synced.",
     )
     parser.add_argument(
+        "--dither-seed",
+        type=int,
+        help="Seed for random state generator used for dithering. [sync-time]",
+    )
+    parser.add_argument(
         "--mask-timestamp",
         action="store_true",
         help="Mask off bottom bits of timestamp (workaround for broken digitiser)",
@@ -505,6 +510,7 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
         use_vkgdr=args.use_vkgdr,
         use_peerdirect=args.use_peerdirect,
         monitor=monitor,
+        dither_seed=args.dither_seed,
     )
 
     return engine, monitor
