@@ -599,6 +599,12 @@ async def test_group_delay(
     cancels out when measuring phase differences, but ensures that there is
     variation in the phases and thus helps prevent systematic bias in the
     quantisation errors.
+
+    The test is replicated across many channels to increase the number of
+    samples and hence improve signal-to-noise. The channels are divided amongst
+    the simulated antennas then combined by beamforming, which allows for
+    larger amplitudes without saturation in the time domain, and also speeds up
+    the test.
     """
     receiver = receive_tied_array_channelised_voltage
     client = cbf.product_controller_client
@@ -609,11 +615,20 @@ async def test_group_delay(
     n_spectra = n_chunks * receiver.n_spectra_per_heap
     acc_time = n_chunks * chunk_timestamp_step / receiver.scale_factor_timestamp
 
-    pdf_report.step("Choose a channel.")
-    # Channel is largely arbitrary, although we should avoid the DC frequency
-    channel = receiver.n_chans // 5
-    cfreq = receiver.channel_frequency(channel)
-    pdf_report.detail(f"Using channel {channel}.")
+    pdf_report.step("Choose channels.")
+    channel_step = 8  # Gap to minimise leakage between tones
+    freq_step = receiver.bandwidth / receiver.n_chans * channel_step
+    n_channels = min(receiver.n_chans // channel_step, 1024)
+    channels = np.arange(channel_step // 2, channel_step * n_channels, channel_step, dtype=int)
+    cfreqs = receiver.channel_frequency(channels)
+    pdf_report.detail(f"Using {n_channels} channels separated by {channel_step} channels ({freq_step} Hz).")
+
+    # Distribute the channels amongst the dsims (round-robin)
+    n_dsims = len(cbf.dsim_clients)
+    cfreqs_by_dsim = [[] for _ in range(n_dsims)]
+    for i, freq in enumerate(cfreqs):
+        cfreqs_by_dsim[i % n_dsims].append(freq)
+    freq_step_dsim = freq_step * n_dsims
 
     pdf_report.step("Determine dsim frequency resolution.")
     dsim_period = await cbf.dsim_clients[0].sensor_value("max-period", int)
@@ -621,7 +636,7 @@ async def test_group_delay(
     pdf_report.detail(f"Resolution is {dsim_resolution:.6f} Hz.")
 
     pdf_report.step("Set F-engine gains.")
-    amplitude = 0.8
+    amplitude = 0.99 / len(cfreqs_by_dsim[0])
     gain = receiver.compute_tone_gain(amplitude, 100)
     await client.request("gain-all", "antenna-channelised-voltage", gain)
     pdf_report.detail(f"Set gain on all channels to {gain}.")
@@ -634,13 +649,7 @@ async def test_group_delay(
     await client.request("delays", "antenna-channelised-voltage", receiver.sync_time, *delay_models)
     pdf_report.detail(f"Set delays to {delay_model} for all inputs.")
 
-    pdf_report.step("Set beamformer weights to use only one antenna.")
-    weights = np.zeros(len(receiver.source_indices[0]))
-    weights[0] = 1.0
-    await client.request("beam-weights", receiver.stream_names[0], *weights)
-    pdf_report.detail(f"Set weights on {receiver.stream_names[0]}.")
-
-    async def measure_once(freqs: tuple[float, float]) -> tuple[float, float, float]:
+    async def measure_once(rel_freqs: tuple[float, float]) -> tuple[float, float, float]:
         """Estimate group delay for a single pair of frequencies.
 
         The delay is ambiguous and could actually be any value of the form
@@ -656,16 +665,25 @@ async def test_group_delay(
             Standard deviation in the delay estimate. Note that the distribution is
             non-Gaussian and is due to quantisation error, which is bounded.
         """
-        signal = f"cw({amplitude}, {freqs[0]}); cw({amplitude}, {freqs[1]});"
-        await cbf.dsim_clients[0].request("signals", signal, dsim_period)
-        pdf_report.detail(f"dsim signal set to {signal}.")
+        async with asyncio.TaskGroup() as tg:
+            for dsim_client, freqs in zip(cbf.dsim_clients, cfreqs_by_dsim):
+                if freqs:
+                    signal = " ".join(
+                        f"multicw({len(freqs)}, {amplitude}, 0.0, {freqs[0] + rfreq}, {freq_step_dsim});"
+                        for rfreq in rel_freqs
+                    )
+                else:
+                    signal = "0;0;"
+                tg.create_task(dsim_client.request("signals", signal, dsim_period))
+                pdf_report.detail(f"Set dsim signal to {signal}.")
+        pdf_report.detail("All dsim signals set.")
 
         pdf_report.detail(f"Receive {n_chunks} chunks of contiguous data.")
         i = 0
         attempts = 0
         first_timestamp = -1
         # First axis corresponds to the 2 signals we're comparing.
-        raw_data = np.ones((2, n_spectra, COMPLEX), np.int8)
+        raw_data = np.ones((2, len(cfreqs), n_spectra, COMPLEX), np.int8)
         try:
             async with asyncio.timeout(30.0):
                 async for timestamp, chunk in receiver.complete_chunks():
@@ -676,7 +694,7 @@ async def test_group_delay(
                             attempts += 1
                         start_spectrum = i * receiver.n_spectra_per_heap
                         end_spectrum = (i + 1) * receiver.n_spectra_per_heap
-                        raw_data[:, start_spectrum:end_spectrum] = chunk.data[:2, channel]
+                        raw_data[:, :, start_spectrum:end_spectrum] = chunk.data[:2, channels]
                     i += 1
                     if i == n_chunks:
                         pdf_report.detail(f"Received all chunks after {attempts} attempt(s).")
@@ -692,13 +710,16 @@ async def test_group_delay(
         # Phase-rotate everything to be referenced to ref_timestamp
         rel_timestamps = np.arange(n_spectra) * receiver.n_samples_between_spectra + (first_timestamp - ref_timestamp)
         rel_times = rel_timestamps / receiver.scale_factor_timestamp
-        data *= np.exp(-2j * np.pi * rel_times[np.newaxis, :] * np.array(freqs)[:, np.newaxis])
+        freqs = cfreqs[np.newaxis, :] + np.asarray(rel_freqs)[:, np.newaxis]
+        data *= np.exp(-2j * np.pi * rel_times[np.newaxis, np.newaxis, :] * freqs[:, :, np.newaxis])
         # The phases should all be similar, but without np.unwrap they could
         # make jumps of 2*pi, which would mess up taking the mean.
-        phase = np.unwrap(np.angle(data[1]) - np.angle(data[0]))
+        phase = np.angle(data[1]) - np.angle(data[0])
+        phase = np.unwrap(phase, axis=1)
+        phase = np.unwrap(phase, axis=0)
         mean_phase = wrap_angle(np.mean(phase))
-        std_phase = np.std(phase) / np.sqrt(len(phase) - 1)
-        scale = receiver.scale_factor_timestamp / (2 * np.pi * (freqs[1] - freqs[0]))
+        std_phase = np.std(phase) / np.sqrt(phase.size - 1)
+        scale = receiver.scale_factor_timestamp / (2 * np.pi * (rel_freqs[1] - rel_freqs[0]))
         delay = -mean_phase * scale
         period = 2 * np.pi * scale
         std = std_phase * scale
@@ -706,12 +727,12 @@ async def test_group_delay(
         return delay, period, std
 
     pdf_report.step("Compare two tones that differ as little as possible.")
-    delay1, period1, std1 = await measure_once((cfreq, cfreq + dsim_resolution))
+    delay1, period1, std1 = await measure_once((0.0, dsim_resolution))
 
     pdf_report.step("Compare two tones that differ by 2/3 of a channel.")
     channel_width = receiver.bandwidth / receiver.n_chans
     steps = round(channel_width / 3 / dsim_resolution)
-    delay2, period2, std2 = await measure_once((cfreq - steps * dsim_resolution, cfreq + steps * dsim_resolution))
+    delay2, period2, std2 = await measure_once((-steps * dsim_resolution, steps * dsim_resolution))
 
     pdf_report.step("Analyse results.")
     assert 5 * std1 < period2  # Ensure the first test localised things sufficiently
