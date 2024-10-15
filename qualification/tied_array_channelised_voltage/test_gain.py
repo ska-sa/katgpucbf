@@ -63,7 +63,10 @@ async def test_gain(
         pdf_report.detail(f"Set gain for {stream_name} to {gain}.")
 
     pdf_report.step("Collect data.")
-    timestamp, data = await receiver.next_complete_chunk()
+    # 10 seconds seems to be enough time to stabilise, so let's settle on 15 seconds for
+    # reproducibility
+    min_timestamp = int(cbf.config["outputs"]["dsim000h"]["adc_sample_rate"]) * 15
+    timestamp, data = await receiver.next_complete_chunk(min_timestamp=min_timestamp)
     pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
 
     pdf_report.step("Check power level of each beam.")
