@@ -25,6 +25,7 @@ import spead2
 import spead2.recv.asyncio
 import spead2.send.asyncio
 from aiokatcp import Sensor, SensorSet
+from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint
 
@@ -37,7 +38,7 @@ from katgpucbf.xbgpu.output import BOutput
 from . import test_parameters
 
 BATCHES_PER_CHUNK: Final[int] = 5
-N_CHUNKS: Final[int] = 2
+N_CHUNKS: Final[int] = 4
 SEND_HEAPS_PER_SUBSTREAM: Final[int] = N_CHUNKS * BATCHES_PER_CHUNK
 
 
@@ -149,6 +150,7 @@ class TestBSend:
         n_channels_per_substream: int,
         n_spectra_per_heap: int,
         heap_timestamp_step: int,
+        first_heap: Sequence[int],
     ) -> None:
         """Receive data transmitted from :meth:`_send_data`.
 
@@ -165,6 +167,8 @@ class TestBSend:
         n_engines, engine_id, channel_offset, n_channels_per_substream, n_spectra_per_heap, heap_timestamp_step
             Variables declared by the calling unit test to verify
             transmitted data.
+        first_heap
+            Expected first heap index for each beam.
         """
         # Reshape as we verify *heaps* per substream, not chunks
         data = data.reshape((SEND_HEAPS_PER_SUBSTREAM,) + data.shape[2:])
@@ -184,7 +188,7 @@ class TestBSend:
             assert items == {}, "This heap contains item values not just the expected descriptors."
 
             # Check the data heaps
-            for j in range(SEND_HEAPS_PER_SUBSTREAM):
+            for j in range(first_heap[i], SEND_HEAPS_PER_SUBSTREAM):
                 if j % BATCHES_PER_CHUNK == 0:
                     # See `_send_data` for logic dictating antenna presence
                     continue
@@ -242,6 +246,8 @@ class TestBSend:
         # it satisfies all values of `n_engines`, which can be as small as 4.
         engine_id = 3
 
+        first_heap = [2, 6]
+        assert len(first_heap) == len(outputs)
         n_channels_per_substream = n_channels // n_engines
         n_spectra_per_heap = n_jones_per_batch // n_channels
         # TODO: We don't do channels * 2 anymore, but n-samples-between-spectra
@@ -263,8 +269,9 @@ class TestBSend:
             stream_factory=lambda stream_config, buffers: spead2.send.asyncio.InprocStream(
                 spead2.ThreadPool(1), queues, stream_config
             ),
-            send_enabled=True,
         )
+        for i, fh in enumerate(first_heap):
+            send_stream.enable_beam(i, True, heap_timestamp_step * fh)
         data = await self._send_data(
             outputs,
             time_converter,
@@ -277,6 +284,8 @@ class TestBSend:
         for queue in queues:
             queue.stop()
 
+        # Sender only sends whole chunks, so first_heap needs to be rounded up.
+        first_heap = [accel.roundup(fh, BATCHES_PER_CHUNK) for fh in first_heap]
         await self._recv_data(
             data,
             queues,
@@ -286,4 +295,5 @@ class TestBSend:
             n_channels_per_substream,
             n_spectra_per_heap,
             heap_timestamp_step,
+            first_heap,
         )

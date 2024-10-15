@@ -28,7 +28,7 @@ import pytest
 import xarray as xr
 
 from katgpucbf.dsim import signal
-from katgpucbf.dsim.signal import CW, WGN, Comb, Constant, Delay, Nodither, Signal, TerminalError
+from katgpucbf.dsim.signal import CW, WGN, Comb, Constant, Delay, MultiCW, Nodither, Signal, TerminalError
 
 from .. import unpackbits
 
@@ -71,6 +71,23 @@ class TestCW:
         frequency = waves * adc_sample_rate / n
         expected = np.cos(timestamps * (frequency / adc_sample_rate * 2 * np.pi)) * amplitude
         np.testing.assert_allclose(out, expected, atol=1e-6 * amplitude)
+
+
+class TestMultiCW:
+    """Tests for :class:`katgpucbf.dsim.signal.MultiCW`."""
+
+    def test_sample(self) -> None:
+        adc_sample_rate = 1e9
+        sig = MultiCW(3, 0.5, 0.25, 100e6, 200e6)
+        n = 10000
+        out = sig.sample(n, adc_sample_rate)
+        timestamps = np.arange(0, n)
+        expected = (
+            0.5 * np.cos(timestamps * (2 * np.pi * 0.1))
+            + 0.75 * np.cos(timestamps * (2 * np.pi * 0.3))
+            + 1.0 * np.cos(timestamps * (2 * np.pi * 0.5))
+        )
+        np.testing.assert_allclose(out, expected, atol=1e-6)
 
 
 class TestComb:
@@ -180,6 +197,7 @@ class TestParseSignals:
         [
             ("cw(1, 2.0);", [CW(1.0, 2.0)]),
             ("cw(1.5, 2.5); cw(3.0, 2.0);", [CW(1.5, 2.5), CW(3.0, 2.0)]),
+            ("multicw(5, 0.2, 0.1, 0.3, 0.4);", [MultiCW(5, 0.2, 0.1, 0.3, 0.4)]),
             ("comb(1.0, 2);", [Comb(1.0, 2.0)]),
             ("c = wgn(1.5, 12345); c; c;", [WGN(1.5, 12345), WGN(1.5, 12345)]),
             ("c = cw(1.5, +2.5e0); c + cw(1, 2);", [CW(1.5, 2.5) + CW(1, 2)]),

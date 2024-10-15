@@ -652,7 +652,9 @@ class TestEngine:
     @pytest.mark.parametrize(
         "dig_sample_bits,send_sample_bits",
         [
-            pytest.param(DIG_SAMPLE_BITS, 4, marks=pytest.mark.cmdline_args("--send-sample-bits=4")),
+            pytest.param(
+                DIG_SAMPLE_BITS, 4, marks=[pytest.mark.cmdline_args("--send-sample-bits=4"), pytest.mark.slow]
+            ),
             pytest.param(12, 8, marks=pytest.mark.cmdline_args("--dig-sample-bits=12", "--send-sample-bits=8")),
         ],
     )
@@ -805,6 +807,7 @@ class TestEngine:
                 np.testing.assert_allclose(sensor_values[3], expected_phase)
 
     @pytest.mark.parametrize("delay_samples", [0.0, 8192.0, 234.5, 42.8])
+    @pytest.mark.slow
     async def test_delay_slope(
         self,
         mock_recv_stream: spead2.InprocQueue,
@@ -887,6 +890,7 @@ class TestEngine:
     # CHUNK_SAMPLES) to ensure narrowband windows fit.
     @pytest.mark.spectra_per_heap(32)
     @pytest.mark.cmdline_args("--recv-chunk-samples=8388608")
+    @pytest.mark.slow
     async def test_missing_heaps(
         self,
         mock_recv_stream: spead2.InprocQueue,

@@ -89,6 +89,32 @@ def _sample_helper_random(n: int, seed_seq: np.random.SeedSequence, sample_chunk
     return _sample_helper(n, seed_seqs_dask, sample_chunk, **kwargs)
 
 
+def _cw(offset: np.int64, *, amplitude: np.float32, n: int, frequency: float, dtype: np.dtype) -> np.ndarray:
+    r"""Compute :math:`\cos(2\pi f(offset+i))` for i in :math:`[0, n)`.
+
+    The `dtype` is the complex dtype in which to perform calculations.
+    The return value is in the equivalent real dtype.
+    """
+    # Compute the complex exponential. Because it is being regularly
+    # sampled, it is possible to do this efficiently by repeated
+    # doubling. This also makes it possible to keep most of the
+    # computation in single precision without losing much precision
+    # (experimentally the results seem to be off by less than 1e-6).
+    scale = frequency * (2 * np.pi)
+    out = np.empty(n, dtype)
+    out[0] = np.exp(offset * scale * 1j) * amplitude
+    valid = 1
+    while valid < n:
+        # Rotate the segment [0, valid) by valid steps, giving the segment
+        # [valid, 2 * value). It's slightly complicated to handle the case
+        # where we have to truncate to n.
+        add = min(valid, n - valid)
+        rot = np.exp(valid * scale * 1j).astype(dtype)
+        np.multiply(out[0:add], rot, out[valid : valid + add])
+        valid += add
+    return out.real
+
+
 class TerminalError(TypeError):
     """Indicate that a terminal signal has been used in an expression."""
 
@@ -201,7 +227,7 @@ class Constant(Signal):
 
 @dataclass
 class Periodic(Signal):
-    """Base class for period signals.
+    """Base class for periodic signals.
 
     The frequency is adjusted during sampling so that the sampled result can
     be looped.
@@ -234,7 +260,7 @@ class Periodic(Signal):
         frequency = waves * sample_rate / n
         logger.info(f"Rounded tone frequency to {frequency} Hz")
 
-        # Index of the first element of each chunk
+        # Index of the firstelement of each chunk
         offsets = da.arange(0, n, CHUNK_SIZE, chunks=1, dtype=np.int64)
         return _sample_helper(
             n,
@@ -261,24 +287,60 @@ class CW(Periodic):
 
     @staticmethod
     def _sample_chunk(offset: np.ndarray, *, amplitude: np.float32, chunk_size: int, frequency: float) -> np.ndarray:
-        # Compute the complex exponential. Because it is being regularly
-        # sampled, it is possible to do this efficiently by repeated
-        # doubling. This also makes it possible to keep most of the
-        # computation in single precision without losing much precision
-        # (experimentally the results seem to be off by less than 1e-6).
-        scale = frequency * (2 * np.pi)
-        out = np.empty(chunk_size, np.complex64)
-        out[0] = np.exp(offset[0] * scale * 1j) * amplitude
-        valid = 1
-        while valid < chunk_size:
-            # Rotate the segment [0, valid) by valid steps, giving the segment
-            # [valid, 2 * value). It's slightly complicated to handle the case
-            # where we have to truncate to chunk_size.
-            add = min(valid, chunk_size - valid)
-            rot = np.exp(valid * scale * 1j).astype(np.complex64)
-            np.multiply(out[0:add], rot, out[valid : valid + add])
-            valid += add
-        return out.real
+        return _cw(offset[0], amplitude=amplitude, n=chunk_size, frequency=frequency, dtype=np.dtype(np.complex64))
+
+
+@dataclass
+class MultiCW(Signal):
+    """Sum of multiple continuous waves.
+
+    The amplitudes and frequencies are both arithmetic progressions. The
+    frequencies are adjusted during sampling so that the sampled result
+    can be looped.
+    """
+
+    m: int
+    amplitude0: float
+    amplitude_step: float
+    frequency0: float
+    frequency_step: float
+    _class_name: ClassVar[str] = "multicw"
+
+    @staticmethod
+    def _sample_chunk(
+        offset: np.ndarray, *, amplitudes: np.ndarray, chunk_size: int, frequencies: np.ndarray
+    ) -> np.ndarray:
+        # Do intermediate computations in double precision, to minimise error
+        # accumulation in the sum.
+        accum = np.zeros(chunk_size, np.float64)
+        for amplitude, frequency in zip(amplitudes, frequencies):
+            accum += _cw(
+                offset[0], amplitude=amplitude, frequency=frequency, n=chunk_size, dtype=np.dtype(np.complex128)
+            )
+        return accum.astype(np.float32)
+
+    def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
+        frequencies = np.arange(self.m) * self.frequency_step + self.frequency0
+        amplitudes = np.arange(self.m) * self.amplitude_step + self.amplitude0
+        # Round target frequencies to fit an integer number of waves into signal_heaps
+        waves = np.maximum(1.0, np.rint(n * frequencies / sample_rate))
+
+        # Index of the first element of each chunk
+        offsets = da.arange(0, n, CHUNK_SIZE, chunks=1, dtype=np.int64)
+        return _sample_helper(
+            n,
+            offsets,
+            self._sample_chunk,
+            amplitudes=amplitudes,
+            frequencies=waves / n,
+            meta=np.array((), np.float32),
+        )
+
+    def __str__(self) -> str:
+        return (
+            f"{self._class_name}({self.m}, {self.amplitude0}, {self.amplitude_step}, "
+            "{self.frequency0}, {self.frequency_step})"
+        )
 
 
 @dataclass
@@ -480,6 +542,8 @@ def parse_signals(prog: str) -> list[Signal]:
     # may be some +'s that can still be changed to -'s.
     cw = pp.Keyword("cw") + lpar - real + comma - real + rpar
     cw.set_parse_action(lambda s, loc, tokens: CW(tokens[1], tokens[2]))
+    multicw = pp.Keyword("multicw") + lpar - integer + comma - real + comma - real + comma - real + comma - real + rpar
+    multicw.set_parse_action(lambda s, loc, tokens: MultiCW(tokens[1], tokens[2], tokens[3], tokens[4], tokens[5]))
     comb = pp.Keyword("comb") + lpar - real + comma - real + rpar
     comb.set_parse_action(lambda s, loc, tokens: Comb(tokens[1], tokens[2]))
     wgn = pp.Keyword("wgn") + lpar - real + pp.Opt(comma - integer("entropy")) + rpar
@@ -493,7 +557,7 @@ def parse_signals(prog: str) -> list[Signal]:
     real_expr = real.copy()
     real_expr.set_parse_action(lambda s, loc, tokens: Constant(float(tokens[0])))
 
-    atom = real_expr | cw | comb | wgn | delay | nodither | variable_expr
+    atom = real_expr | cw | multicw | comb | wgn | delay | nodither | variable_expr
     expr <<= pp.infix_notation(
         atom, [("*", 2, pp.OpAssoc.LEFT, _apply_operator), (pp.one_of("+ -"), 2, pp.OpAssoc.LEFT, _apply_operator)]
     )

@@ -61,6 +61,12 @@ final semi-colon. The following functions are available:
     currently no way to directly control phase, although the ``delay``
     function below gives limited control.
 
+:samp:`multicw({m}, {amplitude0}, {amplitude_step}, {frequency0}, {frequency_step})`
+    Sum of :samp:`{m}` multiple continuous waves. This is equivalent to
+    summing :samp:`cw({amplitude0} + {i}*{amplitude_step}, {frequency0} +
+    i*{frequency_step})` where :samp:`{i}` ranges from 0 (inclusive) to
+    :samp:`{m}` (exclusive), but with better accuracy.
+
 :samp:`comb({amplitude}, {frequency})`
     A comb of impulses, each one sample wide with the given amplitude. Note
     that if the frequency doesn't correspond to an integer number of samples,

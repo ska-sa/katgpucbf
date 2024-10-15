@@ -125,12 +125,13 @@ pipeline {
          * 2. -v: Increases verbosity
          * 3. --junitxml=reports/result.xml' Writes the results to a file for later
          *    examination.
+         * 4. -m "not slow": skip slow tests
          */
         stage('Run pytest (quick)') {
           when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
           options { timeout(time: 30, unit: 'MINUTES') }
           steps {
-            sh 'pytest -n 4 -v -ra --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
+            sh 'pytest -n 4 -v -ra -m "not slow" --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
           }
         }
         stage('Run pytest (full)') {

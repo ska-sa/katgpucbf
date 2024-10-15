@@ -333,7 +333,7 @@ class Pipeline(Generic[_O, _T]):
         raise NotImplementedError  # pragma: nocover
 
     @abstractmethod
-    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:
+    def capture_enable(self, *, stream_id: int, enable: bool = True, timestamp: int = 0) -> None:
         """Enable/Disable the transmission of a data product's stream."""
         raise NotImplementedError  # pragma: nocover
 
@@ -580,8 +580,8 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
 
-    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
-        self.send_stream.enable_beam(beam_id=stream_id, enable=enable)
+    def capture_enable(self, *, stream_id: int, enable: bool = True, timestamp: int = 0) -> None:  # noqa: D102
+        self.send_stream.enable_beam(beam_id=stream_id, enable=enable, timestamp=timestamp)
 
     def _weights_updated(self) -> None:
         """Update version tracking when weight-related parameters are updated."""
@@ -950,8 +950,9 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
 
-    def capture_enable(self, *, stream_id: int, enable: bool = True) -> None:  # noqa: D102
+    def capture_enable(self, *, stream_id: int, enable: bool = True, timestamp: int = 0) -> None:  # noqa: D102
         self.send_stream.send_enabled = enable
+        self.send_stream.send_enabled_timestamp = timestamp
 
 
 class XBEngine(DeviceServer):
@@ -1346,16 +1347,18 @@ class XBEngine(DeviceServer):
             raise aiokatcp.FailReply(f"Output {stream_name!r} is not a tied-array-channelised-voltage stream")
         return pipeline, stream_id
 
-    async def request_capture_start(self, ctx, stream_name: str) -> None:
+    async def request_capture_start(self, ctx, stream_name: str, timestamp: int = 0) -> None:
         """Start transmission of stream.
 
         Parameters
         ----------
         stream_name
             Output stream name.
+        timestamp
+            Minimum ADC timestamp at which to enable transmission.
         """
         pipeline, stream_id = self._request_pipeline(stream_name)
-        pipeline.capture_enable(stream_id=stream_id)
+        pipeline.capture_enable(stream_id=stream_id, timestamp=timestamp)
 
     async def request_capture_stop(self, ctx, stream_name: str) -> None:
         """Stop transmission of a stream.
