@@ -339,6 +339,9 @@ async def _cbf_config_and_description(
         # m8xx is used to avoid possible confusion with real antennas
         "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
         "n_chans": n_channels,
+        "command_line_extra": [
+            "--dither-seed=123",
+        ],
     }
     if narrowband_decimation > 1:
         # Create a wideband output so that testing is representative of normal
@@ -379,6 +382,9 @@ async def _cbf_config_and_description(
                 "type": "gpucbf.tied_array_channelised_voltage",
                 "src_streams": ["antenna-channelised-voltage"],
                 "src_pol": pol_idx,
+                "command_line_extra": [
+                    "--dither-seed=456",
+                ],
             }
 
     # The first three key/values are used for the traditional MeerKAT

@@ -45,7 +45,7 @@ async def test_gain(
     pdf_report.step("Configure the D-sim with Gaussian noise.")
     dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
     amplitude = 32 / dig_max
-    await cbf.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
+    await cbf.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude},789));common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
 
     gains = [0.5, 1.0, 2.0]
