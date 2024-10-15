@@ -625,7 +625,7 @@ async def test_group_delay(
 
     # Distribute the channels amongst the dsims (round-robin)
     n_dsims = len(cbf.dsim_clients)
-    cfreqs_by_dsim = [[] for _ in range(n_dsims)]
+    cfreqs_by_dsim: list[list[float]] = [[] for _ in range(n_dsims)]
     for i, freq in enumerate(cfreqs):
         cfreqs_by_dsim[i % n_dsims].append(freq)
     freq_step_dsim = freq_step * n_dsims
@@ -666,10 +666,10 @@ async def test_group_delay(
             non-Gaussian and is due to quantisation error, which is bounded.
         """
         async with asyncio.TaskGroup() as tg:
-            for dsim_client, freqs in zip(cbf.dsim_clients, cfreqs_by_dsim):
-                if freqs:
+            for dsim_client, dsim_freqs in zip(cbf.dsim_clients, cfreqs_by_dsim):
+                if dsim_freqs:
                     signal = " ".join(
-                        f"multicw({len(freqs)}, {amplitude}, 0.0, {freqs[0] + rfreq}, {freq_step_dsim});"
+                        f"multicw({len(dsim_freqs)}, {amplitude}, 0.0, {dsim_freqs[0] + rfreq}, {freq_step_dsim});"
                         for rfreq in rel_freqs
                     )
                 else:
