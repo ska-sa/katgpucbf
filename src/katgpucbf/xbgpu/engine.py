@@ -357,15 +357,19 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             [Beam(pol=output.pol, dither=output.dither) for output in outputs],
             n_spectra_per_batch=engine.recv_layout.n_spectra_per_heap,
         )
+        if engine.dither_seed is None:
+            # The magic constant was chosen at random. It ensures that the
+            # seed won't be the same as in other types of engine that also use
+            # sync_time as the basis for seeding.
+            seed = int(engine.time_converter.sync_time) ^ 0xFA9D9B2093B458D5
+        else:
+            seed = engine.dither_seed
         self._beamform = template.instantiate(
             self._proc_command_queue,
             n_batches=engine.heaps_per_fengine_per_chunk,
             n_ants=engine.n_ants,
             n_channels_per_substream=engine.n_channels_per_substream,
-            # The magic constant was chosen at random. It ensures that the
-            # seed won't be the same as in other types of engine that also use
-            # sync_time as the basis for seeding.
-            seed=int(engine.time_converter.sync_time) ^ 0xFA9D9B2093B458D5,
+            seed=seed,
             sequence_first=engine.channel_offset_value,
             sequence_step=engine.n_channels,
         )
@@ -1065,6 +1069,9 @@ class XBEngine(DeviceServer):
         Device context for katsdpsigproc. It must be a CUDA device.
     vkgdr_handle
         Handle to vkgdr for the same device as `context`.
+    dither_seed
+        If provided, this will override the default dither seed for this engine,
+        which is based on the sync time.
     """
 
     VERSION = "katgpucbf-xbgpu-icd-0.1"
@@ -1105,6 +1112,7 @@ class XBEngine(DeviceServer):
         monitor: Monitor,
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
+        dither_seed: int | None = None,
     ):
         super().__init__(katcp_host, katcp_port)
         self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
@@ -1138,6 +1146,7 @@ class XBEngine(DeviceServer):
         self.send_rate_factor = send_rate_factor
 
         self.monitor = monitor
+        self.dither_seed = dither_seed
 
         self.n_samples_between_spectra = n_samples_between_spectra
         self.recv_heap_timestamp_step = n_samples_between_spectra * n_spectra_per_heap

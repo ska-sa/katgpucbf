@@ -311,6 +311,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="UNIX time at which digitisers were synced.",
     )
     parser.add_argument(
+        "--dither-seed",
+        type=int,
+        help="Seed for random state generator used for dithering. [sync-time]",
+    )
+    parser.add_argument(
         "--recv-affinity", type=int, default=-1, help="Core to which the receiver thread will be bound [not bound]."
     )
     parser.add_argument(
@@ -439,6 +444,7 @@ def make_engine(
         monitor=monitor,
         context=context,
         vkgdr_handle=vkgdr_handle,
+        dither_seed=args.dither_seed,
     )
     return xbengine, monitor
 
