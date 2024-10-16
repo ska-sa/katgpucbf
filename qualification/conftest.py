@@ -42,6 +42,7 @@ from .reporter import Reporter, custom_report_log
 logger = logging.getLogger(__name__)
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
 pdf_report_data_key = pytest.StashKey[dict]()
+_CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
 
 
 # Storing ini options this way makes pytest.ini easier to validate up-front.
@@ -115,6 +116,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
     config.addinivalue_line("markers", "name(name): human-readable name for the test")
     config.addinivalue_line("markers", "wideband_only: do not run the test in narrowband configurations")
+    config.addinivalue_line(
+        "markers", "no_capture_start([stream, ...]): do not issue capture-start (on all streams if none specified)"
+    )
     for option in ini_options:
         assert config.getini(option.name) is not None, f"{option.name} missing from pytest.ini"
 
@@ -427,10 +431,27 @@ async def cbf_cache(pytestconfig: pytest.Config) -> AsyncGenerator[CBFCache, Non
 
 
 @pytest.fixture
+async def capture_start_streams(request: pytest.FixtureRequest, cbf_config: dict) -> list[str]:
+    """List of streams for which capture-start will automatically be issued."""
+    no_capture_start: set[str] = set()
+    for marker in request.node.iter_markers("no_capture_start"):
+        if marker.args == ():
+            return []  # Requests no streams be automatically started
+        no_capture_start.update(marker.args)
+
+    out = []
+    for name, conf in cbf_config["outputs"].items():
+        if name not in no_capture_start and conf["type"] in _CAPTURE_TYPES:
+            out.append(name)
+    return out
+
+
+@pytest.fixture
 async def cbf(
     cbf_cache: CBFCache,
     cbf_config: dict,
     cbf_mode_config: dict,
+    capture_start_streams: list[str],
     pdf_report: Reporter,
 ) -> AsyncGenerator[CBFRemoteControl, None]:
     """Set up a CBF for a single test.
@@ -448,7 +469,6 @@ async def cbf(
     async with asyncio.TaskGroup() as tg:
         for client in cbf.dsim_clients:
             tg.create_task(client.request("signals", "0;0;"))
-    capture_types = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
@@ -461,13 +481,14 @@ async def cbf(
             await pcc.request("beam-quant-gains", name, 1.0)
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
             await pcc.request("beam-weights", name, *((1.0,) * n_inputs))
-        if conf["type"] in capture_types:
-            await pcc.request("capture-start", name)
+
+    for name in capture_start_streams:
+        await pcc.request("capture-start", name)
 
     yield cbf
 
     for name, conf in cbf.config["outputs"].items():
-        if conf["type"] in capture_types:
+        if conf["type"] in _CAPTURE_TYPES:
             await pcc.request("capture-stop", name)
 
 
@@ -544,6 +565,7 @@ def receive_baseline_correlation_products_manual_start(
 @pytest.fixture
 async def receive_baseline_correlation_products(
     receive_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
+    capture_start_streams: list[str],
 ) -> BaselineCorrelationProductsReceiver:
     """Create a spead2 receive stream for ingesting X-engine output."""
     receiver = receive_baseline_correlation_products_manual_start
@@ -552,7 +574,8 @@ async def receive_baseline_correlation_products(
     # predates the start of this test (to prevent any state leaks from previous
     # tests). The timeout is increased since it may take some time to get the
     # data flowing at the start.
-    await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
+    if "baseline-correlation_products" in capture_start_streams:
+        await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver
 
 
@@ -605,6 +628,8 @@ def receive_tied_array_channelised_voltage_manual_start(
 @pytest.fixture
 async def receive_tied_array_channelised_voltage(
     receive_tied_array_channelised_voltage_manual_start: TiedArrayChannelisedVoltageReceiver,
+    cbf_config: dict,
+    capture_start_streams: list[str],
 ) -> TiedArrayChannelisedVoltageReceiver:
     """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
     receiver = receive_tied_array_channelised_voltage_manual_start
@@ -613,5 +638,10 @@ async def receive_tied_array_channelised_voltage(
     # predates the start of this test (to prevent any state leaks from previous
     # tests). The timeout is increased since it may take some time to get the
     # data flowing at the start.
-    await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
+    if all(
+        name in capture_start_streams
+        for name, config in cbf_config["outputs"].items()
+        if config["type"] == "gpucbf.tied_array_channelised_voltage"
+    ):
+        await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver
