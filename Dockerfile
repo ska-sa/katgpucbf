@@ -31,6 +31,8 @@ FROM nvidia/cuda:12.5.1-base-ubuntu24.04 AS base
 # as well as libcufft, needed for fgpu.
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 
+RUN echo "hello"
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cuda-nvcc-12-5 \
     cuda-profiler-api-12-5 \
