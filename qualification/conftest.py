@@ -40,7 +40,7 @@ from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArra
 from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
-FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
+FULL_ANTENNAS = list(range(32, 81))
 pdf_report_data_key = pytest.StashKey[dict]()
 _CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
 
