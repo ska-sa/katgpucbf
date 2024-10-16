@@ -107,3 +107,58 @@ async def test_gains(
     # quantisation, since gain is handled as single-precision float.
     with check:
         assert max_rel_error < 0.1, "Maximum error exceeds 0.5 dB"
+
+
+@pytest.mark.name("Ordering of gains and capture-start")
+@pytest.mark.no_capture_start("baseline-correlation-products")
+async def test_gains_capture_start(
+    cbf: CBFRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+) -> None:
+    r"""Test that gains applied before capture-start are not delayed.
+
+    Verification methods
+    --------------------
+    Verified by test. Change the gains, then immediately issue a capture-start
+    request. Verify that the received data reflects the change in gains.
+    """
+    receiver = receive_baseline_correlation_products
+    pcc = cbf.product_controller_client
+
+    pdf_report.step("Inject white noise on first antenna.")
+    signals = "common = wgn(0.1); common; common;"
+    await cbf.dsim_clients[0].request("signals", signals)
+    dsim_timestamp = await cbf.dsim_clients[0].sensor_value("steady-state-timestamp", int)
+    pdf_report.detail(f"Set dsim signals to {signals}, starting with timestamp {dsim_timestamp}.")
+
+    pdf_report.step("Wait for injected signal to reach F-engine.")
+    label = receiver.input_labels[0]
+    for _ in range(10):
+        rx_timestamp = await pcc.sensor_value(f"antenna-channelised-voltage.{label}.rx.timestamp", int)
+        pdf_report.detail(f"rx.timestamp = {rx_timestamp}")
+        if rx_timestamp >= dsim_timestamp:
+            break
+        else:
+            pdf_report.detail("Sleep for 0.5s.")
+            await asyncio.sleep(0.5)
+    else:
+        pytest.fail("Digitiser signal did not reach F-engine.")
+
+    pdf_report.step("Set gains on input 0")
+    gains = np.ones(receiver.n_chans)
+    cut = receiver.n_chans // 2
+    gains[cut:] = 0  # Zero out the upper half of the band
+    await pcc.request("gain", "antenna-channelised-voltage", label, *gains)
+    pdf_report.detail(f"Upper half of band on {label} set to zero gain.")
+
+    pdf_report.step("Capture and verify output")
+    await pcc.request("capture-start", "baseline-correlation-products")
+    _, data = await receiver.next_complete_chunk(min_timestamp=0)
+    bls_idx = receiver.bls_ordering.index((label, label))
+    data = data[:, bls_idx, 0]  # 0 to take just the real part (these are auto-correlations)
+    assert np.max(data[cut:]) == 0
+    # It's random, so technically it's possible for any of the values to be
+    # zero, but exceedingly unlikely.
+    assert np.min(data[:cut]) > 0
+    pdf_report.detail("Output reflects effects of gains.")
