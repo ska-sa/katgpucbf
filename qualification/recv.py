@@ -345,6 +345,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         self.int_time = cbf.init_sensors[f"{stream_name}.int-time"].value
         self.bls_ordering = ast.literal_eval(cbf.init_sensors[f"{stream_name}.bls-ordering"].value.decode())
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
+        self.n_xengs = cbf.init_sensors[f"{stream_name}.n-xengs"].value
 
         self.stream_group = create_baseline_correlation_product_receive_stream_group(
             interface_address,
@@ -407,6 +408,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             ast.literal_eval(cbf.init_sensors[f"{stream_name}.source-indices"].value.decode())
             for stream_name in stream_names
         ]
+        self.n_bengs = cbf.init_sensors[f"{stream_names[0]}.n-bengs"].value
 
         self.stream_group = create_tied_array_channelised_voltage_receive_stream_group(
             interface_address,
