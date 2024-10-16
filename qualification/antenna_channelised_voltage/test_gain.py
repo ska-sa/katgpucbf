@@ -129,14 +129,15 @@ async def test_gains_capture_start(
     pdf_report.step("Inject white noise on first antenna.")
     signals = "common = wgn(0.1); common; common;"
     await cbf.dsim_clients[0].request("signals", signals)
-    pdf_report.detail(f"Set dsim signals to {signals}.")
+    dsim_timestamp = await cbf.dsim_clients[0].sensor_value("steady-state-timestamp", int)
+    pdf_report.detail(f"Set dsim signals to {signals}, starting with timestamp {dsim_timestamp}.")
 
     pdf_report.step("Wait for injected signal to reach F-engine.")
     label = receiver.input_labels[0]
     for _ in range(10):
-        power = await pcc.sensor_value(f"antenna-channelised-voltage.{label}.dig-rms-dbfs", float)
-        pdf_report.detail(f"dig-rms-dbfs = {power:.3g} dBFS")
-        if power > -1000:
+        rx_timestamp = await pcc.sensor_value(f"antenna-channelised-voltage.{label}.rx.timestamp", int)
+        pdf_report.detail(f"rx.timestamp = {rx_timestamp}")
+        if rx_timestamp >= dsim_timestamp:
             break
         else:
             pdf_report.detail("Sleep for 0.5s.")
