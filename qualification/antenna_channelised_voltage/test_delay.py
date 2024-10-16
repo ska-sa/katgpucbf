@@ -650,7 +650,12 @@ async def test_group_delay(
     pdf_report.detail(f"Set delays to {delay_model} for all inputs.")
 
     async def measure_once(rel_freqs: tuple[float, float]) -> tuple[float, float, float]:
-        """Estimate group delay for a single pair of frequencies.
+        """Estimate group delay for a single pair of frequency offsets.
+
+        For each channel centre frequency `cfreq` in `cfreqs`, tones are
+        injected at frequencies `cfreq + rel_freqs[0]` and
+        `cfreq + rel_freqs[1]` and the difference in phase between these is
+        examined to determine the delay.
 
         The delay is ambiguous and could actually be any value of the form
         :samp:`{delay} + {i} * {period}`.
@@ -663,7 +668,9 @@ async def test_group_delay(
             Step between possible delay values.
         std
             Standard deviation in the delay estimate. Note that the distribution is
-            non-Gaussian and is due to quantisation error, which is bounded.
+            non-Gaussian and is due to quantisation error (which is bounded), but
+            the estimate is taken from the mean of a large number of samples and so
+            the Central Limit Theorem applies.
         """
         async with asyncio.TaskGroup() as tg:
             for dsim_client, dsim_freqs in zip(cbf.dsim_clients, cfreqs_by_dsim):
