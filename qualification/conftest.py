@@ -117,7 +117,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "name(name): human-readable name for the test")
     config.addinivalue_line("markers", "wideband_only: do not run the test in narrowband configurations")
     config.addinivalue_line(
-        "markers", "no_capture_start([streams]): do not issue capture-start (on all streams if none specified)"
+        "markers", "no_capture_start([stream, ...]): do not issue capture-start (on all streams if none specified)"
     )
     for option in ini_options:
         assert config.getini(option.name) is not None, f"{option.name} missing from pytest.ini"
