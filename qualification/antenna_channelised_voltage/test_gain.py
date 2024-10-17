@@ -116,10 +116,10 @@ async def test_gains_capture_start(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
 ) -> None:
-    r"""Test that gains applied before capture-start are not delayed.
+    """Test that gains applied before capture-start are not delayed.
 
-    Verification methods
-    --------------------
+    Verification method
+    -------------------
     Verified by test. Change the gains, then immediately issue a capture-start
     request. Verify that the received data reflects the change in gains.
     """
@@ -157,7 +157,7 @@ async def test_gains_capture_start(
     _, data = await receiver.next_complete_chunk(min_timestamp=0)
     bls_idx = receiver.bls_ordering.index((label, label))
     data = data[:, bls_idx, 0]  # 0 to take just the real part (these are auto-correlations)
-    assert np.max(data[cut:]) == 0
+    np.testing.assert_equal(data[cut:], 0)
     # It's random, so technically it's possible for any of the values to be
     # zero, but exceedingly unlikely.
     assert np.min(data[:cut]) > 0
