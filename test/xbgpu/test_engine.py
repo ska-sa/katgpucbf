@@ -432,19 +432,41 @@ def verify_corrprod_sensors(
 
 
 def verify_beam_data(
+    beam_outputs: list[BOutput],
     beam_results: np.ndarray,
+    present: np.ndarray,
     batch_indices: list[int],
     n_channels_per_substream: int,
     n_spectra_per_heap: int,
-    present: np.ndarray,
-    beam_outputs: list[BOutput],
     weights: np.ndarray,
     delays: np.ndarray,
     quant_gains: np.ndarray,
     channel_spacing: float,
     centre_channel: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Verify BPipeline data."""
+    """Verify BPipeline data.
+
+    Parameters
+    ----------
+    beam_results
+        Numpy array of all GPU-generated data from :meth:`TestEngine._send_data`.
+    beam_outputs, n_channels_per_substream, n_spectra_per_heap
+        Unit test fixtures in :class:`TestEngine`.
+    present
+        Array of shape (n_batches, n_ants) indicating which heaps were
+        received.
+    batch_indices
+        Indices of heaps where data was present (as indicated by `present`).
+    weights, quant_gains, delays
+        The beam weights, quantiser-gains and delays applied to each input of
+        the beam data product. These are real floating-point values generated
+        for the unit test.
+    channel_spacing
+        Frequency difference between adjacent channels, in Hz.
+    centre_channel
+        Index of the centre channel of the whole stream, relative to the first
+        channel processed by this engine.
+    """
     expected_beams, expected_beam_saturated_low, expected_beam_saturated_high = generate_expected_beams(
         np.asarray(batch_indices),
         n_channels_per_substream,
@@ -1022,7 +1044,6 @@ class TestEngine:
                 present,
             )
 
-        first_timestamp = 0
         # Also need to access the request arguments later when generating expected sensor updates
         rng = np.random.default_rng(seed=1)
         weights = rng.uniform(0.5, 2.0, size=(len(beam_outputs), n_ants))
@@ -1067,6 +1088,7 @@ class TestEngine:
 
             for beam_request in flattened_requests:
                 await client.request(*beam_request)
+            first_timestamp = 0
 
             corrprod_results, beam_results, acc_indices, batch_indices = await self._send_data(
                 mock_recv_streams,
@@ -1112,12 +1134,12 @@ class TestEngine:
         )
 
         expected_beam_saturated_low, expected_beam_saturated_high = verify_beam_data(
-            beam_results,
-            batch_indices,
-            n_channels_per_substream,
-            n_spectra_per_heap,
-            present,
-            beam_outputs,
+            beam_outputs=beam_outputs,
+            beam_results=beam_results,
+            present=present,
+            batch_indices=batch_indices,
+            n_channels_per_substream=n_channels_per_substream,
+            n_spectra_per_heap=n_spectra_per_heap,
             weights=weights,
             delays=delays,
             quant_gains=quant_gains,
