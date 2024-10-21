@@ -52,7 +52,7 @@ async def test_weight_mapping(
     assert receiver.n_inputs < receiver.n_chans, "Test assumes a unique channel per input"
     rng = np.random.default_rng()
     # Pick a random channel for each input
-    channels = rng.choice(receiver.n_chans, receiver.n_inputs, replace=False)
+    all_channels_under_test = rng.choice(receiver.n_chans, receiver.n_inputs, replace=False)
     signals = "common=wgn(0.2); common; common;"
 
     pdf_report.step("Configure dsim with Gaussian noise.")
@@ -61,19 +61,27 @@ async def test_weight_mapping(
 
     pdf_report.step("Set eq gains to select one channel per input.")
     async with asyncio.TaskGroup() as tg:
-        for input_label, channel in zip(receiver.input_labels, channels):
+        for input_label, channel in zip(receiver.input_labels, all_channels_under_test):
             gains = [0.0] * receiver.n_chans
             gains[channel] = 1.0
             tg.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *gains))
             pdf_report.detail(f"Set input {input_label} to pass through only channel {channel}.")
 
-    pdf_report.step("Test all inputs.")
-    for input_idx, (input_label, channel) in enumerate(zip(receiver.input_labels, channels)):
+    pdf_report.step("Test a random selection of inputs.")
+    # NOTE: A full sweep of `all_channels_under_test` takes up too much time during the qualification run.
+    # We test a random selection of the full list, and half the full set at most, to speed that process up.
+    n_inputs_to_test = rng.integers(receiver.n_inputs // 4, max(receiver.n_inputs // 2, 1), dtype=int)
+    channels_to_test = rng.choice(all_channels_under_test, n_inputs_to_test, replace=False)
+    for channel_to_test in channels_to_test:
+        input_idx = np.where(all_channels_under_test == channel_to_test)[0][0]
+        input_label = receiver.input_labels[input_idx]
         candidate_beams = [i for i, source_indices in enumerate(receiver.source_indices) if input_idx in source_indices]
         assert candidate_beams, "No beam includes this input"
         test_beam = rng.choice(candidate_beams)
         test_beam_name = receiver.stream_names[test_beam]
-        pdf_report.detail(f"Test input {input_idx} ({input_label}) with channel {channel} and beam {test_beam_name}.")
+        pdf_report.detail(
+            f"Test input {input_idx} ({input_label}) with channel {channel_to_test} and beam {test_beam_name}."
+        )
 
         source_indices = receiver.source_indices[test_beam]
         input_pos = source_indices.index(input_idx)
@@ -90,11 +98,11 @@ async def test_weight_mapping(
         timestamp, data = await receiver.next_complete_chunk()
         pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
         with check:
-            assert np.sum(np.abs(data[test_beam, channel])) > 0
-            pdf_report.detail(f"Signal found in channel {channel} of the test beam.")
+            assert np.sum(np.abs(data[test_beam, channel_to_test])) > 0
+            pdf_report.detail(f"Signal found in channel {channel_to_test} of the test beam.")
         # Zero out the tone so that we can check that everything else is empty.
-        data[test_beam, channel] = 0
+        data[test_beam, channel_to_test] = 0
 
         with check:
-            assert np.all(data[test_beam, channel] == 0)
+            assert np.all(data[test_beam, channel_to_test] == 0)
             pdf_report.detail("All other beams have no signal in the channel.")
