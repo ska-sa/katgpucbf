@@ -17,6 +17,7 @@
 """Synthesis of simulated signals."""
 
 import asyncio
+import dataclasses
 import logging
 import math
 import multiprocessing.connection
@@ -29,6 +30,7 @@ from dataclasses import dataclass
 from typing import ClassVar, Self
 
 import dask.array as da
+import dask.base
 import numba
 import numpy as np
 import pyparsing as pp
@@ -335,9 +337,23 @@ class MultiCW(Signal):
             if 0 <= neg < len(spectrum):
                 spectrum[neg] += 0.5 * amp
 
-        # Inverse FFT to get time domain
-        v = scipy.fft.irfft(spectrum, n=n, norm="forward")
-        return da.asarray(v, chunks=CHUNK_SIZE)
+        # Inverse FFT to get time domain. When n is even, we can use the DCT,
+        # which avoids some copies.
+        if n % 2 == 0:
+            v = scipy.fft.dct(spectrum, type=1, overwrite_x=True)
+            # DCT only gives us the first half of the output. Mirror to
+            # get the second half.
+            v = np.r_[v, v[-2:0:-1]]
+        else:
+            # Fallback path (scipy doesn't implement the variant of the DCT
+            # that would be needed for this). But we generally expect n to
+            # be a power of 2.
+            v = scipy.fft.irfft(spectrum, n=n, norm="forward", overwrite_x=True)
+        # Generate a unique name. Dask's default is to hash the array itself,
+        # which is somewhat slow. Instead, hash the parameters used to
+        # create it.
+        token = dask.base.tokenize(dataclasses.astuple(self), n, sample_rate)
+        return da.from_array(v, chunks=CHUNK_SIZE, name="multicw-" + token)
 
     def __str__(self) -> str:
         return (
