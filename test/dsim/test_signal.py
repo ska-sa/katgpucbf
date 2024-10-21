@@ -76,9 +76,9 @@ class TestCW:
 class TestMultiCW:
     """Tests for :class:`katgpucbf.dsim.signal.MultiCW`."""
 
-    def test_sample(self) -> None:
+    def test_even(self) -> None:
         adc_sample_rate = 1e9
-        sig = MultiCW(3, 0.5, 0.25, 100e6, 200e6)
+        sig = MultiCW(4, 0.5, 0.25, 100e6, 200e6)
         n = 10000
         out = sig.sample(n, adc_sample_rate)
         timestamps = np.arange(0, n)
@@ -86,6 +86,20 @@ class TestMultiCW:
             0.5 * np.cos(timestamps * (2 * np.pi * 0.1))
             + 0.75 * np.cos(timestamps * (2 * np.pi * 0.3))
             + 1.0 * np.cos(timestamps * (2 * np.pi * 0.5))
+            + 1.25 * np.cos(timestamps * (2 * np.pi * 0.7))
+        )
+        np.testing.assert_allclose(out, expected, atol=1e-6)
+
+    def test_odd(self) -> None:
+        adc_sample_rate = 1e9
+        sig = MultiCW(3, 0.5, 0.25, 200e6, 400e6)
+        n = 25
+        out = sig.sample(n, adc_sample_rate)
+        timestamps = np.arange(0, n)
+        expected = (
+            0.5 * np.cos(timestamps * (2 * np.pi * 0.2))
+            + 0.75 * np.cos(timestamps * (2 * np.pi * 0.6))
+            + 1.0 * np.cos(timestamps * (2 * np.pi * 1.0))
         )
         np.testing.assert_allclose(out, expected, atol=1e-6)
 
