@@ -32,6 +32,7 @@ import dask.array as da
 import numba
 import numpy as np
 import pyparsing as pp
+import scipy.fft
 import xarray as xr
 
 from .. import BYTE_BITS
@@ -335,7 +336,7 @@ class MultiCW(Signal):
                 spectrum[neg] += 0.5 * amp
 
         # Inverse FFT to get time domain
-        v = np.fft.irfft(spectrum, n=n, norm="forward")
+        v = scipy.fft.irfft(spectrum, n=n, norm="forward")
         return da.asarray(v, chunks=CHUNK_SIZE)
 
     def __str__(self) -> str:
