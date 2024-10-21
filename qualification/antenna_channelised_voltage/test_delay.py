@@ -713,21 +713,24 @@ async def test_group_delay(
 
         # Convert Gaussian integers to complex128
         data = raw_data.astype(np.float64).view(np.complex128)[..., 0]
+        phase = np.angle(data[1] * data[0].conj())  # Takes the difference between phases
+        del data  # Free up some memory
         # Pick a reference timestamp at which we know the dsim will be outputting
         # both signals with phase 0.
         ref_timestamp = first_timestamp // dsim_period * dsim_period
         # Phase-rotate everything to be referenced to ref_timestamp
         rel_timestamps = np.arange(n_spectra) * receiver.n_samples_between_spectra + (first_timestamp - ref_timestamp)
         rel_times = rel_timestamps / receiver.scale_factor_timestamp
-        freqs = cfreqs[np.newaxis, :] + np.asarray(rel_freqs)[:, np.newaxis]
-        data *= np.exp(-2j * np.pi * rel_times[np.newaxis, np.newaxis, :] * freqs[:, :, np.newaxis])
-        # The phases should all be similar, but without np.unwrap they could
-        # make jumps of 2*pi, which would mess up taking the mean.
-        phase = np.angle(data[1]) - np.angle(data[0])
-        phase = np.unwrap(phase.ravel())
+        delta = rel_freqs[1] - rel_freqs[0]
+        phase -= 2 * np.pi * delta * rel_times[np.newaxis, :]
+        # The phases should all be similar, but we need to avoid steps of 2pi.
+        # np.unwrap is problematic since it accumulates rounding errors. The
+        # following is good enough as long as all phases are within pi of each
+        # other.
+        phase = wrap_angle(phase - phase[0, 0]) + phase[0, 0]
         mean_phase = wrap_angle(np.mean(phase))
         std_phase = np.std(phase) / np.sqrt(phase.size - 1)
-        scale = receiver.scale_factor_timestamp / (2 * np.pi * (rel_freqs[1] - rel_freqs[0]))
+        scale = receiver.scale_factor_timestamp / (2 * np.pi * delta)
         delay = -mean_phase * scale
         period = 2 * np.pi * scale
         std = std_phase * scale
