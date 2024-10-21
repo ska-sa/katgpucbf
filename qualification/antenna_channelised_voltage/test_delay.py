@@ -609,17 +609,12 @@ async def test_group_delay(
     receiver = receive_tied_array_channelised_voltage
     client = cbf.product_controller_client
 
-    # Collect about 10s of data, to improve SNR.
-    chunk_timestamp_step = receiver.n_spectra_per_heap * receiver.n_samples_between_spectra
-    n_chunks = round(10.0 * receiver.scale_factor_timestamp // chunk_timestamp_step)
-    n_spectra = n_chunks * receiver.n_spectra_per_heap
-    acc_time = n_chunks * chunk_timestamp_step / receiver.scale_factor_timestamp
-
     pdf_report.step("Choose channels.")
     channel_step = 8  # Gap to minimise leakage between tones
     freq_step = receiver.bandwidth / receiver.n_chans * channel_step
-    n_channels = min(receiver.n_chans // channel_step, 1024)
+    n_channels = receiver.n_chans // channel_step
     channels = np.arange(channel_step // 2, channel_step * n_channels, channel_step, dtype=int)
+    channels_slice = slice(channel_step // 2, channel_step * n_channels, channel_step)
     cfreqs = receiver.channel_frequency(channels)
     pdf_report.detail(f"Using {n_channels} channels separated by {channel_step} channels ({freq_step} Hz).")
 
@@ -640,6 +635,13 @@ async def test_group_delay(
     gain = receiver.compute_tone_gain(amplitude, 100)
     await client.request("gain-all", "antenna-channelised-voltage", gain)
     pdf_report.detail(f"Set gain on all channels to {gain}.")
+
+    # Collect about 2^27 samples, to improve SNR.
+    n_spectra = 2**27 // n_channels
+    n_chunks = math.ceil(n_spectra / receiver.n_spectra_per_heap)
+    n_spectra = n_chunks * receiver.n_spectra_per_heap
+    chunk_timestamp_step = receiver.n_spectra_per_heap * receiver.n_samples_between_spectra
+    acc_time = n_chunks * chunk_timestamp_step / receiver.scale_factor_timestamp
 
     pdf_report.step("Set F-engine phase rate.")
     # Swing phase through 2pi radians over the collection time. Start away from
@@ -685,14 +687,14 @@ async def test_group_delay(
                 pdf_report.detail(f"Set dsim signal to {signal}.")
         pdf_report.detail("All dsim signals set.")
 
-        pdf_report.detail(f"Receive {n_chunks} chunks of contiguous data.")
+        pdf_report.detail(f"Receive {n_chunks} chunks ({acc_time:.3f} s) of contiguous data.")
         i = 0
         attempts = 0
         first_timestamp = -1
         # First axis corresponds to the 2 signals we're comparing.
-        raw_data = np.ones((2, len(cfreqs), n_spectra, COMPLEX), np.int8)
+        raw_data = np.ones((2, n_channels, n_spectra, COMPLEX), np.int8)
         try:
-            async with asyncio.timeout(30.0):
+            async with asyncio.timeout(acc_time * 3 + 10.0):
                 async for timestamp, chunk in receiver.complete_chunks():
                     with chunk:
                         if i == 0 or timestamp != first_timestamp + i * chunk_timestamp_step:
@@ -701,7 +703,7 @@ async def test_group_delay(
                             attempts += 1
                         start_spectrum = i * receiver.n_spectra_per_heap
                         end_spectrum = (i + 1) * receiver.n_spectra_per_heap
-                        raw_data[:, :, start_spectrum:end_spectrum] = chunk.data[:2, channels]
+                        raw_data[:, :, start_spectrum:end_spectrum] = chunk.data[:2, channels_slice]
                     i += 1
                     if i == n_chunks:
                         pdf_report.detail(f"Received all chunks after {attempts} attempt(s).")
@@ -722,8 +724,7 @@ async def test_group_delay(
         # The phases should all be similar, but without np.unwrap they could
         # make jumps of 2*pi, which would mess up taking the mean.
         phase = np.angle(data[1]) - np.angle(data[0])
-        phase = np.unwrap(phase, axis=1)
-        phase = np.unwrap(phase, axis=0)
+        phase = np.unwrap(phase.ravel())
         mean_phase = wrap_angle(np.mean(phase))
         std_phase = np.std(phase) / np.sqrt(phase.size - 1)
         scale = receiver.scale_factor_timestamp / (2 * np.pi * (rel_freqs[1] - rel_freqs[0]))
