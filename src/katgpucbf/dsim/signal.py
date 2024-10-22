@@ -17,6 +17,7 @@
 """Synthesis of simulated signals."""
 
 import asyncio
+import dataclasses
 import logging
 import math
 import multiprocessing.connection
@@ -29,9 +30,11 @@ from dataclasses import dataclass
 from typing import ClassVar, Self
 
 import dask.array as da
+import dask.base
 import numba
 import numpy as np
 import pyparsing as pp
+import scipy.fft
 import xarray as xr
 
 from .. import BYTE_BITS
@@ -320,21 +323,37 @@ class MultiCW(Signal):
         return accum.astype(np.float32)
 
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
-        frequencies = np.arange(self.m) * self.frequency_step + self.frequency0
-        amplitudes = np.arange(self.m) * self.amplitude_step + self.amplitude0
-        # Round target frequencies to fit an integer number of waves into signal_heaps
-        waves = np.maximum(1.0, np.rint(n * frequencies / sample_rate))
+        # Build the frequency domain
+        spectrum = np.zeros(n // 2 + 1, np.float32)
+        for i in range(self.m):
+            f = i * self.frequency_step + self.frequency0
+            # Round target frequency to fit an integer number of waves into signal_heaps
+            waves = max(1, round(n * f / sample_rate))
+            pos = waves % n  # Positive frequency component
+            neg = (-waves) % n  # Negative frequency component
+            amp = i * self.amplitude_step + self.amplitude0
+            if 0 <= pos < len(spectrum):
+                spectrum[pos] += 0.5 * amp
+            if 0 <= neg < len(spectrum):
+                spectrum[neg] += 0.5 * amp
 
-        # Index of the first element of each chunk
-        offsets = da.arange(0, n, CHUNK_SIZE, chunks=1, dtype=np.int64)
-        return _sample_helper(
-            n,
-            offsets,
-            self._sample_chunk,
-            amplitudes=amplitudes,
-            frequencies=waves / n,
-            meta=np.array((), np.float32),
-        )
+        # Inverse FFT to get time domain. When n is even, we can use the DCT,
+        # which avoids some copies.
+        if n % 2 == 0:
+            v = scipy.fft.dct(spectrum, type=1, overwrite_x=True)
+            # DCT only gives us the first half of the output. Mirror to
+            # get the second half.
+            v = np.r_[v, v[-2:0:-1]]
+        else:
+            # Fallback path (scipy doesn't implement the variant of the DCT
+            # that would be needed for this). But we generally expect n to
+            # be a power of 2.
+            v = scipy.fft.irfft(spectrum, n=n, norm="forward", overwrite_x=True)
+        # Generate a unique name. Dask's default is to hash the array itself,
+        # which is somewhat slow. Instead, hash the parameters used to
+        # create it.
+        token = dask.base.tokenize(dataclasses.astuple(self), n, sample_rate)
+        return da.from_array(v, chunks=CHUNK_SIZE, name="multicw-" + token)
 
     def __str__(self) -> str:
         return (

@@ -65,7 +65,8 @@ final semi-colon. The following functions are available:
     Sum of :samp:`{m}` multiple continuous waves. This is equivalent to
     summing :samp:`cw({amplitude0} + {i}*{amplitude_step}, {frequency0} +
     i*{frequency_step})` where :samp:`{i}` ranges from 0 (inclusive) to
-    :samp:`{m}` (exclusive), but with better accuracy.
+    :samp:`{m}` (exclusive), but with better accuracy. It is also much
+    faster when :samp:`{m}` is large.
 
 :samp:`comb({amplitude}, {frequency})`
     A comb of impulses, each one sample wide with the given amplitude. Note
