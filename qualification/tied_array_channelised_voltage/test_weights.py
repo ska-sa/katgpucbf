@@ -26,6 +26,8 @@ from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
 from ..reporter import Reporter
 
+MIN_INPUTS_TO_TEST = 16
+
 
 @pytest.mark.requirements("CBF-REQ-0123")
 async def test_weight_mapping(
@@ -69,11 +71,12 @@ async def test_weight_mapping(
 
     pdf_report.step("Test a random selection of inputs.")
     # NOTE: A full sweep of `all_channels_under_test` takes up too much time during the qualification run.
-    # We test a random selection of the full list, and half the full set at most, to speed that process up.
-    n_inputs_to_test = rng.integers(receiver.n_inputs // 4, max(receiver.n_inputs // 2, 1), dtype=int)
-    channels_to_test = rng.choice(all_channels_under_test, n_inputs_to_test, replace=False)
-    for channel_to_test in channels_to_test:
-        input_idx = np.where(all_channels_under_test == channel_to_test)[0][0]
+    # We test a subset of the full list to speed that process up ensuring that small configurations get
+    # completely tested, while bounding the testing time for large configurations.
+    n_inputs_to_test = min(receiver.n_inputs, MIN_INPUTS_TO_TEST)
+    indices_to_test = rng.choice(range(receiver.n_inputs), n_inputs_to_test, replace=False)
+    for input_idx in np.sort(indices_to_test):
+        channel_to_test = all_channels_under_test[input_idx]
         input_label = receiver.input_labels[input_idx]
         candidate_beams = [i for i, source_indices in enumerate(receiver.source_indices) if input_idx in source_indices]
         assert candidate_beams, "No beam includes this input"
