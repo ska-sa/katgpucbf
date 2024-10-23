@@ -54,7 +54,7 @@ async def _test_capture_start(
     # Only need to query one stream, since it's the same engine backing
     # all of them.
     stream_name = receiver.stream_names[0]
-    for _ in range(10):
+    for _ in range(30):
         tasks = []
         async with asyncio.TaskGroup() as tg:
             for i in range(receiver.n_bengs):
