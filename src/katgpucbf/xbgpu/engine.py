@@ -584,7 +584,14 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         self.send_stream.enable_beam(beam_id=stream_id, enable=enable, timestamp=timestamp)
 
     def _weights_updated(self) -> int:
-        """Update version tracking when weight-related parameters are updated."""
+        """Update version tracking when weight-related parameters are updated.
+
+        Returns
+        -------
+        int
+            :attr:`_weights_steady`, the timestamp that includes the effect of
+            a beam request update made now.
+        """
         self._weights_version += 1
         self.engine.update_steady_state_timestamp(self._weights_steady)
         return self._weights_steady
@@ -598,6 +605,12 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             The index of the beam whose weights are being set.
         weights
             A 1D array containing real-valued weights (per input).
+
+        Returns
+        -------
+        int
+            :attr:`_weights_steady`, the timestamp that includes the effect of
+            a beam-weights update made now.
         """
         self._weights[stream_id] = weights
         return self._weights_updated()
@@ -611,6 +624,12 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             The index of the beam whose quantisation gain is being set.
         gain
             Real-valued quantisation gain.
+
+        Returns
+        -------
+        int
+            :attr:`_weights_steady`, the timestamp that includes the effect of
+            a beam-quant-gain update made now.
         """
         self._quant_gains[stream_id] = gain
         return self._weights_updated()
@@ -627,6 +646,12 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             inputs. The second axis has length two, with the first element
             containing the delay in seconds, and the second containing a
             channel-independent phase rotation in radians.
+
+        Returns
+        -------
+        int
+            :attr:`_weights_steady`, the timestamp that includes the effect of
+            a beam-delay update made now.
         """
         self._delays[stream_id] = delays
         return self._weights_updated()

@@ -18,7 +18,7 @@
 
 import asyncio
 from collections import Counter
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Iterable
 from itertools import chain
 from logging import WARNING
 from typing import Final
@@ -466,6 +466,11 @@ def verify_beam_data(
     centre_channel
         Index of the centre channel of the whole stream, relative to the first
         channel processed by this engine.
+
+    Returns
+    -------
+    saturated_low, saturated_high
+        Lower and upper bounds on saturation count per beam.
     """
     expected_beams, expected_beam_saturated_low, expected_beam_saturated_high = generate_expected_beams(
         np.asarray(batch_indices),
@@ -549,9 +554,10 @@ def verify_beam_sensors(
         assert saturated_low[i] <= stream_diff.diff("output_b_clipped_samples_total") <= saturated_high[i]
 
         # Check that sensor value matches Prometheus
-        # NOTE: Verifying the timestamp on saturation count updates is not as predictable
-        # as saturation relies on dithering. As a result, the timestamp field here is mocked
-        # out, and other sensor updates are verified more completely.
+        # NOTE: Verifying the timestamp on saturation count updates is not as
+        # predictable as saturation relies on dithering. As a result, the
+        # timestamp field is ignored here, and other sensor updates are verified
+        # more completely.
         assert actual_sensor_updates[f"{beam_output.name}.beng-clip-cnt"][-1] == aiokatcp.Reading(
             mock.ANY,
             aiokatcp.Sensor.Status.NOMINAL,
@@ -1054,15 +1060,15 @@ class TestEngine:
         # Phase is in radians
         delays[..., 1] = rng.uniform(-2 * np.pi, 2 * np.pi, size=(len(beam_outputs), n_ants))
 
-        katcp_requests: dict[str, list[tuple[str, ...]]] = {
-            output.name: [
+        katcp_requests = [
+            [
                 ("beam-weights", output.name, *weights[i]),
                 ("beam-quant-gains", output.name, quant_gains[i]),
                 ("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]]),
             ]
             for i, output in enumerate(beam_outputs)
-        }
-        flattened_requests = list(chain.from_iterable(katcp_requests.values()))
+        ]
+        flattened_requests = list(chain.from_iterable(katcp_requests))
         steady_state_timestamps = self._patch_get_in_item(
             monkeypatch,
             count=10,
@@ -1228,9 +1234,9 @@ class TestEngine:
         monkeypatch: pytest.MonkeyPatch,
         count: int,
         client: aiokatcp.Client,
-        requests: list[tuple[str, ...]],
+        requests: Iterable[Iterable],
     ) -> list[int]:
-        """Patch :meth:`~.BPipeline._get_in_item` to make a request partway through the stream.
+        """Patch :meth:`~.BPipeline._get_in_item` to make requests partway through the stream.
 
         The returned list will be populated with the value of the
         ``steady-state-timestamp`` sensor immediately after executing the
@@ -1239,7 +1245,9 @@ class TestEngine:
         Parameters
         ----------
         count
-            Count point at which to execute katcp requests in `requests`.
+            Counting from 1, the index of the call to `_get_in_item` to trigger
+            `requests`. `requests` are made prior to the n-th call to
+            `_get_in_item`.
         requests
             A list of tuples in the format ("request-name", arg1, arg2, ...).
         """
