@@ -59,6 +59,7 @@ HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 N_TOTAL_XB_HEAPS: Final[int] = 70
+N_BEAM_REQUESTS: Final[int] = 2
 # Mark that can be applied to a test that just needs one set of parameters
 DEFAULT_PARAMETERS = pytest.mark.parametrize(
     "n_ants, n_channels, n_jones_per_batch, heap_accumulation_threshold",
@@ -194,6 +195,7 @@ def generate_expected_beams(
     n_spectra_per_heap: int,
     present: np.ndarray,
     beam_pols: np.ndarray,
+    beam_params_change_index: int,
     weights: np.ndarray,
     delays: np.ndarray,
     quant_gains: np.ndarray,
@@ -219,11 +221,13 @@ def generate_expected_beams(
     beam_pols
         Indicates, for each beam, which polarisation is used to form the beam.
     weights
-        Real-valued weights for summing the beams, with shape (beams, antennas).
+        Real-valued weights for summing the beams, with shape (N_BEAM_REQUESTS, beams, antennas).
     delays
-        Real-valued delay model, with shape (beams, antennas, 2). In each pair,
+        Real-valued delay model, with shape (N_BEAM_REQUESTS, beams, antennas, 2). In each pair,
         the first element is the delay in seconds and the second is the phase
         to be applied at the centre frequency.
+    quant_gains
+        Real-valued quantisation gains for each beam, with shape (N_BEAM_REQUESTS, beams).
     channel_spacing
         Frequency difference between adjacent channels, in Hz.
     centre_channel
@@ -244,7 +248,11 @@ def generate_expected_beams(
     accum = np.zeros((len(beam_pols), len(batch_indices), n_channels), np.complex64)
     sample = np.empty((N_POLS, COMPLEX), np.int8)
     sample_fp = np.empty(N_POLS, np.complex64)
+
+    beam_params_id = 0
     for batch_id, batch_index in enumerate(batch_indices):
+        if beam_params_change_index == batch_id:
+            beam_params_id = 1
         for channel in range(n_channels):
             # Compute scale factor for turning a delay into a phase
             delay_to_phase = -2 * np.pi * channel_spacing * (channel - centre_channel)
@@ -255,11 +263,11 @@ def generate_expected_beams(
                 sample_fp[0] = sample[0, 0] + np.complex64(1j) * sample[0, 1]
                 sample_fp[1] = sample[1, 0] + np.complex64(1j) * sample[1, 1]
                 for beam, pol in enumerate(beam_pols):
-                    phase = delay_to_phase * delays[beam, ant, 0] + delays[beam, ant, 1]
+                    phase = delay_to_phase * delays[beam_params_id, beam, ant, 0] + delays[beam_params_id, beam, ant, 1]
                     rotation = np.exp(1j * phase)
-                    accum[beam, batch_id, channel] += sample_fp[pol] * weights[beam, ant] * rotation
+                    accum[beam, batch_id, channel] += sample_fp[pol] * weights[beam_params_id, beam, ant] * rotation
             for beam in range(len(beam_pols)):
-                value = accum[beam, batch_id, channel] * quant_gains[beam]
+                value = accum[beam, batch_id, channel] * quant_gains[beam_params_id, beam]
                 sample[0, 0] = np.fmin(np.fmax(np.rint(value.real), -127), 127)
                 sample[0, 1] = np.fmin(np.fmax(np.rint(value.imag), -127), 127)
                 # Copy to all spectra in the batch
@@ -436,6 +444,7 @@ def verify_beam_data(
     beam_results: np.ndarray,
     present: np.ndarray,
     batch_indices: list[int],
+    beam_params_change_index: int,
     n_channels_per_substream: int,
     n_spectra_per_heap: int,
     weights: np.ndarray,
@@ -460,7 +469,9 @@ def verify_beam_data(
     weights, quant_gains, delays
         The beam weights, quantiser-gains and delays applied to each input of
         the beam data product. These are real floating-point values generated
-        for the unit test.
+        for the unit test. There are `N_BEAM_REQUESTS` distinct sets of request
+        parameters in each ndarray. Starting at index 0, the next subsequent set
+        is applied at the indices specified in `beam_request_index`.
     channel_spacing
         Frequency difference between adjacent channels, in Hz.
     centre_channel
@@ -478,6 +489,7 @@ def verify_beam_data(
         n_spectra_per_heap,
         present,
         np.array([beam_output.pol for beam_output in beam_outputs]),
+        beam_params_change_index=beam_params_change_index,
         weights=weights,
         delays=delays,
         quant_gains=quant_gains,
@@ -500,8 +512,7 @@ def verify_beam_sensors(
     beam_dtype: np.dtype,
     prom_diff: PromDiff,
     actual_sensor_updates: dict[str, list[aiokatcp.Reading]],
-    first_timestamp: int,
-    last_timestamp: int,
+    runtime_timestamps: tuple[int, int],
     weights: np.ndarray,
     quant_gains: np.ndarray,
     delays: np.ndarray,
@@ -546,12 +557,16 @@ def verify_beam_sensors(
     # We get rid of the final dimension in the beam data as we need the total
     # number of (COMPLEX) samples.
     heap_samples = np.prod(heap_shape[:-1])
-    for i, beam_output in enumerate(beam_outputs):
+    for boutput_id, beam_output in enumerate(beam_outputs):
         stream_diff = prom_diff.with_labels({"stream": beam_output.name})
         assert stream_diff.diff("output_b_heaps_total") == n_beam_heaps_sent
         assert stream_diff.diff("output_b_bytes_total") == n_beam_heaps_sent * heap_bytes
         assert stream_diff.diff("output_b_samples_total") == n_beam_heaps_sent * heap_samples
-        assert saturated_low[i] <= stream_diff.diff("output_b_clipped_samples_total") <= saturated_high[i]
+        assert (
+            saturated_low[boutput_id]
+            <= stream_diff.diff("output_b_clipped_samples_total")
+            <= saturated_high[boutput_id]
+        )
 
         # Check that sensor value matches Prometheus
         # NOTE: Verifying the timestamp on saturation count updates is not as
@@ -563,31 +578,38 @@ def verify_beam_sensors(
             aiokatcp.Sensor.Status.NOMINAL,
             stream_diff.diff("output_b_clipped_samples_total"),
         )
-        assert first_timestamp < last_timestamp, (
+        assert runtime_timestamps[0] < runtime_timestamps[-1], (
             "Timestamp before katcp requests is not less than timestamp after data"
-            f"has been processed: {first_timestamp} >= {last_timestamp}"
+            f"has been processed: {runtime_timestamps[0]} >= {runtime_timestamps[-1]}"
         )
-        # NOTE: We confirm that there were only ever two requests issued for
-        # each ?beam request: One at the start of the test, another at some
-        # point during the test.
+        # NOTE: We confirm that there were only ever `N_BEAM_REQUESTS` requests issued for
+        # each ?beam request.
         assert actual_sensor_updates[f"{beam_output.name}.weight"] == [
-            aiokatcp.Reading(first_timestamp, aiokatcp.Sensor.Status.NOMINAL, str(list(weights[i]))),
-            aiokatcp.Reading(last_timestamp, aiokatcp.Sensor.Status.NOMINAL, str(list(weights[i]))),
+            aiokatcp.Reading(
+                runtime_timestamps[request_id],
+                aiokatcp.Sensor.Status.NOMINAL,
+                str(list(weights[request_id, boutput_id])),
+            )
+            for request_id in range(N_BEAM_REQUESTS)
         ]
 
         assert actual_sensor_updates[f"{beam_output.name}.quantiser-gain"] == [
-            aiokatcp.Reading(first_timestamp, aiokatcp.Sensor.Status.NOMINAL, quant_gains[i]),
-            aiokatcp.Reading(last_timestamp, aiokatcp.Sensor.Status.NOMINAL, quant_gains[i]),
+            aiokatcp.Reading(
+                runtime_timestamps[request_id], aiokatcp.Sensor.Status.NOMINAL, quant_gains[request_id, boutput_id]
+            )
+            for request_id in range(N_BEAM_REQUESTS)
         ]
 
-        delay_updates_str = ", ".join(f"{delay}, {phase}" for delay, phase in delays[i])
+        def _format_delay_str(delay_phase_pairs) -> str:
+            return ", ".join(f"{delay}, {phase}" for delay, phase in delay_phase_pairs)
+
         assert actual_sensor_updates[f"{beam_output.name}.delay"] == [
             aiokatcp.Reading(
-                first_timestamp, aiokatcp.Sensor.Status.NOMINAL, f"({first_timestamp}, {delay_updates_str})"
-            ),
-            aiokatcp.Reading(
-                last_timestamp, aiokatcp.Sensor.Status.NOMINAL, f"({last_timestamp}, {delay_updates_str})"
-            ),
+                runtime_timestamps[request_id],
+                aiokatcp.Sensor.Status.NOMINAL,
+                f"({runtime_timestamps[request_id]}, {_format_delay_str(delays[request_id, boutput_id])})",
+            )
+            for request_id in range(N_BEAM_REQUESTS)
         ]
 
 
@@ -1051,29 +1073,31 @@ class TestEngine:
             )
 
         # Also need to access the request arguments later when generating expected sensor updates
+        # TODO: That's why we can't really have a `requests_factory`, we need the values
         rng = np.random.default_rng(seed=1)
-        weights = rng.uniform(0.5, 2.0, size=(len(beam_outputs), n_ants))
-        quant_gains = rng.uniform(0.5, 2.0, size=(len(beam_outputs)))
-        delays = np.zeros((len(beam_outputs), n_ants, 2), np.float64)
+        weights = rng.uniform(0.5, 2.0, size=(N_BEAM_REQUESTS, len(beam_outputs), n_ants))
+        quant_gains = rng.uniform(0.5, 2.0, size=(N_BEAM_REQUESTS, len(beam_outputs)))
+        delays = np.zeros((N_BEAM_REQUESTS, len(beam_outputs), n_ants, 2), np.float64)
         # Delay is in seconds, so needs to be very small
-        delays[..., 0] = rng.uniform(-1e-9, 1e-9, size=(len(beam_outputs), n_ants))
+        delays[..., 0] = rng.uniform(-1e-9, 1e-9, size=(N_BEAM_REQUESTS, len(beam_outputs), n_ants))
         # Phase is in radians
-        delays[..., 1] = rng.uniform(-2 * np.pi, 2 * np.pi, size=(len(beam_outputs), n_ants))
+        delays[..., 1] = rng.uniform(-2 * np.pi, 2 * np.pi, size=(N_BEAM_REQUESTS, len(beam_outputs), n_ants))
 
         katcp_requests = [
             [
-                ("beam-weights", output.name, *weights[i]),
-                ("beam-quant-gains", output.name, quant_gains[i]),
-                ("beam-delays", output.name, *[f"{d[0]}:{d[1]}" for d in delays[i]]),
+                ("beam-weights", boutput.name, *weights[request_id, boutput_id]),
+                ("beam-quant-gains", boutput.name, quant_gains[request_id, boutput_id]),
+                ("beam-delays", boutput.name, *[f"{d[0]}:{d[1]}" for d in delays[request_id, boutput_id]]),
             ]
-            for i, output in enumerate(beam_outputs)
+            for request_id in range(N_BEAM_REQUESTS)
+            for boutput_id, boutput in enumerate(beam_outputs)
         ]
-        flattened_requests = list(chain.from_iterable(katcp_requests))
+        beam_params_change_index = 10
         steady_state_timestamps = self._patch_get_in_item(
             monkeypatch,
-            count=10,
+            count=beam_params_change_index,
             client=client,
-            requests=flattened_requests,
+            requests=list(chain.from_iterable(katcp_requests[N_BEAM_REQUESTS:])),
         )
         with caplog.at_level(WARNING, logger="katgpucbf.xbgpu.engine"), PromDiff(
             namespace=METRIC_NAMESPACE
@@ -1092,7 +1116,7 @@ class TestEngine:
                 present[40:50, missing_antenna] = False  # Covers some complete accumulations
                 present[60, missing_antenna] = False  # Just one heap in an accumulation
 
-            for beam_request in flattened_requests:
+            for beam_request in list(chain.from_iterable(katcp_requests[:N_BEAM_REQUESTS])):
                 await client.request(*beam_request)
             first_timestamp = 0
 
@@ -1144,6 +1168,7 @@ class TestEngine:
             beam_results=beam_results,
             present=present,
             batch_indices=batch_indices,
+            beam_params_change_index=beam_params_change_index * HEAPS_PER_FENGINE_PER_CHUNK,
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
             weights=weights,
@@ -1162,8 +1187,7 @@ class TestEngine:
             beam_dtype=beam_results.dtype,
             prom_diff=prom_diff,
             actual_sensor_updates=actual_sensor_updates,
-            first_timestamp=first_timestamp,
-            last_timestamp=steady_state_timestamps[-1],
+            runtime_timestamps=(first_timestamp, steady_state_timestamps[-1]),
             weights=weights,
             quant_gains=quant_gains,
             delays=delays,
