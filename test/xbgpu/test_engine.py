@@ -60,6 +60,9 @@ SEND_RATE_FACTOR: Final[float] = 1.1
 SAMPLE_BITWIDTH: Final[int] = 8
 N_TOTAL_XB_HEAPS: Final[int] = 70
 N_BEAM_REQUESTS: Final[int] = 2
+# The latest chunk index at which updated beam parameters can be updated
+# in order to be properly tested.
+LATEST_BEAM_PARAM_CHANGE_INDEX: Final[int] = N_TOTAL_XB_HEAPS // HEAPS_PER_FENGINE_PER_CHUNK - 1
 # Mark that can be applied to a test that just needs one set of parameters
 DEFAULT_PARAMETERS = pytest.mark.parametrize(
     "n_ants, n_channels, n_jones_per_batch, heap_accumulation_threshold",
@@ -195,7 +198,7 @@ def generate_expected_beams(
     n_spectra_per_heap: int,
     present: np.ndarray,
     beam_pols: np.ndarray,
-    beam_params_change_batch_index: int,
+    beam_params_change_batch_id: int,
     weights: np.ndarray,
     delays: np.ndarray,
     quant_gains: np.ndarray,
@@ -220,7 +223,7 @@ def generate_expected_beams(
         received.
     beam_pols
         Indicates, for each beam, which polarisation is used to form the beam.
-    beam_params_change_batch_index
+    beam_params_change_batch_id
         Batch index in `batch_indices` where the beam weights, delays and quant-gains changed.
     weights
         Real-valued weights for summing the beams, with shape (N_BEAM_REQUESTS, beams, antennas).
@@ -253,7 +256,7 @@ def generate_expected_beams(
 
     beam_params_id = 0
     for batch_id, batch_index in enumerate(batch_indices):
-        if beam_params_change_batch_index == batch_id:
+        if beam_params_change_batch_id == batch_id:
             beam_params_id += 1
         for channel in range(n_channels):
             # Compute scale factor for turning a delay into a phase
@@ -446,7 +449,7 @@ def verify_beam_data(
     beam_results: np.ndarray,
     present: np.ndarray,
     batch_indices: list[int],
-    beam_params_change_batch_index: int,
+    beam_params_change_batch_id: int,
     n_channels_per_substream: int,
     n_spectra_per_heap: int,
     weights: np.ndarray,
@@ -468,7 +471,7 @@ def verify_beam_data(
         received.
     batch_indices
         Indices of heaps where data was present (as indicated by `present`).
-    beam_params_change_batch_index
+    beam_params_change_batch_id
         Batch index in `batch_indices` where the beam weights, delays and
         quant-gains changed.
     weights, quant_gains, delays
@@ -476,7 +479,7 @@ def verify_beam_data(
         the beam data product. These are real floating-point values generated
         for the unit test. There are `N_BEAM_REQUESTS` distinct sets of request
         parameters in each ndarray. Starting at index 0, the next subsequent set
-        is applied at the indices specified in `beam_request_index`.
+        is applied at the batch ID specified in `beam_params_change_batch_id`.
     channel_spacing
         Frequency difference between adjacent channels, in Hz.
     centre_channel
@@ -494,7 +497,7 @@ def verify_beam_data(
         n_spectra_per_heap,
         present,
         np.array([beam_output.pol for beam_output in beam_outputs]),
-        beam_params_change_batch_index=beam_params_change_batch_index,
+        beam_params_change_batch_id=beam_params_change_batch_id,
         weights=weights,
         delays=delays,
         quant_gains=quant_gains,
@@ -517,7 +520,7 @@ def verify_beam_sensors(
     beam_dtype: np.dtype,
     prom_diff: PromDiff,
     actual_sensor_updates: dict[str, list[aiokatcp.Reading]],
-    runtime_timestamps: tuple[int, int],
+    beam_request_timestamps: tuple[int, int],
     weights: np.ndarray,
     quant_gains: np.ndarray,
     delays: np.ndarray,
@@ -544,7 +547,7 @@ def verify_beam_sensors(
         Dictionary of lists of sensor updates. They dictionary keys are sensor
         names, the values are a list of readings for each sensor update captured
         via the callback attached to :class:`BPipeline` sensors.
-    runtime_timestamps
+    beam_request_timestamps
         Two timestamps indicating the first and last issuing of `?beam` requests
         to the :class:`BPipeline`.
     weights, quant_gains, delays
@@ -583,15 +586,15 @@ def verify_beam_sensors(
             aiokatcp.Sensor.Status.NOMINAL,
             stream_diff.diff("output_b_clipped_samples_total"),
         )
-        assert runtime_timestamps[0] < runtime_timestamps[-1], (
+        assert beam_request_timestamps[0] < beam_request_timestamps[-1], (
             "Timestamp at the first ?beam requests is not less than timestamp after the "
-            f"last set of requests: {runtime_timestamps[0]} >= {runtime_timestamps[-1]}"
+            f"last set of requests: {beam_request_timestamps[0]} >= {beam_request_timestamps[-1]}"
         )
         # NOTE: We confirm that there were only ever `N_BEAM_REQUESTS` requests issued for
         # each `?beam` request.
         assert actual_sensor_updates[f"{beam_output.name}.weight"] == [
             aiokatcp.Reading(
-                runtime_timestamps[request_id],
+                beam_request_timestamps[request_id],
                 aiokatcp.Sensor.Status.NOMINAL,
                 str(list(weights[request_id, boutput_id])),
             )
@@ -600,7 +603,7 @@ def verify_beam_sensors(
 
         assert actual_sensor_updates[f"{beam_output.name}.quantiser-gain"] == [
             aiokatcp.Reading(
-                runtime_timestamps[request_id], aiokatcp.Sensor.Status.NOMINAL, quant_gains[request_id, boutput_id]
+                beam_request_timestamps[request_id], aiokatcp.Sensor.Status.NOMINAL, quant_gains[request_id, boutput_id]
             )
             for request_id in range(N_BEAM_REQUESTS)
         ]
@@ -610,9 +613,9 @@ def verify_beam_sensors(
 
         assert actual_sensor_updates[f"{beam_output.name}.delay"] == [
             aiokatcp.Reading(
-                runtime_timestamps[request_id],
+                beam_request_timestamps[request_id],
                 aiokatcp.Sensor.Status.NOMINAL,
-                f"({runtime_timestamps[request_id]}, {_format_delay_str(delays[request_id, boutput_id])})",
+                f"({beam_request_timestamps[request_id]}, {_format_delay_str(delays[request_id, boutput_id])})",
             )
             for request_id in range(N_BEAM_REQUESTS)
         ]
@@ -1087,33 +1090,40 @@ class TestEngine:
         # Phase is in radians
         delays[..., 1] = rng.uniform(-2 * np.pi, 2 * np.pi, size=(N_BEAM_REQUESTS, len(beam_outputs), n_ants))
 
-        # NOTE: This list of lists is done in an order that has a set of requests for alternating
-        # `beam_outputs`. That is, each item is a standalone set of requests per `beam_output`.
-        # As a result, when issuing these requests, we can use a subset each time we need the
-        # `?beam` parameters to change for all `beam_outputs`.
+        # NOTE: This list of lists of lists has shape (N_BEAM_REQUESTS, len(beam_outputs), 3).
+        # It is constructed in an order that has a set of requests for alternating `beam_outputs`.
+        # That is, each item is a standalone set of requests per `beam_output`. As a result, when
+        # issuing these requests, we can use a subset each time we need the `?beam` parameters to
+        # change for all `beam_outputs`.
         katcp_requests = [
             [
-                ("beam-weights", boutput.name, *weights[request_id, boutput_id]),
-                ("beam-quant-gains", boutput.name, quant_gains[request_id, boutput_id]),
-                ("beam-delays", boutput.name, *[f"{d[0]}:{d[1]}" for d in delays[request_id, boutput_id]]),
+                [
+                    ("beam-weights", boutput.name, *weights[request_id, boutput_id]),
+                    ("beam-quant-gains", boutput.name, quant_gains[request_id, boutput_id]),
+                    ("beam-delays", boutput.name, *[f"{d[0]}:{d[1]}" for d in delays[request_id, boutput_id]]),
+                ]
+                for boutput_id, boutput in enumerate(beam_outputs)
             ]
             for request_id in range(N_BEAM_REQUESTS)
-            for boutput_id, boutput in enumerate(beam_outputs)
         ]
         # NOTE: This value is arbitrarily chosen, but must be less than
         # `N_TOTAL_XB_HEAPS` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect. This, as
         # each call to `patch_get_in_item` grabs a Chunk containing `HEAPS_PER_FENGINE_PER_CHUNK`
         # heaps.
         beam_params_change_index = 10
-        # NOTE: We use the 'upper' subset of `katcp_requests` here as `patch_get_in_item` is
-        # triggered during the BPipeline's processing of data. We use the 'lower' subset for
-        # `?beam` requests before it starts processing data so as to make data verification a
-        # bit simpler.
+        assert beam_params_change_index < LATEST_BEAM_PARAM_CHANGE_INDEX, (
+            f"Chunk index: {beam_params_change_index} is not early enough in the data to properly "
+            f"test updated beam parameters - needs to be less than {LATEST_BEAM_PARAM_CHANGE_INDEX}."
+        )
+        # NOTE: We use the last item in `katcp_requests` here as `patch_get_in_item` is
+        # triggered during the BPipeline's processing of data. We use the first item
+        # `?beam` requests before it starts processing data so as to make data verification
+        # a bit simpler.
         steady_state_timestamps = self._patch_get_in_item(
             monkeypatch,
             count=beam_params_change_index,
             client=client,
-            requests=list(chain.from_iterable(katcp_requests[N_BEAM_REQUESTS:])),
+            requests=chain.from_iterable(katcp_requests[-1]),
         )
         with caplog.at_level(WARNING, logger="katgpucbf.xbgpu.engine"), PromDiff(
             namespace=METRIC_NAMESPACE
@@ -1132,7 +1142,7 @@ class TestEngine:
                 present[40:50, missing_antenna] = False  # Covers some complete accumulations
                 present[60, missing_antenna] = False  # Just one heap in an accumulation
 
-            for beam_request in list(chain.from_iterable(katcp_requests[:N_BEAM_REQUESTS])):
+            for beam_request in chain.from_iterable(katcp_requests[0]):
                 await client.request(*beam_request)
             # We only capture the timestamps before and after all katcp
             # requests are executed as we only need to ensure it has
@@ -1190,7 +1200,7 @@ class TestEngine:
             beam_results=beam_results,
             present=present,
             batch_indices=batch_indices,
-            beam_params_change_batch_index=beam_params_change_index * HEAPS_PER_FENGINE_PER_CHUNK,
+            beam_params_change_batch_id=beam_params_change_index * HEAPS_PER_FENGINE_PER_CHUNK,
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
             weights=weights,
@@ -1209,7 +1219,7 @@ class TestEngine:
             beam_dtype=beam_results.dtype,
             prom_diff=prom_diff,
             actual_sensor_updates=actual_sensor_updates,
-            runtime_timestamps=(first_timestamp, steady_state_timestamps[-1]),
+            beam_request_timestamps=(first_timestamp, steady_state_timestamps[-1]),
             weights=weights,
             quant_gains=quant_gains,
             delays=delays,
