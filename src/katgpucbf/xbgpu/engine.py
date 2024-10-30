@@ -583,12 +583,20 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
     def capture_enable(self, *, stream_id: int, enable: bool = True, timestamp: int = 0) -> None:  # noqa: D102
         self.send_stream.enable_beam(beam_id=stream_id, enable=enable, timestamp=timestamp)
 
-    def _weights_updated(self) -> None:
-        """Update version tracking when weight-related parameters are updated."""
+    def _weights_updated(self) -> int:
+        """Update version tracking when weight-related parameters are updated.
+
+        Returns
+        -------
+        int
+            :attr:`_weights_steady`, the timestamp that includes the effect of
+            a beam request update made now.
+        """
         self._weights_version += 1
         self.engine.update_steady_state_timestamp(self._weights_steady)
+        return self._weights_steady
 
-    def set_weights(self, stream_id: int, weights: np.ndarray) -> None:
+    def set_weights(self, stream_id: int, weights: np.ndarray) -> int:
         """Set the beam weights for one beam.
 
         Parameters
@@ -597,11 +605,17 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             The index of the beam whose weights are being set.
         weights
             A 1D array containing real-valued weights (per input).
+
+        Returns
+        -------
+        int
+            :attr:`_weights_steady`, the timestamp that includes the effect of
+            a beam-weights update made now.
         """
         self._weights[stream_id] = weights
-        self._weights_updated()
+        return self._weights_updated()
 
-    def set_quant_gain(self, stream_id: int, gain: float) -> None:
+    def set_quant_gain(self, stream_id: int, gain: float) -> int:
         """Set the quantisation gain for one beam.
 
         Parameters
@@ -610,11 +624,17 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             The index of the beam whose quantisation gain is being set.
         gain
             Real-valued quantisation gain.
+
+        Returns
+        -------
+        int
+            :attr:`_weights_steady`, the timestamp that includes the effect of
+            a beam-quant-gain update made now.
         """
         self._quant_gains[stream_id] = gain
-        self._weights_updated()
+        return self._weights_updated()
 
-    def set_delays(self, stream_id: int, delays: np.ndarray) -> None:
+    def set_delays(self, stream_id: int, delays: np.ndarray) -> int:
         """Set the beam steering delays for one beam.
 
         Parameters
@@ -626,9 +646,15 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             inputs. The second axis has length two, with the first element
             containing the delay in seconds, and the second containing a
             channel-independent phase rotation in radians.
+
+        Returns
+        -------
+        int
+            :attr:`_weights_steady`, the timestamp that includes the effect of
+            a beam-delay update made now.
         """
         self._delays[stream_id] = delays
-        self._weights_updated()
+        return self._weights_updated()
 
 
 class XPipeline(Pipeline[XOutput, XOutQueueItem]):
@@ -1384,8 +1410,8 @@ class XBEngine(DeviceServer):
         pipeline, stream_id = self._request_bpipeline(stream_name)
         if len(weights) != self.n_ants:
             raise aiokatcp.FailReply(f"Incorrect number of weights (expected {self.n_ants}, received {len(weights)})")
-        pipeline.set_weights(stream_id, np.array(weights))
-        self.sensors[f"{stream_name}.weight"].set_value(str(list(weights)))
+        steady_state_timestamp = pipeline.set_weights(stream_id, np.array(weights))
+        self.sensors[f"{stream_name}.weight"].set_value(str(list(weights)), timestamp=steady_state_timestamp)
 
     async def request_beam_delays(self, ctx, stream_name: str, *delays: str) -> None:
         """Set the delays for all inputs of a given beam and update the sensor.
@@ -1408,9 +1434,12 @@ class XBEngine(DeviceServer):
             delay_str, phase_str = entry.split(":")
             new_delays[i, 0] = float(delay_str)
             new_delays[i, 1] = float(phase_str)
-        pipeline.set_delays(stream_id, new_delays)
+        steady_state_timestamp = pipeline.set_delays(stream_id, new_delays)
         delays_formatted_str = ", ".join(str(value) for value in new_delays.flatten())
-        self.sensors[f"{stream_name}.delay"].set_value(f"({pipeline._weights_steady}, {delays_formatted_str})")
+        self.sensors[f"{stream_name}.delay"].set_value(
+            f"({steady_state_timestamp}, {delays_formatted_str})",
+            timestamp=steady_state_timestamp,
+        )
 
     async def request_beam_quant_gains(self, ctx, stream_name: str, gain: float) -> None:
         """Set the quantisation gain for a beam and update the sensor.
@@ -1423,8 +1452,8 @@ class XBEngine(DeviceServer):
             The new gain to apply.
         """
         pipeline, stream_id = self._request_bpipeline(stream_name)
-        pipeline.set_quant_gain(stream_id, gain)
-        self.sensors[f"{stream_name}.quantiser-gain"].set_value(gain)
+        steady_state_timestamp = pipeline.set_quant_gain(stream_id, gain)
+        self.sensors[f"{stream_name}.quantiser-gain"].set_value(gain, timestamp=steady_state_timestamp)
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """
