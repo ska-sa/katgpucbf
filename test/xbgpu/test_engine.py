@@ -1029,9 +1029,9 @@ class TestEngine:
         is an artificial gap introduced in the data sent to/processed by the
         XBEngine.
 
-        Lastly, more complete testing of `?beam` requests is carried out by
-        adjusting beam weights, quantiser-gains and delays at points during the
-        test, and verifying corresponding sensor updates.
+        Lastly, testing of `?beam` requests is carried out by adjusting beam
+        weights, quantiser-gains and delays at points during the test, and
+        verifying corresponding sensor updates.
         """
         # NOTE: `HEAPS_PER_FENGINE_PER_CHUNK` and the `heap_accumulation_threshold`s
         # are chosen carefully for this test. We simulate the first accumulation
