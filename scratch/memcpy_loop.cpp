@@ -65,6 +65,7 @@
 #endif
 #ifdef __ARM_FEATURE_SVE
 # include <arm_sve.h>
+# include <arm_acle.h>
 #endif
 
 using namespace std;
@@ -541,7 +542,11 @@ static void *memcpy_sve(void * __restrict__ dest, const void * __restrict__ src,
 static void *memcpy_stream_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
     // Not clear if this barrier is needed, but for safety
+#if __has_builtin(__dmb)
     __dmb(13);
+#else
+    asm volatile("dmb ld" ::: "memory");
+#endif
 
     std::uint8_t *destc = (std::uint8_t *) dest;
     const std::uint8_t *srcc = (const std::uint8_t *) src;
