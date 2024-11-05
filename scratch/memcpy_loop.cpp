@@ -35,9 +35,11 @@
  * The supported functions are:
  *
  * - memcpy: the library memcpy implementation
- * - memcpy_sse2/avx/avx512: SIMD copies
- * - memcpy_stream_sse2/avx/avx512: SIMD copies, using streaming stores
+ * - memcpy_sse2/avx/avx512: x86 SIMD copies
+ * - memcpy_stream_sse2/avx/avx512: x86 SIMD copies, using streaming stores
  * - memcpy_rep_movsb: use the x86 "REP MOVSB" instruction
+ * - memcpy_sve: ARM SIMD copy
+ * - memcpy_stream_sve: ARM SIMD copy, using streaming loads and stores
  * - memcpy_*_reverse: variants that copy from highest address to lowest
  * - memset: use library memset to clear the destination
  * - memset_stream_sse2: use SSE2 streaming stores to clear the destination
@@ -518,25 +520,51 @@ static void memory_read(const void *src, size_t bytes) noexcept
 #endif // __x86_64__
 
 #ifdef __ARM_FEATURE_SVE
+
 /* TODO: these implementations are rather simplistic. They could be
- * improved by
- * - aligning the destination to a multiple of 16 bytes
- * - unrolling the loop, which probably requires using separate
- *   tail handling.
+ * improved by aligning either the source or the destination to a multiple of
+ * 16 bytes to avoid the cost of mis-aligned stores. On Grace (Neoverse V2), it
+ * seems like it is misaligned source that hurts (for small buffers), while
+ * mis-aligned destination is free.
  */
-static void *memcpy_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+template<typename L, typename S>
+static void *memcpy_sve_generic(
+    void * __restrict__ dest, const void * __restrict__ src, size_t n,
+    const L &load, const S &store) noexcept
 {
     std::uint8_t *destc = (std::uint8_t *) dest;
     const std::uint8_t *srcc = (const std::uint8_t *) src;
+    static constexpr int unroll = 2; // keep in sync with actual code
 
     size_t i = 0;
+    size_t vsize = svcntb();
+    while (i + unroll * vsize <= n)
+    {
+        // Unfortunately svuint8_t is a "sizeless" type, which can't be
+        // put into an array. So we have to hand-unroll.
+        svuint8_t data0, data1;
+        data0 = load(svptrue_b8(), &srcc[i + 0 * vsize]);
+        data1 = load(svptrue_b8(), &srcc[i + 1 * vsize]);
+        store(svptrue_b8(), &destc[i + 0 * vsize], data0);
+        store(svptrue_b8(), &destc[i + 1 * vsize], data1);
+        i += unroll * vsize;
+    }
     svbool_t pg = svwhilelt_b8(i, n);
     do
     {
-        svst1_u8(pg, &destc[i], svld1_u8(pg, &srcc[i]));
-        i += svcntb();
+        store(pg, &destc[i], load(pg, &srcc[i]));
+        i += vsize;
     } while (svptest_first(svptrue_b8(), pg = svwhilelt_b8(i, n)));
     return dest;
+}
+
+static void *memcpy_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    return memcpy_sve_generic(
+        dest, src, n,
+        [](svbool_t pred, const std::uint8_t *ptr) { return svld1_u8(pred, ptr); },
+        [](svbool_t pred, std::uint8_t *ptr, svuint8_t value) { return svst1_u8(pred, ptr, value); }
+    );
 }
 
 static void *memcpy_stream_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
@@ -548,17 +576,11 @@ static void *memcpy_stream_sve(void * __restrict__ dest, const void * __restrict
     asm volatile("dmb ld" ::: "memory");
 #endif
 
-    std::uint8_t *destc = (std::uint8_t *) dest;
-    const std::uint8_t *srcc = (const std::uint8_t *) src;
-
-    size_t i = 0;
-    svbool_t pg = svwhilelt_b8(i, n);
-    do
-    {
-        svstnt1_u8(pg, &destc[i], svldnt1_u8(pg, &srcc[i]));
-        i += svcntb();
-    } while (svptest_first(svptrue_b8(), pg = svwhilelt_b8(i, n)));
-    return dest;
+    return memcpy_sve_generic(
+        dest, src, n,
+        [](svbool_t pred, const std::uint8_t *ptr) { return svldnt1_u8(pred, ptr); },
+        [](svbool_t pred, std::uint8_t *ptr, svuint8_t value) { return svstnt1_u8(pred, ptr, value); }
+    );
 }
 #endif // __ARM_FEATURE_SVE
 
