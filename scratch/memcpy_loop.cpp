@@ -569,13 +569,6 @@ static void *memcpy_sve(void * __restrict__ dest, const void * __restrict__ src,
 
 static void *memcpy_stream_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
-    // Not clear if this barrier is needed, but for safety
-#if __has_builtin(__dmb)
-    __dmb(13);
-#else
-    asm volatile("dmb ld" ::: "memory");
-#endif
-
     return memcpy_sve_generic(
         dest, src, n,
         [](svbool_t pred, const std::uint8_t *ptr) { return svldnt1_u8(pred, ptr); },
