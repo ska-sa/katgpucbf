@@ -526,12 +526,6 @@ static void memory_read(const void *src, size_t bytes) noexcept
 
 #ifdef __ARM_FEATURE_SVE
 
-/* TODO: these implementations are rather simplistic. They could be
- * improved by aligning either the source or the destination to a multiple of
- * 16 bytes to avoid the cost of mis-aligned stores. On Grace (Neoverse V2), it
- * seems like it is misaligned source that hurts (for small buffers), while
- * mis-aligned destination is free.
- */
 template<typename L, typename S>
 static void *memcpy_sve_generic(
     void * __restrict__ dest, const void * __restrict__ src, size_t n,
