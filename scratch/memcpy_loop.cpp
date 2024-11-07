@@ -534,10 +534,23 @@ static void *memcpy_sve_generic(
 {
     std::uint8_t *destc = (std::uint8_t *) dest;
     const std::uint8_t *srcc = (const std::uint8_t *) src;
+    const size_t vsize = svcntb();
     static constexpr int unroll = 2; // keep in sync with actual code
 
+    /* Experiments on Grace (Neoverse V2) show that source alignment
+     * is more important than destination alignment to throughput.
+     */
+    void *aligned_src = const_cast<void *>(src);
+    if (align(vsize, vsize * unroll, aligned_src, n))
+    {
+        std::size_t head = (const std::uint8_t *) aligned_src - srcc;
+        svbool_t pg = svwhilelt_b8(std::size_t(0), head);
+        store(pg, destc, load(pg, srcc));
+        destc += head;
+        srcc += head;
+    }
+
     size_t i = 0;
-    size_t vsize = svcntb();
     while (i + unroll * vsize <= n)
     {
         // Unfortunately svuint8_t is a "sizeless" type, which can't be
