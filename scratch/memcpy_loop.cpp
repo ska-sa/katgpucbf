@@ -67,6 +67,7 @@
 # include <immintrin.h>
 #endif
 #ifdef __ARM_FEATURE_SVE
+# include <sys/auxv.h>
 # include <arm_sve.h>
 # include <arm_acle.h>
 #endif
@@ -627,6 +628,11 @@ static void *memset_stream_sve(void *dest, int c, size_t n) noexcept
     return dest;
 }
 
+static bool sve_supported()
+{
+    return getauxval(AT_HWCAP) & HWCAP_SVE;
+}
+
 #endif // __ARM_FEATURE_SVE
 
 static const struct
@@ -765,14 +771,14 @@ static const struct
         memory_function::MEMCPY_SVE,
         memory_function_type::MEMCPY,
         "memcpy_sve",
-        true,  // TODO: detect SVE at runtime
+        sve_supported(),
         { .memcpy_impl = &memcpy_sve },
     },
     {
         memory_function::MEMCPY_STREAM_SVE,
         memory_function_type::MEMCPY,
         "memcpy_stream_sve",
-        true,  // TODO: detect SVE at runtime
+        sve_supported(),
         { .memcpy_impl = &memcpy_stream_sve },
     },
 #endif // __ARM_FEATURE_SVE
@@ -804,7 +810,7 @@ static const struct
         memory_function::MEMSET_STREAM_SVE,
         memory_function_type::MEMSET,
         "memset_stream_sve",
-        true,  // TODO: detect SVE at runtime
+        sve_supported(),
         { .memset_impl = &memset_stream_sve },
     },
 #endif // __ARM_FEATURE_SVE
