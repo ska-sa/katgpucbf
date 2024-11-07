@@ -43,6 +43,7 @@
  * - memcpy_*_reverse: variants that copy from highest address to lowest
  * - memset: use library memset to clear the destination
  * - memset_stream_sse2: use SSE2 streaming stores to clear the destination
+ * - memset_stream_sve: use SVE streaming stores to clear the destination
  * - read: just read the source (using SSE2) and do not write anything
  */
 
@@ -110,8 +111,11 @@ enum class memory_function
     MEMSET,
 #ifdef __x86_64__
     MEMSET_STREAM_SSE2,
+    READ,
 #endif // __x86_64__
-    READ
+#ifdef __ARM_FEATURE_SVE
+    MEMSET_STREAM_SVE,
+#endif
 };
 
 enum class memory_function_type
@@ -588,6 +592,41 @@ static void *memcpy_stream_sve(void * __restrict__ dest, const void * __restrict
         [](svbool_t pred, std::uint8_t *ptr, svuint8_t value) { return svstnt1_u8(pred, ptr, value); }
     );
 }
+
+static void *memset_stream_sve(void *dest, int c, size_t n) noexcept
+{
+    std::uint8_t *destc = (std::uint8_t *) dest;
+    const size_t vsize = svcntb();
+    static constexpr int unroll = 2; // keep in sync with actual code
+
+    void *aligned_dest = const_cast<void *>(dest);
+    svuint8_t value = svdup_u8(c);
+    if (align(vsize, vsize * unroll, aligned_dest, n))
+    {
+        std::size_t head = (const std::uint8_t *) aligned_dest - destc;
+        svbool_t pg = svwhilelt_b8(std::size_t(0), head);
+        svstnt1_u8(pg, destc, value);
+        destc += head;
+    }
+
+    size_t i = 0;
+    while (i + unroll * vsize <= n)
+    {
+        // Unfortunately svuint8_t is a "sizeless" type, which can't be
+        // put into an array. So we have to hand-unroll.
+        svstnt1_u8(svptrue_b8(), &destc[i + 0 * vsize], value);
+        svstnt1_u8(svptrue_b8(), &destc[i + 1 * vsize], value);
+        i += unroll * vsize;
+    }
+    svbool_t pg = svwhilelt_b8(i, n);
+    do
+    {
+        svstnt1_u8(pg, &destc[i], value);
+        i += vsize;
+    } while (svptest_first(svptrue_b8(), pg = svwhilelt_b8(i, n)));
+    return dest;
+}
+
 #endif // __ARM_FEATURE_SVE
 
 static const struct
@@ -760,6 +799,15 @@ static const struct
         { .read_impl = &memory_read },
     },
 #endif // __x86_64__
+#ifdef __ARM_FEATURE_SVE
+    {
+        memory_function::MEMSET_STREAM_SVE,
+        memory_function_type::MEMSET,
+        "memset_stream_sve",
+        true,  // TODO: detect SVE at runtime
+        { .memset_impl = &memset_stream_sve },
+    },
+#endif // __ARM_FEATURE_SVE
 };
 
 template<typename T, typename V>
