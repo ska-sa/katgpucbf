@@ -1492,7 +1492,7 @@ class TestEngine:
         n_batches = heap_accumulation_threshold[0]
         # Naive list concatention using '+' not used below as mypy was not happy
         # lists of two different types could be added together.
-        all_stream_names = list(map(lambda output: output.name, [*corrprod_outputs, *beam_outputs]))
+        all_stream_names = list(map(lambda output: output.name, chain(corrprod_outputs, beam_outputs)))
         rng = np.random.default_rng(seed=1)
         # Select random subset of output data products to issue `?capture-stop` to
         n_streams_to_stop = rng.integers(1, len(all_stream_names))
