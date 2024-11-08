@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2019-2020, 2022-2023, National Research Foundation (SARAO)
+ * Copyright (c) 2019-2020, 2022-2024, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -35,12 +35,15 @@
  * The supported functions are:
  *
  * - memcpy: the library memcpy implementation
- * - memcpy_sse2/avx/avx512: SIMD copies
- * - memcpy_stream_sse2/avx/avx512: SIMD copies, using streaming stores
+ * - memcpy_sse2/avx/avx512: x86 SIMD copies
+ * - memcpy_stream_sse2/avx/avx512: x86 SIMD copies, using streaming stores
  * - memcpy_rep_movsb: use the x86 "REP MOVSB" instruction
+ * - memcpy_sve: ARM SIMD copy
+ * - memcpy_stream_sve: ARM SIMD copy, using streaming loads and stores
  * - memcpy_*_reverse: variants that copy from highest address to lowest
  * - memset: use library memset to clear the destination
  * - memset_stream_sse2: use SSE2 streaming stores to clear the destination
+ * - memset_stream_sve: use SVE streaming stores to clear the destination
  * - read: just read the source (using SSE2) and do not write anything
  */
 
@@ -59,8 +62,15 @@
 #include <unistd.h>
 #include <semaphore.h>
 #include <pthread.h>
-#include <emmintrin.h>
-#include <immintrin.h>
+#ifdef __x86_64__
+# include <emmintrin.h>
+# include <immintrin.h>
+#endif
+#ifdef __ARM_FEATURE_SVE
+# include <sys/auxv.h>
+# include <arm_sve.h>
+# include <arm_acle.h>
+#endif
 
 using namespace std;
 using namespace std::chrono;
@@ -79,6 +89,7 @@ enum class memory_type
 enum class memory_function
 {
     MEMCPY,
+#ifdef __x86_64__
     MEMCPY_SSE2,
     MEMCPY_SSE2_REVERSE,
     MEMCPY_AVX,
@@ -93,9 +104,19 @@ enum class memory_function
     MEMCPY_STREAM_AVX512_REVERSE,
     MEMCPY_REP_MOVSB,
     MEMCPY_REP_MOVSB_REVERSE,
+#endif // __x86_64__
+#ifdef __ARM_FEATURE_SVE
+    MEMCPY_SVE,
+    MEMCPY_STREAM_SVE,
+#endif // __ARM_FEATURE_SVE
     MEMSET,
+#ifdef __x86_64__
     MEMSET_STREAM_SSE2,
-    READ
+    READ,
+#endif // __x86_64__
+#ifdef __ARM_FEATURE_SVE
+    MEMSET_STREAM_SVE,
+#endif
 };
 
 enum class memory_function_type
@@ -265,6 +286,7 @@ static void *memcpy_generic_reverse(
 }
 #pragma GCC diagnostic pop
 
+#if __x86_64__
 // memcpy, with SSE2
 static void *memcpy_sse2(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
 {
@@ -500,6 +522,112 @@ static void memory_read(const void *src, size_t bytes) noexcept
     (void) sink1;
     (void) sink2;
 }
+#endif // __x86_64__
+
+#ifdef __ARM_FEATURE_SVE
+
+template<typename L, typename S>
+static void *memcpy_sve_generic(
+    void * __restrict__ dest, const void * __restrict__ src, size_t n,
+    const L &load, const S &store) noexcept
+{
+    std::uint8_t *destc = (std::uint8_t *) dest;
+    const std::uint8_t *srcc = (const std::uint8_t *) src;
+    const size_t vsize = svcntb();
+    static constexpr int unroll = 2; // keep in sync with actual code
+
+    /* Experiments on Grace (Neoverse V2) show that source alignment
+     * is more important than destination alignment to throughput.
+     */
+    void *aligned_src = const_cast<void *>(src);
+    if (align(vsize, vsize * unroll, aligned_src, n))
+    {
+        std::size_t head = (const std::uint8_t *) aligned_src - srcc;
+        svbool_t pg = svwhilelt_b8(std::size_t(0), head);
+        store(pg, destc, load(pg, srcc));
+        destc += head;
+        srcc += head;
+    }
+
+    size_t i = 0;
+    while (i + unroll * vsize <= n)
+    {
+        // Unfortunately svuint8_t is a "sizeless" type, which can't be
+        // put into an array. So we have to hand-unroll.
+        svuint8_t data0, data1;
+        data0 = load(svptrue_b8(), &srcc[i + 0 * vsize]);
+        data1 = load(svptrue_b8(), &srcc[i + 1 * vsize]);
+        store(svptrue_b8(), &destc[i + 0 * vsize], data0);
+        store(svptrue_b8(), &destc[i + 1 * vsize], data1);
+        i += unroll * vsize;
+    }
+    svbool_t pg = svwhilelt_b8(i, n);
+    do
+    {
+        store(pg, &destc[i], load(pg, &srcc[i]));
+        i += vsize;
+    } while (svptest_first(svptrue_b8(), pg = svwhilelt_b8(i, n)));
+    return dest;
+}
+
+static void *memcpy_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    return memcpy_sve_generic(
+        dest, src, n,
+        [](svbool_t pred, const std::uint8_t *ptr) { return svld1_u8(pred, ptr); },
+        [](svbool_t pred, std::uint8_t *ptr, svuint8_t value) { return svst1_u8(pred, ptr, value); }
+    );
+}
+
+static void *memcpy_stream_sve(void * __restrict__ dest, const void * __restrict__ src, size_t n) noexcept
+{
+    return memcpy_sve_generic(
+        dest, src, n,
+        [](svbool_t pred, const std::uint8_t *ptr) { return svldnt1_u8(pred, ptr); },
+        [](svbool_t pred, std::uint8_t *ptr, svuint8_t value) { return svstnt1_u8(pred, ptr, value); }
+    );
+}
+
+static void *memset_stream_sve(void *dest, int c, size_t n) noexcept
+{
+    std::uint8_t *destc = (std::uint8_t *) dest;
+    const size_t vsize = svcntb();
+    static constexpr int unroll = 2; // keep in sync with actual code
+
+    void *aligned_dest = const_cast<void *>(dest);
+    svuint8_t value = svdup_u8(c);
+    if (align(vsize, vsize * unroll, aligned_dest, n))
+    {
+        std::size_t head = (const std::uint8_t *) aligned_dest - destc;
+        svbool_t pg = svwhilelt_b8(std::size_t(0), head);
+        svstnt1_u8(pg, destc, value);
+        destc += head;
+    }
+
+    size_t i = 0;
+    while (i + unroll * vsize <= n)
+    {
+        // Unfortunately svuint8_t is a "sizeless" type, which can't be
+        // put into an array. So we have to hand-unroll.
+        svstnt1_u8(svptrue_b8(), &destc[i + 0 * vsize], value);
+        svstnt1_u8(svptrue_b8(), &destc[i + 1 * vsize], value);
+        i += unroll * vsize;
+    }
+    svbool_t pg = svwhilelt_b8(i, n);
+    do
+    {
+        svstnt1_u8(pg, &destc[i], value);
+        i += vsize;
+    } while (svptest_first(svptrue_b8(), pg = svwhilelt_b8(i, n)));
+    return dest;
+}
+
+static bool sve_supported()
+{
+    return getauxval(AT_HWCAP) & HWCAP_SVE;
+}
+
+#endif // __ARM_FEATURE_SVE
 
 static const struct
 {
@@ -532,6 +660,7 @@ static const struct
         true,
         { .memcpy_impl = &std::memcpy },
     },
+#if __x86_64__
     {
         memory_function::MEMCPY_SSE2,
         memory_function_type::MEMCPY,
@@ -630,6 +759,23 @@ static const struct
         true,
         { .memcpy_impl = &memcpy_rep_movsb_reverse },
     },
+#endif // __x86_64__
+#ifdef __ARM_FEATURE_SVE
+    {
+        memory_function::MEMCPY_SVE,
+        memory_function_type::MEMCPY,
+        "memcpy_sve",
+        sve_supported(),
+        { .memcpy_impl = &memcpy_sve },
+    },
+    {
+        memory_function::MEMCPY_STREAM_SVE,
+        memory_function_type::MEMCPY,
+        "memcpy_stream_sve",
+        sve_supported(),
+        { .memcpy_impl = &memcpy_stream_sve },
+    },
+#endif // __ARM_FEATURE_SVE
     {
         memory_function::MEMSET,
         memory_function_type::MEMSET,
@@ -637,6 +783,7 @@ static const struct
         true,
         { .memset_impl = &std::memset },
     },
+#ifdef __x86_64__
     {
         memory_function::MEMSET_STREAM_SSE2,
         memory_function_type::MEMSET,
@@ -651,6 +798,16 @@ static const struct
         true,
         { .read_impl = &memory_read },
     },
+#endif // __x86_64__
+#ifdef __ARM_FEATURE_SVE
+    {
+        memory_function::MEMSET_STREAM_SVE,
+        memory_function_type::MEMSET,
+        "memset_stream_sve",
+        sve_supported(),
+        { .memset_impl = &memset_stream_sve },
+    },
+#endif // __ARM_FEATURE_SVE
 };
 
 template<typename T, typename V>
