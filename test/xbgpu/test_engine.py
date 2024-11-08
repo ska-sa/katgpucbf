@@ -1472,7 +1472,6 @@ class TestEngine:
         monkeypatch: pytest.MonkeyPatch,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
-        xbengine: XBEngine,
         client: aiokatcp.Client,
         n_ants: int,
         n_channels_per_substream: int,
