@@ -17,7 +17,6 @@
 """Unit tests for XBEngine module."""
 
 import asyncio
-import logging
 from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Iterable
 from itertools import chain
@@ -48,9 +47,6 @@ from katgpucbf.xbgpu.output import BOutput, XOutput
 from .. import PromDiff
 from . import test_parameters
 from .test_recv import gen_heap
-
-logger = logging.getLogger(__name__)
-logging.basicConfig()
 
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
@@ -539,8 +535,8 @@ def verify_beam_sensors(
         Output beam configurations parsed into BOutput objects.
     beam_results_shape
         The shape of the verified beam data for all beams with shape
-        (len(beam_outputs), n_beam_heaps_sent, n_channels_per_substream,
-        n_samples_between_spectra, COMPLEX).
+        (n_beam_heaps_sent, n_channels_per_substream, n_samples_between_spectra,
+        COMPLEX).
     beam_dtype
         The numpy data type of the beam data, used to calculate the number of
         bytes in each heap.
@@ -563,8 +559,8 @@ def verify_beam_sensors(
         necessary because dithering is not modelled on the host.
     """
     # Get the number of total heaps transmitted by each beam output
-    n_beam_heaps_sent = beam_results_shape[1]
-    heap_shape = beam_results_shape[2:]
+    n_beam_heaps_sent = beam_results_shape[0]
+    heap_shape = beam_results_shape[1:]
     heap_bytes = np.prod(heap_shape) * beam_dtype.itemsize
     # We get rid of the final dimension in the beam data as we need the total
     # number of (COMPLEX) samples.
@@ -828,10 +824,8 @@ class TestEngine:
         out_config = spead2.recv.StreamConfig(max_heaps=100)
         out_tp = spead2.ThreadPool()
 
-        output_name = None
         for i, corrprod_output in enumerate(corrprod_outputs):
             try:
-                output_name = corrprod_output.name
                 stream = spead2.recv.asyncio.Stream(out_tp, out_config)
                 stream.add_inproc_reader(mock_send_stream[i])
                 # It is expected that the first packet will be a descriptor.
@@ -874,7 +868,6 @@ class TestEngine:
 
                     corrprod_results[corrprod_output.name][j] = ig_recv["xeng_raw"].value
             except spead2.Stopped:
-                logger.info(f"Ringbuffer has stopped for {output_name}")
                 pass
 
         beam_results = {
@@ -887,7 +880,6 @@ class TestEngine:
 
         for i, beam_output in enumerate(beam_outputs):
             try:
-                output_name = beam_output.name
                 stream = spead2.recv.asyncio.Stream(out_tp, out_config)
                 stream.add_inproc_reader(mock_send_stream[i + len(corrprod_outputs)])
                 # It is expected that the first packet will be a descriptor.
@@ -910,7 +902,6 @@ class TestEngine:
                     assert ig_recv["beam_ants"].value == np.sum(present[index])
                     beam_results[beam_output.name][j, ...] = ig_recv["bf_raw"].value
             except spead2.Stopped:
-                logger.info(f"Ringbuffer has stopped for {output_name}")
                 pass
 
         return corrprod_results, beam_results, acc_indices, batch_indices
@@ -1500,14 +1491,16 @@ class TestEngine:
         receive a `?capture-stop` request.
         """
         n_batches = heap_accumulation_threshold[0]
-        all_outputs = beam_outputs + corrprod_outputs
+        # Naive list concatention using '+' not used below as mypy was not happy
+        # lists of two different types could be added together.
+        all_stream_names = list(map(lambda output: output.name, [*corrprod_outputs, *beam_outputs]))
         rng = np.random.default_rng(seed=1)
         # Select random subset of output data products to issue `?capture-stop` to
-        n_streams_to_stop = rng.integers(1, len(all_outputs))
-        stop_ids = rng.choice(len(all_outputs), n_streams_to_stop, replace=False)
-        stopped_streams = [all_outputs[stop_id].name for stop_id in stop_ids]
+        n_streams_to_stop = rng.integers(1, len(all_stream_names))
+        stop_ids = rng.choice(len(all_stream_names), n_streams_to_stop, replace=False)
+        stopped_stream_names = [all_stream_names[stop_id] for stop_id in stop_ids]
 
-        capture_stop_requests = [("capture-stop", stopped_stream) for stopped_stream in stopped_streams]
+        capture_stop_requests = [("capture-stop", stopped_stream) for stopped_stream in stopped_stream_names]
 
         capture_stop_chunk_id = 10  # Arbitrarily chosen
         _ = self._patch_get_in_item(monkeypatch, capture_stop_chunk_id, client, requests=capture_stop_requests)
@@ -1538,7 +1531,7 @@ class TestEngine:
         # NOTE: The results arrays returned are initialised as zeros, and should
         # therefore still be zero for indices after the `?capture-stop` request
         # was issued. That is, completely zero data is akin to no data received.
-        for stopped_stream in stopped_streams:
+        for stopped_stream in stopped_stream_names:
             if stopped_stream in corrprod_results.keys():
                 # NOTE: As per the `DEFAULT_PARAMETERS`, both corrprod_outputs have the same
                 # heap_accumulation_threshold, which is why we can use either one to calculate
@@ -1557,5 +1550,15 @@ class TestEngine:
                 np.testing.assert_equal(
                     beam_results[stopped_stream][capture_stop_chunk_id * HEAPS_PER_FENGINE_PER_CHUNK :], 0
                 )
+            # Remove this stopped-stream from the master list of data streams
+            all_stream_names.remove(stopped_stream)
 
-        # TODO: Check all other data is nonzero for all heaps
+        for captured_stream in all_stream_names:
+            if captured_stream in corrprod_results.keys():
+                # NOTE: The `heap_factory` only sends real data. The results buffer has
+                # shape (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
+                # As a result, the final dimension only has data populated for the
+                # 'real' (first) index.
+                np.testing.assert_equal(corrprod_results[captured_stream][..., 0] != 0, True)
+            elif captured_stream in beam_results.keys():
+                np.testing.assert_equal(beam_results[captured_stream] != 0, True)
