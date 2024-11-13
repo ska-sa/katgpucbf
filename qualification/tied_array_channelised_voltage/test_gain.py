@@ -48,8 +48,8 @@ async def test_gain(
     await cbf.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
 
-    gains = [0.5, 1.0, 2.0]
-    stream_names = receiver.stream_names[: len(gains)]  # Only need 3 half-beams for the test
+    gains = [0.5, 0.5, 1.0, 1.0, 2.0, 2.0]
+    stream_names = receiver.stream_names[: len(gains)]  # Only need 3 beams for the test
     pdf_report.step("Set weights to 1/n_ants")
     weights = (1.0 / receiver.n_ants,) * receiver.n_ants
     client = cbf.product_controller_client
@@ -77,7 +77,9 @@ async def test_gain(
         assert power == pytest.approx(expected_power, rel=0.05)
 
     pdf_report.step("Compare beams to each other.")
-    for i in range(1, len(gains)):
+    # Compare like pols because the dithering is independent between pols and may rarely cause
+    # differences greater than expected.
+    for i in [2, 4]:
         scale = gains[i] / gains[0]
         expected = data[0] * scale
         # The actual data gets clamped, so we should clamp expected values too
