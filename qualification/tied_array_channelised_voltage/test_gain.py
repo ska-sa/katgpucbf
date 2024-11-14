@@ -79,9 +79,9 @@ async def test_gain(
     pdf_report.step("Compare beams to each other.")
     # Compare like pols because the dithering is independent between pols and may rarely cause
     # differences greater than expected.
-    for i in [2, 4]:
-        scale = gains[i] / gains[0]
-        expected = data[0] * scale
+    for i in range(2, len(gains)):
+        scale = gains[i] / gains[i % 2]
+        expected = data[i % 2] * scale
         # The actual data gets clamped, so we should clamp expected values too
         max_value = 2 ** (receiver.n_bits_per_sample - 1) - 1
         expected = np.clip(expected, -max_value, max_value)
