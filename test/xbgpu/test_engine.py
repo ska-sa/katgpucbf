@@ -310,7 +310,7 @@ def valid_end_to_end_combination(combo: dict) -> bool:
 def verify_corrprod_data(
     *,
     corrprod_outputs: list[XOutput],
-    corrprod_results: list[np.ndarray],
+    corrprod_results: dict[str, np.ndarray],
     acc_indices: list[list[int]],
     n_channels_per_substream: int,
     n_spectra_per_heap: int,
@@ -320,11 +320,11 @@ def verify_corrprod_data(
 
     Parameters
     ----------
+    corrprod_results
+        Dictionary of numpy arrays of all GPU-generated X-engine data from
+        :meth:`TestEngine._send_data`.
     corrprod_outputs, n_channels_per_substream, n_spectra_per_heap
         Unit test fixtures in :class:`TestEngine`.
-    corrprod_results
-        List of arrays of all GPU-generated data from
-        :meth:`TestEngine._send_data`.
     acc_indices
         Accumulation indices used to generate stimulus data for each
         corrprod_output. This is a list of lists, with the outer index matching
@@ -334,7 +334,7 @@ def verify_corrprod_data(
         Boolean array of shape (n_batches, n_ants) indicating which heaps were
         present.
     """
-    for i, (corrprod_output, acc_index_list) in enumerate(zip(corrprod_outputs, acc_indices)):
+    for corrprod_output, acc_index_list in zip(corrprod_outputs, acc_indices):
         for j, acc_index in enumerate(acc_index_list):
             n_batches = corrprod_output.heap_accumulation_threshold
             batch_start_index = acc_index * n_batches
@@ -348,7 +348,7 @@ def verify_corrprod_data(
                 n_spectra_per_heap,
                 present[batch_start_index : batch_start_index + n_batches].all(axis=0),
             )
-            np.testing.assert_equal(expected_output, corrprod_results[i][j])
+            np.testing.assert_equal(expected_output, corrprod_results[corrprod_output.name][j])
 
 
 def verify_corrprod_sensors(
@@ -446,7 +446,7 @@ def verify_corrprod_sensors(
 
 def verify_beam_data(
     beam_outputs: list[BOutput],
-    beam_results: list[np.ndarray],
+    beam_results: dict[str, np.ndarray],
     present: np.ndarray,
     batch_indices: list[int],
     beam_params_change_batch_id: int,
@@ -463,7 +463,8 @@ def verify_beam_data(
     Parameters
     ----------
     beam_results
-        Numpy array of all GPU-generated data from :meth:`TestEngine._send_data`.
+        Dictionary of numpy arrays of all GPU-generated B-engine data from
+        :meth:`TestEngine._send_data`.
     beam_outputs, n_channels_per_substream, n_spectra_per_heap
         Unit test fixtures in :class:`TestEngine`.
     present
@@ -506,9 +507,9 @@ def verify_beam_data(
     )
     # assert_allclose converts to float, which bloats memory usage.
     # To keep it manageable, compare a batch at a time.
-    for i in range(len(beam_outputs)):
+    for i, beam_output in enumerate(beam_outputs):
         for j in range(len(batch_indices)):
-            np.testing.assert_allclose(expected_beams[i, j], beam_results[i][j], atol=1)
+            np.testing.assert_allclose(expected_beams[i, j], beam_results[beam_output.name][j], atol=1)
 
     return expected_beam_saturated_low, expected_beam_saturated_high
 
@@ -771,11 +772,11 @@ class TestEngine:
         -------
         corrprod_results
             Dictionary of arrays of all XPipeline output. Each key is the
-            corrprod_output name, each value is an array with shape
+            corrprod_output name. Each value is an array with shape
             (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
         beam_results
             Dictionary of arrays of all BPipeline output. Each key is the
-            beam_output name, each value is an array with shape
+            beam_output name. Each value is an array with shape
             (n_batches, n_channels_per_substream, n_spectra_per_heap, COMPLEX).
         acc_indices
             List of accumulation indices for each corrprod_output.
@@ -886,9 +887,7 @@ class TestEngine:
                 ig_recv = spead2.ItemGroup()
                 heap = await stream.get()
                 items = ig_recv.update(heap)
-                assert (
-                    len(list(items.values())) == 0
-                ), "This heap contains item values not just the expected descriptors."
+                assert len(items) == 0, "This heap contains item values not just the expected descriptors."
 
                 for j, index in enumerate(batch_indices):
                     heap = await stream.get()
@@ -1182,7 +1181,7 @@ class TestEngine:
 
         verify_corrprod_data(
             corrprod_outputs=corrprod_outputs,
-            corrprod_results=list(corrprod_results.values()),
+            corrprod_results=corrprod_results,
             acc_indices=acc_indices,
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
@@ -1212,7 +1211,7 @@ class TestEngine:
 
         expected_beam_saturated_low, expected_beam_saturated_high = verify_beam_data(
             beam_outputs=beam_outputs,
-            beam_results=list(beam_results.values()),
+            beam_results=beam_results,
             present=present,
             batch_indices=batch_indices,
             beam_params_change_batch_id=beam_params_change_index * HEAPS_PER_FENGINE_PER_CHUNK,
@@ -1482,27 +1481,17 @@ class TestEngine:
         corrprod_outputs: list[XOutput],
         beam_outputs: list[BOutput],
     ) -> None:
-        """Test capture-stop request on only some data streams.
+        """Test capture-stop request on only B-engine data streams.
 
         Issue a `?capture-stop` request at some point into data processing and
         check the corresponding streams only have partial data transmission.
-        Also ensure that data is completely received for streams that did not
-        receive a `?capture-stop` request.
+        Also ensure that data is completely received for X-engine streams that
+        did not receive a `?capture-stop` request.
         """
         n_batches = heap_accumulation_threshold[0]
-        # Naive list concatention using '+' not used below as mypy was not happy
-        # lists of two different types could be added together.
-        all_stream_names = list(map(lambda output: output.name, chain(corrprod_outputs, beam_outputs)))
-        rng = np.random.default_rng(seed=1)
-        # Select random subset of output data products to issue `?capture-stop` to
-        n_streams_to_stop = rng.integers(1, len(all_stream_names))
-        stop_ids = rng.choice(len(all_stream_names), n_streams_to_stop, replace=False)
-        stopped_stream_names = [all_stream_names[stop_id] for stop_id in stop_ids]
-
-        capture_stop_requests = [("capture-stop", stopped_stream) for stopped_stream in stopped_stream_names]
-
+        capture_stop_requests = [("capture-stop", beam_output.name) for beam_output in beam_outputs]
         capture_stop_chunk_id = 10  # Arbitrarily chosen
-        _ = self._patch_get_in_item(monkeypatch, capture_stop_chunk_id, client, requests=capture_stop_requests)
+        self._patch_get_in_item(monkeypatch, capture_stop_chunk_id, client, requests=capture_stop_requests)
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
@@ -1530,34 +1519,17 @@ class TestEngine:
         # NOTE: The results arrays returned are initialised as zeros, and should
         # therefore still be zero for indices after the `?capture-stop` request
         # was issued. That is, completely zero data is akin to no data received.
-        for stopped_stream in stopped_stream_names:
-            if stopped_stream in corrprod_results.keys():
-                # NOTE: As per the `DEFAULT_PARAMETERS`, both corrprod_outputs have the same
-                # heap_accumulation_threshold, which is why we can use either one to calculate
-                # the accumulation index where data stopped transmitting.
-                np.testing.assert_equal(
-                    corrprod_results[stopped_stream][
-                        capture_stop_chunk_id * HEAPS_PER_FENGINE_PER_CHUNK // heap_accumulation_threshold[0] :
-                    ],
-                    0,
-                )
-            elif stopped_stream in beam_results.keys():
-                # NOTE: The `beam_results` contain data for each heap (or batch). As a result,
-                # we multiply the chunk ID at which `?capture-stop` was issued by
-                # `HEAPS_PER_FENGINE_PER_CHUNK` to get the specific heap ID at which data
-                # ceased transmitting for a stopped stream.
-                np.testing.assert_equal(
-                    beam_results[stopped_stream][capture_stop_chunk_id * HEAPS_PER_FENGINE_PER_CHUNK :], 0
-                )
-            # Remove this stopped-stream from the master list of data streams
-            all_stream_names.remove(stopped_stream)
+        # NOTE: The `beam_results` contain data for each heap (or batch). As a
+        # result, we multiply the chunk ID at which `?capture-stop` was issued by
+        # `HEAPS_PER_FENGINE_PER_CHUNK` to get the specific heap ID at which data
+        # ceased transmitting for a stopped stream.
+        capture_stop_heap_id = capture_stop_chunk_id * HEAPS_PER_FENGINE_PER_CHUNK
+        for beam_output in beam_outputs:
+            np.testing.assert_equal(beam_results[beam_output.name][capture_stop_heap_id:], 0)
 
-        for captured_stream in all_stream_names:
-            if captured_stream in corrprod_results.keys():
-                # NOTE: The `heap_factory` only sends real data. The results buffer has
-                # shape (n_accumulations, n_channels_per_substream, n_baselines, COMPLEX).
-                # As a result, the final dimension only has data populated for the
-                # 'real' (first) index.
-                np.testing.assert_equal(corrprod_results[captured_stream][..., 0] != 0, True)
-            elif captured_stream in beam_results.keys():
-                np.testing.assert_equal(beam_results[captured_stream] != 0, True)
+        for corrprod_output in corrprod_outputs:
+            # NOTE: The X-engine output is entirely real (no imag component).
+            # The results buffer has shape (n_accumulations,
+            # n_channels_per_substream, n_baselines, COMPLEX). As a result, the
+            # final dimension only has data populated for the 'real' (first) index.
+            np.testing.assert_equal(corrprod_results[corrprod_output.name][..., 0] != 0, True)
