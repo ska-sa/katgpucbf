@@ -663,6 +663,30 @@ class TestEngine:
         return [parse_beam(beam_arg) for beam_arg in beam_args]
 
     @staticmethod
+    def _default_heap_factory(
+        batch_index: int,
+        timestamp_step: int,
+        n_ants: int,
+        n_channels_per_substream: int,
+        n_spectra_per_heap: int,
+        frequency: int,
+        present: np.ndarray,
+        data_value: int = 10,
+    ) -> list[spead2.send.HeapReference]:
+        """Create heaps required by the XBEngine.
+
+        This is for use where the user does not need finer control of the
+        data value. It is also hardcoded to use 8-bit data values for heaps.
+        """
+        timestamp = batch_index * timestamp_step
+        data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), data_value, np.int8)
+        return [
+            spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
+            for ant_index in range(n_ants)
+            if present[ant_index]
+        ]
+
+    @staticmethod
     def _create_heaps(
         timestamp: int,
         batch_index: int,
@@ -1270,24 +1294,23 @@ class TestEngine:
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         n_baselines = n_ants * (n_ants + 1) * 2
 
-        def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
-            timestamp = batch_index * timestamp_step
-            data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), 127, np.int8)
-            return [
-                spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
-                for ant_index in range(n_ants)
-                if present[ant_index]
-            ]
-
-        present = np.ones((heap_accumulation_threshold[0], n_ants), bool)
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             await self._send_data(
                 mock_recv_streams,
                 mock_send_stream,
                 corrprod_outputs,
                 beam_outputs,
-                heap_factory=heap_factory,
-                present=present,
+                heap_factory=lambda batch_index, present: self._default_heap_factory(
+                    timestamp_step=timestamp_step,
+                    n_ants=n_ants,
+                    n_channels_per_substream=n_channels_per_substream,
+                    n_spectra_per_heap=n_spectra_per_heap,
+                    frequency=frequency,
+                    data_value=127,
+                    batch_index=batch_index,
+                    present=present,
+                ),
+                present=np.ones((heap_accumulation_threshold[0], n_ants), bool),
                 timestamp_step=timestamp_step,
                 n_channels_per_substream=n_channels_per_substream,
                 frequency=frequency,
@@ -1372,15 +1395,6 @@ class TestEngine:
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
-        def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
-            timestamp = batch_index * timestamp_step
-            data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), 10, np.int8)
-            return [
-                spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
-                for ant_index in range(n_ants)
-                if present[ant_index]
-            ]
-
         beam_under_test = beam_outputs[0].name
         request = request_factory(beam_under_test, n_ants)
         timestamp_list = self._patch_get_in_item(monkeypatch, 4, client, [request])
@@ -1390,7 +1404,16 @@ class TestEngine:
             mock_send_stream,
             corrprod_outputs,
             beam_outputs,
-            heap_factory=heap_factory,
+            heap_factory=lambda batch_index, present: self._default_heap_factory(
+                timestamp_step=timestamp_step,
+                n_ants=n_ants,
+                n_channels_per_substream=n_channels_per_substream,
+                n_spectra_per_heap=n_spectra_per_heap,
+                frequency=frequency,
+                data_value=10,
+                batch_index=batch_index,
+                present=present,
+            ),
             present=np.ones((n_batches, n_ants), bool),
             timestamp_step=timestamp_step,
             n_channels_per_substream=n_channels_per_substream,
@@ -1548,15 +1571,6 @@ class TestEngine:
         self._patch_send_chunk(monkeypatch, capture_stop_chunk_index, client, requests=capture_stop_requests)
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
-        def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
-            timestamp = batch_index * timestamp_step
-            data = np.full((n_channels_per_substream, n_spectra_per_heap, N_POLS, COMPLEX), 10, np.int8)
-            return [
-                spead2.send.HeapReference(gen_heap(timestamp, ant_index, frequency, data))
-                for ant_index in range(n_ants)
-                if present[ant_index]
-            ]
-
         # NOTE: The `beam_results` contain data for each heap (or batch) transmitted.
         # As a result, we multiply the chunk ID at which `?capture-stop` was issued
         # by `HEAPS_PER_FENGINE_PER_CHUNK` to get the specific heap ID at which data
@@ -1567,7 +1581,16 @@ class TestEngine:
             mock_send_stream,
             corrprod_outputs,
             beam_outputs,
-            heap_factory=heap_factory,
+            heap_factory=lambda batch_index, present: self._default_heap_factory(
+                timestamp_step=timestamp_step,
+                n_ants=n_ants,
+                n_channels_per_substream=n_channels_per_substream,
+                n_spectra_per_heap=n_spectra_per_heap,
+                frequency=frequency,
+                data_value=10,
+                batch_index=batch_index,
+                present=present,
+            ),
             present=np.ones((n_batches, n_ants), bool),
             timestamp_step=timestamp_step,
             n_channels_per_substream=n_channels_per_substream,
