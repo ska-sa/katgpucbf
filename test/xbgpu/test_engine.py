@@ -893,6 +893,9 @@ class TestEngine:
 
                 corrprod_results[corrprod_output.name][j] = ig_recv["xeng_raw"].value
 
+        if beam_capture_stop_heap_index is not None and beam_capture_stop_heap_index > 0:
+            batch_indices = batch_indices[:beam_capture_stop_heap_index]
+
         beam_results = {
             beam_output.name: np.zeros(
                 (len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
@@ -900,9 +903,6 @@ class TestEngine:
             )
             for beam_output in beam_outputs
         }
-
-        if beam_capture_stop_heap_index is not None and beam_capture_stop_heap_index > 0:
-            batch_indices = batch_indices[:beam_capture_stop_heap_index]
 
         for i, beam_output in enumerate(beam_outputs):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
@@ -1599,11 +1599,12 @@ class TestEngine:
             beam_capture_stop_heap_index=beam_capture_stop_heap_index,
         )
 
-        # NOTE: The results arrays returned are initialised as zeros, and should
-        # therefore still be zero for indices after the `?capture-stop` request
-        # was issued. That is, completely zero data is akin to no data received.
+        # NOTE: During receiving beam data, only data up to `beam_capture_stop_index`
+        # is stored. It is also verified that there is no more data in the stream.
+        # This is largely a sanity check that there is non-zero data for heaps that
+        # were transmitted before the `?capture-stop` request.
         for beam_output in beam_outputs:
-            np.testing.assert_equal(beam_results[beam_output.name][beam_capture_stop_heap_index:], 0)
+            np.testing.assert_equal(beam_results[beam_output.name][:beam_capture_stop_heap_index] != 0, True)
 
         for corrprod_output in corrprod_outputs:
             # NOTE: The X-engine output is entirely real (no imag component).
