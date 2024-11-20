@@ -743,6 +743,7 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
+        beam_capture_stop_heap_index: int | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], list[list[int]], list[int]]:
         """Send a stream of data to the engine and retrieve the results.
 
@@ -767,6 +768,8 @@ class TestEngine:
             Timestamp step between each received heap processed.
         n_channels_per_substream, n_spectra_per_heap, frequency
             See :meth:`_create_heaps` for more info.
+        beam_capture_stop_heap_index
+            Heap count at which a `?capture-stop` was issued to beam streams.
 
         Returns
         -------
@@ -826,50 +829,45 @@ class TestEngine:
         out_tp = spead2.ThreadPool()
 
         for i, corrprod_output in enumerate(corrprod_outputs):
-            try:
-                stream = spead2.recv.asyncio.Stream(out_tp, out_config)
-                stream.add_inproc_reader(mock_send_stream[i])
-                # It is expected that the first packet will be a descriptor.
-                ig_recv = spead2.ItemGroup()
+            stream = spead2.recv.asyncio.Stream(out_tp, out_config)
+            stream.add_inproc_reader(mock_send_stream[i])
+            # It is expected that the first packet will be a descriptor.
+            ig_recv = spead2.ItemGroup()
+            heap = await stream.get()
+            items = ig_recv.update(heap)
+            assert len(items) == 0, "This heap contains item values not just the expected descriptors."
+
+            for j, accumulation_index in enumerate(sorted(acc_indices[i])):
+                # Wait for heap to be ready and then update out item group
+                # with the new values.
                 heap = await stream.get()
-                items = ig_recv.update(heap)
-                assert (
-                    len(list(items.values())) == 0
-                ), "This heap contains item values not just the expected descriptors."
 
-                for j, accumulation_index in enumerate(sorted(acc_indices[i])):
-                    # Wait for heap to be ready and then update out item group
-                    # with the new values.
+                while (updated_items := set(ig_recv.update(heap))) == set():
+                    # Test has gone on long enough that we've received another descriptor
                     heap = await stream.get()
+                assert updated_items == {"frequency", "timestamp", "xeng_raw"}
+                # Ensure that the timestamp from the heap is what we expect.
+                assert (
+                    ig_recv["timestamp"].value % (timestamp_step * corrprod_output.heap_accumulation_threshold) == 0
+                ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
 
-                    while (updated_items := set(ig_recv.update(heap))) == set():
-                        # Test has gone on long enough that we've received another descriptor
-                        heap = await stream.get()
-                    assert updated_items == {"frequency", "timestamp", "xeng_raw"}
-                    # Ensure that the timestamp from the heap is what we expect.
-                    assert (
-                        ig_recv["timestamp"].value % (timestamp_step * corrprod_output.heap_accumulation_threshold) == 0
-                    ), "Output timestamp is not a multiple of timestamp_step * heap_accumulation_threshold."
+                assert (
+                    ig_recv["timestamp"].value
+                    == accumulation_index * timestamp_step * corrprod_output.heap_accumulation_threshold
+                ), (
+                    "Output timestamp is not correct. "
+                    f"Expected: "
+                    f"{hex(accumulation_index * timestamp_step * corrprod_output.heap_accumulation_threshold)}, "
+                    f"actual: {hex(ig_recv['timestamp'].value)}."
+                )
 
-                    assert (
-                        ig_recv["timestamp"].value
-                        == accumulation_index * timestamp_step * corrprod_output.heap_accumulation_threshold
-                    ), (
-                        "Output timestamp is not correct. "
-                        f"Expected: "
-                        f"{hex(accumulation_index * timestamp_step * corrprod_output.heap_accumulation_threshold)}, "
-                        f"actual: {hex(ig_recv['timestamp'].value)}."
-                    )
+                assert ig_recv["frequency"].value == frequency, (
+                    "Output channel offset not correct. "
+                    f"Expected: {frequency}, "
+                    f"actual: {ig_recv['frequency'].value}."
+                )
 
-                    assert ig_recv["frequency"].value == frequency, (
-                        "Output channel offset not correct. "
-                        f"Expected: {frequency}, "
-                        f"actual: {ig_recv['frequency'].value}."
-                    )
-
-                    corrprod_results[corrprod_output.name][j] = ig_recv["xeng_raw"].value
-            except spead2.Stopped:
-                pass
+                corrprod_results[corrprod_output.name][j] = ig_recv["xeng_raw"].value
 
         beam_results = {
             beam_output.name: np.zeros(
@@ -879,29 +877,34 @@ class TestEngine:
             for beam_output in beam_outputs
         }
 
+        if beam_capture_stop_heap_index is not None and beam_capture_stop_heap_index > 0:
+            batch_indices = batch_indices[:beam_capture_stop_heap_index]
+
         for i, beam_output in enumerate(beam_outputs):
-            try:
-                stream = spead2.recv.asyncio.Stream(out_tp, out_config)
-                stream.add_inproc_reader(mock_send_stream[i + len(corrprod_outputs)])
-                # It is expected that the first packet will be a descriptor.
-                ig_recv = spead2.ItemGroup()
+            stream = spead2.recv.asyncio.Stream(out_tp, out_config)
+            stream.add_inproc_reader(mock_send_stream[i + len(corrprod_outputs)])
+            # It is expected that the first packet will be a descriptor.
+            ig_recv = spead2.ItemGroup()
+            heap = await stream.get()
+            items = ig_recv.update(heap)
+            assert len(items) == 0, "This heap contains item values not just the expected descriptors."
+
+            for j, index in enumerate(batch_indices):
                 heap = await stream.get()
-                items = ig_recv.update(heap)
-                assert len(items) == 0, "This heap contains item values not just the expected descriptors."
-
-                for j, index in enumerate(batch_indices):
+                while (updated_items := set(ig_recv.update(heap))) == set():
+                    # Test has gone on long enough that we've received another descriptor
                     heap = await stream.get()
-                    while (updated_items := set(ig_recv.update(heap))) == set():
-                        # Test has gone on long enough that we've received another descriptor
-                        heap = await stream.get()
 
-                    assert updated_items == {"frequency", "timestamp", "beam_ants", "bf_raw"}
-                    assert ig_recv["timestamp"].value == index * timestamp_step
-                    assert ig_recv["frequency"].value == frequency
-                    assert ig_recv["beam_ants"].value == np.sum(present[index])
-                    beam_results[beam_output.name][j, ...] = ig_recv["bf_raw"].value
-            except spead2.Stopped:
-                pass
+                assert updated_items == {"frequency", "timestamp", "beam_ants", "bf_raw"}
+                assert ig_recv["timestamp"].value == index * timestamp_step
+                assert ig_recv["frequency"].value == frequency
+                assert ig_recv["beam_ants"].value == np.sum(present[index])
+                beam_results[beam_output.name][j, ...] = ig_recv["bf_raw"].value
+
+            if beam_capture_stop_heap_index:
+                # Confirm that there are no more heaps to receive
+                with pytest.raises(spead2.Stopped):
+                    heap = await stream.get()
 
         return corrprod_results, beam_results, acc_indices, batch_indices
 
@@ -1465,6 +1468,46 @@ class TestEngine:
             await client.request("capture-start", output.name)
             assert get_stream_status(output.name) is True, f"Stream {output.name} is still disabled"
 
+    def _patch_send_chunk(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        count: int,
+        client: aiokatcp.Client,
+        requests: list[tuple],
+    ) -> None:
+        """Patch :meth:`~.BSend.send_chunk` to make requests partway through data transmission.
+
+        This is required to have finer control on verifying BPipeline send-side activity and
+        behaviour.
+
+        Parameters
+        ----------
+        count
+            Counting from 1, the index of the call to `send_chunk` to trigger
+            `requests`. `requests` are made prior to the n-th call to `send_chunk`.
+        requests
+            A list of tuples in the format ("request-name", arg1, arg2, ...).
+        """
+        counter = 0
+        orig_send_chunk = bsend.BSend.send_chunk
+
+        def send_chunk_and_make_requests(
+            self: bsend.BSend,
+            chunk: bsend.Chunk,
+            time_converter: TimeConverter,
+            sensors: aiokatcp.SensorSet,
+        ) -> None:
+            nonlocal counter
+            counter += 1
+            request_futures: list[asyncio.Future] = []
+            if counter == count:
+                for request in requests:
+                    request_futures.append(asyncio.ensure_future(client.request(*request)))
+                asyncio.gather(*request_futures)
+            orig_send_chunk(self, chunk, time_converter, sensors)
+
+        monkeypatch.setattr(bsend.BSend, "send_chunk", send_chunk_and_make_requests)
+
     @DEFAULT_PARAMETERS
     async def test_capture_stop_some_streams(
         self,
@@ -1487,11 +1530,22 @@ class TestEngine:
         check the corresponding streams only have partial data transmission.
         Also ensure that data is completely received for X-engine streams that
         did not receive a `?capture-stop` request.
+
+        This is only tested of B-engine data streams so as to deterministic in
+        measuring the strength of the test. It has been tested successfully when
+        issuing capture-stop to X-engine data streams as well.
         """
         n_batches = heap_accumulation_threshold[0]
         capture_stop_requests = [("capture-stop", beam_output.name) for beam_output in beam_outputs]
-        capture_stop_chunk_id = 10  # Arbitrarily chosen
-        self._patch_get_in_item(monkeypatch, capture_stop_chunk_id, client, requests=capture_stop_requests)
+        # NOTE This value is arbitrarily chosen, but must be less than
+        # `n_batches` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
+        # Much like the XBEngine receiver, the BPipeline send-stream transmits
+        # chunks that contain `HEAPS_PER_FENGINE_PER_CHUNK`. Consequently, the
+        # `?capture-stop` request must be issued at least one send-chunk before
+        # data transmission is over to ensure some strength in the test.
+        capture_stop_chunk_index = 10
+        assert capture_stop_chunk_index < n_batches // HEAPS_PER_FENGINE_PER_CHUNK
+        self._patch_send_chunk(monkeypatch, capture_stop_chunk_index, client, requests=capture_stop_requests)
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
         def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
@@ -1503,6 +1557,11 @@ class TestEngine:
                 if present[ant_index]
             ]
 
+        # NOTE: The `beam_results` contain data for each heap (or batch) transmitted.
+        # As a result, we multiply the chunk ID at which `?capture-stop` was issued
+        # by `HEAPS_PER_FENGINE_PER_CHUNK` to get the specific heap ID at which data
+        # ceased transmitting for a stopped stream.
+        beam_capture_stop_heap_index = capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
         corrprod_results, beam_results, _, _ = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
@@ -1514,18 +1573,14 @@ class TestEngine:
             n_channels_per_substream=n_channels_per_substream,
             frequency=frequency,
             n_spectra_per_heap=n_spectra_per_heap,
+            beam_capture_stop_heap_index=beam_capture_stop_heap_index,
         )
 
         # NOTE: The results arrays returned are initialised as zeros, and should
         # therefore still be zero for indices after the `?capture-stop` request
         # was issued. That is, completely zero data is akin to no data received.
-        # NOTE: The `beam_results` contain data for each heap (or batch). As a
-        # result, we multiply the chunk ID at which `?capture-stop` was issued by
-        # `HEAPS_PER_FENGINE_PER_CHUNK` to get the specific heap ID at which data
-        # ceased transmitting for a stopped stream.
-        capture_stop_heap_id = capture_stop_chunk_id * HEAPS_PER_FENGINE_PER_CHUNK
         for beam_output in beam_outputs:
-            np.testing.assert_equal(beam_results[beam_output.name][capture_stop_heap_id:], 0)
+            np.testing.assert_equal(beam_results[beam_output.name][beam_capture_stop_heap_index:], 0)
 
         for corrprod_output in corrprod_outputs:
             # NOTE: The X-engine output is entirely real (no imag component).
