@@ -101,6 +101,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     texlive-latex-recommended \
     texlive-science
 
+# Jenkins runs the containers with the `-u 1000:1000` option, not as root.
+RUN chown -Rf +1000:+1000 /venv
+
 #######################################################################
 
 # The above image is independent of the contents of this package (except
