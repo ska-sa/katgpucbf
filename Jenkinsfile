@@ -57,12 +57,6 @@ pipeline {
   }
 
   stages {
-    stage('Install Python packages') {
-      steps {
-        sh 'pip install -r requirements.txt -r requirements-dev.txt'
-      }
-    }
-
     stage('Install katgpucbf package') {
       steps {
         sh 'pip install --no-deps ".[test]" && pip check'

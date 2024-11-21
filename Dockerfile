@@ -78,6 +78,7 @@ RUN pip install pip==24.2 setuptools==72.1.0 wheel==0.44.0
 # Jenkins image has a clean environment to start from).
 WORKDIR /tmp/katgpucbf
 COPY requirements.txt .
+COPY requirements-dev.txt .
 RUN pip install --no-deps -c /tmp/katgpucbf/requirements.txt pycuda && \
     pip uninstall -y pycuda
 
@@ -100,6 +101,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     texlive-latex-extra \
     texlive-latex-recommended \
     texlive-science
+
+# Install required packages for testing to be able to run
+RUN pip install -r requirements.txt -r requirements-dev.txt
 
 # Jenkins runs the containers with the `-u 1000:1000` option, not as root.
 RUN chown -Rf +1000:+1000 /venv
