@@ -754,6 +754,26 @@ class TestEngine:
         )
         return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, feng_stream_config)
 
+    @staticmethod
+    async def get_data_heap(stream: spead2.recv.asyncio.Stream, ig_recv: spead2.ItemGroup) -> set[str]:
+        r"""Continue to receive heaps from a stream until a non-descriptor heap arrives.
+
+        This modifies `ig_recv` in place in order to obtain an updated set of
+        :class:`spead2.Item`\ s.
+
+        Parameters
+        ----------
+        stream
+            Streams that received XBEngine
+        """
+        # Wait for heap to be ready and then update the item group
+        # with the new values.
+        heap = await stream.get()
+        while (updated_items := set(ig_recv.update(heap))) == set():
+            # Test has gone on long enough that we've received another descriptor
+            heap = await stream.get()
+        return updated_items
+
     async def _send_data(
         self,
         mock_recv_streams: list[spead2.InprocQueue],
@@ -862,14 +882,7 @@ class TestEngine:
             assert len(items) == 0, "This heap contains item values not just the expected descriptors."
 
             for j, accumulation_index in enumerate(sorted(acc_indices[i])):
-                # Wait for heap to be ready and then update out item group
-                # with the new values.
-                heap = await stream.get()
-
-                while (updated_items := set(ig_recv.update(heap))) == set():
-                    # Test has gone on long enough that we've received another descriptor
-                    heap = await stream.get()
-                assert updated_items == {"frequency", "timestamp", "xeng_raw"}
+                assert await self.get_data_heap(stream, ig_recv) == {"frequency", "timestamp", "xeng_raw"}
                 # Ensure that the timestamp from the heap is what we expect.
                 assert (
                     ig_recv["timestamp"].value % (timestamp_step * corrprod_output.heap_accumulation_threshold) == 0
@@ -914,21 +927,15 @@ class TestEngine:
             assert len(items) == 0, "This heap contains item values not just the expected descriptors."
 
             for j, index in enumerate(batch_indices):
-                heap = await stream.get()
-                while (updated_items := set(ig_recv.update(heap))) == set():
-                    # Test has gone on long enough that we've received another descriptor
-                    heap = await stream.get()
-
-                assert updated_items == {"frequency", "timestamp", "beam_ants", "bf_raw"}
+                assert await self.get_data_heap(stream, ig_recv) == {"frequency", "timestamp", "beam_ants", "bf_raw"}
                 assert ig_recv["timestamp"].value == index * timestamp_step
                 assert ig_recv["frequency"].value == frequency
                 assert ig_recv["beam_ants"].value == np.sum(present[index])
                 beam_results[beam_output.name][j, ...] = ig_recv["bf_raw"].value
 
-            if beam_capture_stop_heap_index:
-                # Confirm that there are no more heaps to receive
-                with pytest.raises(spead2.Stopped):
-                    heap = await stream.get()
+            # Confirm that there are no more heaps to receive
+            with pytest.raises(spead2.Stopped):
+                await self.get_data_heap(stream, ig_recv)
 
         return corrprod_results, beam_results, acc_indices, batch_indices
 
