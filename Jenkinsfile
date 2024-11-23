@@ -104,7 +104,6 @@ pipeline {
          */
         stage('Run pre-commit checks') {
           steps {
-            sh 'GIT_CONFIG=/dev/null pre-commit install'
             // no-commit-to-branch complains if we are on the main branch
             sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
           }
