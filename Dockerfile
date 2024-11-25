@@ -101,6 +101,13 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     texlive-latex-recommended \
     texlive-science
 
+# Install required packages for testing to be able to run
+COPY requirements-dev.txt .
+RUN pip install -r requirements.txt -r requirements-dev.txt
+
+# Jenkins runs the containers with the `-u 1000:1000` option, not as root.
+RUN chown -R +1000:+1000 /venv
+
 #######################################################################
 
 # The above image is independent of the contents of this package (except

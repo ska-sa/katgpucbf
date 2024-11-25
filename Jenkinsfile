@@ -57,12 +57,6 @@ pipeline {
   }
 
   stages {
-    stage('Install Python packages') {
-      steps {
-        sh 'pip install -r requirements.txt -r requirements-dev.txt'
-      }
-    }
-
     stage('Install katgpucbf package') {
       steps {
         sh 'pip install --no-deps ".[test]" && pip check'
@@ -110,7 +104,6 @@ pipeline {
          */
         stage('Run pre-commit checks') {
           steps {
-            sh 'pre-commit install'
             // no-commit-to-branch complains if we are on the main branch
             sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
           }
