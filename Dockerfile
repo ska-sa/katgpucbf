@@ -93,6 +93,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     docker-buildx \
     fonts-liberation2 \
     latexmk \
+    libcap2-dev \
+    libcap2-bin \
     lmodern \
     pdf2svg \
     tex-gyre \
@@ -100,6 +102,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     texlive-latex-extra \
     texlive-latex-recommended \
     texlive-science
+
+# spead2_net_raw is needed so that qualification tests can use ibverbs
+RUN wget https://raw.githubusercontent.com/ska-sa/spead2/master/src/spead2_net_raw.cpp && \
+    gcc -Wall -O2 -o spead2_net_raw spead2_net_raw.cpp -lcap && \
+    mv spead2_net_raw /usr/local/bin && \
+    setcap cap_net_raw+p /usr/local/bin/spead2_net_raw
 
 # Install required packages for testing to be able to run
 COPY requirements-dev.txt .
