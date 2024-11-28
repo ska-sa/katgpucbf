@@ -86,7 +86,7 @@ pipeline {
           * tests and mark the build as unstable.
           */
          sh '''
-           spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification\
+           spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification \
            --suppress-tests-failed-exit-code \
            --image-override katgpucbf:${katgpucbf_image} \
            --image-override katsdpcontroller:${katsdpcontroller_image} \

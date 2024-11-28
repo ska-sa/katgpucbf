@@ -105,8 +105,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
 
 # spead2_net_raw is needed so that qualification tests can use ibverbs
 RUN wget https://raw.githubusercontent.com/ska-sa/spead2/master/src/spead2_net_raw.cpp && \
-    gcc -Wall -O2 -o spead2_net_raw spead2_net_raw.cpp -lcap && \
-    mv spead2_net_raw /usr/local/bin && \
+    gcc -Wall -O2 -o /usr/local/bin/spead2_net_raw spead2_net_raw.cpp -lcap && \
     setcap cap_net_raw+p /usr/local/bin/spead2_net_raw
 
 # Install required packages for testing to be able to run
