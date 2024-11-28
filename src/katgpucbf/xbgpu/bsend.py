@@ -297,6 +297,7 @@ class Chunk:
             enabled and self.timestamp >= timestamp
             for enabled, timestamp in zip(send_stream.send_enabled, send_stream.send_enabled_timestamp)
         )
+
         n_enabled = sum(send_enabled)
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         send_futures: list[asyncio.Future] = []
@@ -322,6 +323,7 @@ class Chunk:
                 )
 
             self.future = asyncio.gather(*send_futures)
+            send_stream.sent_chunk_counter += 1
         else:
             # TODO: Is it necessary to handle this case?
             self.future = asyncio.create_task(send_stream.stream.async_flush())
@@ -454,6 +456,8 @@ class BSend(Send):
             descriptor_heap=item_group.get_heap(descriptors="all", data="none"),
         )
 
+        self.sent_chunk_counter = 0
+
     def enable_beam(self, beam_id: int, enable: bool = True, timestamp: int = 0) -> None:
         """Enable/Disable a beam's data transmission.
 
@@ -471,6 +475,7 @@ class BSend(Send):
         timestamp
             Minimum timestamp to transmit when enabled.
         """
+        logger.error(f"Setting beam to: {enable} at Tx chunk: {self.sent_chunk_counter}")
         self.send_enabled[beam_id] = enable
         self.send_enabled_timestamp[beam_id] = timestamp
 

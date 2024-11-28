@@ -71,6 +71,7 @@ from .xsend import make_stream as make_xstream
 from .xsend import skipped_accum_counter
 
 logger = logging.getLogger(__name__)
+logging.basicConfig()
 _O = TypeVar("_O", bound=Output)
 _T = TypeVar("_T", bound=QueueItem)
 
@@ -581,6 +582,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         logger.debug("sender_loop completed")
 
     def capture_enable(self, *, stream_id: int, enable: bool = True, timestamp: int = 0) -> None:  # noqa: D102
+        logger.info(f"Beam got capture-{enable} at chunk: {self.engine.chunk_counter}")
         self.send_stream.enable_beam(beam_id=stream_id, enable=enable, timestamp=timestamp)
 
     def _weights_updated(self) -> int:
@@ -1258,6 +1260,8 @@ class XBEngine(DeviceServer):
             chunk = recv.Chunk(data=buf, present=present, sink=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
+        self.chunk_counter = 0
+
     def populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         # Dynamic sensors
@@ -1339,6 +1343,7 @@ class XBEngine(DeviceServer):
 
             # Give the received item to the pipelines' gpu_proc_loop.
             await self._add_in_item(item)
+            self.chunk_counter += 1
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
         logger.debug("_receiver_loop completed")
@@ -1426,6 +1431,7 @@ class XBEngine(DeviceServer):
             ``fringe-offset`` is the net phase adjustment at the centre
             frequency (of the whole stream, not of this engine).
         """
+        logger.info(f"Received beam delay request at: {self.chunk_counter}")
         pipeline, stream_id = self._request_bpipeline(stream_name)
         if len(delays) != self.n_ants:
             raise aiokatcp.FailReply(f"Incorrect number of delays (expected {self.n_ants}, received {len(delays)})")
