@@ -113,11 +113,10 @@ RUN chown -R +1000:+1000 /venv
 # spead2_net_raw is needed so that qualification tests can use ibverbs
 RUN SPEAD2_VERSION=$(grep ^spead2== requirements.txt | cut -d= -f3) && \
     cd /tmp && \
-    wget https://github.com/ska-sa/spead2/releases/download/v$SPEAD2_VERSION/spead2-$SPEAD2_VERSION.tar.gz && \
-    tar -zxf "spead2-$SPEAD2_VERSION.tar.gz" && \
-    cd "spead2-$SPEAD2_VERSION/src" %&& \
+    wget https://raw.githubusercontent.com/ska-sa/spead2/refs/tags/v$SPEAD2_VERSION/src/spead2_net_raw.cpp && \
     gcc -Wall -O2 -o /usr/local/bin/spead2_net_raw spead2_net_raw.cpp -lcap && \
-    setcap cap_net_raw+p /usr/local/bin/spead2_net_raw
+    setcap cap_net_raw+p /usr/local/bin/spead2_net_raw && \
+    rm spead2_net_raw.cpp
 
 #######################################################################
 
