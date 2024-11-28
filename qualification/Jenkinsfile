@@ -61,6 +61,7 @@ pipeline {
   }
 
   options {
+    disableConcurrentBuilds()
     timeout(time: 16, unit: 'HOURS')
   }
 
