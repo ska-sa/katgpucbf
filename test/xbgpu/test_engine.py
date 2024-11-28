@@ -21,7 +21,7 @@ from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Iterable
 from itertools import chain
 from logging import WARNING
-from typing import Final
+from typing import Final, TypeVar
 from unittest import mock
 
 import aiokatcp
@@ -40,7 +40,7 @@ from katgpucbf.fgpu.send import PREAMBLE_SIZE
 from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, bsend, xsend
 from katgpucbf.xbgpu.correlation import Correlation, device_filter
-from katgpucbf.xbgpu.engine import BPipeline, InQueueItem, XBEngine, XPipeline
+from katgpucbf.xbgpu.engine import BPipeline, XBEngine, XPipeline
 from katgpucbf.xbgpu.main import make_engine, parse_args, parse_beam, parse_corrprod
 from katgpucbf.xbgpu.output import BOutput, XOutput
 
@@ -48,6 +48,7 @@ from .. import PromDiff
 from . import test_parameters
 from .test_recv import gen_heap
 
+_T = TypeVar("_T")
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
 get_baseline_index = njit(Correlation.get_baseline_index)
@@ -1210,8 +1211,10 @@ class TestEngine:
         # triggered during the BPipeline's processing of data. We use the first item
         # `?beam` requests before it starts processing data so as to make data verification
         # a bit simpler.
-        steady_state_timestamps = self._patch_get_in_item(
+        steady_state_timestamps = self._patch_method(
             monkeypatch,
+            "_get_in_item",
+            BPipeline,
             count=beam_params_change_index,
             client=client,
             requests=chain.from_iterable(katcp_requests[-1]),
@@ -1376,42 +1379,65 @@ class TestEngine:
             assert stream_diff.diff("output_x_clipped_visibilities_total") == n_vis
             assert xbengine.sensors[f"{corrprod_output.name}.xeng-clip-cnt"].value == n_vis
 
-    def _patch_get_in_item(
+    def _patch_method(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        method_name: str,
+        class_type: type[_T],
         count: int,
         client: aiokatcp.Client,
         requests: Iterable[Iterable],
     ) -> list[int]:
-        """Patch :meth:`~.BPipeline._get_in_item` to make requests partway through the stream.
+        """Patch `method_name` of class `class_type` to make requests during operation.
 
         The returned list will be populated with the value of the
         ``steady-state-timestamp`` sensor immediately after executing the
-        request.
+        requests.
 
         Parameters
         ----------
+        method_name
+            The method intended to be patched.
+        class_type
+            The class which has an attribute `method_name`.
         count
-            Counting from 1, the index of the call to `_get_in_item` to trigger
+            Counting from 1, the index of the call to `method_name` to trigger
             `requests`. `requests` are made prior to the n-th call to
             `_get_in_item`.
         requests
             A list of tuples in the format ("request-name", arg1, arg2, ...).
+
+        Returns
+        -------
+        timestamp
+            The steady-state timestamp obtained after executing `requests`.
+
+        Raises
+        ------
+        AttributeError
+            If `class_type` does not have a `method_name`.
+
+        .. todo::
+
+            NGC-1568: Update the count logic to count from zero instead of one.
         """
         counter = 0
         timestamp = []
-        orig_get_in_item = BPipeline._get_in_item
+        try:
+            orig_method = getattr(class_type, method_name)
+        except AttributeError:
+            raise AttributeError(f"Class {class_type} does not have method {method_name}")
 
-        async def get_in_item(self: BPipeline) -> InQueueItem | None:
+        async def call_method_and_make_requests(self: _T, *args, **kwargs):
             nonlocal counter
             counter += 1
             if counter == count:
                 for request in requests:
                     await client.request(*request)
                 timestamp.append(await client.sensor_value("steady-state-timestamp", int))
-            return await orig_get_in_item(self)
+            return await orig_method(self, *args, **kwargs)
 
-        monkeypatch.setattr(BPipeline, "_get_in_item", get_in_item)
+        monkeypatch.setattr(class_type, method_name, call_method_and_make_requests)
         return timestamp
 
     @DEFAULT_PARAMETERS
@@ -1447,7 +1473,14 @@ class TestEngine:
 
         beam_under_test = beam_outputs[0].name
         request = request_factory(beam_under_test, n_ants)
-        timestamp_list = self._patch_get_in_item(monkeypatch, 4, client, [request])
+        timestamp_list = self._patch_method(
+            monkeypatch,
+            method_name="_get_in_item",
+            class_type=BPipeline,
+            count=4,
+            client=client,
+            requests=[request],
+        )
         n_batches = heap_accumulation_threshold[0]
         _, data, _, _ = await self._send_data(
             mock_recv_streams,
@@ -1541,46 +1574,6 @@ class TestEngine:
             await client.request("capture-start", output.name)
             assert get_stream_status(output.name) is True, f"Stream {output.name} is still disabled"
 
-    def _patch_send_chunk(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        count: int,
-        client: aiokatcp.Client,
-        requests: list[tuple],
-    ) -> None:
-        """Patch :meth:`~.BSend.send_chunk` to make requests partway through data transmission.
-
-        This is required to have finer control on verifying BPipeline send-side activity and
-        behaviour.
-
-        Parameters
-        ----------
-        count
-            Counting from 1, the index of the call to `send_chunk` to trigger
-            `requests`. `requests` are made prior to the n-th call to `send_chunk`.
-        requests
-            A list of tuples in the format ("request-name", arg1, arg2, ...).
-        """
-        counter = 0
-        orig_send_chunk = bsend.BSend.send_chunk
-
-        def send_chunk_and_make_requests(
-            self: bsend.BSend,
-            chunk: bsend.Chunk,
-            time_converter: TimeConverter,
-            sensors: aiokatcp.SensorSet,
-        ) -> None:
-            nonlocal counter
-            counter += 1
-            request_futures: list[asyncio.Future] = []
-            if counter == count:
-                for request in requests:
-                    request_futures.append(asyncio.ensure_future(client.request(*request)))
-                asyncio.gather(*request_futures)
-            orig_send_chunk(self, chunk, time_converter, sensors)
-
-        monkeypatch.setattr(bsend.BSend, "send_chunk", send_chunk_and_make_requests)
-
     @DEFAULT_PARAMETERS
     @pytest.mark.parametrize("n_x_streams_to_stop, n_b_streams_to_stop", [(2, 0), (1, 1), (0, 2)])
     async def test_capture_stop_some_streams(
@@ -1621,7 +1614,7 @@ class TestEngine:
         # - Using a negative index, while valid, results in a non-deterministic
         #   point of issue for the capture-stop request(s). i.e. it depends on
         #   `n_batches`, which is not ideal.
-        # NOTE: Much like the XBEngine receiver, the BPipeline send-stream transmits
+        # NOTE: Like the XBEngine receiver, the BPipeline send-stream transmits
         # chunks that contain `HEAPS_PER_FENGINE_PER_CHUNK`. Consequently, the
         # `?capture-stop` request must be issued at least one send-chunk before
         # data transmission is over to ensure some strength in the test.
@@ -1641,7 +1634,14 @@ class TestEngine:
                     capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
                 )
                 capture_stop_corrprods.append(("capture-stop", stopped_corrprod.name))
-            self._patch_get_in_item(monkeypatch, capture_stop_chunk_index, client, capture_stop_corrprods)
+            self._patch_method(
+                monkeypatch,
+                "_get_in_item",
+                XPipeline,
+                capture_stop_chunk_index,
+                client,
+                capture_stop_corrprods,
+            )
 
         beam_capture_stop_heap_indices = [0] * len(beam_outputs)
         if n_b_streams_to_stop > 0:
@@ -1651,7 +1651,21 @@ class TestEngine:
                 stream_index = beam_outputs.index(stopped_beam)
                 beam_capture_stop_heap_indices[stream_index] = capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
                 capture_stop_beams.append(("capture-stop", stopped_beam.name))
-            self._patch_send_chunk(monkeypatch, capture_stop_chunk_index, client, capture_stop_beams)
+            # NOTE: `get_free_chunk` is given `capture_stop_index` + 1 because
+            # `get_free_chunk` is actually called (just) before a :class:`bsend.Chunk`
+            # is sent. Ideally, we would wait for the n-th Chunk to send before
+            # issuing the `?capture-stop`, but both :meth:`bsend.Bsend.send_chunk`
+            # and :meth:`bsend.Chunk.send` are not asynchronous. As a result, we
+            # settled on :meth:`bsend.Bsend.get_free_chunk` in order to ensure the
+            # requests are at least complete before moving on with processing.
+            self._patch_method(
+                monkeypatch,
+                "get_free_chunk",
+                bsend.BSend,
+                capture_stop_chunk_index + 1,
+                client,
+                capture_stop_beams,
+            )
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 

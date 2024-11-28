@@ -282,6 +282,13 @@ class Pipeline(Generic[_O, _T]):
         """Append a newly-received :class:`InQueueItem` to the :attr:`_in_queue`."""
         self._in_queue.put_nowait(item)
 
+    async def _get_in_item(self) -> InQueueItem | None:
+        """Get the next :class:`InQueueItem`.
+
+        This is wrapped in a method so that it can be mocked.
+        """
+        return await self._in_queue.get()
+
     def shutdown(self) -> None:
         """Start a graceful shutdown after the final call to :meth:`add_in_item`."""
         self._in_queue.put_nowait(None)
@@ -479,13 +486,6 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
-
-    async def _get_in_item(self) -> InQueueItem | None:
-        """Get the next :class:`InQueueItem`.
-
-        This is wrapped in a method so that it can be mocked.
-        """
-        return await self._in_queue.get()
 
     async def gpu_proc_loop(self) -> None:  # noqa: D102
         while True:
