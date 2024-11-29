@@ -120,12 +120,8 @@ def fgpu_factory(
     hstep = step // 2
     qstep = step // 4
     my_cpus = server_info.cpus[index * step : (index + 1) * step]
-    if args.use_vkgdr:
-        recv_chunk_samples = 2**24 // scaling_n
-        send_chunk_jones = recv_chunk_samples // 2
-    else:
-        recv_chunk_samples = 2**27 // scaling_n
-        send_chunk_jones = recv_chunk_samples // 4
+    recv_chunk_samples = 2**27 // scaling_n
+    send_chunk_jones = recv_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
         recv_affinity = f"0,1,{qstep},{qstep + 1}"
@@ -172,7 +168,7 @@ def fgpu_factory(
         f"--prometheus-port={prometheus_port} "
         f"--sync-time={sync_time} "
         f"--feng-id={index} "
-        f"{'--use-vkgdr --max-delay-diff=65536' if args.use_vkgdr else ''} "
+        f"{'--use-vkgdr' if args.use_vkgdr else ''} "
         f"--wideband={wideband_arg} "
         f"239.102.{index}.64+15:7148 "
     )
