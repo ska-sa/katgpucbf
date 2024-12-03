@@ -1188,22 +1188,22 @@ class TestEngine:
             for request_id in range(N_BEAM_REQUESTS)
         ]
         # NOTE: This value is arbitrarily chosen, but must be less than
-        # `N_TOTAL_XB_HEAPS` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect. This, as
-        # each call to `patch_get_in_item` grabs a Chunk containing `HEAPS_PER_FENGINE_PER_CHUNK`
-        # heaps.
+        # `N_TOTAL_XB_HEAPS` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
+        # This, as each call to the patched `_get_in_item` grabs a Chunk containing
+        # `HEAPS_PER_FENGINE_PER_CHUNK` heaps.
         beam_params_change_index = 10
         assert beam_params_change_index < LATEST_BEAM_PARAM_CHANGE_INDEX, (
             f"Chunk index: {beam_params_change_index} is not early enough in the data to properly "
             f"test updated beam parameters - needs to be less than {LATEST_BEAM_PARAM_CHANGE_INDEX}."
         )
-        # NOTE: We use the last item in `katcp_requests` here as `patch_get_in_item` is
+        # NOTE: We use the last item in `katcp_requests` here as `_patch_method` is
         # triggered during the BPipeline's processing of data. We use the first item
         # `?beam` requests before it starts processing data so as to make data verification
         # a bit simpler.
         steady_state_timestamps = self._patch_method(
             monkeypatch,
-            "_get_in_item",
             BPipeline,
+            "_get_in_item",
             count=beam_params_change_index,
             client=client,
             requests=chain.from_iterable(katcp_requests[-1]),
@@ -1371,8 +1371,8 @@ class TestEngine:
     def _patch_method(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        method_name: str,
         class_type: type[_T],
+        method_name: str,
         count: int,
         client: aiokatcp.Client,
         requests: Iterable[Iterable],
@@ -1385,14 +1385,14 @@ class TestEngine:
 
         Parameters
         ----------
-        method_name
-            The method intended to be patched.
         class_type
             The class which has an attribute `method_name`.
+        method_name
+            The method intended to be patched.
         count
             Counting from 1, the index of the call to `method_name` to trigger
             `requests`. `requests` are made prior to the n-th call to
-            `_get_in_item`.
+            `method_name`.
         requests
             A list of tuples in the format ("request-name", arg1, arg2, ...).
 
@@ -1415,7 +1415,7 @@ class TestEngine:
         try:
             orig_method = getattr(class_type, method_name)
         except AttributeError:
-            raise AttributeError(f"Class {class_type} does not have method {method_name}")
+            raise AttributeError(f"Class {class_type} does not have method {method_name}") from None
 
         async def call_method_and_make_requests(self: _T, *args, **kwargs):
             nonlocal counter
@@ -1464,8 +1464,8 @@ class TestEngine:
         request = request_factory(beam_under_test, n_ants)
         timestamp_list = self._patch_method(
             monkeypatch,
-            method_name="_get_in_item",
             class_type=BPipeline,
+            method_name="_get_in_item",
             count=4,
             client=client,
             requests=[request],
@@ -1482,7 +1482,6 @@ class TestEngine:
                 n_channels_per_substream=n_channels_per_substream,
                 n_spectra_per_heap=n_spectra_per_heap,
                 frequency=frequency,
-                data_value=10,
                 batch_index=batch_index,
                 present=present,
             ),
@@ -1582,7 +1581,7 @@ class TestEngine:
         n_x_streams_to_stop: int,
         n_b_streams_to_stop: int,
     ) -> None:
-        """Test capture-stop request on only B-engine data streams.
+        """Test capture-stop request on X- and B-engine data streams.
 
         Issue a `?capture-stop` request at some point into data processing and
         check the corresponding streams only have partial data transmission.
@@ -1625,8 +1624,8 @@ class TestEngine:
                 capture_stop_corrprods.append(("capture-stop", stopped_corrprod.name))
             self._patch_method(
                 monkeypatch,
-                "_get_in_item",
                 XPipeline,
+                "_get_in_item",
                 capture_stop_chunk_index,
                 client,
                 capture_stop_corrprods,
@@ -1641,16 +1640,11 @@ class TestEngine:
                 beam_capture_stop_heap_indices[stream_index] = capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
                 capture_stop_beams.append(("capture-stop", stopped_beam.name))
             # NOTE: `get_free_chunk` is given `capture_stop_index` + 1 because
-            # `get_free_chunk` is actually called (just) before a :class:`bsend.Chunk`
-            # is sent. Ideally, we would wait for the n-th Chunk to send before
-            # issuing the `?capture-stop`, but both :meth:`bsend.Bsend.send_chunk`
-            # and :meth:`bsend.Chunk.send` are not asynchronous. As a result, we
-            # settled on :meth:`bsend.Bsend.get_free_chunk` in order to ensure the
-            # requests are at least complete before moving on with processing.
+            # `patch_method` counts from 1 instead of 0.
             self._patch_method(
                 monkeypatch,
-                "get_free_chunk",
                 bsend.BSend,
+                "get_free_chunk",
                 capture_stop_chunk_index + 1,
                 client,
                 capture_stop_beams,
@@ -1668,7 +1662,6 @@ class TestEngine:
                 n_channels_per_substream=n_channels_per_substream,
                 n_spectra_per_heap=n_spectra_per_heap,
                 frequency=frequency,
-                data_value=10,
                 batch_index=batch_index,
                 present=present,
             ),
@@ -1685,11 +1678,8 @@ class TestEngine:
         # is stored. It is also verified that there is no more data in the stream.
         # This is largely a sanity check that there is non-zero data for heaps that
         # were transmitted before the `?capture-stop` request.
-        for beam_output, beam_capture_stop_heap_index in zip(beam_outputs, beam_capture_stop_heap_indices):
-            if beam_capture_stop_heap_index is not None and beam_capture_stop_heap_index > 0:
-                np.testing.assert_equal(beam_results[beam_output.name][:beam_capture_stop_heap_index] != 0, True)
-            else:
-                np.testing.assert_equal(beam_results[beam_output.name] != 0, True)
+        for beam_output in beam_outputs:
+            np.testing.assert_equal(beam_results[beam_output.name] != 0, True)
 
         # NOTE: The X-engine output is entirely real (no imag component).
         # The results buffer has shape (n_accumulations, n_channels_per_substream,
@@ -1705,6 +1695,6 @@ class TestEngine:
                     # Make sure the ndarray is empty
                     assert corrprod_results[corrprod_output.name].size == 0
                 else:
-                    np.testing.assert_equal(corrprod_results[corrprod_output.name][:accum_index, ..., 0] != 0, True)
+                    np.testing.assert_equal(corrprod_results[corrprod_output.name][..., 0] != 0, True)
             else:
                 np.testing.assert_equal(corrprod_results[corrprod_output.name][..., 0] != 0, True)

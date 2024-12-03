@@ -282,12 +282,14 @@ class Pipeline(Generic[_O, _T]):
         """Append a newly-received :class:`InQueueItem` to the :attr:`_in_queue`."""
         self._in_queue.put_nowait(item)
 
+    @abstractmethod
     async def _get_in_item(self) -> InQueueItem | None:
         """Get the next :class:`InQueueItem`.
 
-        This is wrapped in a method so that it can be mocked.
+        This is an optional wrapper to allow the underlying method
+        to be mocked.
         """
-        return await self._in_queue.get()
+        raise NotImplementedError
 
     def shutdown(self) -> None:
         """Start a graceful shutdown after the final call to :meth:`add_in_item`."""
@@ -426,6 +428,9 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         )
 
         self._populate_sensors()
+
+    async def _get_in_item(self) -> InQueueItem | None:
+        return await self._in_queue.get()
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
@@ -732,6 +737,9 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
     def output(self) -> XOutput:
         """The single :class:`Output` produced by this pipeline."""
         return self.outputs[0]
+
+    async def _get_in_item(self) -> InQueueItem | None:
+        return await self._in_queue.get()
 
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
