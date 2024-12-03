@@ -420,6 +420,14 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
 
         self._populate_sensors()
 
+    async def _get_in_item(self) -> InQueueItem | None:
+        """Get the next :class:`InQueueItem`.
+
+        This is wrapped in a method so it can be mocked and not result in a
+        potential race condition with :class:`XPipeline`.
+        """
+        return await self._in_queue.get()
+
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         for i, output in enumerate(self.outputs):
@@ -479,13 +487,6 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
-
-    async def _get_in_item(self) -> InQueueItem | None:
-        """Get the next :class:`InQueueItem`.
-
-        This is wrapped in a method so that it can be mocked.
-        """
-        return await self._in_queue.get()
 
     async def gpu_proc_loop(self) -> None:  # noqa: D102
         while True:
@@ -733,6 +734,14 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         """The single :class:`Output` produced by this pipeline."""
         return self.outputs[0]
 
+    async def _get_in_item(self) -> InQueueItem | None:
+        """Get the next :class:`InQueueItem`.
+
+        This is wrapped in a method so it can be mocked and not result in a
+        potential race condition with :class:`BPipeline`.
+        """
+        return await self._in_queue.get()
+
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         # Static sensors
@@ -846,7 +855,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             # Get item from the receiver function.
             # - Wait for the HtoD transfers to complete, then
             # - Give the chunk back to the receiver for reuse.
-            in_item = await self._in_queue.get()
+            in_item = await self._get_in_item()
             if in_item is None:
                 break
             await in_item.async_wait_for_events()
