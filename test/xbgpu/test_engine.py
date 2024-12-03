@@ -855,13 +855,13 @@ class TestEngine:
             for i, (corrprod_output, capture_stop_heap_index) in enumerate(
                 zip(corrprod_outputs, corrprod_capture_stop_heap_indices)
             ):
-                if capture_stop_heap_index is not None and capture_stop_heap_index > 0:
+                if capture_stop_heap_index is not None:
                     # Find out which accumulation the heap belongs to
                     stop_acc_index = capture_stop_heap_index // corrprod_output.heap_accumulation_threshold
                     # Again, if data goes missing in an accumulation,
                     # this accumulation and all subsequent accumulations
                     # are not transmitted.
-                    acc_indices_affected = filter(lambda acc_index: acc_index >= stop_acc_index, acc_counts[i])
+                    acc_indices_affected = [acc_index for acc_index in acc_counts[i] if acc_index >= stop_acc_index]
                     for affected_index in acc_indices_affected:
                         acc_counts[i][affected_index] = 0
 
@@ -926,11 +926,12 @@ class TestEngine:
 
         beam_results: dict[str, np.ndarray] = {}
         if beam_capture_stop_heap_indices is None:
-            beam_capture_stop_heap_indices = [-1] * len(beam_outputs)
+            # Rather be explicit for each `beam_output` to simplify the logic below
+            beam_capture_stop_heap_indices = [None] * len(beam_outputs)
         # We adjust the corresponding beam stream to only receive the required
         # amount of data (up until the capture-stop point).
         for beam_output, capture_stop_heap_index in zip(beam_outputs, beam_capture_stop_heap_indices):
-            if capture_stop_heap_index is not None and capture_stop_heap_index > 0:
+            if capture_stop_heap_index is not None:
                 # Obtaining a subset using zero (0) would result in an empty array.
                 # We also don't want to use negative indices to work from the end
                 # of the list of indices. Positive values are desired and more
@@ -1688,7 +1689,7 @@ class TestEngine:
         for corrprod_output, corrprod_capture_stop_heap_index in zip(
             corrprod_outputs, corrprod_capture_stop_heap_indices
         ):
-            if corrprod_capture_stop_heap_index is not None and corrprod_capture_stop_heap_index > 0:
+            if corrprod_capture_stop_heap_index is not None:
                 accum_index = corrprod_capture_stop_heap_index // corrprod_output.heap_accumulation_threshold
                 if accum_index == 0:
                     # The XPipeline never transmitted any accumulations
