@@ -757,7 +757,7 @@ class TestEngine:
 
     @staticmethod
     async def get_data_heap(stream: spead2.recv.asyncio.Stream, ig_recv: spead2.ItemGroup) -> set[str]:
-        r"""Continue to receive heaps from a stream until a non-descriptor heap arrives.
+        r"""Receive heaps from a stream until a non-descriptor heap arrives.
 
         This modifies `ig_recv` in place in order to obtain an updated set of
         :class:`spead2.Item`\ s.
@@ -788,8 +788,8 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
-        corrprod_capture_stop_heap_indices: list[int] | None = None,
-        beam_capture_stop_heap_indices: list[int] | None = None,
+        corrprod_capture_stop_heap_indices: list[int | None] | None = None,
+        beam_capture_stop_heap_indices: list[int | None] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], list[list[int]], list[int]]:
         """Send a stream of data to the engine and retrieve the results.
 
@@ -814,8 +814,10 @@ class TestEngine:
             Timestamp step between each received heap processed.
         n_channels_per_substream, n_spectra_per_heap, frequency
             See :meth:`_create_heaps` for more info.
-        beam_capture_stop_heap_index
-            Heap count at which a `?capture-stop` was issued to beam streams.
+        corrprod_capture_stop_heap_indices
+            Heap counts at which a `?capture-stop` was issued to corrprod streams.
+        beam_capture_stop_heap_indices
+            Heap counts at which a `?capture-stop` was issued to beam streams.
 
         Returns
         -------
@@ -853,12 +855,15 @@ class TestEngine:
             for i, (corrprod_output, capture_stop_heap_index) in enumerate(
                 zip(corrprod_outputs, corrprod_capture_stop_heap_indices)
             ):
-                if capture_stop_heap_index > 0:
+                if capture_stop_heap_index is not None and capture_stop_heap_index > 0:
                     # Find out which accumulation the heap belongs to
-                    acc_index = capture_stop_heap_index // corrprod_output.heap_accumulation_threshold
+                    stop_acc_index = capture_stop_heap_index // corrprod_output.heap_accumulation_threshold
                     # Again, if data goes missing in an accumulation,
-                    # the accumulation is not transmitted.
-                    acc_counts[i][acc_index] = 0
+                    # this accumulation and all subsequent accumulations
+                    # are not transmitted.
+                    acc_indices_affected = filter(lambda acc_index: acc_index >= stop_acc_index, acc_counts[i])
+                    for affected_index in acc_indices_affected:
+                        acc_counts[i][affected_index] = 0
 
         acc_indices = [
             [acc_index for acc_index, count in counts.items() if count == corrprod_output.heap_accumulation_threshold]
@@ -920,46 +925,30 @@ class TestEngine:
                 corrprod_results[corrprod_output.name][j] = ig_recv["xeng_raw"].value
 
         beam_results: dict[str, np.ndarray] = {}
-        if beam_capture_stop_heap_indices is not None:
-            # We adjust the corresponding beam stream to only receive the required
-            # amount of data (up until the capture-stop point).
-            for beam_output, capture_stop_heap_index in zip(beam_outputs, beam_capture_stop_heap_indices):
-                if capture_stop_heap_index > 0:
-                    # Obtaining a subset using zero (0) would result in an empty array.
-                    # We also don't want to use negative indices to work from the end
-                    # of the list of indices. Positive values are desired and more
-                    # explicit in this case.
-                    beam_results.update(
-                        {
-                            beam_output.name: np.zeros(
-                                (
-                                    len(batch_indices[:capture_stop_heap_index]),
-                                    n_channels_per_substream,
-                                    n_spectra_per_heap,
-                                    COMPLEX,
-                                ),
-                                bsend.SEND_DTYPE,
-                            )
-                        }
-                    )
-                else:
-                    beam_results.update(
-                        {
-                            beam_output.name: np.zeros(
-                                (len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
-                                bsend.SEND_DTYPE,
-                            )
-                        }
-                    )
-        else:
-            beam_results.update(
-                {
-                    beam_output.name: np.zeros(
-                        (len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX), bsend.SEND_DTYPE
-                    )
-                    for beam_output in beam_outputs
-                }
-            )
+        if beam_capture_stop_heap_indices is None:
+            beam_capture_stop_heap_indices = [-1] * len(beam_outputs)
+        # We adjust the corresponding beam stream to only receive the required
+        # amount of data (up until the capture-stop point).
+        for beam_output, capture_stop_heap_index in zip(beam_outputs, beam_capture_stop_heap_indices):
+            if capture_stop_heap_index is not None and capture_stop_heap_index > 0:
+                # Obtaining a subset using zero (0) would result in an empty array.
+                # We also don't want to use negative indices to work from the end
+                # of the list of indices. Positive values are desired and more
+                # explicit in this case.
+                beam_results[beam_output.name] = np.zeros(
+                    (
+                        capture_stop_heap_index,
+                        n_channels_per_substream,
+                        n_spectra_per_heap,
+                        COMPLEX,
+                    ),
+                    bsend.SEND_DTYPE,
+                )
+            else:
+                beam_results[beam_output.name] = np.zeros(
+                    (len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
+                    bsend.SEND_DTYPE,
+                )
 
         for i, beam_output in enumerate(beam_outputs):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
@@ -1620,7 +1609,7 @@ class TestEngine:
         # data transmission is over to ensure some strength in the test.
         capture_stop_chunk_index = 10
         assert capture_stop_chunk_index < n_batches // HEAPS_PER_FENGINE_PER_CHUNK
-        corrprod_capture_stop_heap_indices = [0] * len(corrprod_outputs)
+        corrprod_capture_stop_heap_indices: list[int | None] = [None] * len(corrprod_outputs)
         if n_x_streams_to_stop > 0:
             stopped_corrprods = [corrprod_output for corrprod_output in corrprod_outputs[:n_x_streams_to_stop]]
             capture_stop_corrprods = []
@@ -1643,7 +1632,7 @@ class TestEngine:
                 capture_stop_corrprods,
             )
 
-        beam_capture_stop_heap_indices = [0] * len(beam_outputs)
+        beam_capture_stop_heap_indices: list[int | None] = [None] * len(beam_outputs)
         if n_b_streams_to_stop > 0:
             stopped_beams = [beam_output for beam_output in beam_outputs[:n_b_streams_to_stop]]
             capture_stop_beams = []
@@ -1668,7 +1657,6 @@ class TestEngine:
             )
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
-
         corrprod_results, beam_results, _, _ = await self._send_data(
             mock_recv_streams,
             mock_send_stream,
@@ -1698,7 +1686,7 @@ class TestEngine:
         # This is largely a sanity check that there is non-zero data for heaps that
         # were transmitted before the `?capture-stop` request.
         for beam_output, beam_capture_stop_heap_index in zip(beam_outputs, beam_capture_stop_heap_indices):
-            if beam_capture_stop_heap_index > 0:
+            if beam_capture_stop_heap_index is not None and beam_capture_stop_heap_index > 0:
                 np.testing.assert_equal(beam_results[beam_output.name][:beam_capture_stop_heap_index] != 0, True)
             else:
                 np.testing.assert_equal(beam_results[beam_output.name] != 0, True)
@@ -1710,7 +1698,7 @@ class TestEngine:
         for corrprod_output, corrprod_capture_stop_heap_index in zip(
             corrprod_outputs, corrprod_capture_stop_heap_indices
         ):
-            if corrprod_capture_stop_heap_index > 0:
+            if corrprod_capture_stop_heap_index is not None and corrprod_capture_stop_heap_index > 0:
                 accum_index = corrprod_capture_stop_heap_index // corrprod_output.heap_accumulation_threshold
                 if accum_index == 0:
                     # The XPipeline never transmitted any accumulations
