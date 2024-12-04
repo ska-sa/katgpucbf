@@ -47,7 +47,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("cmc_host", help="Hostname / IP address of the CMC.")
     parser.add_argument("--cmc_port", type=int, default=7147, help="KATCP port of the CMC. [%(default)s]")
     parser.add_argument("--target", type=str, required=True, help="Which subordinate to copy.")
-
+    parser.add_argument(
+        "--develop",
+        nargs="?",
+        const=True,
+        help="Pass development options in the config. Use comma separation, or omit the arg to enable all.",
+    )
+    parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
     args = parser.parse_args(argv)
     return args
 
@@ -133,6 +139,13 @@ async def async_main(args) -> int:
 
     for k, v in out_kwargs.items():
         out_cmd.append(f"--{k}={v}")
+
+    if args.develop is not None:
+        out_cmd.append(f"--develop={args.develop}")
+
+    if args.image_override is not None:
+        for override in args.image_override:
+            out_cmd.append(f"--image-override={override}")
 
     output = subprocess.run(out_cmd, capture_output=True)
     print(output)
