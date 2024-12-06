@@ -116,7 +116,7 @@ async def async_main(args) -> int:
     match bandwidth:
         case 544000000.0:
             band = "u"
-        case 85600000.0:
+        case 856000000.0:
             band = "l"
         case _:
             print(f"Unable to determine which band we are in. Bandwidth reported as {bandwidth}", file=sys.stderr)

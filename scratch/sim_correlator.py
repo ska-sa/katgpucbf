@@ -210,7 +210,7 @@ def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
 def generate_config(args: argparse.Namespace) -> dict:
     """Produce the configuration dict from the parsed command-line arguments."""
     config: dict = {
-        "version": "4.0",
+        "version": "4.3",
         "config": {},
         "inputs": {},
         "outputs": {},
