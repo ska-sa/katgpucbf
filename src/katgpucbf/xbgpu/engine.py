@@ -423,8 +423,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
     async def _get_in_item(self) -> InQueueItem | None:
         """Get the next :class:`InQueueItem`.
 
-        This is wrapped in a method so it can be mocked and not result in a
-        potential race condition with :class:`XPipeline`.
+        This is wrapped in a method so it can be mocked.
         """
         return await self._in_queue.get()
 
@@ -734,14 +733,6 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         """The single :class:`Output` produced by this pipeline."""
         return self.outputs[0]
 
-    async def _get_in_item(self) -> InQueueItem | None:
-        """Get the next :class:`InQueueItem`.
-
-        This is wrapped in a method so it can be mocked and not result in a
-        potential race condition with :class:`BPipeline`.
-        """
-        return await self._in_queue.get()
-
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         # Static sensors
@@ -855,7 +846,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             # Get item from the receiver function.
             # - Wait for the HtoD transfers to complete, then
             # - Give the chunk back to the receiver for reuse.
-            in_item = await self._get_in_item()
+            in_item = await self._in_queue.get()
             if in_item is None:
                 break
             await in_item.async_wait_for_events()
