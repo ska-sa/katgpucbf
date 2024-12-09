@@ -788,7 +788,7 @@ class TestEngine:
         n_channels_per_substream: int,
         frequency: int,
         n_spectra_per_heap: int,
-        corrprod_capture_stop_heap_indices: list[int | None] | None = None,
+        corrprod_capture_stop_accum_indices: list[int | None] | None = None,
         beam_capture_stop_heap_indices: list[int | None] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], list[list[int]], list[int]]:
         """Send a stream of data to the engine and retrieve the results.
@@ -814,8 +814,8 @@ class TestEngine:
             Timestamp step between each received heap processed.
         n_channels_per_substream, n_spectra_per_heap, frequency
             See :meth:`_create_heaps` for more info.
-        corrprod_capture_stop_heap_indices
-            Heap counts at which a `?capture-stop` was issued to corrprod streams.
+        corrprod_capture_stop_accum_indices
+            Accumulation index at which a `?capture-stop` was issued to corrprod streams.
         beam_capture_stop_heap_indices
             Heap counts at which a `?capture-stop` was issued to beam streams.
 
@@ -833,7 +833,7 @@ class TestEngine:
             List of accumulation indices for each corrprod_output.
         batch_indices
             List of batch indices which have at least one antenna present.
-            The ith positionon the batch axis of `beam_results` corresponds
+            The ith position on the batch axis of `beam_results` corresponds
             to batch ``batch_indices[i]``.
         """
         batch_indices = list(np.nonzero(np.any(present, axis=1))[0])
@@ -851,17 +851,15 @@ class TestEngine:
             await feng_stream.async_send_heaps(heaps, spead2.send.GroupMode.ROUND_ROBIN)
         # Accumulations are only transmitted if there is some data for every
         # corresponding batch.
-        if corrprod_capture_stop_heap_indices is not None:
-            for i, (corrprod_output, capture_stop_heap_index) in enumerate(
-                zip(corrprod_outputs, corrprod_capture_stop_heap_indices)
-            ):
-                if capture_stop_heap_index is not None:
-                    # Find out which accumulation the heap belongs to
-                    stop_acc_index = capture_stop_heap_index // corrprod_output.heap_accumulation_threshold
+        if corrprod_capture_stop_accum_indices is not None:
+            for i, capture_stop_accum_index in enumerate(corrprod_capture_stop_accum_indices):
+                if capture_stop_accum_index is not None:
                     # Again, if data goes missing in an accumulation,
                     # this accumulation and all subsequent accumulations
                     # are not transmitted.
-                    acc_indices_affected = [acc_index for acc_index in acc_counts[i] if acc_index >= stop_acc_index]
+                    acc_indices_affected = [
+                        acc_index for acc_index in acc_counts[i] if acc_index >= capture_stop_accum_index
+                    ]
                     for affected_index in acc_indices_affected:
                         acc_counts[i][affected_index] = 0
 
@@ -923,6 +921,10 @@ class TestEngine:
                 )
 
                 corrprod_results[corrprod_output.name][j] = ig_recv["xeng_raw"].value
+
+            # Confirm that there are no more accumulations to receive
+            with pytest.raises(spead2.Stopped):
+                await self.get_data_heap(stream, ig_recv)
 
         beam_results: dict[str, np.ndarray] = {}
         if beam_capture_stop_heap_indices is None:
@@ -1563,7 +1565,10 @@ class TestEngine:
             await client.request("capture-start", output.name)
             assert get_stream_status(output.name) is True, f"Stream {output.name} is still disabled"
 
-    @DEFAULT_PARAMETERS
+    @pytest.mark.parametrize(
+        "n_ants, n_channels, n_jones_per_batch, heap_accumulation_threshold",
+        [(4, 1024, 262144, [20, 20])],
+    )
     @pytest.mark.parametrize("n_x_streams_to_stop, n_b_streams_to_stop", [(2, 0), (1, 1), (0, 2)])
     async def test_capture_stop_some_streams(
         self,
@@ -1594,46 +1599,43 @@ class TestEngine:
         """
         assert n_x_streams_to_stop <= len(corrprod_outputs)
         assert n_b_streams_to_stop <= len(beam_outputs)
-        n_batches = heap_accumulation_threshold[0]
-        # NOTE This value is arbitrarily chosen, but must be less than
-        # `n_batches` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
-        # A stop index <= 0 (zero) is treated as invalid/an indication to proceed
-        # as normal for the following reasons:
-        # - Using index zero (0) to obtain a subset of results yields an empty array.
-        # - Using a negative index, while valid, results in a non-deterministic
-        #   point of issue for the capture-stop request(s). i.e. it depends on
-        #   `n_batches`, which is not ideal.
-        # NOTE: Like the XBEngine receiver, the BPipeline send-stream transmits
-        # chunks that contain `HEAPS_PER_FENGINE_PER_CHUNK`. Consequently, the
-        # `?capture-stop` request must be issued at least one send-chunk before
-        # data transmission is over to ensure some strength in the test.
-        capture_stop_chunk_index = 10
-        assert capture_stop_chunk_index < n_batches // HEAPS_PER_FENGINE_PER_CHUNK
-        corrprod_capture_stop_heap_indices: list[int | None] = [None] * len(corrprod_outputs)
+        # NOTE: This value is arbitrarily chosen to have a few whole accumulations
+        # for each corrprod_output. This allows us to issue a capture-stop request
+        # partway in its processing.
+        n_total_accumulations = 5
+        n_batches = heap_accumulation_threshold[0] * n_total_accumulations
+        corrprod_capture_stop_accum_indices: list[int | None] = [None] * len(corrprod_outputs)
         if n_x_streams_to_stop > 0:
+            # NOTE: This value is arbitrarily chosen, but must be less than
+            # `n_total_accumulations` in order to accurately test stopping of
+            # corrprod data streams.
+            capture_stop_accum_index = 3
+            assert capture_stop_accum_index < n_total_accumulations
             stopped_corrprods = [corrprod_output for corrprod_output in corrprod_outputs[:n_x_streams_to_stop]]
             capture_stop_corrprods = []
             for stopped_corrprod in stopped_corrprods:
                 stream_index = corrprod_outputs.index(stopped_corrprod)
-                # NOTE: Data is received at the heap level. As a result, we multiply the chunk
-                # ID at which `?capture-stop` was issued by `HEAPS_PER_FENGINE_PER_CHUNK` to
-                # get the specific heap ID at which data ceased transmitting for a stopped
-                # stream.
-                corrprod_capture_stop_heap_indices[stream_index] = (
-                    capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
-                )
+                corrprod_capture_stop_accum_indices[stream_index] = capture_stop_accum_index
                 capture_stop_corrprods.append(("capture-stop", stopped_corrprod.name))
             self._patch_method(
                 monkeypatch,
                 XPipeline,
-                "_get_in_item",
-                capture_stop_chunk_index,
+                "_flush_accumulation",
+                # NOTE: `capture_stop_accum_index` is multiplied by the number of corrprod_outputs
+                # because each corrprod stream (XPipeline) makes calls to `_flush_accumulation`.
+                # That is, patching the method is not specific to the XPipeline instantiation.
+                # TODO: NGC-1568 to remove the `+ 1` appended here
+                (capture_stop_accum_index * len(corrprod_outputs)) + 1,
                 client,
                 capture_stop_corrprods,
             )
 
+        # NOTE This value is arbitrarily chosen, but must be less than
+        # `n_batches` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
         beam_capture_stop_heap_indices: list[int | None] = [None] * len(beam_outputs)
         if n_b_streams_to_stop > 0:
+            capture_stop_chunk_index = 10
+            assert capture_stop_chunk_index < n_batches // HEAPS_PER_FENGINE_PER_CHUNK
             stopped_beams = [beam_output for beam_output in beam_outputs[:n_b_streams_to_stop]]
             capture_stop_beams = []
             for stopped_beam in stopped_beams:
@@ -1671,7 +1673,7 @@ class TestEngine:
             n_channels_per_substream=n_channels_per_substream,
             frequency=frequency,
             n_spectra_per_heap=n_spectra_per_heap,
-            corrprod_capture_stop_heap_indices=corrprod_capture_stop_heap_indices,
+            corrprod_capture_stop_accum_indices=corrprod_capture_stop_accum_indices,
             beam_capture_stop_heap_indices=beam_capture_stop_heap_indices,
         )
 
@@ -1686,12 +1688,11 @@ class TestEngine:
         # The results buffer has shape (n_accumulations, n_channels_per_substream,
         # n_baselines, COMPLEX). As a result, the final dimension only has data
         # populated for the 'real' (first) index.
-        for corrprod_output, corrprod_capture_stop_heap_index in zip(
-            corrprod_outputs, corrprod_capture_stop_heap_indices
+        for corrprod_output, corrprod_capture_stop_accum_index in zip(
+            corrprod_outputs, corrprod_capture_stop_accum_indices
         ):
-            if corrprod_capture_stop_heap_index is not None:
-                accum_index = corrprod_capture_stop_heap_index // corrprod_output.heap_accumulation_threshold
-                if accum_index == 0:
+            if corrprod_capture_stop_accum_index is not None:
+                if corrprod_capture_stop_accum_index == 0:
                     # The XPipeline never transmitted any accumulations
                     # Make sure the ndarray is empty
                     assert corrprod_results[corrprod_output.name].size == 0
