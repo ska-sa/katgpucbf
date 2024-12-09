@@ -45,7 +45,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("cmc_host", help="Hostname / IP address of the CMC.")
-    parser.add_argument("--cmc_port", type=int, default=7147, help="KATCP port of the CMC. [%(default)s]")
+    parser.add_argument("--cmc-port", type=int, default=7147, help="KATCP port of the CMC. [%(default)s]")
     parser.add_argument("--target", type=str, required=True, help="Which subordinate to copy.")
     parser.add_argument(
         "--develop",
