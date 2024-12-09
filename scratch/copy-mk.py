@@ -72,7 +72,7 @@ async def async_main(args) -> int:
     cmc_client = await aiokatcp.Client.connect(args.cmc_host, args.cmc_port)
 
     try:
-        reply, informs = await cmc_client.request("subordinate-list")
+        _, informs = await cmc_client.request("subordinate-list")
     except (aiokatcp.FailReply, ConnectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
