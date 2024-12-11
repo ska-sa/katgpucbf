@@ -1560,7 +1560,7 @@ class TestEngine:
         "n_ants, n_channels, n_jones_per_batch, heap_accumulation_threshold",
         [(4, 1024, 262144, [20, 20])],
     )
-    @pytest.mark.parametrize("n_x_streams_to_stop, n_b_streams_to_stop", [(2, 0), (1, 1), (0, 2)])
+    @pytest.mark.parametrize("n_x_streams_to_stop, n_b_streams_to_stop", [(2, None), (1, 1), (None, 2)])
     async def test_capture_stop_some_streams(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1589,24 +1589,29 @@ class TestEngine:
         This test is carried out in combinations to fully exercise stop logic in
         both X- and BPipelines.
         """
-        assert n_x_streams_to_stop <= len(corrprod_outputs)
-        assert n_b_streams_to_stop <= len(beam_outputs)
+        rng = np.random.default_rng(seed=1)
         # NOTE: This value is arbitrarily chosen to have a few whole accumulations
         # for each corrprod_output. This allows us to issue a capture-stop request
         # partway in its processing.
         n_total_accumulations = 5
         n_batches = heap_accumulation_threshold[0] * n_total_accumulations
         corrprod_capture_stop_accum_indices: list[int | None] = [None] * len(corrprod_outputs)
-        if n_x_streams_to_stop > 0:
+        if n_x_streams_to_stop is not None:
+            assert n_x_streams_to_stop <= len(corrprod_outputs)
             # NOTE: This value is arbitrarily chosen, but must be less than
             # `n_total_accumulations` in order to accurately test stopping of
             # corrprod data streams.
             capture_stop_accum_index = 3
             assert capture_stop_accum_index < n_total_accumulations
-            stopped_corrprods = [corrprod_output for corrprod_output in corrprod_outputs[:n_x_streams_to_stop]]
+            if n_x_streams_to_stop == 1:
+                # Randomly select one of the corrprod outputs to stop
+                stream_id_to_stop = rng.integers(0, len(corrprod_outputs))
+                stopped_corrprods = [corrprod_outputs[stream_id_to_stop]]
+                corrprod_capture_stop_accum_indices[stream_id_to_stop] = capture_stop_accum_index
+            else:
+                stopped_corrprods = corrprod_outputs
+                corrprod_capture_stop_accum_indices = [capture_stop_accum_index] * len(corrprod_outputs)
             for stopped_corrprod in stopped_corrprods:
-                stream_index = corrprod_outputs.index(stopped_corrprod)
-                corrprod_capture_stop_accum_indices[stream_index] = capture_stop_accum_index
                 capture_stop_corrprod_request = ("capture-stop", stopped_corrprod.name)
                 stopped_xpipeline = xbengine._request_pipeline(stopped_corrprod.name)[0]
                 # NOTE: We patch the instance and not the class in this case as we only
@@ -1621,17 +1626,26 @@ class TestEngine:
                     [capture_stop_corrprod_request],
                 )
 
-        # NOTE This value is arbitrarily chosen, but must be less than
-        # `n_batches` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
         beam_capture_stop_heap_indices: list[int | None] = [None] * len(beam_outputs)
-        if n_b_streams_to_stop > 0:
+        if n_b_streams_to_stop is not None:
+            assert n_b_streams_to_stop <= len(beam_outputs)
+            # NOTE This value is arbitrarily chosen, but must be less than
+            # `n_batches` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
             capture_stop_chunk_index = 10
             assert capture_stop_chunk_index < n_batches // HEAPS_PER_FENGINE_PER_CHUNK
-            stopped_beams = [beam_output for beam_output in beam_outputs[:n_b_streams_to_stop]]
+            if n_b_streams_to_stop == 1:
+                stream_id_to_stop = rng.integers(0, len(beam_outputs))
+                stopped_beams = [beam_outputs[stream_id_to_stop]]
+                beam_capture_stop_heap_indices[stream_id_to_stop] = (
+                    capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
+                )
+            else:
+                stopped_beams = beam_outputs
+                beam_capture_stop_heap_indices = [capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK] * len(
+                    beam_outputs
+                )
             capture_stop_beams = []
             for stopped_beam in stopped_beams:
-                stream_index = beam_outputs.index(stopped_beam)
-                beam_capture_stop_heap_indices[stream_index] = capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
                 capture_stop_beams.append(("capture-stop", stopped_beam.name))
             # NOTE: `get_free_chunk` is given `capture_stop_index` + 1 because
             # `patch_method` counts from 1 instead of 0.
