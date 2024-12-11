@@ -21,7 +21,7 @@ from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Iterable
 from itertools import chain
 from logging import WARNING
-from typing import Final, TypeVar
+from typing import Final
 from unittest import mock
 
 import aiokatcp
@@ -48,7 +48,6 @@ from .. import PromDiff
 from . import test_parameters
 from .test_recv import gen_heap
 
-_T = TypeVar("_T")
 pytestmark = [pytest.mark.device_filter.with_args(device_filter)]
 
 get_baseline_index = njit(Correlation.get_baseline_index)
@@ -1374,7 +1373,7 @@ class TestEngine:
     def _patch_method(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        class_type: type[_T],
+        class_or_instance: object,
         method_name: str,
         count: int,
         client: aiokatcp.Client,
@@ -1388,8 +1387,8 @@ class TestEngine:
 
         Parameters
         ----------
-        class_type
-            The class which has an attribute `method_name`.
+        class_or_instance
+            The class or instance which has an attribute `method_name`.
         method_name
             The method intended to be patched.
         count
@@ -1404,32 +1403,24 @@ class TestEngine:
         timestamp
             The steady-state timestamp obtained after executing `requests`.
 
-        Raises
-        ------
-        AttributeError
-            If `class_type` does not have a `method_name`.
-
         .. todo::
 
             NGC-1568: Update the count logic to count from zero instead of one.
         """
         counter = 0
         timestamp = []
-        try:
-            orig_method = getattr(class_type, method_name)
-        except AttributeError:
-            raise AttributeError(f"Class {class_type} does not have method {method_name}") from None
+        orig_method = getattr(class_or_instance, method_name)
 
-        async def call_method_and_make_requests(self: _T, *args, **kwargs):
+        async def call_method_and_make_requests(*args, **kwargs):
             nonlocal counter
             counter += 1
             if counter == count:
                 for request in requests:
                     await client.request(*request)
                 timestamp.append(await client.sensor_value("steady-state-timestamp", int))
-            return await orig_method(self, *args, **kwargs)
+            return await orig_method(*args, **kwargs)
 
-        monkeypatch.setattr(class_type, method_name, call_method_and_make_requests)
+        monkeypatch.setattr(class_or_instance, method_name, call_method_and_make_requests)
         return timestamp
 
     @DEFAULT_PARAMETERS
@@ -1467,7 +1458,7 @@ class TestEngine:
         request = request_factory(beam_under_test, n_ants)
         timestamp_list = self._patch_method(
             monkeypatch,
-            class_type=BPipeline,
+            class_or_instance=BPipeline,
             method_name="_get_in_item",
             count=4,
             client=client,
@@ -1586,6 +1577,7 @@ class TestEngine:
         beam_outputs: list[BOutput],
         n_x_streams_to_stop: int,
         n_b_streams_to_stop: int,
+        xbengine: XBEngine,
     ) -> None:
         """Test capture-stop request on X- and B-engine data streams.
 
@@ -1612,23 +1604,22 @@ class TestEngine:
             capture_stop_accum_index = 3
             assert capture_stop_accum_index < n_total_accumulations
             stopped_corrprods = [corrprod_output for corrprod_output in corrprod_outputs[:n_x_streams_to_stop]]
-            capture_stop_corrprods = []
             for stopped_corrprod in stopped_corrprods:
                 stream_index = corrprod_outputs.index(stopped_corrprod)
                 corrprod_capture_stop_accum_indices[stream_index] = capture_stop_accum_index
-                capture_stop_corrprods.append(("capture-stop", stopped_corrprod.name))
-            self._patch_method(
-                monkeypatch,
-                XPipeline,
-                "_flush_accumulation",
-                # NOTE: `capture_stop_accum_index` is multiplied by the number of corrprod_outputs
-                # because each corrprod stream (XPipeline) makes calls to `_flush_accumulation`.
-                # That is, patching the method is not specific to the XPipeline instantiation.
-                # TODO: NGC-1568 to remove the `+ 1` appended here
-                (capture_stop_accum_index * len(corrprod_outputs)) + 1,
-                client,
-                capture_stop_corrprods,
-            )
+                capture_stop_corrprod_request = ("capture-stop", stopped_corrprod.name)
+                stopped_xpipeline = xbengine._request_pipeline(stopped_corrprod.name)[0]
+                # NOTE: We patch the instance and not the class in this case as we only
+                # want each corrprod stream (XPipeline) to affect its own output.
+                self._patch_method(
+                    monkeypatch,
+                    stopped_xpipeline.send_stream,
+                    "get_free_heap",
+                    # TODO: NGC-1568 to remove the `+ 1` appended here
+                    capture_stop_accum_index + 1,
+                    client,
+                    [capture_stop_corrprod_request],
+                )
 
         # NOTE This value is arbitrarily chosen, but must be less than
         # `n_batches` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
