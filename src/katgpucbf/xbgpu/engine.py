@@ -420,13 +420,6 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
 
         self._populate_sensors()
 
-    async def _get_in_item(self) -> InQueueItem | None:
-        """Get the next :class:`InQueueItem`.
-
-        This is wrapped in a method so it can be mocked.
-        """
-        return await self._in_queue.get()
-
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         for i, output in enumerate(self.outputs):
@@ -486,6 +479,13 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
+
+    async def _get_in_item(self) -> InQueueItem | None:
+        """Get the next :class:`InQueueItem`.
+
+        This is wrapped in a method so it can be mocked.
+        """
+        return await self._in_queue.get()
 
     async def gpu_proc_loop(self) -> None:  # noqa: D102
         while True:
