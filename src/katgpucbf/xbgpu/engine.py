@@ -483,7 +483,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
     async def _get_in_item(self) -> InQueueItem | None:
         """Get the next :class:`InQueueItem`.
 
-        This is wrapped in a method so it can be mocked.
+        This is wrapped in a method so that it can be mocked.
         """
         return await self._in_queue.get()
 

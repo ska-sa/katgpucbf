@@ -764,7 +764,15 @@ class TestEngine:
         Parameters
         ----------
         stream
-            Streams that received XBEngine
+            Stream that received XBEngine data.
+        ig_recv
+            :class:`spead2.ItemGroup` used to update item descriptors from
+            an incoming heap.
+
+        Returns
+        -------
+        updated_items
+            Set of strings comprising :class:`spead2.ItemGroup` item names.
         """
         # Wait for heap to be ready and then update the item group
         # with the new values.
@@ -929,28 +937,19 @@ class TestEngine:
         if beam_capture_stop_heap_indices is None:
             # Rather be explicit for each `beam_output` to simplify the logic below
             beam_capture_stop_heap_indices = [None] * len(beam_outputs)
-        # We adjust the corresponding beam stream to only receive the required
-        # amount of data (up until the capture-stop point).
         for beam_output, capture_stop_heap_index in zip(beam_outputs, beam_capture_stop_heap_indices):
-            if capture_stop_heap_index is not None:
-                # Obtaining a subset using zero (0) would result in an empty array.
-                # We also don't want to use negative indices to work from the end
-                # of the list of indices. Positive values are desired and more
-                # explicit in this case.
-                beam_results[beam_output.name] = np.zeros(
-                    (
-                        capture_stop_heap_index,
-                        n_channels_per_substream,
-                        n_spectra_per_heap,
-                        COMPLEX,
-                    ),
-                    bsend.SEND_DTYPE,
-                )
-            else:
-                beam_results[beam_output.name] = np.zeros(
-                    (len(batch_indices), n_channels_per_substream, n_spectra_per_heap, COMPLEX),
-                    bsend.SEND_DTYPE,
-                )
+            # If necessary, adjust the corresponding beam stream to only receive
+            # the required amount of data (up until the capture-stop point).
+            n_batches = len(batch_indices) if capture_stop_heap_index is None else capture_stop_heap_index
+            beam_results[beam_output.name] = np.zeros(
+                (
+                    n_batches,
+                    n_channels_per_substream,
+                    n_spectra_per_heap,
+                    COMPLEX,
+                ),
+                bsend.SEND_DTYPE,
+            )
 
         for i, beam_output in enumerate(beam_outputs):
             stream = spead2.recv.asyncio.Stream(out_tp, out_config)
@@ -1373,21 +1372,21 @@ class TestEngine:
     def _patch_method(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        class_or_instance: object,
+        obj: object,
         method_name: str,
         count: int,
         client: aiokatcp.Client,
         requests: Iterable[Iterable],
     ) -> list[int]:
-        """Patch `method_name` of class `class_type` to make requests during operation.
+        """Patch `method_name` of `obj` to make requests during operation.
 
-        The returned list will be populated with the value of the
-        ``steady-state-timestamp`` sensor immediately after executing the
-        requests.
+        This can be used to patch a class or an instance. The returned list
+        will be populated with the value of the ``steady-state-timestamp``
+        sensor immediately after executing the requests.
 
         Parameters
         ----------
-        class_or_instance
+        obj
             The class or instance which has an attribute `method_name`.
         method_name
             The method intended to be patched.
@@ -1409,7 +1408,7 @@ class TestEngine:
         """
         counter = 0
         timestamp = []
-        orig_method = getattr(class_or_instance, method_name)
+        orig_method = getattr(obj, method_name)
 
         async def call_method_and_make_requests(*args, **kwargs):
             nonlocal counter
@@ -1420,7 +1419,7 @@ class TestEngine:
                 timestamp.append(await client.sensor_value("steady-state-timestamp", int))
             return await orig_method(*args, **kwargs)
 
-        monkeypatch.setattr(class_or_instance, method_name, call_method_and_make_requests)
+        monkeypatch.setattr(obj, method_name, call_method_and_make_requests)
         return timestamp
 
     @DEFAULT_PARAMETERS
@@ -1458,7 +1457,7 @@ class TestEngine:
         request = request_factory(beam_under_test, n_ants)
         timestamp_list = self._patch_method(
             monkeypatch,
-            class_or_instance=BPipeline,
+            obj=BPipeline,
             method_name="_get_in_item",
             count=4,
             client=client,
@@ -1560,7 +1559,7 @@ class TestEngine:
         "n_ants, n_channels, n_jones_per_batch, heap_accumulation_threshold",
         [(4, 1024, 262144, [20, 20])],
     )
-    @pytest.mark.parametrize("n_x_streams_to_stop, n_b_streams_to_stop", [(2, None), (1, 1), (None, 2)])
+    @pytest.mark.parametrize("n_x_streams_to_stop, n_b_streams_to_stop", [(2, 0), (1, 1), (0, 2)])
     async def test_capture_stop_some_streams(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1596,67 +1595,56 @@ class TestEngine:
         n_total_accumulations = 5
         n_batches = heap_accumulation_threshold[0] * n_total_accumulations
         corrprod_capture_stop_accum_indices: list[int | None] = [None] * len(corrprod_outputs)
-        if n_x_streams_to_stop is not None:
-            assert n_x_streams_to_stop <= len(corrprod_outputs)
-            # NOTE: This value is arbitrarily chosen, but must be less than
-            # `n_total_accumulations` in order to accurately test stopping of
-            # corrprod data streams.
-            capture_stop_accum_index = 3
-            assert capture_stop_accum_index < n_total_accumulations
-            if n_x_streams_to_stop == 1:
-                # Randomly select one of the corrprod outputs to stop
-                stream_id_to_stop = rng.integers(0, len(corrprod_outputs))
-                stopped_corrprods = [corrprod_outputs[stream_id_to_stop]]
-                corrprod_capture_stop_accum_indices[stream_id_to_stop] = capture_stop_accum_index
-            else:
-                stopped_corrprods = corrprod_outputs
-                corrprod_capture_stop_accum_indices = [capture_stop_accum_index] * len(corrprod_outputs)
-            for stopped_corrprod in stopped_corrprods:
-                capture_stop_corrprod_request = ("capture-stop", stopped_corrprod.name)
-                stopped_xpipeline = xbengine._request_pipeline(stopped_corrprod.name)[0]
-                # NOTE: We patch the instance and not the class in this case as we only
-                # want each corrprod stream (XPipeline) to affect its own output.
-                self._patch_method(
-                    monkeypatch,
-                    stopped_xpipeline.send_stream,
-                    "get_free_heap",
-                    # TODO: NGC-1568 to remove the `+ 1` appended here
-                    capture_stop_accum_index + 1,
-                    client,
-                    [capture_stop_corrprod_request],
-                )
-
-        beam_capture_stop_heap_indices: list[int | None] = [None] * len(beam_outputs)
-        if n_b_streams_to_stop is not None:
-            assert n_b_streams_to_stop <= len(beam_outputs)
-            # NOTE This value is arbitrarily chosen, but must be less than
-            # `n_batches` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
-            capture_stop_chunk_index = 10
-            assert capture_stop_chunk_index < n_batches // HEAPS_PER_FENGINE_PER_CHUNK
-            if n_b_streams_to_stop == 1:
-                stream_id_to_stop = rng.integers(0, len(beam_outputs))
-                stopped_beams = [beam_outputs[stream_id_to_stop]]
-                beam_capture_stop_heap_indices[stream_id_to_stop] = (
-                    capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
-                )
-            else:
-                stopped_beams = beam_outputs
-                beam_capture_stop_heap_indices = [capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK] * len(
-                    beam_outputs
-                )
-            capture_stop_beams = []
-            for stopped_beam in stopped_beams:
-                capture_stop_beams.append(("capture-stop", stopped_beam.name))
-            # NOTE: `get_free_chunk` is given `capture_stop_index` + 1 because
-            # `patch_method` counts from 1 instead of 0.
+        assert n_x_streams_to_stop <= len(corrprod_outputs)
+        # NOTE: This value is arbitrarily chosen, but must be less than
+        # `n_total_accumulations` in order to accurately test stopping of
+        # corrprod data streams.
+        capture_stop_accum_index = 3
+        assert capture_stop_accum_index < n_total_accumulations
+        stream_ids_to_stop = sorted(rng.choice(len(corrprod_outputs), n_x_streams_to_stop, replace=False))
+        stopped_corrprods: list[XOutput] = []
+        for stream_id in stream_ids_to_stop:
+            stopped_corrprods.append(corrprod_outputs[stream_id])
+            corrprod_capture_stop_accum_indices[stream_id] = capture_stop_accum_index
+        for stopped_corrprod in stopped_corrprods:
+            capture_stop_corrprod_request = ("capture-stop", stopped_corrprod.name)
+            stopped_xpipeline = xbengine._request_pipeline(stopped_corrprod.name)[0]
+            # NOTE: We patch the instance and not the class in this case as we only
+            # want each corrprod stream (XPipeline) to affect its own output.
             self._patch_method(
                 monkeypatch,
-                bsend.BSend,
-                "get_free_chunk",
-                capture_stop_chunk_index + 1,
+                stopped_xpipeline.send_stream,
+                "get_free_heap",
+                # TODO: NGC-1568 to remove the `+ 1` appended here
+                capture_stop_accum_index + 1,
                 client,
-                capture_stop_beams,
+                [capture_stop_corrprod_request],
             )
+
+        beam_capture_stop_heap_indices: list[int | None] = [None] * len(beam_outputs)
+        assert n_b_streams_to_stop <= len(beam_outputs)
+        # NOTE This value is arbitrarily chosen, but must be less than
+        # `n_batches` / `HEAPS_PER_FENGINE_PER_CHUNK` to actually take effect.
+        capture_stop_chunk_index = 10
+        assert capture_stop_chunk_index < n_batches // HEAPS_PER_FENGINE_PER_CHUNK
+        stream_ids_to_stop = sorted(rng.choice(len(beam_outputs), n_b_streams_to_stop, replace=False))
+        stopped_beams: list[BOutput] = []
+        for stream_id in stream_ids_to_stop:
+            stopped_beams.append(beam_outputs[stream_id])
+            beam_capture_stop_heap_indices[stream_id] = capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
+        capture_stop_beams = []
+        for stopped_beam in stopped_beams:
+            capture_stop_beams.append(("capture-stop", stopped_beam.name))
+        # NOTE: `get_free_chunk` is given `capture_stop_index` + 1 because
+        # `patch_method` counts from 1 instead of 0.
+        self._patch_method(
+            monkeypatch,
+            bsend.BSend,
+            "get_free_chunk",
+            capture_stop_chunk_index + 1,
+            client,
+            capture_stop_beams,
+        )
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
         corrprod_results, beam_results, _, _ = await self._send_data(
@@ -1693,15 +1681,5 @@ class TestEngine:
         # The results buffer has shape (n_accumulations, n_channels_per_substream,
         # n_baselines, COMPLEX). As a result, the final dimension only has data
         # populated for the 'real' (first) index.
-        for corrprod_output, corrprod_capture_stop_accum_index in zip(
-            corrprod_outputs, corrprod_capture_stop_accum_indices
-        ):
-            if corrprod_capture_stop_accum_index is not None:
-                if corrprod_capture_stop_accum_index == 0:
-                    # The XPipeline never transmitted any accumulations
-                    # Make sure the ndarray is empty
-                    assert corrprod_results[corrprod_output.name].size == 0
-                else:
-                    np.testing.assert_equal(corrprod_results[corrprod_output.name][..., 0] != 0, True)
-            else:
-                np.testing.assert_equal(corrprod_results[corrprod_output.name][..., 0] != 0, True)
+        for corrprod_output in corrprod_outputs:
+            np.testing.assert_equal(corrprod_results[corrprod_output.name][..., 0] != 0, True)
