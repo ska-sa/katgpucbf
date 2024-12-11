@@ -86,6 +86,8 @@ repos:
           - --strip-extras
           - setup.cfg
           - requirements.in
+        additional_dependencies:
+          - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
         files: '^(requirements\.(in|txt)|setup\.cfg)$'
       - id: pip-compile
         name: pip-compile requirements-dev.txt
@@ -96,6 +98,8 @@ repos:
           - --strip-extras
           - setup.cfg
           - requirements-dev.in
+        additional_dependencies:
+          - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
         files: '^(requirements(-dev)?\.(in|txt)|setup\.cfg)$'
       - id: pip-compile
         name: pip-compile qualification/requirements.txt
@@ -105,10 +109,15 @@ repos:
           - --strip-extras
           - setup.cfg
           - qualification/requirements.in
+        additional_dependencies:
+          - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
         files: '(.*requirements(-dev)?\.(in|txt)|^setup\.cfg)$'
       - id: pip-compile
         name: pip-compile scratch/benchmarks/requirements.txt
         args:
           - --output-file=scratch/benchmarks/requirements.txt
+          - --strip-extras
           - scratch/benchmarks/requirements.in
+        additional_dependencies:
+          - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
         files: '(.*requirements(-dev)?\.(in|txt)|^setup\.cfg)$'

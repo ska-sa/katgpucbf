@@ -20,148 +20,144 @@
  * This means that the Docker Engine being used needs to have been configured
  * to use the Nvidia Container Runtime and the node which the container runs
  * on needs a Nvidia GPU with tensor cores along with the Nvidia Driver installed.
- *
- * Additionally the Jenkins server also needs access to a Mellanox NIC that
- * supports ibverbs. The ibverbs drivers need to be passed into the Jenkins
- * container using specific flags.
  */
 
 pipeline {
-  agent {
-    dockerfile {
-      label 'katgpucbf'
-      registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
-
-      /* Use the Jenkins-specific stage of the Dockerfile as the image for
-       * testing. This provides the appropriate dependencies.
-       */
-      additionalBuildArgs '--target=jenkins'
-
-      /* The following argument needs to be specified in order for the container
-       * to launch correctly.
-       *
-       * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
-       * devices from the host to the container. It requires the NVIDIA Container
-       * Toolkit to be installed on the host.
-       *
-       * -v /var/run/docker.sock:/var/run/docker.sock: makes the connection to
-       * the Docker server available inside the container (for building a Docker
-       * image).
-       */
-      args '--runtime=nvidia --gpus=all -v /var/run/docker.sock:/var/run/docker.sock'
-    }
-  }
-
+  agent { label 'katgpucbf' }
   options {
     timeout(time: 2, unit: 'HOURS')
+    disableConcurrentBuilds()
   }
 
   stages {
-    stage('Install Python packages') {
-      steps {
-        sh 'pip install -r requirements.txt -r requirements-dev.txt'
-      }
-    }
+    /* This is an outer stage that serves just to hold the 'agent' config for
+     * stages that run inside a Docker container. The build of the Docker
+     * image is done outside of that Docker container because of the
+     * complexities of running Docker-in-docker.
+     */
+    stage('Testing') {
+      agent {
+        dockerfile {
+          reuseNode true
+          registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
-    stage('Install katgpucbf package') {
-      steps {
-        sh 'pip install --no-deps ".[test]" && pip check'
-      }
-    }
+          /* Use the Jenkins-specific stage of the Dockerfile as the image for
+           * testing. This provides the appropriate dependencies.
+           */
+          additionalBuildArgs '--target=jenkins'
 
-    stage('Parallel stage') {
-      parallel {
-        stage('Compile and test microbenchmarks') {
-          options { timeout(time: 5, unit: 'MINUTES') }
+          /* The following arguments needs to be specified in order for the container
+           * to launch correctly.
+           *
+           * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
+           * devices from the host to the container. It requires the NVIDIA Container
+           * Toolkit to be installed on the host.
+           */
+          args '--runtime=nvidia --gpus=all'
+        }
+      }
+      stages {
+        stage('Install katgpucbf package') {
           steps {
-            dir('scratch') {
-              sh 'make clean'
-              sh 'make'
-              sh './memcpy_loop -T'
+            sh 'pip install --no-deps ".[test]" && pip check'
+          }
+        }
 
-              // We just want to know if they run without crashing, so we use a small
-              // number of passes to speed things up.
-              sh 'fgpu/benchmarks/compute_bench.py --kernel all --passes 10'
-              sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --narrowband --passes 10'
-              sh 'fgpu/benchmarks/compute_bench.py --kernel pfb_fir --passes 10'
-              sh 'fgpu/benchmarks/compute_bench.py --kernel fft --passes 10'
-              sh 'fgpu/benchmarks/compute_bench.py --kernel postproc --passes 10'
-              sh 'fgpu/benchmarks/compute_bench.py --kernel all --narrowband --passes 10'
+        stage('Parallel stage') {
+          parallel {
+            stage('Compile and test microbenchmarks') {
+              options { timeout(time: 5, unit: 'MINUTES') }
+              steps {
+                dir('scratch') {
+                  sh 'make clean'
+                  sh 'make'
+                  sh './memcpy_loop -T'
 
-              sh 'fgpu/benchmarks/ddc_bench.py --passes 10'
+                  // We just want to know if they run without crashing, so we use a small
+                  // number of passes to speed things up.
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel all --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --narrowband --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel pfb_fir --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel fft --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel postproc --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel all --narrowband --passes 10'
 
-              sh 'fgpu/benchmarks/fft_bench.py --mode r2c --passes 10'
-              sh 'fgpu/benchmarks/fft_bench.py --mode c2c --passes 10'
+                  sh 'fgpu/benchmarks/ddc_bench.py --passes 10'
 
-              sh 'xbgpu/benchmarks/beamform_bench.py --passes 10'
-              sh 'xbgpu/benchmarks/correlate_bench.py --passes 10'
+                  sh 'fgpu/benchmarks/fft_bench.py --mode r2c --passes 10'
+                  sh 'fgpu/benchmarks/fft_bench.py --mode c2c --passes 10'
 
-              sh './gpu_copy.py htod --repeat 10'
-              sh './gpu_copy.py dtoh --repeat 10'
-              sh './gpu_copy.py dtod --repeat 10'
-              sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
+                  sh 'xbgpu/benchmarks/beamform_bench.py --passes 10'
+                  sh 'xbgpu/benchmarks/correlate_bench.py --passes 10'
+
+                  sh './gpu_copy.py htod --repeat 10'
+                  sh './gpu_copy.py dtoh --repeat 10'
+                  sh './gpu_copy.py dtod --repeat 10'
+                  sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
+                }
+              }
+            }
+
+            /* This stage ensures that all the python style guidelines checks pass.
+             * This will catch if someone has committed to the repo without
+             * installing the required pre-commit hooks, or has bypassed them.
+             */
+            stage('Run pre-commit checks') {
+              steps {
+                // no-commit-to-branch complains if we are on the main branch
+                sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
+              }
+            }
+
+            /* This stage actually runs pytest. Pytest has a number of flags that are
+             * not required but make life easier:
+             * 1. -n X: Launches X processes and runs the tests in parallel across
+             *     multiple processes. This speeds up testing significantly. NOTE: This
+             *     can create resource contention over things like GPU RAM. If it
+             *     starts becoming an issue set X to 1.
+             * 2. -v: Increases verbosity
+             * 3. --junitxml=reports/result.xml' Writes the results to a file for later
+             *    examination.
+             * 4. -m "not slow": skip slow tests
+             */
+            stage('Run pytest (quick)') {
+              when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
+              options { timeout(time: 30, unit: 'MINUTES') }
+              steps {
+                sh 'pytest -n 4 -v -ra -m "not slow" --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
+              }
+            }
+            stage('Run pytest (full)') {
+              when { anyOf { changeRequest target: 'main'; branch 'main' } }
+              options { timeout(time: 60, unit: 'MINUTES') }
+              steps {
+                sh 'pytest -n 4 -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
+              }
+            }
+
+            stage('Build documentation') {
+              options { timeout(time: 5, unit: 'MINUTES') }
+              steps {
+                // -W causes warnings to become errors.
+                // --keep-going ensures we get all warnings instead of just the first.
+                sh 'make -C doc clean html latexpdf SPHINXOPTS="-W --keep-going"'
+                publishHTML(target: [reportName: 'Module documentation', reportDir: 'doc/_build/html', reportFiles: 'index.html'])
+                publishHTML(target: [reportName: 'Module documentation (PDF)', reportDir: 'doc/_build/latex', reportFiles: 'katgpucbf.pdf'])
+              }
             }
           }
         }
 
-        /* This stage ensures that all the python style guidelines checks pass.
-         * This will catch if someone has committed to the repo without
-         * installing the required pre-commit hooks, or has bypassed them.
-         */
-        stage('Run pre-commit checks') {
+        stage('Publish test results') {
           steps {
-            sh 'pre-commit install'
-            // no-commit-to-branch complains if we are on the main branch
-            sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
-          }
-        }
-
-        /* This stage actually runs pytest. Pytest has a number of flags that are
-         * not required but make life easier:
-         * 1. -n X: Launches X processes and runs the tests in parallel across
-         *     multiple processes. This speeds up testing significantly. NOTE: This
-         *     can create resource contention over things like GPU RAM. If it
-         *     starts becoming an issue set X to 1.
-         * 2. -v: Increases verbosity
-         * 3. --junitxml=reports/result.xml' Writes the results to a file for later
-         *    examination.
-         * 4. -m "not slow": skip slow tests
-         */
-        stage('Run pytest (quick)') {
-          when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
-          options { timeout(time: 30, unit: 'MINUTES') }
-          steps {
-            sh 'pytest -n 4 -v -ra -m "not slow" --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
-          }
-        }
-        stage('Run pytest (full)') {
-          when { anyOf { changeRequest target: 'main'; branch 'main' } }
-          options { timeout(time: 60, unit: 'MINUTES') }
-          steps {
-            sh 'pytest -n 4 -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
-          }
-        }
-
-        stage('Build documentation') {
-          options { timeout(time: 5, unit: 'MINUTES') }
-          steps {
-            // -W causes warnings to become errors.
-            // --keep-going ensures we get all warnings instead of just the first.
-            sh 'make -C doc clean html latexpdf SPHINXOPTS="-W --keep-going"'
-            publishHTML(target: [reportName: 'Module documentation', reportDir: 'doc/_build/html', reportFiles: 'index.html'])
-            publishHTML(target: [reportName: 'Module documentation (PDF)', reportDir: 'doc/_build/latex', reportFiles: 'katgpucbf.pdf'])
+            junit 'reports/result.xml'
+            cobertura coberturaReportFile: 'coverage.xml'
           }
         }
       }
     }
 
-    stage('Publish test results') {
-      steps {
-        junit 'reports/result.xml'
-        cobertura coberturaReportFile: 'coverage.xml'
-      }
-    }
-
+    // This stage runs directly on the host
     stage('Build and push Docker image') {
       when {
         not { changeRequest() }
@@ -208,5 +204,4 @@ pipeline {
       cleanWs()
     }
   }
-
 }
