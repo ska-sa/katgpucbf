@@ -12,7 +12,7 @@ aiohappyeyeballs==2.3.5
     # via
     #   -c requirements.txt
     #   aiohttp
-aiohttp==3.10.3
+aiohttp==3.11.8
     # via
     #   -c requirements.txt
     #   aiomonitor
@@ -253,6 +253,11 @@ prompt-toolkit==3.0.43
     #   -c requirements.txt
     #   aiomonitor
     #   ipython
+propcache==0.2.0
+    # via
+    #   -c requirements.txt
+    #   aiohttp
+    #   yarl
 ptyprocess==0.7.0
     # via pexpect
 pure-eval==0.2.2
@@ -426,7 +431,7 @@ xarray==2023.12.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)
-yarl==1.9.4
+yarl==1.18.0
     # via
     #   -c requirements.txt
     #   aiohttp

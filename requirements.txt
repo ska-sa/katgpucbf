@@ -8,7 +8,7 @@ aioconsole==0.7.0
     # via aiomonitor
 aiohappyeyeballs==2.3.5
     # via aiohttp
-aiohttp==3.10.3
+aiohttp==3.11.8
     # via
     #   aiomonitor
     #   prometheus-async
@@ -120,6 +120,10 @@ prometheus-client==0.19.0
     #   prometheus-async
 prompt-toolkit==3.0.43
     # via aiomonitor
+propcache==0.2.0
+    # via
+    #   aiohttp
+    #   yarl
 psutil==5.9.6
     # via -r requirements.in
 pycparser==2.22
@@ -175,7 +179,7 @@ wrapt==1.16.0
     # via prometheus-async
 xarray==2023.12.0
     # via katgpucbf (setup.cfg)
-yarl==1.9.4
+yarl==1.18.0
     # via aiohttp
 zipp==3.19.2
     # via importlib-metadata

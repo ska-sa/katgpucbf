@@ -14,7 +14,7 @@ aiohappyeyeballs==2.3.5
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiohttp
-aiohttp==3.10.3
+aiohttp==3.11.8
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -267,6 +267,12 @@ prompt-toolkit==3.0.43
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
+propcache==0.2.0
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   -c qualification/../requirements.txt
+    #   aiohttp
+    #   yarl
 pygelf==0.4.2
     # via
     #   -c qualification/../requirements-dev.txt
@@ -398,7 +404,7 @@ xarray==2023.12.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
-yarl==1.9.4
+yarl==1.18.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
