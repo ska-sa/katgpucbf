@@ -1602,11 +1602,9 @@ class TestEngine:
         capture_stop_accum_index = 3
         assert capture_stop_accum_index < n_total_accumulations
         stream_ids_to_stop = sorted(rng.choice(len(corrprod_outputs), n_x_streams_to_stop, replace=False))
-        stopped_corrprods: list[XOutput] = []
         for stream_id in stream_ids_to_stop:
-            stopped_corrprods.append(corrprod_outputs[stream_id])
+            stopped_corrprod = corrprod_outputs[stream_id]
             corrprod_capture_stop_accum_indices[stream_id] = capture_stop_accum_index
-        for stopped_corrprod in stopped_corrprods:
             capture_stop_corrprod_request = ("capture-stop", stopped_corrprod.name)
             stopped_xpipeline = xbengine._request_pipeline(stopped_corrprod.name)[0]
             # NOTE: We patch the instance and not the class in this case as we only
@@ -1628,12 +1626,10 @@ class TestEngine:
         capture_stop_chunk_index = 10
         assert capture_stop_chunk_index < n_batches // HEAPS_PER_FENGINE_PER_CHUNK
         stream_ids_to_stop = sorted(rng.choice(len(beam_outputs), n_b_streams_to_stop, replace=False))
-        stopped_beams: list[BOutput] = []
-        for stream_id in stream_ids_to_stop:
-            stopped_beams.append(beam_outputs[stream_id])
-            beam_capture_stop_heap_indices[stream_id] = capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
         capture_stop_beams = []
-        for stopped_beam in stopped_beams:
+        for stream_id in stream_ids_to_stop:
+            stopped_beam = beam_outputs[stream_id]
+            beam_capture_stop_heap_indices[stream_id] = capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
             capture_stop_beams.append(("capture-stop", stopped_beam.name))
         # NOTE: `get_free_chunk` is given `capture_stop_index` + 1 because
         # `patch_method` counts from 1 instead of 0.
