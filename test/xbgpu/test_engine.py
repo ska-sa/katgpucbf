@@ -1205,7 +1205,7 @@ class TestEngine:
             monkeypatch,
             BPipeline,
             "_get_in_item",
-            count=beam_params_change_index,
+            count=beam_params_change_index - 1,
             client=client,
             requests=chain.from_iterable(katcp_requests[-1]),
         )
@@ -1391,7 +1391,7 @@ class TestEngine:
         method_name
             The method intended to be patched.
         count
-            Counting from 1, the index of the call to `method_name` to trigger
+            Counting from 0, the index of the call to `method_name` to trigger
             `requests`. `requests` are made prior to the n-th call to
             `method_name`.
         requests
@@ -1412,11 +1412,11 @@ class TestEngine:
 
         async def call_method_and_make_requests(*args, **kwargs):
             nonlocal counter
-            counter += 1
             if counter == count:
                 for request in requests:
                     await client.request(*request)
                 timestamp.append(await client.sensor_value("steady-state-timestamp", int))
+            counter += 1
             return await orig_method(*args, **kwargs)
 
         monkeypatch.setattr(obj, method_name, call_method_and_make_requests)
@@ -1459,7 +1459,7 @@ class TestEngine:
             monkeypatch,
             obj=BPipeline,
             method_name="_get_in_item",
-            count=4,
+            count=3,
             client=client,
             requests=[request],
         )
@@ -1613,8 +1613,7 @@ class TestEngine:
                 monkeypatch,
                 stopped_xpipeline.send_stream,
                 "get_free_heap",
-                # TODO: NGC-1568 to remove the `+ 1` appended here
-                capture_stop_accum_index + 1,
+                capture_stop_accum_index,
                 client,
                 [capture_stop_corrprod_request],
             )
@@ -1631,13 +1630,11 @@ class TestEngine:
             stopped_beam = beam_outputs[stream_id]
             beam_capture_stop_heap_indices[stream_id] = capture_stop_chunk_index * HEAPS_PER_FENGINE_PER_CHUNK
             capture_stop_beams.append(("capture-stop", stopped_beam.name))
-        # NOTE: `get_free_chunk` is given `capture_stop_index` + 1 because
-        # `patch_method` counts from 1 instead of 0.
         self._patch_method(
             monkeypatch,
             bsend.BSend,
             "get_free_chunk",
-            capture_stop_chunk_index + 1,
+            capture_stop_chunk_index,
             client,
             capture_stop_beams,
         )
