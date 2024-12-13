@@ -1165,10 +1165,10 @@ class TestEngine:
         async def fill_in(self) -> InQueueItem | None:
             if self._in_item is None and self.output.name == output.name:
                 nonlocal counter
-                counter += 1
-                if counter == 12:
+                if counter == 11:
                     await engine_client.request(*request)
                     timestamp.append(await engine_client.sensor_value("steady-state-timestamp", int))
+                counter += 1
             return await orig_fill_in(self)
 
         orig_fill_in = Pipeline._fill_in
