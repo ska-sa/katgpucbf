@@ -104,11 +104,11 @@ async def async_main(args) -> int:
     try:
         target = subordinates[args.target]
     except KeyError:
-        print(f"{args.target} is not among the subordinates currently running. Options are: {subordinates.keys()}")
+        print(f"{args.target} is not among the subordinates currently running. Options are: {subordinates.keys()}", file=sys.stderr)
         return 1
 
     # connect to the corr2_servlet itself to see the sync time, n_chans and bandwidth
-    corr2_client = await aiokatcp.Client.connect(args.cmc_host, control_port)
+    corr2_client = await aiokatcp.Client.connect(args.cmc_host, target.control_port)
     sync_time = await get_sensor_value(corr2_client, "sync-time", float)
     channels = await get_sensor_value(corr2_client, "antenna-channelised-voltage-n-chans", int)
     bandwidth = await get_sensor_value(corr2_client, "antenna-channelised-voltage-bandwidth", float)
