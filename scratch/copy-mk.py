@@ -24,12 +24,14 @@ instead of a simulated one, it gets the parameters from a live MK correlator.
 
 import argparse
 import asyncio
-import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from os import execv
 
 import aiokatcp
+
+from katgpucbf.meerkat import BANDS
 
 
 @dataclass
@@ -101,16 +103,19 @@ async def async_main(args) -> int:
     corr2_client = await aiokatcp.Client.connect(args.cmc_host, target.control_port)
     sync_time = await corr2_client.sensor_value("sync-time", float)
     channels = await corr2_client.sensor_value("antenna-channelised-voltage-n-chans", int)
-    bandwidth = await corr2_client.sensor_value("antenna-channelised-voltage-bandwidth", float)
-    # TODO: this could probably be better, and doesn't support S-band yet.
-    match bandwidth:
-        case 544000000.0:
-            band = "u"
-        case 856000000.0:
-            band = "l"
-        case _:
-            print(f"Unable to determine which band we are in. Bandwidth reported as {bandwidth}", file=sys.stderr)
-            return 1
+    sample_rate = await corr2_client.sensor_value("antenna-channelised-voltage-bandwidth", float) * 2
+
+    # This won't distinguish between the different kinds of S-band. It'll be wrong. I'm not quite
+    # sure at this point how to match up the centre_frequency values in katgpucbf.meerkat.BANDS with
+    # what MK actually reports, even in the L and UHF cases, so for the purposes of getting
+    # something producing a result, I am leaving it as-is for the time being.
+    band = next((k for k, v in BANDS.items() if v.adc_sample_rate == sample_rate), None)
+    if not band:
+        print(
+            f"Unable to determine which band. Sample rate reported as {sample_rate}",
+            file=sys.stderr,
+        )
+        return 1
 
     out_kwargs = {
         "name": target.name.replace(".", "_"),
@@ -122,9 +127,7 @@ async def async_main(args) -> int:
     }
 
     out_cmd = [
-        "python",
-        "sim_correlator.py",
-        "cbf-mc.cbf.mkat.karoo.kat.ac.za",
+        "./sim_correlator.py",
     ]
 
     for k, v in out_kwargs.items():
@@ -137,10 +140,10 @@ async def async_main(args) -> int:
         for override in args.image_override:
             out_cmd.append(f"--image-override={override}")
 
-    output = subprocess.run(out_cmd, capture_output=True)
-    print(output)
+    out_cmd.append("cbf-mc.cbf.mkat.karoo.kat.ac.za")
 
-    return output.returncode
+    print(f"Executing: {out_cmd}", "\n")
+    execv(out_cmd[0], out_cmd[1:])
 
 
 def main(argv: Sequence[str] | None = None) -> int:
