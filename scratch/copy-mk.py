@@ -26,7 +26,7 @@ import argparse
 import asyncio
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import aiokatcp
@@ -56,16 +56,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
     args = parser.parse_args(argv)
     return args
-
-
-async def get_sensor_value(client: aiokatcp.Client, sensor_name: str, sensor_type: Callable):
-    """Retrieve a sensor value from a katcp client."""
-    try:
-        _, informs = await client.request("sensor-value", sensor_name)
-    except (aiokatcp.FailReply, ConnectionError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
-    return sensor_type(informs[0].arguments[4].decode())
 
 
 async def async_main(args) -> int:
@@ -109,9 +99,9 @@ async def async_main(args) -> int:
 
     # connect to the corr2_servlet itself to see the sync time, n_chans and bandwidth
     corr2_client = await aiokatcp.Client.connect(args.cmc_host, target.control_port)
-    sync_time = await get_sensor_value(corr2_client, "sync-time", float)
-    channels = await get_sensor_value(corr2_client, "antenna-channelised-voltage-n-chans", int)
-    bandwidth = await get_sensor_value(corr2_client, "antenna-channelised-voltage-bandwidth", float)
+    sync_time = await corr2_client.sensor_value("sync-time", float)
+    channels = await corr2_client.sensor_value("antenna-channelised-voltage-n-chans", int)
+    bandwidth = await corr2_client.sensor_value("antenna-channelised-voltage-bandwidth", float)
     # TODO: this could probably be better, and doesn't support S-band yet.
     match bandwidth:
         case 544000000.0:
