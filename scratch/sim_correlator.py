@@ -229,7 +229,18 @@ def generate_config(args: argparse.Namespace) -> dict:
             config["config"]["develop"] = True
         else:
             # User passed a comma-separated list of options
-            config["config"]["develop"] = {key: True for key in args.develop.split(",")}
+            def process_develop_options() -> dict:
+                out_dict = {}
+                for item in args.develop.split(","):
+                    # data_timeout option isn't boolean, unlike the rest
+                    if "data_timeout" in item:
+                        k, v = item.split("=")
+                        out_dict[k] = v
+                    else:
+                        out_dict[item] = True
+                return out_dict
+
+            config["config"]["develop"] = process_develop_options()
 
     dig_names = generate_digitisers(args, config)
     if args.last_stage == "d":
