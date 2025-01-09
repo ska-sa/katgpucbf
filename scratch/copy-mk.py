@@ -46,7 +46,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("cmc_host", help="Hostname / IP address of the CMC.")
     parser.add_argument("--cmc-port", type=int, default=7147, help="KATCP port of the CMC. [%(default)s]")
-    parser.add_argument("--target", type=str, required=True, help="Which subordinate to copy.")
+    parser.add_argument("--subordinate", type=str, required=True, help="Which subordinate to copy.")
     parser.add_argument(
         "--develop",
         nargs="?",
@@ -102,9 +102,9 @@ async def async_main(args) -> int:
         subordinates[name] = Subordinate(name, control_port, monitor_port, digitiser_address, n_antennas)
 
     try:
-        target = subordinates[args.target]
+        target = subordinates[args.subordinate]
     except KeyError:
-        print(f"{args.target} is not among the subordinates currently running. Options are: {subordinates.keys()}", file=sys.stderr)
+        print(f"{args.subordinate} is not among the subordinates currently running. Options are: {subordinates.keys()}")
         return 1
 
     # connect to the corr2_servlet itself to see the sync time, n_chans and bandwidth
