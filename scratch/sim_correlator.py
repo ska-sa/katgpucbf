@@ -235,7 +235,7 @@ def generate_config(args: argparse.Namespace) -> dict:
                     # data_timeout option isn't boolean, unlike the rest
                     if "data_timeout" in item:
                         k, v = item.split("=")
-                        out_dict[k] = v
+                        out_dict[k] = float(v)
                     else:
                         out_dict[item] = True
                 return out_dict
