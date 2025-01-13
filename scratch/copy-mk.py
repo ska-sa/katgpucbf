@@ -24,10 +24,10 @@ instead of a simulated one, it gets the parameters from a live MK correlator.
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from os import execv
 
 import aiokatcp
 
@@ -56,6 +56,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Pass development options in the config. Use comma separation, or omit the arg to enable all.",
     )
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
+    parser.add_argument("--controller", help="Hostname of the SDP master controller")
     args = parser.parse_args(argv)
     return args
 
@@ -126,9 +127,7 @@ async def async_main(args) -> int:
         "band": band,
     }
 
-    out_cmd = [
-        "./sim_correlator.py",
-    ]
+    out_cmd = [str(os.path.join(os.path.dirname(__file__), "sim_correlator.py"))]
 
     for k, v in out_kwargs.items():
         out_cmd.append(f"--{k}={v}")
@@ -140,10 +139,10 @@ async def async_main(args) -> int:
         for override in args.image_override:
             out_cmd.append(f"--image-override={override}")
 
-    out_cmd.append("cbf-mc.cbf.mkat.karoo.kat.ac.za")
+    out_cmd.append(args.controller)
 
-    print(f"Executing: {out_cmd}\n")
-    execv(out_cmd[0], out_cmd[1:])
+    print(f"Executing: {out_cmd}", "\n")
+    os.execv(out_cmd[0], out_cmd[1:])
 
 
 def main(argv: Sequence[str] | None = None) -> int:
