@@ -233,7 +233,7 @@ def generate_config(args: argparse.Namespace) -> dict:
                 out_dict = {}
                 for item in args.develop.split(","):
                     # data_timeout option isn't boolean, unlike the rest
-                    if "data_timeout" in item:
+                    if item.startswith("data_timeout="):
                         k, v = item.split("=")
                         out_dict[k] = float(v)
                     else:

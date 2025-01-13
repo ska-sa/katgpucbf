@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -85,7 +85,7 @@ async def async_main(args) -> int:
         n_antennas = len(mcast_groups) // 2
         for n, grp in enumerate(mcast_groups[1:]):
             if grp == mcast_groups[0]:
-                # MK is not using a full power-of-2 size array, there are dummies from here onwards.
+                # MK is not using a full power-of-2 size array. There are dummies from here onwards.
                 print("Dummy antenna found starting at ", (n + 1) // 2)
                 n_antennas = (n + 1) // 2
                 break
@@ -142,7 +142,7 @@ async def async_main(args) -> int:
 
     out_cmd.append("cbf-mc.cbf.mkat.karoo.kat.ac.za")
 
-    print(f"Executing: {out_cmd}", "\n")
+    print(f"Executing: {out_cmd}\n")
     execv(out_cmd[0], out_cmd[1:])
 
 
