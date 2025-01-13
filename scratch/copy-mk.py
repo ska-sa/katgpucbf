@@ -103,7 +103,7 @@ async def async_main(args) -> int:
     corr2_client = await aiokatcp.Client.connect(args.cmc_host, target.control_port)
     sync_time = await corr2_client.sensor_value("sync-time", float)
     channels = await corr2_client.sensor_value("antenna-channelised-voltage-n-chans", int)
-    sample_rate = await corr2_client.sensor_value("antenna-channelised-voltage-bandwidth", float) * 2
+    sample_rate = await corr2_client.sensor_value("adc-sample-rate", float)
 
     # This won't distinguish between the different kinds of S-band. It'll be wrong. I'm not quite
     # sure at this point how to match up the centre_frequency values in katgpucbf.meerkat.BANDS with
