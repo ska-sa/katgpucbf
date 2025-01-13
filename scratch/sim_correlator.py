@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -117,7 +117,7 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
             if args.digitiser_address is None:
                 config["outputs"][name] = {
                     "type": "sim.dig.baseband_voltage",
-                    "band": args.band,
+                    "band": args.band[:1],
                     "adc_sample_rate": args.adc_sample_rate,
                     "centre_frequency": args.centre_frequency,
                     "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
@@ -128,7 +128,7 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
                 config["inputs"][name] = {
                     "type": "dig.baseband_voltage",
                     "sync_time": args.sync_time,
-                    "band": args.band,
+                    "band": args.band[:1],
                     "adc_sample_rate": args.adc_sample_rate,
                     "centre_frequency": args.centre_frequency,
                     "antenna": f"m{number}",
