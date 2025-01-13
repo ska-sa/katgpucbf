@@ -207,6 +207,19 @@ def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
         }
 
 
+def parse_develop_options(develop_argument: str) -> dict:
+    """Separate complex develop options into a dictionary."""
+    out_dict = {}
+    for item in develop_argument.split(","):
+        # data_timeout option isn't boolean, unlike the rest
+        if "data_timeout" in item:
+            k, v = item.split("=")
+            out_dict[k] = float(v)
+        else:
+            out_dict[item] = True
+    return out_dict
+
+
 def generate_config(args: argparse.Namespace) -> dict:
     """Produce the configuration dict from the parsed command-line arguments."""
     config: dict = {
@@ -225,22 +238,11 @@ def generate_config(args: argparse.Namespace) -> dict:
         config["config"]["image_overrides"] = image_overrides
     if args.develop is not None:
         if args.develop is True or args.develop == "":
-            # Use passed --develop with no argument or --develop= with empty argument
+            # User passed --develop with no argument or --develop= with empty argument
             config["config"]["develop"] = True
         else:
             # User passed a comma-separated list of options
-            def process_develop_options() -> dict:
-                out_dict = {}
-                for item in args.develop.split(","):
-                    # data_timeout option isn't boolean, unlike the rest
-                    if item.startswith("data_timeout="):
-                        k, v = item.split("=")
-                        out_dict[k] = float(v)
-                    else:
-                        out_dict[item] = True
-                return out_dict
-
-            config["config"]["develop"] = process_develop_options()
+            config["config"]["develop"] = parse_develop_options(args.develop)
 
     dig_names = generate_digitisers(args, config)
     if args.last_stage == "d":
