@@ -56,7 +56,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Pass development options in the config. Use comma separation, or omit the arg to enable all.",
     )
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
-    parser.add_argument("--controller", help="Hostname of the SDP master controller")
+    parser.add_argument(
+        "--controller", default="cbf-mc.cbf.mkat.karoo.kat.ac.za", help="Hostname of the SDP master controller"
+    )
     args = parser.parse_args(argv)
     return args
 
