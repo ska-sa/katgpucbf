@@ -127,7 +127,7 @@ async def async_main(args) -> int:
         "band": band,
     }
 
-    out_cmd = [str(os.path.join(os.path.dirname(__file__), "sim_correlator.py"))]
+    out_cmd = [os.path.join(os.path.dirname(__file__), "sim_correlator.py")]
 
     for k, v in out_kwargs.items():
         out_cmd.append(f"--{k}={v}")
