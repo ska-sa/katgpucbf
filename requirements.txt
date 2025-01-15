@@ -4,57 +4,53 @@
 #
 #    pip-compile --extra=gpu --output-file=requirements.txt --strip-extras requirements.in setup.cfg
 #
-aioconsole==0.7.0
+aioconsole==0.8.1
     # via aiomonitor
-aiohappyeyeballs==2.3.5
+aiohappyeyeballs==2.4.4
     # via aiohttp
-aiohttp==3.11.8
+aiohttp==3.11.11
     # via
     #   aiomonitor
     #   prometheus-async
 aiokatcp==2.0.1
     # via katgpucbf (setup.cfg)
-aiomonitor==0.7.0
+aiomonitor==0.7.1
     # via katsdpservices
-aiosignal==1.3.1
+aiosignal==1.3.2
     # via aiohttp
 appdirs==1.4.4
-    # via
-    #   katsdpsigproc
-    #   pycuda
-async-timeout==4.0.3
+    # via katsdpsigproc
+async-timeout==5.0.1
     # via aiokatcp
-attrs==23.1.0
+attrs==24.3.0
     # via
     #   aiohttp
     #   aiomonitor
-cffi==1.17.0
+cffi==1.17.1
     # via vkgdr
-click==8.1.7
+click==8.1.8
     # via
     #   aiomonitor
     #   dask
-cloudpickle==3.0.0
+cloudpickle==3.1.1
     # via dask
-dask==2023.12.0
+dask==2024.12.1
     # via katgpucbf (setup.cfg)
 decorator==5.1.1
     # via
     #   aiokatcp
     #   katsdpsigproc
-frozenlist==1.4.0
+frozenlist==1.5.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2023.12.1
+fsspec==2024.12.0
     # via dask
-hiredis==2.2.3
+hiredis==3.1.0
     # via katsdptelstate
-idna==3.7
+idna==3.10
     # via yarl
-importlib-metadata==7.0.0
-    # via dask
-janus==1.0.0
+janus==2.0.0
     # via aiomonitor
 jinja2==3.1.5
     # via aiomonitor
@@ -64,33 +60,33 @@ katsdpservices==1.4
     # via katgpucbf (setup.cfg)
 katsdpsigproc==1.8.1
     # via katgpucbf (setup.cfg)
-katsdptelstate==0.13
+katsdptelstate==0.14
     # via katgpucbf (setup.cfg)
-llvmlite==0.42.0
+llvmlite==0.43.0
     # via numba
 locket==1.0.0
     # via partd
-mako==1.3.0
+mako==1.3.8
     # via
     #   katsdpsigproc
     #   pycuda
-markupsafe==2.1.3
+markupsafe==3.0.2
     # via
     #   jinja2
     #   mako
-msgpack==1.0.7
+msgpack==1.1.0
     # via katsdptelstate
-multidict==6.0.4
+multidict==6.1.0
     # via
     #   aiohttp
     #   yarl
 netifaces==0.11.0
     # via katsdpservices
-numba==0.59.1
+numba==0.60.0
     # via
     #   katgpucbf (setup.cfg)
     #   katsdpsigproc
-numpy==1.26.2
+numpy==2.0.2
     # via
     #   katgpucbf (setup.cfg)
     #   katsdpsigproc
@@ -100,86 +96,87 @@ numpy==1.26.2
     #   scipy
     #   spead2
     #   xarray
-packaging==23.2
+packaging==24.2
     # via
     #   dask
     #   xarray
-pandas==2.1.4
+pandas==2.2.3
     # via
     #   katsdpsigproc
     #   xarray
-partd==1.4.1
+partd==1.4.2
     # via dask
-platformdirs==4.2.2
-    # via pytools
+platformdirs==4.3.6
+    # via
+    #   pycuda
+    #   pytools
 prometheus-async==22.2.0
     # via katgpucbf (setup.cfg)
-prometheus-client==0.19.0
+prometheus-client==0.21.1
     # via
     #   katgpucbf (setup.cfg)
     #   prometheus-async
-prompt-toolkit==3.0.43
+prompt-toolkit==3.0.48
     # via aiomonitor
-propcache==0.2.0
+propcache==0.2.1
     # via
     #   aiohttp
     #   yarl
-psutil==5.9.6
+psutil==6.1.1
     # via -r requirements.in
 pycparser==2.22
     # via cffi
-pycuda==2023.1
+pycuda==2024.1.2
     # via katsdpsigproc
 pygelf==0.4.2
     # via katsdpservices
-pyparsing==3.0.9
+pyparsing==3.2.1
     # via katgpucbf (setup.cfg)
 python-dateutil==2.9.0.post0
     # via pandas
-pytools==2024.1.13
+pytools==2025.1.1
     # via pycuda
-pytz==2023.3.post1
+pytz==2024.2
     # via pandas
-pyyaml==6.0.1
+pyyaml==6.0.2
     # via dask
-redis==5.0.1
+redis==5.2.1
     # via katsdptelstate
-scipy==1.11.4
+scipy==1.15.1
     # via
     #   katgpucbf (setup.cfg)
     #   katsdpsigproc
-six==1.16.0
+six==1.17.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==4.3.1
+spead2==4.4.0
     # via katgpucbf (setup.cfg)
+telnetlib3==2.0.4
+    # via aiomonitor
 terminaltables==3.1.10
     # via aiomonitor
-toolz==0.12.0
+toolz==1.0.0
     # via
     #   dask
     #   partd
 trafaret==2.1.1
     # via aiomonitor
-typing-extensions==4.12.0
+typing-extensions==4.12.2
     # via
     #   aiokatcp
     #   aiomonitor
-    #   janus
     #   katsdpsigproc
     #   pytools
-tzdata==2023.3
+tzdata==2024.2
     # via pandas
 vkgdr==0.1
     # via katgpucbf (setup.cfg)
 wcwidth==0.2.13
     # via prompt-toolkit
-wrapt==1.16.0
+wrapt==1.17.2
     # via prometheus-async
-xarray==2023.12.0
+xarray==2025.1.1
     # via katgpucbf (setup.cfg)
-yarl==1.18.0
+yarl==1.18.3
     # via aiohttp
-zipp==3.19.2
-    # via importlib-metadata
