@@ -93,7 +93,8 @@ pipeline {
                   sh './gpu_copy.py htod --repeat 10'
                   sh './gpu_copy.py dtoh --repeat 10'
                   sh './gpu_copy.py dtod --repeat 10'
-                  sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
+                  // Fails on newer pycuda: https://github.com/inducer/pycuda/issues/459
+                  // sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
                 }
               }
             }
