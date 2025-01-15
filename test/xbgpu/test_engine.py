@@ -597,7 +597,7 @@ def verify_beam_sensors(
             aiokatcp.Reading(
                 beam_request_timestamps[request_id],
                 aiokatcp.Sensor.Status.NOMINAL,
-                str(list(weights[request_id, boutput_id])),
+                str(weights[request_id, boutput_id].tolist()),
             )
             for request_id in range(N_BEAM_REQUESTS)
         ]
