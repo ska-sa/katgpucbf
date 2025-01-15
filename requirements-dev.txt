@@ -69,9 +69,7 @@ cloudpickle==3.1.1
     #   -c requirements.txt
     #   dask
 coverage==7.6.10
-    # via
-    #   coverage
-    #   pytest-cov
+    # via pytest-cov
 dask==2024.12.1
     # via
     #   -c requirements.txt
