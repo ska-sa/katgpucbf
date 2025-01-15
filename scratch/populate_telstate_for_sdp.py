@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,12 +17,12 @@
 ################################################################################
 
 import argparse
+import ast
 import asyncio
 from collections.abc import Callable
 from typing import Any
 
 import aiokatcp
-import numpy as np
 from katsdptelstate import TelescopeState
 from katsdptelstate.endpoint import endpoint_parser
 
@@ -80,7 +80,7 @@ async def main():
                 await converter(int, "n-chans")
                 await converter(int, "n-chans-per-substream")
                 await converter(int, "n-accs")
-                bls_ordering = await converter(str, "bls-ordering", convert=np.safe_eval)
+                bls_ordering = await converter(str, "bls-ordering", convert=ast.literal_eval)
                 # No sensor for input-labels, so infer from bls_ordering
                 input_labels = []
                 for bls in bls_ordering:

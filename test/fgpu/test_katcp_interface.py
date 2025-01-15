@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,11 +17,11 @@
 """Collection of tests for the KATCP interface of katgpucbf.fgpu."""
 
 import re
+from ast import literal_eval
 
 import aiokatcp
 import numpy as np
 import pytest
-from numpy import safe_eval
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
@@ -91,7 +91,7 @@ class TestKatcpRequests:
 
         sensor_value = await engine_client.sensor_value(f"wideband.input{pol}.eq", str)
         assert_valid_complex_list(sensor_value)
-        assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
+        assert literal_eval(sensor_value) == pytest.approx([0.2 - 3j])
         np.testing.assert_equal(engine_server._pipelines[0].gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
         # Other pol must not have been affected
         np.testing.assert_equal(engine_server._pipelines[0].gains[:, 1 - pol], np.full(CHANNELS, GAIN, np.complex64))
@@ -117,7 +117,7 @@ class TestKatcpRequests:
 
         sensor_value = await engine_client.sensor_value("wideband.input0.eq", str)
         assert_valid_complex_list(sensor_value)
-        np.testing.assert_equal(np.array(safe_eval(sensor_value)), gains)
+        np.testing.assert_equal(np.array(literal_eval(sensor_value)), gains)
 
     async def test_gain_not_complex(self, engine_client: aiokatcp.Client) -> None:
         """Test that an error is raised if a value passed to ``?gain`` is not a finite complex number."""
@@ -151,7 +151,7 @@ class TestKatcpRequests:
         for pol in range(N_POLS):
             sensor_value = await engine_client.sensor_value(f"wideband.input{pol}.eq", str)
             assert_valid_complex_list(sensor_value)
-            assert safe_eval(sensor_value) == pytest.approx([0.2 - 3j])
+            assert literal_eval(sensor_value) == pytest.approx([0.2 - 3j])
             np.testing.assert_equal(
                 engine_server._pipelines[0].gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64)
             )
@@ -166,7 +166,7 @@ class TestKatcpRequests:
             np.testing.assert_equal(engine_server._pipelines[0].gains[:, pol], gains)
             sensor_value = await engine_client.sensor_value(f"wideband.input{pol}.eq", str)
             assert_valid_complex_list(sensor_value)
-            np.testing.assert_equal(np.array(safe_eval(sensor_value)), gains)
+            np.testing.assert_equal(np.array(literal_eval(sensor_value)), gains)
 
     async def test_gain_all_set_default(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
         """Test ``?gain-all default``."""
