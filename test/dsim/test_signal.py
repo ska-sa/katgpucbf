@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -248,7 +248,8 @@ class TestParseSignals:
 
     def test_bad_real(self) -> None:
         """Test error when expecting a number but something else is found."""
-        with pytest.raises(pp.ParseSyntaxException, match="Expected number"):
+        # Regex gives two alternatives, to handle different versions of pyparsing.
+        with pytest.raises(pp.ParseSyntaxException, match="Expected (?:real )?number"):
             signal.parse_signals("cw(1, foo);")
 
     @pytest.mark.parametrize(
