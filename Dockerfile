@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1
 
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -71,7 +71,7 @@ RUN python3 -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==24.2 setuptools==72.1.0 wheel==0.44.0
+RUN pip install pip==24.3.1 setuptools==75.8.0 wheel==0.45.1
 
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
