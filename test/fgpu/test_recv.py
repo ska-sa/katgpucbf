@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -153,7 +153,7 @@ def gen_heaps(
             row = data_arr[pol, i]
             if present is None or present[pol, i]:
                 if saturated is not None and saturated[pol, i] > 0:
-                    status = (saturated[pol, i] << DIGITISER_STATUS_SATURATION_COUNT_SHIFT) | (
+                    status = (int(saturated[pol, i]) << DIGITISER_STATUS_SATURATION_COUNT_SHIFT) | (
                         1 << DIGITISER_STATUS_SATURATION_FLAG_BIT
                     )
                 else:
