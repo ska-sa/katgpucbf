@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -597,7 +597,7 @@ def verify_beam_sensors(
             aiokatcp.Reading(
                 beam_request_timestamps[request_id],
                 aiokatcp.Sensor.Status.NOMINAL,
-                str(list(weights[request_id, boutput_id])),
+                str(weights[request_id, boutput_id].tolist()),
             )
             for request_id in range(N_BEAM_REQUESTS)
         ]

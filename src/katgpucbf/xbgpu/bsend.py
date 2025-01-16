@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023-2024, National Research Foundation (SARAO)
+# Copyright (c) 2023-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -332,7 +332,9 @@ class Chunk:
             functools.partial(
                 self._inc_counters,
                 len(send_futures),  # Increment counters for as many calls to async_send_heaps
-                self.data.shape[2:],  # Get rid of 'batch' and 'beam' dimensions
+                # Get rid of 'batch' and 'beam' dimensions (ignore is because
+                # mypy doesn't know the number of dimensions)
+                self.data.shape[2:],  # type: ignore[arg-type]
                 self.data.dtype,
                 send_enabled,
                 send_stream.output_names,
