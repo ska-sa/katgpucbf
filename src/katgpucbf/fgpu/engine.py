@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -63,7 +63,7 @@ from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, DIG_RMS_DBFS_WINDOW, INPUT_CH
 from .accum import Accum
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
-from .output import NarrowbandOutput, Output, WidebandOutput
+from .output import NarrowbandOutput, Output, WidebandOutput, WindowFunction
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def _sample_models(
     return tuple(np.stack(group) for group in zip(*parts))  # type: ignore
 
 
-def generate_pfb_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
+def generate_pfb_weights(step: int, taps: int, w_cutoff: float, window_function: WindowFunction) -> np.ndarray:
     """Generate Hann-window weights for the F-engine's PFB-FIR.
 
     The resulting weights are normalised such that the sum of
@@ -92,6 +92,8 @@ def generate_pfb_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
         Number of taps in the PFB-FIR.
     w_cutoff
         Scaling factor for the width of the channel response.
+    window_function
+        Window function to use.
 
     Returns
     -------
@@ -101,9 +103,15 @@ def generate_pfb_weights(step: int, taps: int, w_cutoff: float) -> np.ndarray:
     """
     window_size = step * taps
     idx = np.arange(window_size)
-    hann = np.square(np.sin(np.pi * idx / (window_size - 1)))
+    match window_function:
+        case WindowFunction.HANN:
+            window = np.square(np.sin(np.pi * idx / (window_size - 1)))
+        case WindowFunction.RECT:
+            window = np.ones(window_size)
+        case _:
+            raise ValueError(f"Invalid window function {window_function!r} (must be HANN or RECT)")
     sinc = np.sinc(w_cutoff * ((idx + 0.5) / step - taps / 2))
-    weights = hann * sinc
+    weights = window * sinc
     # Work around https://github.com/numpy/numpy/issues/21898
     weights /= np.sqrt(np.sum(np.square(weights)))  # type: ignore[misc]
     return weights.astype(np.float32)
@@ -523,7 +531,9 @@ class Pipeline:
         device_pfb_weights = self._compute.slots["weights"].allocate(accel.DeviceAllocator(context))
         device_pfb_weights.set(
             compute_queue,
-            generate_pfb_weights(output.spectra_samples // output.subsampling, output.taps, output.w_cutoff),
+            generate_pfb_weights(
+                output.spectra_samples // output.subsampling, output.taps, output.w_cutoff, output.window_function
+            ),
         )
 
         # Initialize sending

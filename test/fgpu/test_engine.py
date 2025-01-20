@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -211,7 +211,9 @@ class TestEngine:
         magnitude 1 when the eq gain is 1. The array is 1D, indexed by
         channel.
         """
-        pfb = generate_pfb_weights(output.spectra_samples // output.subsampling, output.taps, output.w_cutoff)
+        pfb = generate_pfb_weights(
+            output.spectra_samples // output.subsampling, output.taps, output.w_cutoff, output.window_function
+        )
         gain = np.repeat(np.sum(pfb), output.channels)
         if isinstance(output, NarrowbandOutput):
             ddc = generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass)

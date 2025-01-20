@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023-2024, National Research Foundation (SARAO)
+# Copyright (c) 2023-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,11 +18,20 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from katsdptelstate.endpoint import Endpoint
 
 from ..utils import DitherType
+
+
+class WindowFunction(Enum):
+    """Window function to use in :func:`.generate_pfb_weights`."""
+
+    HANN = 1
+    RECT = 2
+    DEFAULT = 1  # Alias used to determine default when none is specified
 
 
 @dataclass
@@ -34,6 +43,7 @@ class Output(ABC):
     jones_per_batch: int
     taps: int
     w_cutoff: float
+    window_function: WindowFunction
     dst: list[Endpoint]
     dither: DitherType
 
