@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -25,6 +25,7 @@ from katgpucbf import DEFAULT_JONES_PER_BATCH, DIG_SAMPLE_BITS
 from katgpucbf.fgpu.compute import ComputeTemplate, NarrowbandConfig
 from katgpucbf.fgpu.engine import generate_ddc_weights, generate_pfb_weights
 from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
+from katgpucbf.fgpu.output import WindowFunction
 from katgpucbf.utils import DitherType, parse_dither
 
 
@@ -102,7 +103,7 @@ def main():  # noqa: C901
         fn.ensure_all_bound()
 
         h_weights = fn.buffer("weights").empty_like()
-        h_weights[:] = generate_pfb_weights(2 * args.channels, args.taps, 1.0)
+        h_weights[:] = generate_pfb_weights(2 * args.channels, args.taps, 1.0, WindowFunction.DEFAULT)
         fn.buffer("weights").set(command_queue, h_weights)
 
         h_gains = fn.buffer("gains").empty_like()
