@@ -255,7 +255,7 @@ class Pipeline(Generic[_O, _T]):
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
     n_in_items = DEFAULT_N_IN_ITEMS
-    n_out_items = DEFAULT_N_OUT_ITEMS
+    n_out_items = DEFAULT_N_OUT_ITEMS + 1
 
     send_stream: Send
 
@@ -575,7 +575,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         """
         # TODO: Need to parametrise this somehow to run multiple sleep values
         # during qualification tests.
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
         self._out_queue.put_nowait(out_item)
 
     async def sender_loop(self) -> None:  # noqa: D102
