@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -39,7 +39,7 @@ class NarrowbandConfig:
     #: Factor by which bandwidth is reduced
     decimation: int
     #: Mixer frequency, in cycles per ADC sample
-    mix_frequency: float
+    mix_frequency: Fraction
     #: Downconversion filter weights (float)
     weights: np.ndarray
 
@@ -274,9 +274,10 @@ class Compute(accel.OperationSequence):
         # Compute the fractional part of first_sample * mix_frequency.
         # Using Fraction avoids the serious rounding errors that would
         # occur using floating point.
-        phase = Fraction(self.ddc.mix_frequency) * first_sample
+        assert isinstance(self.ddc.mix_frequency, Fraction)
+        phase = self.ddc.mix_frequency * first_sample
         phase -= round(phase)
-        self.ddc.mix_phase = float(phase)
+        self.ddc.mix_phase = phase
         self.ddc()
 
     def _run_frontend_common(
