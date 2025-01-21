@@ -97,7 +97,7 @@ Polyphase filter bank (PFB)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 A finite impulse response (FIR) filter is applied to the signal to condition
 the frequency-domain response. The filter is the product of a window function
-Hann window (to reduce spectral leakage) and a sinc (to broaden the peak to
+(to reduce spectral leakage) and a sinc (to broaden the peak to
 cover the frequency bin). Specifically, if there are :math:`n` output channels
 and :math:`t` taps in the polyphase filter bank, then the filter has length
 :math:`w = 2nt`, with coefficients
