@@ -182,6 +182,11 @@ class BOutQueueItem(QueueItem):
         Potentially create (yet another) base class for B- and XOutQueueItems.
     """
 
+    # NOTE: Temporary additions for debugging NGC-1542
+    timer_handle: asyncio.TimerHandle | None
+    put_task: asyncio.Future | None
+    close_pipeline: bool
+
     def __init__(
         self,
         out: accel.DeviceArray,
@@ -191,6 +196,9 @@ class BOutQueueItem(QueueItem):
         delays: MappedArray,
         timestamp: int = 0,
     ) -> None:
+        self.timer_handle = None
+        self.put_task = None
+        self.close_pipeline = False
         self.out = out
         self.saturated = saturated
         self.present = present
@@ -247,7 +255,7 @@ class Pipeline(Generic[_O, _T]):
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
     n_in_items = DEFAULT_N_IN_ITEMS
-    n_out_items = DEFAULT_N_OUT_ITEMS
+    n_out_items = DEFAULT_N_OUT_ITEMS + 2
 
     send_stream: Send
 
@@ -276,7 +284,8 @@ class Pipeline(Generic[_O, _T]):
         self._in_queue: asyncio.Queue[InQueueItem | None] = engine.monitor.make_queue(
             f"{name}.in_queue", self.n_in_items
         )
-        self._out_queue: asyncio.Queue[_T | None] = engine.monitor.make_queue(f"{name}.out_queue", self.n_out_items)
+        # NOTE: Temporarily removing `| None` from type-hint for NGC-1542
+        self._out_queue: asyncio.Queue[_T] = engine.monitor.make_queue(f"{name}.out_queue", self.n_out_items)
         self._out_free_queue: asyncio.Queue[_T] = engine.monitor.make_queue(f"{name}.out_free_queue", self.n_out_items)
 
     def add_in_item(self, item: InQueueItem) -> None:
@@ -421,6 +430,8 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
 
         self._populate_sensors()
 
+        self.chunk_counter = 0
+
     def _populate_sensors(self) -> None:
         sensors = self.engine.sensors
         for i, output in enumerate(self.outputs):
@@ -542,7 +553,8 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             out_item.present[:] = in_item.present
 
             out_item.add_marker(self._proc_command_queue)
-            self._out_queue.put_nowait(out_item)
+            # self._out_queue.put_nowait(out_item)
+            out_item.put_task = asyncio.create_task(self._sleep_out_item(out_item))
 
             # Finish with the in_item
             in_item.add_marker(self._proc_command_queue)
@@ -551,7 +563,20 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         # it will never exit. Upon receiving this NoneType, the sender_loop can
         # stop waiting and exit.
         logger.debug("gpu_proc_loop completed")
-        self._out_queue.put_nowait(None)
+        # self._out_queue.put_nowait(None)
+        last_out_item = await self._out_free_queue.get()
+        last_out_item.close_pipeline = True
+        last_out_item.put_task = asyncio.create_task(self._sleep_out_item(last_out_item))
+
+    async def _sleep_out_item(self, out_item: BOutQueueItem) -> None:
+        """Introduce artificial delays in processing output data.
+
+        See NGC-1542.
+        """
+        # TODO: Need to parametrise this somehow to run multiple sleep values
+        # during qualification tests.
+        await asyncio.sleep(0.01)
+        self._out_queue.put_nowait(out_item)
 
     async def sender_loop(self) -> None:  # noqa: D102
         # NOTE: This function passes the entire downloaded data to
@@ -559,7 +584,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         # output destination.
         while True:
             item = await self._out_queue.get()
-            if item is None:
+            if item is not None and item.close_pipeline:
                 break
             # The CPU doesn't need to wait, but the GPU does to ensure it
             # won't start the download before computation is done.
@@ -569,7 +594,6 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
 
             item.out.get_async(self._download_command_queue, chunk.data)
             item.saturated.get_async(self._download_command_queue, chunk.saturated)
-
             event = self._download_command_queue.enqueue_marker()
             await katsdpsigproc.resource.async_wait_for_events([event])
 
@@ -577,12 +601,12 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             chunk.timestamp = item.timestamp
             self.send_stream.send_chunk(chunk, self.engine.time_converter, self.engine.sensors)
             self._out_free_queue.put_nowait(item)
+            self.chunk_counter += 1
 
         await self.send_stream.send_stop_heap()
         logger.debug("sender_loop completed")
 
     def capture_enable(self, *, stream_id: int, enable: bool = True, timestamp: int = 0) -> None:  # noqa: D102
-        logger.info(f"Beam got capture-{enable} at chunk: {self.engine.chunk_counter}")
         self.send_stream.enable_beam(beam_id=stream_id, enable=enable, timestamp=timestamp)
 
     def _weights_updated(self) -> int:
@@ -899,7 +923,8 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         # it will never exit. Upon receiving this NoneType, the sender_loop can
         # stop waiting and exit.
         logger.debug("gpu_proc_loop completed")
-        self._out_queue.put_nowait(None)
+        # NOTE: Temporary ignore for NGC-1542
+        self._out_queue.put_nowait(None)  # type: ignore
 
     async def sender_loop(self) -> None:  # noqa: D102
         # NOTE: The transfer from the GPU to the heap buffer and the sending onto
@@ -1260,8 +1285,6 @@ class XBEngine(DeviceServer):
             chunk = recv.Chunk(data=buf, present=present, sink=self.receiver_stream)
             chunk.recycle()  # Make available to the stream
 
-        self.chunk_counter = 0
-
     def populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         # Dynamic sensors
@@ -1343,7 +1366,6 @@ class XBEngine(DeviceServer):
 
             # Give the received item to the pipelines' gpu_proc_loop.
             await self._add_in_item(item)
-            self.chunk_counter += 1
 
         # spead2 will (eventually) indicate that there are no chunks to async-for through
         logger.debug("_receiver_loop completed")
@@ -1431,7 +1453,6 @@ class XBEngine(DeviceServer):
             ``fringe-offset`` is the net phase adjustment at the centre
             frequency (of the whole stream, not of this engine).
         """
-        logger.info(f"Received beam delay request at: {self.chunk_counter}")
         pipeline, stream_id = self._request_bpipeline(stream_name)
         if len(delays) != self.n_ants:
             raise aiokatcp.FailReply(f"Incorrect number of delays (expected {self.n_ants}, received {len(delays)})")
