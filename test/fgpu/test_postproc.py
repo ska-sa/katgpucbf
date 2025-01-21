@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -51,10 +51,10 @@ def postproc_host_pol(
     # Fix up unzipped complex-to-complex transform into a full-size
     # real-to-complex or complex-to-complex transform. Rather than doing this
     # directly, go back to the time domain and do a fresh transform, to ensure
-    # correctness rather than efficiency.
-    data_time = np.fft.ifft(data.reshape(-1, unzip_factor, channels // unzip_factor), axis=-1)
+    # correctness rather than efficiency. We'll use double precision so that
+    # accuracy isn't compromised.
+    data_time = np.fft.ifft(data.astype(np.complex128).reshape(-1, unzip_factor, channels // unzip_factor), axis=-1)
     data_time = data_time.swapaxes(-1, -2).reshape(-1, channels)
-    assert data_time.dtype == np.complex128  # numpy only does double-precision FFTs
     if complex_pfb:
         data = np.fft.fftshift(np.fft.fft(data_time, axis=-1).astype(np.complex64), axes=-1)
     else:

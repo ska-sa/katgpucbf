@@ -630,11 +630,22 @@ async def test_group_delay(
     dsim_resolution = receiver.adc_sample_rate / dsim_period
     pdf_report.detail(f"Resolution is {dsim_resolution:.6f} Hz.")
 
+    # We set per-channel gains so that each F-engine only outputs non-zero
+    # values for the channels where it has signal. This suppresses any spectral
+    # leakage that would otherwise contaminate the signal from other F-engines
+    # when the results are added in the beamformer.
     pdf_report.step("Set F-engine gains.")
     amplitude = 0.99 / len(cfreqs_by_dsim[0])
     gain = receiver.compute_tone_gain(amplitude, 100)
-    await client.request("gain-all", "antenna-channelised-voltage", gain)
-    pdf_report.detail(f"Set gain on all channels to {gain}.")
+    gains = [[0.0] * receiver.n_chans for _ in range(n_dsims)]
+    for i, channel in enumerate(channels):
+        gains[i % n_dsims][channel] = gain
+    async with asyncio.TaskGroup() as tg:
+        for i, g in enumerate(gains):
+            for j in range(2):
+                input_label = receiver.input_labels[2 * i + j]
+                tg.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *g))
+    pdf_report.detail(f"Set gain to {gain} on chosen antenna/channel pairs.")
 
     # Collect about 2^27 samples, to improve SNR.
     n_spectra = 2**27 // n_channels

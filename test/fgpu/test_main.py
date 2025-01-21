@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023-2024, National Research Foundation (SARAO)
+# Copyright (c) 2023-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -28,7 +28,7 @@ from katgpucbf.fgpu.main import (
     parse_args,
     parse_narrowband,
 )
-from katgpucbf.fgpu.output import NarrowbandOutput, WidebandOutput
+from katgpucbf.fgpu.output import NarrowbandOutput, WidebandOutput, WindowFunction
 from katgpucbf.utils import DitherType
 
 
@@ -50,6 +50,7 @@ class TestParseNarrowband:
             taps=DEFAULT_TAPS,
             ddc_taps=DEFAULT_DDC_TAPS_RATIO * 8,
             w_cutoff=DEFAULT_W_CUTOFF,
+            window_function=WindowFunction.DEFAULT,
             jones_per_batch=DEFAULT_JONES_PER_BATCH,
         )
 
@@ -57,7 +58,8 @@ class TestParseNarrowband:
         """Test with all valid arguments."""
         assert parse_narrowband(
             "name=foo,channels=1024,centre_frequency=400e6,decimation=8,taps=8,w_cutoff=0.5,"
-            "dst=239.1.2.3+1:7148,dither=none,ddc_taps=128,weight_pass=0.3,jones_per_batch=262144"
+            "dst=239.1.2.3+1:7148,dither=none,ddc_taps=128,weight_pass=0.3,jones_per_batch=262144,"
+            "window_function=rect"
         ) == NarrowbandOutput(
             name="foo",
             channels=1024,
@@ -65,6 +67,7 @@ class TestParseNarrowband:
             decimation=8,
             taps=8,
             w_cutoff=0.5,
+            window_function=WindowFunction.RECT,
             dst=[Endpoint("239.1.2.3", 7148), Endpoint("239.1.2.4", 7148)],
             dither=DitherType.NONE,
             ddc_taps=128,
@@ -110,7 +113,7 @@ class TestParseArgs:
             (
                 "--narrowband=name=nb0,dst=239.1.0.0+1,channels=32768,"
                 "centre_frequency=400e6,decimation=8,taps=4,w_cutoff=0.8,"
-                "ddc_taps=64,weight_pass=0.3,jones_per_batch=524288"
+                "window_function=hann,ddc_taps=64,weight_pass=0.3,jones_per_batch=524288"
             ),
             "--narrowband=name=nb1,dst=239.2.0.0+0:7149,channels=8192,centre_frequency=300e6,decimation=16",
             "239.0.1.0+15:7148",
@@ -124,6 +127,7 @@ class TestParseArgs:
                 channels=1024,
                 taps=64,
                 w_cutoff=0.9,
+                window_function=WindowFunction.DEFAULT,
                 jones_per_batch=262144,
             ),
             NarrowbandOutput(
@@ -135,6 +139,7 @@ class TestParseArgs:
                 decimation=8,
                 taps=4,
                 w_cutoff=0.8,
+                window_function=WindowFunction.HANN,
                 ddc_taps=64,
                 weight_pass=0.3,
                 jones_per_batch=524288,
@@ -148,6 +153,7 @@ class TestParseArgs:
                 decimation=16,
                 taps=DEFAULT_TAPS,
                 w_cutoff=DEFAULT_W_CUTOFF,
+                window_function=WindowFunction.DEFAULT,
                 ddc_taps=DEFAULT_DDC_TAPS_RATIO * 16,
                 weight_pass=DEFAULT_WEIGHT_PASS,
                 jones_per_batch=DEFAULT_JONES_PER_BATCH,

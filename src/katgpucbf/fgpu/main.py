@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -50,10 +50,10 @@ from .. import (
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import DitherType, add_gc_stats, add_signal_handlers, comma_split, parse_dither, parse_source
+from ..utils import DitherType, add_gc_stats, add_signal_handlers, comma_split, parse_dither, parse_enum, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
-from .output import NarrowbandOutput, WidebandOutput
+from .output import NarrowbandOutput, WidebandOutput, WindowFunction
 
 _T = TypeVar("_T")
 _OD = TypeVar("_OD", bound="_OutputDict")
@@ -79,6 +79,7 @@ class _OutputDict(TypedDict, total=False):
     dst: list[Endpoint]
     taps: int
     w_cutoff: float
+    window_function: WindowFunction
     dither: DitherType
 
 
@@ -124,6 +125,8 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
                         kws[key] = int(data)
                     case "w_cutoff":
                         kws[key] = float(data)
+                    case "window_function":
+                        kws[key] = parse_enum("window_function", data, WindowFunction)
                     case "dst":
                         kws[key] = endpoint_list_parser(DEFAULT_PORT)(data)
                     case "dither":
@@ -132,8 +135,6 @@ def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str]
                         field_callback(kws, key, data)
             case _:
                 raise ValueError(f"missing '=' in {part}")
-    # ignore due to https://github.com/python/mypy/issues/17674
-    kws.setdefault("dither", DitherType.DEFAULT)  # type: ignore
     for key in ["name", "channels", "dst"]:
         if key not in kws:
             raise ValueError(f"{key} is missing")
@@ -160,7 +161,9 @@ def parse_wideband(value: str) -> WidebandOutput:
         kws = {
             "taps": DEFAULT_TAPS,
             "w_cutoff": DEFAULT_W_CUTOFF,
+            "window_function": WindowFunction.DEFAULT,
             "jones_per_batch": DEFAULT_JONES_PER_BATCH,
+            "dither": DitherType.DEFAULT,
             **kws,
         }
         return WidebandOutput(**kws)
@@ -202,9 +205,11 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
         kws = {
             "taps": DEFAULT_TAPS,
             "w_cutoff": DEFAULT_W_CUTOFF,
+            "window_function": WindowFunction.DEFAULT,
             "jones_per_batch": DEFAULT_JONES_PER_BATCH,
             "weight_pass": DEFAULT_WEIGHT_PASS,
             "ddc_taps": DEFAULT_DDC_TAPS_RATIO * kws["decimation"],
+            "dither": DitherType.DEFAULT,
             **kws,
         }
         return NarrowbandOutput(**kws)

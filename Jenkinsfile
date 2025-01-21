@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2021-2024, National Research Foundation (SARAO)
+ * Copyright (c) 2021-2025, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -93,7 +93,8 @@ pipeline {
                   sh './gpu_copy.py htod --repeat 10'
                   sh './gpu_copy.py dtoh --repeat 10'
                   sh './gpu_copy.py dtod --repeat 10'
-                  sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
+                  // Fails on newer pycuda: https://github.com/inducer/pycuda/issues/459
+                  // sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
                 }
               }
             }

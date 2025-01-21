@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -261,7 +261,8 @@ class Chunk:
                 futures.append(_multi_send(streams, batch.heaps))
                 futures[-1].add_done_callback(functools.partial(self._inc_counters, batch, output_name))
                 for pol in range(N_POLS):
-                    saturated[pol] += batch.saturated[pol]
+                    # Cast np.uint32 to Python int to avoid overflow
+                    saturated[pol] += int(batch.saturated[pol])
             else:
                 skipped_heaps_counter.labels(output_name).inc(len(batch.heaps))
         if futures:

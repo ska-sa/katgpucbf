@@ -231,8 +231,7 @@ class BaseLayout(ABC):
 
     @property
     @abstractmethod
-    def _chunk_place(self) -> numba.core.ccallback.CFunc:
-        ...
+    def _chunk_place(self) -> numba.core.ccallback.CFunc: ...
 
     def chunk_place(self, user_data: np.ndarray) -> scipy.LowLevelCallable:
         """Generate low-level code for placing heaps in chunks.

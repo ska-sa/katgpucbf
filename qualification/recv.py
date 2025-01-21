@@ -281,12 +281,10 @@ class XBReceiver:
         raise RuntimeError(f"stream was shut down before we received {n} complete chunk(s)")
 
     @overload
-    def channel_frequency(self, channel: float) -> float:
-        ...
+    def channel_frequency(self, channel: float) -> float: ...
 
     @overload
-    def channel_frequency(self, channel: np.ndarray) -> np.ndarray:
-        ...
+    def channel_frequency(self, channel: np.ndarray) -> np.ndarray: ...
 
     def channel_frequency(self, channel):
         """Compute the frequency (in Hz) for a given channel.

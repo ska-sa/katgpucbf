@@ -96,28 +96,37 @@ phasors are done in single precision.
 Polyphase filter bank (PFB)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 A finite impulse response (FIR) filter is applied to the signal to condition
-the frequency-domain response. The filter is the product of a Hann window (to
-reduce spectral leakage) and a sinc (to broaden the peak to cover the
-frequency bin). Specifically, if there are :math:`n` output channels and
-:math:`t` taps in the polyphase filter bank, then the filter has length
+the frequency-domain response. The filter is the product of a window function
+(to reduce spectral leakage) and a sinc (to broaden the peak to
+cover the frequency bin). Specifically, if there are :math:`n` output channels
+and :math:`t` taps in the polyphase filter bank, then the filter has length
 :math:`w = 2nt`, with coefficients
 
 .. math::
 
-   x_i = A\sin^2\left(\frac{\pi i}{w - 1}\right)
-         \operatorname{sinc}\left(w_c\cdot \frac{i + \tfrac 12 - nt}{2n}\right),
+   x_i = AW_i\operatorname{sinc}\left(w_c\cdot \frac{i + \tfrac 12 - nt}{2n}\right),
 
-where :math:`i` runs from 0 to :math:`w - 1`. Here :math:`A` is a
-normalisation factor which is chosen such that :math:`\sum_i x_i^2 = 1`. This
-ensures that given white Gaussian noise as input, the expected output power
-in a channel is the same as the expected input power in a digitised sample.
-Note that the input and output are treated as integers rather than as
-fixed-point values.
+where :math:`i` runs from 0 to :math:`w - 1`, and :math:`W` is the window function,
+for which there are two choices:
+
+- Hann: :math:`W_i = \sin^2\left(\frac{\pi i}{w - 1}\right)`
+- Rect: :math:`W_i = 1`.
+
+:math:`A` is a normalisation factor which is chosen such that :math:`\sum_i
+x_i^2 = 1`. This ensures that given white Gaussian noise as input, the
+expected output power in a channel is the same as the expected input power in
+a digitised sample. Note that the input and output are treated as integers
+rather than as fixed-point values.
 
 The tuning parameter :math:`w_c` (specified by the :option:`!--w-cutoff`
 command-line option) scales the width of the response in the frequency domain.
 The default value is 1, which makes the width of the response (at -6dB)
 approximately equal the channel spacing.
+
+In some cases spectral leakage is less important than the ability to
+reconstruct the original signal. Setting :math:`t = 1`, :math:`w_c = 0` and
+using the rectangular window function gives a degenerate PFB in which each
+block of :math:`2n` samples is Fourier transformed.
 
 .. _signal-path.narrow:
 

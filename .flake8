@@ -12,7 +12,10 @@ ignore =
 	# 'whitespace before :' error
 	E203,
 	# 'line break before binary operator' error
-	W503
+	W503,
+	# Multiple statements on one line
+	E701,
+	E704
 
 # specify which checks to enable
 select =

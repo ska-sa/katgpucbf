@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -117,7 +117,7 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
             if args.digitiser_address is None:
                 config["outputs"][name] = {
                     "type": "sim.dig.baseband_voltage",
-                    "band": args.band,
+                    "band": args.band[:1],
                     "adc_sample_rate": args.adc_sample_rate,
                     "centre_frequency": args.centre_frequency,
                     "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
@@ -128,7 +128,7 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
                 config["inputs"][name] = {
                     "type": "dig.baseband_voltage",
                     "sync_time": args.sync_time,
-                    "band": args.band,
+                    "band": args.band[:1],
                     "adc_sample_rate": args.adc_sample_rate,
                     "centre_frequency": args.centre_frequency,
                     "antenna": f"m{number}",
@@ -207,10 +207,23 @@ def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
         }
 
 
+def parse_develop_options(develop_argument: str) -> dict:
+    """Separate complex develop options into a dictionary."""
+    out_dict = {}
+    for item in develop_argument.split(","):
+        # data_timeout option isn't boolean, unlike the rest
+        if "data_timeout" in item:
+            k, v = item.split("=")
+            out_dict[k] = float(v)
+        else:
+            out_dict[item] = True
+    return out_dict
+
+
 def generate_config(args: argparse.Namespace) -> dict:
     """Produce the configuration dict from the parsed command-line arguments."""
     config: dict = {
-        "version": "4.0",
+        "version": "4.3",
         "config": {},
         "inputs": {},
         "outputs": {},
@@ -225,11 +238,11 @@ def generate_config(args: argparse.Namespace) -> dict:
         config["config"]["image_overrides"] = image_overrides
     if args.develop is not None:
         if args.develop is True or args.develop == "":
-            # Use passed --develop with no argument or --develop= with empty argument
+            # User passed --develop with no argument or --develop= with empty argument
             config["config"]["develop"] = True
         else:
             # User passed a comma-separated list of options
-            config["config"]["develop"] = {key: True for key in args.develop.split(",")}
+            config["config"]["develop"] = parse_develop_options(args.develop)
 
     dig_names = generate_digitisers(args, config)
     if args.last_stage == "d":

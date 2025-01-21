@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -36,6 +36,7 @@ from katsdptelstate.endpoint import endpoint_list_parser
 from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME
 from .spead import DEFAULT_PORT
 
+_E = TypeVar("_E", bound=enum.Enum)
 _T = TypeVar("_T")
 
 # Sensor status threshold. These are mostly thumb-sucks.
@@ -105,14 +106,19 @@ def add_gc_stats() -> None:
     gc.callbacks.append(callback)
 
 
-def parse_dither(value: str) -> DitherType:
-    """Parse a string into a dither type."""
-    # Note: this allows only the non-aliases, so excludes DEFAULT
-    table = {member.name.lower(): member for member in DitherType}
+def parse_enum(name: str, value: str, cls: type[_E]) -> _E:
+    """Parse a command-line argument into an enum type."""
+    table = {member.name.lower(): member for member in cls}
     try:
         return table[value]
     except KeyError:
-        raise ValueError(f"Invalid dither value {value} (valid values are {list(table.keys())})") from None
+        raise ValueError(f"Invalid {name} value {value} (valid values are {list(table.keys())})") from None
+
+
+def parse_dither(value: str) -> DitherType:
+    """Parse a string into a dither type."""
+    # Note: this allows only the non-aliases, so excludes DEFAULT
+    return parse_enum("dither", value, DitherType)
 
 
 def parse_source(value: str) -> list[tuple[str, int]] | str:
