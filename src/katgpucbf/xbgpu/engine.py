@@ -255,7 +255,7 @@ class Pipeline(Generic[_O, _T]):
     # most tests cases up until now. If the pipeline starts bottlenecking,
     # then maybe look at increasing these values.
     n_in_items = DEFAULT_N_IN_ITEMS
-    n_out_items = DEFAULT_N_OUT_ITEMS + 2
+    n_out_items = DEFAULT_N_OUT_ITEMS
 
     send_stream: Send
 
