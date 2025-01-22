@@ -70,6 +70,7 @@ pipeline {
       steps {
          sh 'pip install -r qualification/requirements.txt'
          sh 'pip install --no-deps ".[qualification]" && pip check'
+         sh 'pip install pytest-repeat'
       }
     }
 
@@ -87,7 +88,7 @@ pipeline {
           * tests and mark the build as unstable.
           */
          sh '''
-           spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification/tied_array_channelised_voltage/test_steady_state.py \
+           spead2_net_raw pytest --count=50 -v -c qualification/pytest-jenkins.ini qualification/tied_array_channelised_voltage/test_steady_state.py \
            --suppress-tests-failed-exit-code \
            --image-override katgpucbf:${katgpucbf_image} \
            --image-override katsdpcontroller:${katsdpcontroller_image} \
