@@ -238,7 +238,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             "Add a narrowband output (may be repeated). "
             "The required keys are: name, centre_frequency, decimation, channels, dst. "
             f"Optional keys: taps [{DEFAULT_TAPS}], ddc_taps [{DEFAULT_DDC_TAPS_RATIO}*decimation], "
-            f"w_cutoff [{DEFAULT_W_CUTOFF}], weight_pass, dither [uniform]."
+            f"w_cutoff [{DEFAULT_W_CUTOFF}], window_function [hann], weight_pass [{DEFAULT_WEIGHT_PASS}], "
+            "dither [uniform]."
         ),
     )
     parser.add_argument(
@@ -249,7 +250,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help=(
             "Add a wideband output (may be repeated). The required keys are: name, channels, dst. "
-            f"Optional keys: taps [{DEFAULT_TAPS}], w_cutoff [{DEFAULT_W_CUTOFF}], dither [uniform]"
+            f"Optional keys: taps [{DEFAULT_TAPS}], w_cutoff [{DEFAULT_W_CUTOFF}], "
+            "window_function [hann], dither [uniform]"
         ),
     )
     parser.add_argument(
