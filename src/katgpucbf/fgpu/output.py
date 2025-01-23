@@ -141,6 +141,19 @@ class NarrowbandOutput(Output):
     ddc_taps: int
     weight_pass: float
 
+    @property
+    def spectra_samples(self) -> int:  # noqa: D102
+        return self.internal_channels * self.subsampling
+
+    @property
+    def window(self) -> int:  # noqa: D102
+        return self.taps * self.spectra_samples + self.ddc_taps - self.subsampling
+
+
+@dataclass
+class NarrowbandOutputDiscard(NarrowbandOutput):
+    """Static configuration for a narrowband stream that discards channels."""
+
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.decimation % 2 != 0:
@@ -151,10 +164,6 @@ class NarrowbandOutput(Output):
         return 2 * self.channels
 
     @property
-    def spectra_samples(self) -> int:  # noqa: D102
-        return 2 * self.channels * self.decimation
-
-    @property
     def internal_decimation(self) -> int:  # noqa: D102
         return self.decimation // 2
 
@@ -162,6 +171,21 @@ class NarrowbandOutput(Output):
     def subsampling(self) -> int:  # noqa: D102
         return self.decimation
 
+
+@dataclass
+class NarrowbandOutputNoDiscard(NarrowbandOutput):
+    """Static configuration for a narrowband stream that does not discard channels."""
+
+    usable_bandwidth: float
+
     @property
-    def window(self) -> int:  # noqa: D102
-        return self.taps * self.spectra_samples + self.ddc_taps - self.subsampling
+    def internal_channels(self) -> int:  # noqa: D102
+        return self.channels
+
+    @property
+    def internal_decimation(self) -> int:  # noqa: D102
+        return self.decimation
+
+    @property
+    def subsampling(self) -> int:  # noqa: D102
+        return 2 * self.decimation

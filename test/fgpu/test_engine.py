@@ -216,7 +216,7 @@ class TestEngine:
         )
         gain = np.repeat(np.sum(pfb), output.channels)
         if isinstance(output, NarrowbandOutput):
-            ddc = generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass)
+            ddc = generate_ddc_weights(output, ADC_SAMPLE_RATE)
             response = np.fft.fftshift(scipy.signal.freqz(ddc, worN=output.spectra_samples, whole=True)[1])
             # Discard higher frequencies
             response = response[

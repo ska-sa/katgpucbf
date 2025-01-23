@@ -53,7 +53,7 @@ from ..spead import DEFAULT_PORT
 from ..utils import DitherType, add_gc_stats, add_signal_handlers, comma_split, parse_dither, parse_enum, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
-from .output import NarrowbandOutput, WidebandOutput, WindowFunction
+from .output import NarrowbandOutput, NarrowbandOutputDiscard, NarrowbandOutputNoDiscard, WidebandOutput, WindowFunction
 
 _T = TypeVar("_T")
 _OD = TypeVar("_OD", bound="_OutputDict")
@@ -102,6 +102,7 @@ class _NarrowbandOutputDict(_OutputDict, total=False):
     decimation: int
     ddc_taps: int
     weight_pass: float
+    usable_bandwidth: float
 
 
 def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
@@ -187,7 +188,7 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
 
     def field_callback(kws: _NarrowbandOutputDict, key: str, data: str) -> None:
         match key:
-            case "centre_frequency" | "weight_pass":
+            case "centre_frequency" | "weight_pass" | "usable_bandwidth":
                 kws[key] = float(data)
             case "decimation" | "ddc_taps":
                 kws[key] = int(data)
@@ -212,7 +213,12 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
             "dither": DitherType.DEFAULT,
             **kws,
         }
-        return NarrowbandOutput(**kws)
+        if "usable_bandwidth" in kws:
+            return NarrowbandOutputNoDiscard(**kws)
+        else:
+            # mypy isn't smart enough to realise that "usable_bandwidth"
+            # isn't going to be in **kws.
+            return NarrowbandOutputDiscard(**kws)  # type: ignore[misc]
     except ValueError as exc:
         raise ValueError(f"--narrowband: {exc}") from exc
 

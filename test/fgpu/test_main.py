@@ -28,7 +28,7 @@ from katgpucbf.fgpu.main import (
     parse_args,
     parse_narrowband,
 )
-from katgpucbf.fgpu.output import NarrowbandOutput, WidebandOutput, WindowFunction
+from katgpucbf.fgpu.output import NarrowbandOutputDiscard, NarrowbandOutputNoDiscard, WidebandOutput, WindowFunction
 from katgpucbf.utils import DitherType
 
 
@@ -39,7 +39,7 @@ class TestParseNarrowband:
         """Test with the minimum required arguments."""
         assert parse_narrowband(
             "name=foo,channels=1024,centre_frequency=400e6,decimation=8,dst=239.1.2.3+1:7148"
-        ) == NarrowbandOutput(
+        ) == NarrowbandOutputDiscard(
             name="foo",
             channels=1024,
             centre_frequency=400e6,
@@ -59,8 +59,8 @@ class TestParseNarrowband:
         assert parse_narrowband(
             "name=foo,channels=1024,centre_frequency=400e6,decimation=8,taps=8,w_cutoff=0.5,"
             "dst=239.1.2.3+1:7148,dither=none,ddc_taps=128,weight_pass=0.3,jones_per_batch=262144,"
-            "window_function=rect"
-        ) == NarrowbandOutput(
+            "window_function=rect,usable_bandwidth=64e6"
+        ) == NarrowbandOutputNoDiscard(
             name="foo",
             channels=1024,
             centre_frequency=400e6,
@@ -72,6 +72,7 @@ class TestParseNarrowband:
             dither=DitherType.NONE,
             ddc_taps=128,
             weight_pass=0.3,
+            usable_bandwidth=64e6,
             jones_per_batch=262144,
         )
 
@@ -130,7 +131,7 @@ class TestParseArgs:
                 window_function=WindowFunction.DEFAULT,
                 jones_per_batch=262144,
             ),
-            NarrowbandOutput(
+            NarrowbandOutputDiscard(
                 name="nb0",
                 dst=[Endpoint("239.1.0.0", 7148), Endpoint("239.1.0.1", 7148)],
                 dither=DitherType.DEFAULT,
@@ -144,7 +145,7 @@ class TestParseArgs:
                 weight_pass=0.3,
                 jones_per_batch=524288,
             ),
-            NarrowbandOutput(
+            NarrowbandOutputDiscard(
                 name="nb1",
                 dst=[Endpoint("239.2.0.0", 7149)],
                 dither=DitherType.DEFAULT,

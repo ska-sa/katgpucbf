@@ -64,7 +64,14 @@ from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, DIG_RMS_DBFS_WINDOW, INPUT_CH
 from .accum import Accum
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
-from .output import NarrowbandOutput, Output, WidebandOutput, WindowFunction
+from .output import (
+    NarrowbandOutput,
+    NarrowbandOutputDiscard,
+    NarrowbandOutputNoDiscard,
+    Output,
+    WidebandOutput,
+    WindowFunction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +125,7 @@ def generate_pfb_weights(step: int, taps: int, w_cutoff: float, window_function:
     return weights.astype(np.float32)
 
 
-def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.ndarray:
+def _generate_ddc_weights_discard(taps: int, subsampling: int, weight_pass: float) -> np.ndarray:
     """Generate equiripple filter weights for the narrowband low-pass filter.
 
     The filter is designed with the assumption that only the inner 50% of the
@@ -148,6 +155,52 @@ def generate_ddc_weights(taps: int, subsampling: int, weight_pass: float) -> np.
     coeff = scipy.signal.remez(taps, edges, desired, weight=weights, fs=subsampling, maxiter=1000)
     coeff *= np.sqrt(subsampling)
     return coeff.astype(np.float32)
+
+
+def _generate_ddc_weights_no_discard(taps: int, subsampling: int, usable: float, weight_pass: float) -> np.ndarray:
+    """Generate filter weights for the narrowband low-pass filter.
+
+    The filter response is optimised so that a certain fraction of the band
+    has a flat response. There will be roll-off outside this range.
+
+    The resulting weights are normalised such that the gain (after subsampling)
+    is 1.
+
+    Parameters
+    ----------
+    taps
+        Number of taps in the filter
+    subsampling
+        Subsampling factor for subsampling applied after filtering
+    usable
+        Fraction of the post-subsampling bandwidth that will have flat response.
+    weight_pass
+        Weight given to the passband in the filter design (relative to stopband
+        weight of 1.0).
+    """
+    # TODO: this is just a first attempt to get something workable. It can
+    # probably be tuned e.g. to weight rolloff versus alias rejection in
+    # the stopband.
+    coeff = scipy.signal.remez(
+        taps,
+        bands=[0.0, 0.5 * usable, 0.5, 0.5 * subsampling],
+        desired=[1.0, 0.0],
+        weight=[weight_pass, 1.0],
+        fs=subsampling,
+        maxiter=1000,
+    )
+    coeff *= np.sqrt(subsampling)  # TODO: check if this is correct
+    return coeff.astype(np.float32)
+
+
+def generate_ddc_weights(output: NarrowbandOutput, adc_sample_rate: float) -> np.ndarray:
+    """Generate filter weights for the narrowband low-pass filter."""
+    if isinstance(output, NarrowbandOutputNoDiscard):
+        bandwidth = adc_sample_rate * 0.5 / output.decimation
+        usable = output.usable_bandwidth / bandwidth
+        return _generate_ddc_weights_no_discard(output.ddc_taps, output.subsampling, usable, output.weight_pass)
+    else:
+        return _generate_ddc_weights_discard(output.ddc_taps, output.subsampling, output.weight_pass)
 
 
 def _padded_input_size(size_bytes: int) -> int:
@@ -496,7 +549,8 @@ class Pipeline:
             narrowband_config = NarrowbandConfig(
                 decimation=output.decimation,
                 mix_frequency=-Fraction(output.centre_frequency) / Fraction(engine.adc_sample_rate),
-                weights=generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass),
+                weights=generate_ddc_weights(output, engine.adc_sample_rate),
+                discard=isinstance(output, NarrowbandOutputDiscard),
             )
         else:
             narrowband_config = None

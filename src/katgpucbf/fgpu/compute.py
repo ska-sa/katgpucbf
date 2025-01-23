@@ -42,6 +42,8 @@ class NarrowbandConfig:
     mix_frequency: Fraction
     #: Downconversion filter weights (float)
     weights: np.ndarray
+    #: Whether we are to discard the outer 50% of channels
+    discard: bool
 
 
 class ComputeTemplate:
@@ -95,7 +97,8 @@ class ComputeTemplate:
             )
             self.ddc: ddc.DDCTemplate | None = None
         else:
-            self.internal_channels = 2 * channels
+            self.internal_channels = 2 * channels if narrowband.discard else channels
+            subsampling = narrowband.decimation if narrowband.discard else 2 * narrowband.decimation
             self.postproc = postproc.PostprocTemplate(
                 context,
                 self.internal_channels,
@@ -103,12 +106,12 @@ class ComputeTemplate:
                 complex_pfb=True,
                 out_bits=out_bits,
                 dither=dither,
-                out_channels=(channels // 2, 3 * channels // 2),
+                out_channels=(channels // 2, 3 * channels // 2) if narrowband.discard else None,
             )
             self.pfb_fir = pfb.PFBFIRTemplate(
                 context, taps, self.internal_channels, 32, self.unzip_factor, complex_input=True, n_pols=N_POLS
             )
-            self.ddc = ddc.DDCTemplate(context, len(narrowband.weights), narrowband.decimation, dig_sample_bits)
+            self.ddc = ddc.DDCTemplate(context, len(narrowband.weights), subsampling, dig_sample_bits)
 
     def instantiate(
         self,
