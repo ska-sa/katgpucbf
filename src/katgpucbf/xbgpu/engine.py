@@ -554,7 +554,8 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
 
             out_item.add_marker(self._proc_command_queue)
             # self._out_queue.put_nowait(out_item)
-            out_item.put_task = asyncio.create_task(self._sleep_out_item(out_item))
+            # out_item.put_task = asyncio.create_task(self._sleep_out_item(out_item))
+            self._put_later(out_item)
 
             # Finish with the in_item
             in_item.add_marker(self._proc_command_queue)
@@ -568,6 +569,13 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         last_out_item.close_pipeline = True
         last_out_item.put_task = asyncio.create_task(self._sleep_out_item(last_out_item))
 
+    def _put_later(self, out_item: BOutQueueItem) -> None:
+        """Introduce an artificial delay in processing output data.
+
+        This time using asyncio call_later.
+        """
+        asyncio.get_running_loop().call_later(1.0, self._out_queue.put_nowait, out_item)
+
     async def _sleep_out_item(self, out_item: BOutQueueItem) -> None:
         """Introduce artificial delays in processing output data.
 
@@ -575,7 +583,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         """
         # TODO: Need to parametrise this somehow to run multiple sleep values
         # during qualification tests.
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(1.0)
         self._out_queue.put_nowait(out_item)
 
     async def sender_loop(self) -> None:  # noqa: D102
