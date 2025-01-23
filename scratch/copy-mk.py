@@ -57,7 +57,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
     parser.add_argument(
-        "--controller", default="cbf-mc.cbf.mkat.karoo.kat.ac.za", help="Hostname of the SDP master controller"
+        "--controller", default="cbf-mc.cbf.mkat.karoo.kat.ac.za", help="Hostname of the CBF master controller"
     )
     args = parser.parse_args(argv)
     return args
@@ -89,7 +89,7 @@ async def async_main(args) -> int:
         for n, grp in enumerate(mcast_groups[1:]):
             if grp == mcast_groups[0]:
                 # MK is not using a full power-of-2 size array. There are dummies from here onwards.
-                print("Dummy antenna found starting at ", (n + 1) // 2)
+                print(f"Dummy antenna found starting at {(n + 1) // 2}")
                 n_antennas = (n + 1) // 2
                 break
         digitiser_address = mcast_groups[0].split("+")[0]
@@ -99,7 +99,11 @@ async def async_main(args) -> int:
     try:
         target = subordinates[args.subordinate]
     except KeyError:
-        print(f"{args.subordinate} is not among the subordinates currently running. Options are: {subordinates.keys()}")
+        print(
+            f"{args.subordinate} is not among the subordinates currently running. "
+            f"Options are: {list(subordinates.keys())}",
+            file=sys.stderr,
+        )
         return 1
 
     # connect to the corr2_servlet itself to see the sync time, n_chans and bandwidth
@@ -127,15 +131,11 @@ async def async_main(args) -> int:
         "digitiser-address": mcast_groups[0].split("+")[0],
         "sync-time": sync_time,
         "band": band,
+        "develop": args.develop,
     }
 
     out_cmd = [os.path.join(os.path.dirname(__file__), "sim_correlator.py")]
-
-    for k, v in out_kwargs.items():
-        out_cmd.append(f"--{k}={v}")
-
-    if args.develop is not None:
-        out_cmd.append(f"--develop={args.develop}")
+    out_cmd += [f"--{k}={v}" for k, v in out_kwargs.items() if v is not None]
 
     if args.image_override is not None:
         for override in args.image_override:
@@ -143,8 +143,8 @@ async def async_main(args) -> int:
 
     out_cmd.append(args.controller)
 
-    print(f"Executing: {out_cmd}", "\n")
-    os.execv(out_cmd[0], out_cmd[1:])
+    print(f"Executing: {out_cmd}\n")
+    os.execv(out_cmd[0], out_cmd)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
