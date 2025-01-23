@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -15,6 +15,9 @@
 ################################################################################
 
 """Smoke test for Compute class."""
+
+from fractions import Fraction
+
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
@@ -49,7 +52,7 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     else:
         narrowband = compute.NarrowbandConfig(
             decimation=decimation,
-            mix_frequency=0.2,
+            mix_frequency=Fraction(1, 5),
             weights=generate_ddc_weights(ddc_taps, decimation, 0.1),
         )
         spectra = nb_spectra

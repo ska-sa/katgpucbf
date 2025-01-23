@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2023, National Research Foundation (SARAO)
+ * Copyright (c) 2023, 2025, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -128,8 +128,8 @@ void ddc(
     unsigned int in_stride,  // stride between pols, unit: sample_word
     unsigned int out_size,
     unsigned int in_size_words,
-    unsigned int mix_scale,  // Mixer frequency in cycles per SUBSAMPLING samples, fixed point
-    unsigned int mix_bias    // Mixer phase in cycles at the first sample, fixed point
+    unsigned long mix_scale,  // Mixer frequency in cycles per SUBSAMPLING samples, fixed point
+    unsigned long mix_bias    // Mixer phase in cycles at the first sample, fixed point
 )
 {
     const int group_in_size = TAPS + (WGS * C - 1) * SUBSAMPLING;
@@ -201,15 +201,15 @@ void ddc(
         }
     }
 
-    unsigned int mix_cycles = get_global_id(0) * C * mix_scale + mix_bias;
+    unsigned long mix_cycles = get_global_id(0) * C * mix_scale + mix_bias;
 #pragma unroll
     for (int i = 0; i < C; i++)
     {
         cplx mix;
-        // Casting from unsigned int to int changes the range from [0, 2pi) to
-        // [-pi, pi). The magic number is 2^32, used to convert fixed-point
+        // Casting from unsigned long to long changes the range from [0, 2pi) to
+        // [-pi, pi). The magic number is 2^64, used to convert fixed-point
         // representation to real.
-        __sincosf(2 * (float) M_PI / 4294967296.0f * (int) mix_cycles, &mix.y, &mix.x);
+        __sincosf(2 * (float) M_PI / 18446744073709551616.0f * (long) mix_cycles, &mix.y, &mix.x);
         accum[i] = cmul(accum[i], mix);
         mix_cycles += mix_scale;
     }

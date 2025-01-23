@@ -695,10 +695,17 @@ the fractional part. Even passing :math:`f` in single precision can lead
 to large errors.
 
 To avoid these problems, fixed-point computations are used. Phase is
-represented as a fractional number of cycles, scaled by :math:`2^{32}` and
-stored in a 32-bit integer. When performing arithmetic on values encoded this
+represented as a fractional number of cycles, scaled by :math:`2^{64}` and
+stored in a 64-bit integer. When performing arithmetic on values encoded this
 way, the values may overflow and wrap. The high bits that are lost represent
 complete cycles, and so have no effect on phase.
+
+This is sufficient to avoid any rounding errors inside the kernel, where
+:math:`t` is limited to the number of samples processed by a single kernel
+invocation. However, over much longer timescales (days) even quantising the
+frequency to 64-bit fixed point could lead to a small phase drift. The Python
+code thus uses the :class:`~fractions.Fraction` class to perform exact
+arithmetic until after it has subtracted the whole cycles.
 
 Delays
 ^^^^^^

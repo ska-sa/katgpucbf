@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,6 +16,8 @@
 
 """Unit tests for digital down conversion."""
 
+from fractions import Fraction
+
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
@@ -27,12 +29,16 @@ from .. import unpackbits
 
 
 def ddc_host(
-    samples: np.ndarray, weights: np.ndarray, subsampling: int, input_sample_bits: int, mix_frequency: float
+    samples: np.ndarray, weights: np.ndarray, subsampling: int, input_sample_bits: int, mix_frequency: Fraction
 ) -> np.ndarray:
     """Implement the DDC calculation simply in numpy."""
     # Calculation is done in double precision for better accuracy
     samples = np.stack([unpackbits(pol_samples, input_sample_bits).astype(np.complex128) for pol_samples in samples])
-    mix_angle = 2 * np.pi * mix_frequency * np.arange(0, samples.shape[1], dtype=np.float64)
+    mix_cycles_scaled = (
+        mix_frequency.numerator * np.arange(0, samples.shape[1], dtype=np.int64) % mix_frequency.denominator
+    )
+    mix_cycles = mix_cycles_scaled.astype(np.float64) / mix_frequency.denominator
+    mix_angle = 2 * np.pi * mix_cycles
     mix = np.cos(mix_angle) + 1j * np.sin(mix_angle)
     samples *= mix
     # weights is reversed to make it a standard convolution instead of a correlation
@@ -70,7 +76,7 @@ def test_ddc(
     rng = np.random.default_rng(seed=1)
     h_in = rng.integers(0, 256, (n_pols, samples * input_sample_bits // BYTE_BITS), np.uint8)
     weights = rng.uniform(-1.0, 1.0, (taps,)).astype(np.float32)
-    mix_frequency = 0.21
+    mix_frequency = Fraction("0.21")
 
     template = DDCTemplate(
         context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, tuning=tuning
@@ -82,8 +88,7 @@ def test_ddc(
     fn()
     h_out = fn.buffer("out").get(command_queue)
 
-    # Check that quantisation doesn't affect frequency too much
-    assert fn.mix_frequency == pytest.approx(mix_frequency, abs=1 / 2**32 / subsampling)
+    assert fn.mix_frequency == mix_frequency
 
     # atol has to be quite large because the calculation is fundamentally
     # numerically unstable.

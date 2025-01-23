@@ -23,6 +23,7 @@ import logging
 import math
 import numbers
 from collections.abc import Iterable, Iterator, Sequence
+from fractions import Fraction
 from functools import partial
 
 import aiokatcp
@@ -494,7 +495,7 @@ class Pipeline:
         if isinstance(output, NarrowbandOutput):
             narrowband_config = NarrowbandConfig(
                 decimation=output.decimation,
-                mix_frequency=-output.centre_frequency / engine.adc_sample_rate,
+                mix_frequency=-Fraction(output.centre_frequency) / Fraction(engine.adc_sample_rate),
                 weights=generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass),
             )
         else:

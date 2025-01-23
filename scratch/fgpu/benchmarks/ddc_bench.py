@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,6 +17,7 @@
 ################################################################################
 
 import argparse
+from fractions import Fraction
 
 import numpy as np
 from katsdpsigproc import accel
@@ -47,7 +48,7 @@ def main():
         fn = template.instantiate(command_queue, samples=args.samples, n_pols=args.pols)
         fn.ensure_all_bound()
         fn.buffer("in").zero(command_queue)
-        fn.configure(0.25, np.ones(args.taps, np.float32))
+        fn.configure(Fraction(0.25), np.ones(args.taps, np.float32))
         fn()  # Do a warmup pass
         start = command_queue.enqueue_marker()
         for _ in range(args.passes):

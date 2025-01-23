@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,6 +18,7 @@
 
 import math
 from collections.abc import Callable
+from fractions import Fraction
 from importlib import resources
 from typing import TypedDict, cast
 
@@ -203,41 +204,42 @@ class DDC(accel.Operation):
         self.slots["out"] = accel.IOSlot((n_pols, self.out_samples), np.complex64)
         self._weights = accel.DeviceArray(template.context, (template.taps,), np.complex64)
         self._weights_host = self._weights.empty_like()
-        self._mix_scale = 0  # Specify in cycles per output sample, times 2**32
-        self.mix_phase = 0.0  # Specify in fractions of a cycle (0-1)
+        self._mix_scale = 0  # Specify in cycles per output sample, times 2**64
+        self._mix_frequency = Fraction(0)
+        self.mix_phase = Fraction(0)  # Specify in fractions of a cycle (0-1)
 
-    def configure(self, mix_frequency: float, weights: np.ndarray) -> None:
+    def configure(self, mix_frequency: Fraction, weights: np.ndarray) -> None:
         """Set the mixer frequency and filter weights.
 
         This is a somewhat expensive operation, as it computes lookup tables
         and transfers them to the device synchronously. It is only intended
         to be used at startup rather than continuously.
-
-        .. note::
-
-           The provided `mix_frequency` is quantised. The actual mixer
-           frequency can be retrieved from the :attr:`mix_frequency`
-           property.
         """
         assert weights.shape == self._weights_host.shape
+        # Passing a float implies that it has not been computed exactly
+        assert isinstance(mix_frequency, Fraction)
+        self._mix_frequency = mix_frequency
         # Quantise the mixer frequency so that cycles per *output* sample are
-        # represented in fixed point with 32 fractional bits.
-        self._mix_scale = round(mix_frequency * self.template.subsampling * 2**32)
-        self._weights_host[:] = weights * np.exp(2j * np.pi * self.mix_frequency * np.arange(len(weights)))
+        # represented in fixed point with 64 fractional bits.
+        self._mix_scale = round(mix_frequency * self.template.subsampling * 2**64) % 2**64
+        # Here we're quantising the mixer frequency to float (double
+        # precision). Since len(weights) should be small (hundreds or maybe
+        # thousands) and _weights is only single-precision, there should be no
+        # loss in precision.
+        self._weights_host[:] = weights * np.exp(2j * np.pi * float(mix_frequency) * np.arange(len(weights)))
         self._weights.set(self.command_queue, self._weights_host)
 
     @property
-    def mix_frequency(self) -> float:
+    def mix_frequency(self) -> Fraction:
         """Mixer frequency in cycles per ADC sample."""
-        return self._mix_scale / self.template.subsampling / 2**32
+        return self._mix_frequency
 
     def _run(self) -> None:
         in_buffer = self.buffer("in")
         out_buffer = self.buffer("out")
         groups = accel.divup(self.out_samples, self.template.wgs * self.template.unroll)
 
-        mix_scale = self._mix_scale % 2**32
-        mix_bias = round(self.mix_phase * 2**32) % 2**32
+        mix_bias = round(self.mix_phase * 2**64) % 2**64
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             [
@@ -248,8 +250,8 @@ class DDC(accel.Operation):
                 np.uint32(in_buffer.padded_shape[1] // _SAMPLE_WORD_SIZE),  # in_stride in sample_words
                 np.uint32(out_buffer.shape[1]),  # out_size
                 np.uint32(accel.divup(in_buffer.shape[1], _SAMPLE_WORD_SIZE)),  # in_size_words
-                np.uint32(mix_scale),
-                np.uint32(mix_bias),
+                np.uint64(self._mix_scale),
+                np.uint64(mix_bias),
             ],
             global_size=(groups * self.template.wgs, in_buffer.shape[0], 1),
             local_size=(self.template.wgs, 1, 1),

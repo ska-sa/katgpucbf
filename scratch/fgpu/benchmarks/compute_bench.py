@@ -17,6 +17,7 @@
 ################################################################################
 
 import argparse
+from fractions import Fraction
 
 import numpy as np
 from katsdpsigproc import accel
@@ -70,7 +71,7 @@ def main():  # noqa: C901
         if args.narrowband:
             narrowband_config = NarrowbandConfig(
                 decimation=args.narrowband_decimation,
-                mix_frequency=0.25,
+                mix_frequency=Fraction(1, 4),
                 weights=generate_ddc_weights(args.ddc_taps, args.narrowband_decimation, 0.005),
             )
             spectra_samples = 2 * args.channels * args.narrowband_decimation

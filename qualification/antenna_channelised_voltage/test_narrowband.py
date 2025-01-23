@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,6 +16,7 @@
 
 """Test specific features of narrowband."""
 
+import numpy as np
 import pytest
 
 from katgpucbf.meerkat import BANDS
@@ -27,18 +28,14 @@ def test_narrowband_centre_frequency() -> None:
 
     Verification method
     -------------------
-    Verified by analysis. The F-engine converts the frequency of the DDC mixer
-    to a fixed-point representation with 32 fractional bits. The units are
-    cycles per output (decimated) sample. The resolution is thus
-    :math:`\frac{f}{2^{32} d}`
-    where :math:`f` is the ADC sample rate and :math:`d` is the decimation
-    factor. For Narrowband Fine L-band,
-    :math:`f = 1712 \text{MHz}` and :math:`d = 16`, giving
-    a resolution of 0.025 Hz.
-
-    The interfaces which set and report the centre frequency use IEEE-754
-    double precision, which has significantly more precision than this and
-    is not the limiting factor.
+    Verified by analysis. The F-engine converts the text representation
+    of the centre frequency to double-precision floating point. The
+    resolution is thus determined by float-point accuracy and depends on
+    the magnitude of the value. The magnitude is limited to 856 MHz
+    (since the value is specified at baseband) and at this magnitude,
+    1 ULP is approximately :math:`1.2\times 10^{-7}` Hz.
     """
     for band in ["u", "l"]:
-        assert BANDS[band].adc_sample_rate / 2**32 / 16 < 100.0
+        max_centre_frequency = BANDS[band].adc_sample_rate / 2
+        resolution = max_centre_frequency - np.nextafter(max_centre_frequency, 0.0)
+        assert resolution < 100.0
