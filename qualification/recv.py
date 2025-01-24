@@ -44,7 +44,7 @@ from katgpucbf.utils import TimeConverter
 
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
-DEFAULT_TIMEOUT = 10.0
+DEFAULT_TIMEOUT = 30.0
 logger = logging.getLogger(__name__)
 
 
