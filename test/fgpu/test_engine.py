@@ -151,13 +151,23 @@ class TestEngine:
     def decimation(self, request: pytest.FixtureRequest) -> int:
         return request.param
 
+    @pytest.fixture(params=[True, False])
+    def narrowband_discard(self, request: pytest.FixtureRequest) -> bool:
+        return request.param
+
     @pytest.fixture
-    def narrowband_args(self, channels: int, jones_per_batch: int, decimation: int) -> str:
+    def narrowband_args(self, channels: int, jones_per_batch: int, decimation: int, narrowband_discard: bool) -> str:
         """Arguments to pass to the command-line parser for the narrowband output."""
-        return f"{NARROWBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch},decimation={decimation}"
+        args = f"{NARROWBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch},decimation={decimation}"
+        if not narrowband_discard:
+            bandwidth = 0.5 * ADC_SAMPLE_RATE / decimation
+            args += f",usable_bandwidth={0.6 * bandwidth}"
+        return args
 
     @pytest.fixture(params=["wideband", "narrowband"])
-    def output(self, wideband_args: str, narrowband_args: str, request: pytest.FixtureRequest) -> Output:
+    def output(
+        self, wideband_args: str, narrowband_args: str, decimation: int, request: pytest.FixtureRequest
+    ) -> Output:
         """The output to run tests against."""
         if request.param == "wideband":
             return parse_wideband(wideband_args)
@@ -230,7 +240,7 @@ class TestEngine:
     @pytest.fixture
     def default_gain(self, coherent_scale: np.ndarray) -> np.float32:
         """Default value passed to ``?gain`` command."""
-        # Centre chain gets defined power. In narrowband, other channels will
+        # Centre channel gets defined power. In narrowband, other channels will
         # have less power.
         return np.float32(1 / coherent_scale[len(coherent_scale) // 2])
 
@@ -499,7 +509,7 @@ class TestEngine:
         # The tones are placed in the second Nyquist zone (the "1 +" in
         # frac_channel) then down-converted to baseband, simulating what
         # happens in MeerKAT L-band.
-        tone_channels = [64, 271]
+        tone_channels = [192, 271]
         tone_phases = [0.0, 1.23]
         tones = [
             CW(
