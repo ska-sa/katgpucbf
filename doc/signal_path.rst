@@ -248,6 +248,21 @@ channels have multiple aliases, and the filter response in those aliases is
 also irrelevant. We thus use :func:`scipy.signal.remez` to only optimise the
 response to those channels that alias into the output.
 
+Narrowband without discard
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+The above combined time-frequency approach to narrowband can be disabled,
+giving a purely time-domain FIR filter. In this case, step 5 is skipped.
+The filter design in this case is more critical, and needs to trade off
+factors such as passband ripple, rolloff, and alias rejection.
+
+.. todo::
+
+   Describe the filter design once it is finalised.
+
+The primary use case is for reconstructing a time-domain signal from the
+channelised output, where completely discarding channels appears to lose
+necessary information.
+
 Correlation
 -----------
 Given a baseline (p, q) and time-varying channelised voltages :math:`e_p` and
