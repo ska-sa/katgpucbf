@@ -36,7 +36,7 @@ from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine, InQueueItem, Pipeline, generate_ddc_weights, generate_pfb_weights
 from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
-from katgpucbf.fgpu.output import NarrowbandOutput, Output
+from katgpucbf.fgpu.output import NarrowbandOutput, NarrowbandOutputNoDiscard, Output
 from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff, packbits
@@ -685,7 +685,7 @@ class TestEngine:
         """Test that delay rate and phase rate setting works."""
         # One tone at centre frequency to test the absolute phase, and one at another
         # frequency to test the slope across the band.
-        tone_channels = [CHANNELS // 2, CHANNELS - 123]
+        tone_channels = [CHANNELS // 2, CHANNELS // 2 + 123]
         tones = [
             CW(
                 frac_channel=frac_channel(output, channel),
@@ -828,6 +828,7 @@ class TestEngine:
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
+        default_gain: float,
         delay_samples: float,
     ) -> None:
         """Test the slope and intercept of the phase response to delay.
@@ -840,6 +841,10 @@ class TestEngine:
         delay_s = delay_samples / ADC_SAMPLE_RATE
         coeffs = ["0.0,0.0:0.0,0.0", f"{delay_s},0.0:0.0,0.0"]
         await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
+        # Increase the gain to use the full dynamic range. We can't use a higher
+        # tone_magnitude because it will lead to time-domain saturation.
+        tone_magnitude = 60
+        await engine_client.request("gain-all", output.name, 100 / tone_magnitude * default_gain)
 
         recv_layout = engine_server.recv_layout
         # Don't send the first chunk, to avoid complications with the step
@@ -851,11 +856,19 @@ class TestEngine:
 
         rng = np.random.default_rng(123)
         n_tones = 10
-        tone_channels = rng.integers(0, channels, size=n_tones)
+        if not isinstance(output, NarrowbandOutputNoDiscard):
+            tone_channels = rng.integers(0, channels, size=n_tones)
+        else:
+            bandwidth = ADC_SAMPLE_RATE * 0.5
+            usable_channels_half = int(output.usable_bandwidth / bandwidth * channels / 2)
+            min_channel = channels // 2 - usable_channels_half
+            max_channel = channels // 2 + usable_channels_half
+            # numpy <2.2 has a bug in inferring the type here.
+            tone_channels = rng.integers(min_channel, max_channel, size=n_tones, endpoint=True)  # type: ignore
         tone_channels[0] = channels // 2  # Ensure we test the intercept exactly
         tone_phases = rng.uniform(0, 2 * np.pi, size=n_tones)
         tones = [
-            CW(frac_channel=frac_channel(output, channel), magnitude=60, phase=phase)
+            CW(frac_channel=frac_channel(output, channel), magnitude=tone_magnitude, phase=phase)
             for channel, phase in zip(tone_channels, tone_phases)
         ]
         dig_data = np.sum([self._make_tone(tone_timestamps, tone, 0) for tone in tones], axis=0)
@@ -883,9 +896,9 @@ class TestEngine:
             send_present=expected_spectra // output.spectra_per_heap,
         )
 
-        # Ensure we haven't saturated
-        assert np.max(np.abs(out_data.real)) < 127
-        assert np.max(np.abs(out_data.imag)) < 127
+        # Ensure we haven't saturated, but are also exploiting the full dynamic range
+        assert 90 < np.max(np.abs(out_data.real)) < 127
+        assert 90 < np.max(np.abs(out_data.imag)) < 127
         orig_phase = np.angle(out_data[tone_channels, :, 0])
         delayed_phase = np.angle(out_data[tone_channels, :, 1])
         channel_bw = ADC_SAMPLE_RATE / 2 / output.decimation / channels
