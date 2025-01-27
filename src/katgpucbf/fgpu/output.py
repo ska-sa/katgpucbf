@@ -176,7 +176,7 @@ class NarrowbandOutputDiscard(NarrowbandOutput):
 class NarrowbandOutputNoDiscard(NarrowbandOutput):
     """Static configuration for a narrowband stream that does not discard channels."""
 
-    usable_bandwidth: float
+    pass_bandwidth: float
 
     @property
     def internal_channels(self) -> int:  # noqa: D102

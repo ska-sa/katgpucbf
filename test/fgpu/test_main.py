@@ -59,7 +59,7 @@ class TestParseNarrowband:
         assert parse_narrowband(
             "name=foo,channels=1024,centre_frequency=400e6,decimation=8,taps=8,w_cutoff=0.5,"
             "dst=239.1.2.3+1:7148,dither=none,ddc_taps=128,weight_pass=0.3,jones_per_batch=262144,"
-            "window_function=rect,usable_bandwidth=64e6"
+            "window_function=rect,pass_bandwidth=64e6"
         ) == NarrowbandOutputNoDiscard(
             name="foo",
             channels=1024,
@@ -72,7 +72,7 @@ class TestParseNarrowband:
             dither=DitherType.NONE,
             ddc_taps=128,
             weight_pass=0.3,
-            usable_bandwidth=64e6,
+            pass_bandwidth=64e6,
             jones_per_batch=262144,
         )
 

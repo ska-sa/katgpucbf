@@ -157,7 +157,9 @@ def _generate_ddc_weights_discard(taps: int, subsampling: int, weight_pass: floa
     return coeff.astype(np.float32)
 
 
-def _generate_ddc_weights_no_discard(taps: int, subsampling: int, usable: float, weight_pass: float) -> np.ndarray:
+def _generate_ddc_weights_no_discard(
+    taps: int, subsampling: int, pass_fraction: float, weight_pass: float
+) -> np.ndarray:
     """Generate filter weights for the narrowband low-pass filter.
 
     The filter response is optimised so that a certain fraction of the band
@@ -172,8 +174,9 @@ def _generate_ddc_weights_no_discard(taps: int, subsampling: int, usable: float,
         Number of taps in the filter
     subsampling
         Subsampling factor for subsampling applied after filtering
-    usable
+    pass_fraction
         Fraction of the post-subsampling bandwidth that will have flat response.
+        This must be the interval (0, 1).
     weight_pass
         Weight given to the passband in the filter design (relative to stopband
         weight of 1.0).
@@ -183,7 +186,7 @@ def _generate_ddc_weights_no_discard(taps: int, subsampling: int, usable: float,
     # the stopband.
     coeff = scipy.signal.remez(
         taps,
-        bands=[0.0, 0.5 * usable, 0.5, 0.5 * subsampling],
+        bands=[0.0, 0.5 * pass_fraction, 0.5, 0.5 * subsampling],
         desired=[1.0, 0.0],
         weight=[weight_pass, 1.0],
         fs=subsampling,
@@ -197,8 +200,8 @@ def generate_ddc_weights(output: NarrowbandOutput, adc_sample_rate: float) -> np
     """Generate filter weights for the narrowband low-pass filter."""
     if isinstance(output, NarrowbandOutputNoDiscard):
         bandwidth = adc_sample_rate * 0.5 / output.decimation
-        usable = output.usable_bandwidth / bandwidth
-        return _generate_ddc_weights_no_discard(output.ddc_taps, output.subsampling, usable, output.weight_pass)
+        pass_fraction = output.pass_bandwidth / bandwidth
+        return _generate_ddc_weights_no_discard(output.ddc_taps, output.subsampling, pass_fraction, output.weight_pass)
     else:
         return _generate_ddc_weights_discard(output.ddc_taps, output.subsampling, output.weight_pass)
 

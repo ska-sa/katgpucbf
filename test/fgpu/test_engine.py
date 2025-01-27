@@ -161,7 +161,7 @@ class TestEngine:
         args = f"{NARROWBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch},decimation={decimation}"
         if output_type == "narrowband_no_discard":
             bandwidth = 0.5 * ADC_SAMPLE_RATE / decimation
-            args += f",usable_bandwidth={0.6 * bandwidth}"
+            args += f",pass_bandwidth={0.6 * bandwidth}"
         return args
 
     @pytest.fixture
@@ -865,9 +865,9 @@ class TestEngine:
             tone_channels = rng.integers(0, channels, size=n_tones)
         else:
             bandwidth = ADC_SAMPLE_RATE * 0.5
-            usable_channels_half = int(output.usable_bandwidth / bandwidth * channels / 2)
-            min_channel = channels // 2 - usable_channels_half
-            max_channel = channels // 2 + usable_channels_half
+            pass_channels_half = int(output.pass_bandwidth / bandwidth * channels / 2)
+            min_channel = channels // 2 - pass_channels_half
+            max_channel = channels // 2 + pass_channels_half
             # numpy <2.2 has a bug in inferring the type here.
             tone_channels = rng.integers(min_channel, max_channel, size=n_tones, endpoint=True)  # type: ignore
         tone_channels[0] = channels // 2  # Ensure we test the intercept exactly

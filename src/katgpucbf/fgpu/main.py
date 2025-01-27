@@ -102,7 +102,7 @@ class _NarrowbandOutputDict(_OutputDict, total=False):
     decimation: int
     ddc_taps: int
     weight_pass: float
-    usable_bandwidth: float
+    pass_bandwidth: float
 
 
 def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
@@ -188,7 +188,7 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
 
     def field_callback(kws: _NarrowbandOutputDict, key: str, data: str) -> None:
         match key:
-            case "centre_frequency" | "weight_pass" | "usable_bandwidth":
+            case "centre_frequency" | "weight_pass" | "pass_bandwidth":
                 kws[key] = float(data)
             case "decimation" | "ddc_taps":
                 kws[key] = int(data)
@@ -204,7 +204,7 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
         # Note that using **kws at the end means these are only defaults which
         # can be overridden by the user.
         default_taps = DEFAULT_DDC_TAPS_RATIO * kws["decimation"]
-        if "usable_bandwidth" in kws:
+        if "pass_bandwidth" in kws:
             default_taps *= 2  # sampling = 2 * decimation in this case
         kws = {
             "taps": DEFAULT_TAPS,
@@ -216,10 +216,10 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
             "dither": DitherType.DEFAULT,
             **kws,
         }
-        if "usable_bandwidth" in kws:
+        if "pass_bandwidth" in kws:
             return NarrowbandOutputNoDiscard(**kws)
         else:
-            # mypy isn't smart enough to realise that "usable_bandwidth"
+            # mypy isn't smart enough to realise that "pass_bandwidth"
             # isn't going to be in **kws.
             return NarrowbandOutputDiscard(**kws)  # type: ignore[misc]
     except ValueError as exc:
