@@ -231,10 +231,6 @@ The figure below shows the modified signal path.
    \draw[->] (quantx) |- node[lbl, auto, swap, near start] {ci8} (pack);
    \draw[->] (quanty) |- node[lbl, auto, near start] {ci8} (pack);
 
-The mixer frequency is quantised to a 0.32 unsigned fixed-point representation
-of the number of cycles per post-DDC sample. The resolution
-is thus :math:`2^{-31}B` where :math:`B` is the final bandwidth.
-
 Discarding half the channels after channelisation allows for a lot of freedom
 in the design of the DDC FIR filter: the discarded channels can have an
 arbitrary response. This allows for a gradual transition from passband to
