@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TAPS = 16
 DEFAULT_W_CUTOFF = 1.0
 #: Ratio of decimation factor to tap count
-DEFAULT_DDC_TAPS_RATIO = 12
+DEFAULT_DDC_TAPS_RATIO = 24
 DEFAULT_WEIGHT_PASS = 0.005
 
 
