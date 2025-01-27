@@ -142,6 +142,10 @@ def assert_angles_allclose(a, b, **kwargs) -> None:
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
 
+    @pytest.fixture(params=["wideband", "narrowband_discard", "narrowband_no_discard"])
+    def output_type(self, request: pytest.FixtureRequest) -> str:
+        return request.param
+
     @pytest.fixture
     def wideband_args(self, channels: int, jones_per_batch: int) -> str:
         """Arguments to pass to the command-line parser for the wideband output."""
@@ -151,25 +155,26 @@ class TestEngine:
     def decimation(self, request: pytest.FixtureRequest) -> int:
         return request.param
 
-    @pytest.fixture(params=[True, False])
-    def narrowband_discard(self, request: pytest.FixtureRequest) -> bool:
-        return request.param
-
     @pytest.fixture
-    def narrowband_args(self, channels: int, jones_per_batch: int, decimation: int, narrowband_discard: bool) -> str:
+    def narrowband_args(self, channels: int, jones_per_batch: int, decimation: int, output_type: str) -> str:
         """Arguments to pass to the command-line parser for the narrowband output."""
         args = f"{NARROWBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch},decimation={decimation}"
-        if not narrowband_discard:
+        if output_type == "narrowband_no_discard":
             bandwidth = 0.5 * ADC_SAMPLE_RATE / decimation
             args += f",usable_bandwidth={0.6 * bandwidth}"
         return args
 
-    @pytest.fixture(params=["wideband", "narrowband"])
+    @pytest.fixture
     def output(
-        self, wideband_args: str, narrowband_args: str, decimation: int, request: pytest.FixtureRequest
+        self,
+        output_type: str,
+        wideband_args: str,
+        narrowband_args: str,
+        decimation: int,
+        request: pytest.FixtureRequest,
     ) -> Output:
         """The output to run tests against."""
-        if request.param == "wideband":
+        if output_type == "wideband":
             return parse_wideband(wideband_args)
         else:
             return parse_narrowband(narrowband_args)
