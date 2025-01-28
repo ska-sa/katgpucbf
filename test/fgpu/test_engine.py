@@ -17,6 +17,7 @@
 """Unit tests for Engine functions."""
 
 import logging
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -1276,3 +1277,40 @@ class TestEngine:
         # Check that it doesn't affect the first timestamp, which would suggest
         # we've messed up the test setup.
         assert np.angle(out_data[CHANNELS // 2, 0, 0]) == pytest.approx(0, abs=0.1)
+
+    async def test_incoherent_gain(
+        self,
+        mock_recv_stream: spead2.InprocQueue,
+        mock_send_stream: list[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+        output: Output,
+    ) -> None:
+        """Test that a ``?gain`` of 1 gives incoherent gain of 1."""
+        await engine_client.request("gain-all", output.name, 1.0)
+        n_samples = max(CHUNK_SAMPLES, 2 * output.spectra_samples * output.spectra_per_heap)
+        rng = np.random.default_rng(seed=1)
+        # Should be low enough to limit saturation but high enough to minimise
+        # impact of quantisation noise.
+        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        sigma = 40.0
+        dig_data = np.rint(rng.normal(scale=sigma, size=(2, n_samples)).clip(-dig_max, dig_max)).astype(int)
+        out_data, timestamps = await self._send_data(
+            mock_recv_stream,
+            mock_send_stream,
+            engine_server,
+            output,
+            dig_data,
+        )
+        if isinstance(output, NarrowbandOutputNoDiscard):
+            # Exclude the roll-off, since it will have less power
+            pass_fraction = output.pass_bandwidth / (0.5 * ADC_SAMPLE_RATE)
+            lo = math.ceil(output.channels * (1 - pass_fraction) * 0.5)
+            hi = math.floor(output.channels * (1 + pass_fraction) * 0.5)
+            out_data = out_data[lo:hi]
+        # Compute sqrt of average power
+        out_sigma = np.sqrt(np.mean(np.square(np.abs(out_data))))
+        # The tolerance is quite loose because there is lots of noise
+        # (both from the random input data and from quantisation), and we're
+        # mostly worried about major errors like a missing factor of sqrt(2).
+        assert out_sigma == pytest.approx(sigma, rel=0.01)
