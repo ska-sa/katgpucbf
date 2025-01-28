@@ -192,7 +192,7 @@ def _generate_ddc_weights_no_discard(
         fs=subsampling,
         maxiter=1000,
     )
-    coeff *= np.sqrt(subsampling)  # TODO: check if this is correct
+    coeff *= np.sqrt(subsampling)
     return coeff.astype(np.float32)
 
 
