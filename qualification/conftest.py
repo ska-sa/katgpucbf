@@ -41,6 +41,7 @@ from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
+PASS_FRACTION = 0.6  # Fraction of total narrowband bandwidth to use as pass_bandwidth
 pdf_report_data_key = pytest.StashKey[dict]()
 _CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
 
@@ -154,14 +155,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "band" in metafunc.fixturenames:
         metafunc.parametrize("band", metafunc.config.getini("bands"))
     if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
-        configs = [(int(n_channels), 1) for n_channels in metafunc.config.getini("wideband_channels")]
+        configs = [(int(n_channels), 1, False) for n_channels in metafunc.config.getini("wideband_channels")]
         if not metafunc.definition.get_closest_marker("wideband_only"):
             configs.extend(
-                (int(n_channels), int(decimation))
+                (int(n_channels), int(decimation), discard)
                 for decimation in metafunc.config.getini("narrowband_decimation")
                 for n_channels in metafunc.config.getini("narrowband_channels")
+                for discard in [True, False]
             )
-        metafunc.parametrize("n_channels, narrowband_decimation", configs)
+        metafunc.parametrize("n_channels, narrowband_decimation, narrowband_discard", configs)
 
 
 @pytest.hookimpl(trylast=True)
@@ -178,7 +180,7 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         ans: list = [rel_path.parts[0] != "antenna_channelised_voltage"]
         callspec = getattr(item, "callspec", None)
         if callspec is not None:
-            for name in ["n_antennas", "narrowband_decimation", "n_channels", "band"]:
+            for name in ["n_antennas", "narrowband_decimation", "narrowband_discard", "n_channels", "band"]:
                 ans.append((name, callspec.params.get(name)))
         return tuple(ans)
 
@@ -304,11 +306,12 @@ async def _cbf_config_and_description(
     band: str,
     int_time: float,
     narrowband_decimation: int,
+    narrowband_discard: bool,
 ) -> tuple[dict, dict]:
     # shutdown_delay is set to zero to speed up the test. We don't care
     # that Prometheus might not get to scrape the final metric updates.
     config: dict = {
-        "version": "4.1",
+        "version": "4.4",
         "config": {"shutdown_delay": 0.0},
         "inputs": {},
         "outputs": {},
@@ -366,10 +369,13 @@ async def _cbf_config_and_description(
         # narrowband heap rate is 1/2**24 (jones-per-batch=2**20 and
         # narrowband factor 8).
         centre_frequency = adc_sample_rate * (3456789 / 2**24)
-        config["outputs"]["antenna-channelised-voltage"]["narrowband"] = {
+        nb_config = {
             "decimation_factor": narrowband_decimation,
             "centre_frequency": centre_frequency,
         }
+        if not narrowband_discard:
+            nb_config["pass_bandwidth"] = adc_sample_rate * 0.5 / narrowband_decimation * PASS_FRACTION
+        config["outputs"]["antenna-channelised-voltage"]["narrowband"] = nb_config
     config["outputs"]["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
         "src_streams": ["antenna-channelised-voltage"],
@@ -396,6 +402,7 @@ async def _cbf_config_and_description(
         "band": f"{BANDS[band].long_name}",
         "integration_time": str(int_time),
         "narrowband_decimation": str(narrowband_decimation),
+        "narrowband_discard": str(narrowband_discard),
         "dsims": str(n_dsims),
         "beams": str(n_beams),
     }
@@ -405,6 +412,8 @@ async def _cbf_config_and_description(
     )
     if narrowband_decimation > 1:
         long_description += f", 1/{narrowband_decimation} narrowband"
+        if not narrowband_discard:
+            long_description += " (no channel discard)"
     logger.info("Config for CBF generation: %s.", long_description)
 
     return config, cbf_mode_config
