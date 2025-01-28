@@ -73,6 +73,17 @@ GROUP_NAMES = {
 }
 
 
+def str_to_bool(s: str) -> bool:
+    """Convert a string containing "True" or "False" to boolean."""
+    match s:
+        case "True":
+            return True
+        case "False":
+            return False
+        case _:
+            raise ValueError(f"Expected 'True' or 'False', received {s!r}")
+
+
 def cbf_sort_key(config: dict) -> tuple:
     """Generate a sort key to sort CBFs."""
     # It seems at least some of these get stringified, so ensure they are numeric
@@ -83,6 +94,8 @@ def cbf_sort_key(config: dict) -> tuple:
         int(config["beams"]),
         float(config["integration_time"]),
         int(config["dsims"]),
+        int(config["narrowband_decimation"]),
+        str_to_bool(config.get("narrowband_discard", "True")),
     )
 
 
@@ -263,6 +276,8 @@ class CBFConfiguration:
                 "integration_time": "0.5",
                 "dsims": "4",
                 "beams": "4",
+                "narrowband_decimation": "8",
+                "narrowband_discard": "True"
             }
 
         If `expand` is True, it will return a 'long description' as a sentence:
@@ -285,6 +300,9 @@ class CBFConfiguration:
         -------
         Short or long description of CBF mode.
         """
+        narrowband_decimation = int(self.mode_config["narrowband_decimation"])
+        # Originally there was only one narrowband mode, discard=True.
+        narrowband_discard = str_to_bool(self.mode_config.get("narrowband_discard", "True"))
         if expand:
             # Long description required
             parts = [
@@ -295,13 +313,17 @@ class CBFConfiguration:
                 f'{self.mode_config["integration_time"]}s integrations',
                 f'{self.mode_config["dsims"]} dsims',
             ]
-            if int(self.mode_config["narrowband_decimation"]) > 1:
-                parts.append(f'1/{self.mode_config["narrowband_decimation"]} narrowband')
+            if narrowband_decimation > 1:
+                parts.append(f"1/{narrowband_decimation} narrowband")
+                if not narrowband_discard:
+                    parts[-1] += " (no channel discard)"
             config_mode = ", ".join(parts) + "."
         else:
             antpols = int(self.mode_config["antennas"]) * 2
             chans = int(self.mode_config["channels"]) // 1000
             mode = "bc" if int(self.mode_config["beams"]) > 0 else "c"
+            if narrowband_decimation > 1 and not narrowband_discard:
+                mode += "v"
             config_mode = f'{mode}{antpols}n{self.mode_config["bandwidth"]}M{chans}k'
 
         return config_mode
