@@ -95,7 +95,7 @@ def cbf_sort_key(config: dict) -> tuple:
         float(config["integration_time"]),
         int(config["dsims"]),
         int(config["narrowband_decimation"]),
-        str_to_bool(config.get("narrowband_discard", "True")),
+        str_to_bool(config.get("narrowband_vlbi", "False")),
     )
 
 
@@ -277,7 +277,7 @@ class CBFConfiguration:
                 "dsims": "4",
                 "beams": "4",
                 "narrowband_decimation": "8",
-                "narrowband_discard": "True"
+                "narrowband_vlbi": "False"
             }
 
         If `expand` is True, it will return a 'long description' as a sentence:
@@ -301,8 +301,8 @@ class CBFConfiguration:
         Short or long description of CBF mode.
         """
         narrowband_decimation = int(self.mode_config["narrowband_decimation"])
-        # Originally there was only one narrowband mode, discard=True.
-        narrowband_discard = str_to_bool(self.mode_config.get("narrowband_discard", "True"))
+        # Older report files won't contain the narrowband_vlbi key
+        narrowband_vlbi = str_to_bool(self.mode_config.get("narrowband_vlbi", "False"))
         if expand:
             # Long description required
             parts = [
@@ -315,14 +315,14 @@ class CBFConfiguration:
             ]
             if narrowband_decimation > 1:
                 parts.append(f"1/{narrowband_decimation} narrowband")
-                if not narrowband_discard:
-                    parts[-1] += " (no channel discard)"
+                if narrowband_vlbi:
+                    parts[-1] += " (VLBI)"
             config_mode = ", ".join(parts) + "."
         else:
             antpols = int(self.mode_config["antennas"]) * 2
             chans = int(self.mode_config["channels"]) // 1000
             mode = "bc" if int(self.mode_config["beams"]) > 0 else "c"
-            if narrowband_decimation > 1 and not narrowband_discard:
+            if narrowband_decimation > 1 and narrowband_vlbi:
                 mode += "v"
             config_mode = f'{mode}{antpols}n{self.mode_config["bandwidth"]}M{chans}k'
 
