@@ -51,7 +51,7 @@ def main() -> None:  # noqa: D103
         should_delete = True
         try:
             os.environ["KATSDPSIGPROC_TUNE_DB"] = temp_db.name
-            for taps_ratio in range(8, 17):
+            for taps_ratio in range(8, 33):
                 for subsampling in [2, 4, 8, 16, 32]:
                     for input_sample_bits in range(2, 17):
                         DDCTemplate(context, taps_ratio * subsampling, subsampling, input_sample_bits)

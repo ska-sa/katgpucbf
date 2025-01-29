@@ -54,7 +54,7 @@ class DDCTemplate:
         Bits per input sample
     """
 
-    autotune_version = 2
+    autotune_version = 3
 
     def __init__(
         self,
@@ -131,7 +131,7 @@ class DDCTemplate:
                 fn.bind(**{"in": in_data, "out": out_data})
                 return tune.make_measure(queue, fn)
 
-        return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64], unroll=range(max(8, ua), 17, ua)))
+        return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64], unroll=range(ua, 17, ua)))
 
     def instantiate(self, command_queue: AbstractCommandQueue, samples: int, n_pols: int) -> "DDC":
         """Generate a :class:`DDC` object based on the template."""
