@@ -118,6 +118,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
     config.addinivalue_line("markers", "name(name): human-readable name for the test")
     config.addinivalue_line("markers", "wideband_only: do not run the test in narrowband configurations")
+    config.addinivalue_line("markers", "no_vlbi: do not run the test in VLBI narrowband configurations")
     config.addinivalue_line(
         "markers", "no_capture_start([stream, ...]): do not issue capture-start (on all streams if none specified)"
     )
@@ -158,11 +159,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
         configs = [(int(n_channels), 1, False) for n_channels in metafunc.config.getini("wideband_channels")]
         if not metafunc.definition.get_closest_marker("wideband_only"):
+            if metafunc.definition.get_closest_marker("no_vlbi"):
+                vlbi_params = [False]
+            else:
+                vlbi_params = [False, True]
             configs.extend(
                 (int(n_channels), int(decimation), vlbi)
                 for decimation in metafunc.config.getini("narrowband_decimation")
                 for n_channels in metafunc.config.getini("narrowband_channels")
-                for vlbi in [False, True]
+                for vlbi in vlbi_params
             )
         metafunc.parametrize("n_channels, narrowband_decimation, narrowband_vlbi", configs)
 

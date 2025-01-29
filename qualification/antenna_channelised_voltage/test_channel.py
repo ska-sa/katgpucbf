@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, 2024, National Research Foundation (SARAO)
+# Copyright (c) 2022, 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -56,6 +56,7 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> list[floa
     return sfdr_measurements
 
 
+@pytest.mark.no_vlbi
 @pytest.mark.name("Channelisation and SFDR")
 @pytest.mark.requirements("CBF-REQ-0126")
 async def test_channelisation_and_sfdr(
