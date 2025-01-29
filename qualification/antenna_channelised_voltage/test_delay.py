@@ -22,10 +22,12 @@ from ast import literal_eval
 from collections.abc import Callable, Sequence
 from typing import cast
 
+import matplotlib.colors
 import numpy as np
 import pytest
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.typing import ColorType
 from pytest_check import check
 
 from katgpucbf import BYTE_BITS, COMPLEX, N_POLS
@@ -263,10 +265,20 @@ async def test_delay_sensors(
             assert value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value"
 
 
+def _faded_color(color: ColorType) -> ColorType:
+    """Get a washed-out variant of a color.
+
+    This is done by simply overriding the alpha channel, and hence depends on
+    the original having full opacity.
+    """
+    return matplotlib.colors.to_rgba(color, alpha=0.3)
+
+
 def check_phases(
     pdf_report: Reporter,
     actual: np.ndarray,
     expected: np.ndarray,
+    pass_channels: slice,
     caption: str,
     tolerance_deg: float = 1,
 ) -> None:
@@ -275,12 +287,10 @@ def check_phases(
     The error in phase is also plotted.
     """
     n_chans = len(actual)
-    # Exclude DC component, because it always has zero phase
-    actual = actual[1:]
-    expected = expected[1:]
     delta = wrap_angle(actual - expected)
-    max_error = np.max(np.abs(delta))
-    rms_error = np.sqrt(np.mean(np.square(delta)))
+    pass_delta = delta[pass_channels]
+    max_error = np.max(np.abs(pass_delta))
+    rms_error = np.sqrt(np.mean(np.square(pass_delta)))
     pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f}°.")
     pdf_report.detail(f"RMS error over channels is {np.rad2deg(rms_error):.5f}°.")
     with check:
@@ -289,21 +299,31 @@ def check_phases(
     fig = Figure(tight_layout=True)
     # matplotlib's typing doesn't specialise for Nx1 case
     ax, ax_err = cast(Sequence[Axes], fig.subplots(2))
-    x = range(1, n_chans)
+    x = range(0, n_chans)
 
     ax.set_title(f"Phase with {caption}")
     ax.set_xlabel("Channel")
     ax.set_ylabel("Phase (degrees)")
     ax.xaxis.set_major_locator(POTLocator())
-    ax.plot(x, np.rad2deg(wrap_angle(actual)), label="Actual")
-    ax.plot(x, np.rad2deg(wrap_angle(expected)), label="Expected")
+    actual_artist = ax.plot(x[pass_channels], np.rad2deg(wrap_angle(actual[pass_channels])), label="Actual")[0]
+    expected_artist = ax.plot(x[pass_channels], np.rad2deg(wrap_angle(expected[pass_channels])), label="Expected")[0]
     ax.legend()
 
     ax_err.set_title(f"Phase error with {caption}")
     ax_err.set_xlabel("Channel")
     ax_err.set_ylabel("Error (degrees)")
     ax_err.xaxis.set_major_locator(POTLocator())
-    ax_err.plot(x, np.rad2deg(delta))
+    delta_artist = ax_err.plot(x[pass_channels], np.rad2deg(delta[pass_channels]))[0]
+
+    # Plot what happens outside the passband, but freeze the y limits
+    # so that large errors don't shrink the useful information.
+    ax.set_ylim(ax.get_ylim())
+    ax_err.set_ylim(ax_err.get_ylim())
+    for slc in [np.s_[0 : pass_channels.start], np.s_[pass_channels.stop : n_chans]]:
+        if slc.start < slc.stop:
+            ax.plot(x[slc], np.rad2deg(wrap_angle(actual[slc])), color=_faded_color(actual_artist.get_color()))
+            ax.plot(x[slc], np.rad2deg(wrap_angle(expected[slc])), color=_faded_color(expected_artist.get_color()))
+            ax_err.plot(x[slc], np.rad2deg(delta[slc]), color=_faded_color(delta_artist.get_color()))
 
     pdf_report.figure(fig)
 
@@ -323,6 +343,7 @@ async def _test_delay_phase_fixed(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
     delay_phases: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
     report_residual: bool,
@@ -334,7 +355,7 @@ async def _test_delay_phase_fixed(
 
     Parameters
     ----------
-    cbf, receive_baseline_correlation_products, pdf_report
+    cbf, receive_baseline_correlation_products, pdf_report, pass_channels
         Fixtures
     delay_phases
         Pairs of (delay, phase) to test
@@ -393,13 +414,14 @@ async def _test_delay_phase_fixed(
         # The delay in the dsim will affect the phase of the centre frequency,
         # which the delay compensation won't correct.
         expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.center_freq
-        check_phases(pdf_report, actual[:, bl_idx], expected, caption)
+        check_phases(pdf_report, actual[:, bl_idx], expected, pass_channels, caption)
 
 
 async def _test_delay_phase_rate(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
     rates: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
 ) -> None:
@@ -410,7 +432,7 @@ async def _test_delay_phase_rate(
 
     Parameters
     ----------
-    cbf, receive_baseline_correlation_products, pdf_report
+    cbf, receive_baseline_correlation_products, pdf_report, pass_channels
         Fixtures
     rates
         Pairs of (delay_rate, phase_rate) to test
@@ -461,7 +483,7 @@ async def _test_delay_phase_rate(
         expected = delay_phase(receiver, delay_rate * elapsed) + phase_rate * elapsed_s
         # Allow 2° rather than 1° because we're taking the difference between
         # two phases which each have a 1° tolerance.
-        check_phases(pdf_report, actual, expected, caption, tolerance_deg=2)
+        check_phases(pdf_report, actual, expected, pass_channels, caption, tolerance_deg=2)
 
 
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
@@ -469,6 +491,7 @@ async def test_delay(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test performance of delay compensation with a fixed delay.
 
@@ -486,6 +509,7 @@ async def test_delay(
         cbf,
         receive_baseline_correlation_products,
         pdf_report,
+        pass_channels,
         [(delay, 0.0) for delay in delays],
         lambda delay, phase: f"delay {delay * 1e12:.2f}ps",
         True,
@@ -497,6 +521,7 @@ async def test_delay_rate(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test performance of delay compensation with a delay rate.
 
@@ -513,6 +538,7 @@ async def test_delay_rate(
         cbf,
         receive_baseline_correlation_products,
         pdf_report,
+        pass_channels,
         [(delay_rate, 0.0) for delay_rate in rates],
         lambda delay_rate, phase_rate: f"delay rate {delay_rate}",
     )
@@ -523,6 +549,7 @@ async def test_delay_phase(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test performance of delay tracking with a fixed phase.
 
@@ -538,6 +565,7 @@ async def test_delay_phase(
         cbf,
         receive_baseline_correlation_products,
         pdf_report,
+        pass_channels,
         [(0.0, phase) for phase in phases],
         lambda delay, phase: f"phase {phase:.4f} rad ({np.rad2deg(phase):.2f}°)",
         False,
@@ -550,6 +578,7 @@ async def test_phase_rate(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test performance of delay tracking with a phase rate.
 
@@ -566,6 +595,7 @@ async def test_phase_rate(
         cbf,
         receive_baseline_correlation_products,
         pdf_report,
+        pass_channels,
         [(0.0, phase_rate) for phase_rate in rates],
         lambda delay_rate, phase_rate: f"phase rate {phase_rate}",
     )

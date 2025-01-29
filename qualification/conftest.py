@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -21,6 +21,7 @@ import asyncio
 import copy
 import inspect
 import logging
+import math
 import os
 import subprocess
 import time
@@ -512,6 +513,23 @@ async def cbf(
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] in _CAPTURE_TYPES:
             await pcc.request("capture-stop", name)
+
+
+@pytest.fixture
+def pass_channels(n_channels: int, narrowband_vlbi: bool) -> slice:
+    """Range of channels which form the passband.
+
+    Channels outside of this range will be attenuated by the narrowband
+    DDC filter. For modes other than VLBI, this will be the full channel range.
+    """
+    if narrowband_vlbi:
+        lo = math.ceil(n_channels * 0.5 * (1.0 - PASS_FRACTION))
+        # + 1 because this is an exclusive range
+        hi = math.floor(n_channels * 0.5 * (1.0 + PASS_FRACTION)) + 1
+    else:
+        lo = 0
+        hi = n_channels
+    return slice(lo, hi)
 
 
 class CoreAllocator:
