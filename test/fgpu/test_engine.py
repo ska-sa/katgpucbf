@@ -1306,7 +1306,7 @@ class TestEngine:
             # Exclude the roll-off, since it will have less power
             pass_fraction = output.pass_bandwidth / (0.5 * ADC_SAMPLE_RATE)
             lo = math.ceil(output.channels * (1 - pass_fraction) * 0.5)
-            hi = math.floor(output.channels * (1 + pass_fraction) * 0.5)
+            hi = math.floor(output.channels * (1 + pass_fraction) * 0.5) + 1
             out_data = out_data[lo:hi]
         # Compute sqrt of average power
         out_sigma = np.sqrt(np.mean(np.square(np.abs(out_data))))
