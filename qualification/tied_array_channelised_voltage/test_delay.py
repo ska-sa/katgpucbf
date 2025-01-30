@@ -17,12 +17,9 @@
 """Delay test."""
 
 import time
-from collections.abc import Sequence
-from typing import cast
 
 import numpy as np
 import pytest
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from pytest_check import check
 
@@ -30,7 +27,7 @@ from katgpucbf.fgpu.delay import wrap_angle
 
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
-from ..reporter import POTLocator, Reporter
+from ..reporter import POTLocator, Reporter, plot_focus
 
 
 @pytest.mark.requirements("CBF-REQ-0220")
@@ -127,6 +124,7 @@ async def test_delay(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test beam steering delay application.
 
@@ -197,11 +195,10 @@ async def test_delay(
 
         corr_phase = np.angle(corr)
         fig = Figure(tight_layout=True)
-        # matplotlib's typing doesn't specialise for Nx1 case
-        ax, ax_err = cast(Sequence[Axes], fig.subplots(2))
+        ax, ax_err = fig.subplots(2)
         x = range(receiver.n_chans)
         delta = wrap_angle(corr_phase - expected_phase)
-        max_error_deg = np.max(np.abs(np.rad2deg(delta)))
+        max_error_deg = np.max(np.abs(np.rad2deg(delta[pass_channels])))
         pdf_report.detail(f"Maximum phase error is {max_error_deg:.3f}°.")
         with check:
             assert max_error_deg < 1.0
@@ -210,15 +207,15 @@ async def test_delay(
         ax.set_xlabel("Channel")
         ax.set_ylabel("Phase (degrees)")
         ax.xaxis.set_major_locator(POTLocator())
-        ax.plot(x, np.rad2deg(corr_phase), label="Actual")
-        ax.plot(x, np.rad2deg(wrap_angle(expected_phase)), label="Expected")
+        plot_focus(ax, pass_channels, x, np.rad2deg(corr_phase), label="Actual")
+        plot_focus(ax, pass_channels, x, np.rad2deg(wrap_angle(expected_phase)), label="Expected")
         ax.legend()
 
         ax_err.set_title(f"Phase error with delay {delay}:{phase}")
         ax_err.set_xlabel("Channel")
         ax_err.set_ylabel("Error (degrees)")
         ax_err.xaxis.set_major_locator(POTLocator())
-        ax_err.plot(x, np.rad2deg(delta))
+        plot_focus(ax_err, pass_channels, x, np.rad2deg(delta))
 
         pdf_report.figure(fig)
 

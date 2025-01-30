@@ -22,12 +22,10 @@ from ast import literal_eval
 from collections.abc import Callable, Sequence
 from typing import cast
 
-import matplotlib.colors
 import numpy as np
 import pytest
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.typing import ColorType
 from pytest_check import check
 
 from katgpucbf import BYTE_BITS, COMPLEX, N_POLS
@@ -35,7 +33,7 @@ from katgpucbf.fgpu.delay import wrap_angle
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
-from ..reporter import POTLocator, Reporter
+from ..reporter import POTLocator, Reporter, plot_focus
 
 MAX_DELAY = 79.53e-6  # seconds
 MAX_DELAY_RATE = 2.56e-9
@@ -265,15 +263,6 @@ async def test_delay_sensors(
             assert value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value"
 
 
-def _faded_color(color: ColorType) -> ColorType:
-    """Get a washed-out variant of a color.
-
-    This is done by simply overriding the alpha channel, and hence depends on
-    the original having full opacity.
-    """
-    return matplotlib.colors.to_rgba(color, alpha=0.3)
-
-
 def check_phases(
     pdf_report: Reporter,
     actual: np.ndarray,
@@ -305,25 +294,15 @@ def check_phases(
     ax.set_xlabel("Channel")
     ax.set_ylabel("Phase (degrees)")
     ax.xaxis.set_major_locator(POTLocator())
-    actual_artist = ax.plot(x[pass_channels], np.rad2deg(wrap_angle(actual[pass_channels])), label="Actual")[0]
-    expected_artist = ax.plot(x[pass_channels], np.rad2deg(wrap_angle(expected[pass_channels])), label="Expected")[0]
+    plot_focus(ax, pass_channels, x, np.rad2deg(wrap_angle(actual)), label="Actual")
+    plot_focus(ax, pass_channels, x, np.rad2deg(wrap_angle(expected)), label="Expected")
     ax.legend()
 
     ax_err.set_title(f"Phase error with {caption}")
     ax_err.set_xlabel("Channel")
     ax_err.set_ylabel("Error (degrees)")
     ax_err.xaxis.set_major_locator(POTLocator())
-    delta_artist = ax_err.plot(x[pass_channels], np.rad2deg(delta[pass_channels]))[0]
-
-    # Plot what happens outside the passband, but freeze the y limits
-    # so that large errors don't shrink the useful information.
-    ax.set_ylim(ax.get_ylim())
-    ax_err.set_ylim(ax_err.get_ylim())
-    for slc in [np.s_[0 : pass_channels.start], np.s_[pass_channels.stop : n_chans]]:
-        if slc.start < slc.stop:
-            ax.plot(x[slc], np.rad2deg(wrap_angle(actual[slc])), color=_faded_color(actual_artist.get_color()))
-            ax.plot(x[slc], np.rad2deg(wrap_angle(expected[slc])), color=_faded_color(expected_artist.get_color()))
-            ax_err.plot(x[slc], np.rad2deg(delta[slc]), color=_faded_color(delta_artist.get_color()))
+    plot_focus(ax_err, pass_channels, x, np.rad2deg(delta))
 
     pdf_report.figure(fig)
 
