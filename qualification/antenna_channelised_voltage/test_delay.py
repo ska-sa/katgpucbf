@@ -605,6 +605,7 @@ async def test_group_delay(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test the ``filter-group-delay`` sensor.
 
@@ -642,9 +643,14 @@ async def test_group_delay(
     pdf_report.step("Choose channels.")
     channel_step = 8  # Gap to minimise leakage between tones
     freq_step = receiver.bandwidth / receiver.n_chans * channel_step
-    n_channels = receiver.n_chans // channel_step
-    channels = np.arange(channel_step // 2, channel_step * n_channels, channel_step, dtype=int)
-    channels_slice = slice(channel_step // 2, channel_step * n_channels, channel_step)
+    # Pick channels to test, keeping some distance from the edges
+    channels_slice = slice(
+        pass_channels.start + channel_step // 2,
+        pass_channels.stop - channel_step // 2,
+        channel_step,
+    )
+    channels = np.arange(receiver.n_chans, dtype=int)[channels_slice]
+    n_channels = len(channels)
     cfreqs = receiver.channel_frequency(channels)
     pdf_report.detail(f"Using {n_channels} channels separated by {channel_step} channels ({freq_step} Hz).")
 
