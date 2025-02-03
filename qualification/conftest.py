@@ -318,7 +318,7 @@ async def _cbf_config_and_description(
     # shutdown_delay is set to zero to speed up the test. We don't care
     # that Prometheus might not get to scrape the final metric updates.
     config: dict = {
-        "version": "4.4",
+        "version": "4.5",
         "config": {"shutdown_delay": 0.0},
         "inputs": {},
         "outputs": {},
@@ -381,12 +381,7 @@ async def _cbf_config_and_description(
             "centre_frequency": centre_frequency,
         }
         if narrowband_vlbi:
-            config["outputs"]["antenna-channelised-voltage"] |= {
-                "taps": 1,
-                "w_cutoff": 0.0,
-                "window_function": "rect",
-            }
-            nb_config |= {
+            nb_config["vlbi"] = {
                 "pass_bandwidth": adc_sample_rate * 0.5 / narrowband_decimation * PASS_FRACTION,
             }
         config["outputs"]["antenna-channelised-voltage"]["narrowband"] = nb_config
