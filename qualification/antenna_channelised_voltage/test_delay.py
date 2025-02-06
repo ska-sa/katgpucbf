@@ -585,6 +585,7 @@ async def test_group_delay(
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    narrowband_vlbi: bool,
 ) -> None:
     r"""Test the ``filter-group-delay`` sensor.
 
@@ -620,21 +621,31 @@ async def test_group_delay(
     client = cbf.product_controller_client
 
     pdf_report.step("Choose channels.")
-    channel_step = 8  # Gap to minimise leakage between tones
+    # In VLBI mode we don't have a PFB, and there is too much leakage
+    # between channels to be able to multiplex multiple channels onto
+    # one signal.
+    n_dsims = len(cbf.dsim_clients)
+    if narrowband_vlbi:
+        channel_step = 1
+        channels_slice = slice(
+            pass_channels.start,
+            min(pass_channels.stop, pass_channels.start + n_dsims),
+        )
+    else:
+        # Pick channels to test, keeping some distance from the edges.
+        channel_step = 8  # Gap to minimise leakage between tones
+        channels_slice = slice(
+            pass_channels.start + channel_step // 2,
+            pass_channels.stop - channel_step // 2,
+            channel_step,
+        )
     freq_step = receiver.bandwidth / receiver.n_chans * channel_step
-    # Pick channels to test, keeping some distance from the edges
-    channels_slice = slice(
-        pass_channels.start + channel_step // 2,
-        pass_channels.stop - channel_step // 2,
-        channel_step,
-    )
     channels = np.arange(receiver.n_chans, dtype=int)[channels_slice]
     n_channels = len(channels)
     cfreqs = receiver.channel_frequency(channels)
     pdf_report.detail(f"Using {n_channels} channels separated by {channel_step} channels ({freq_step} Hz).")
 
     # Distribute the channels amongst the dsims (round-robin)
-    n_dsims = len(cbf.dsim_clients)
     cfreqs_by_dsim: list[list[float]] = [[] for _ in range(n_dsims)]
     for i, freq in enumerate(cfreqs):
         cfreqs_by_dsim[i % n_dsims].append(freq)
@@ -662,8 +673,14 @@ async def test_group_delay(
                 tg.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *g))
     pdf_report.detail(f"Set gain to {gain} on chosen antenna/channel pairs.")
 
-    # Collect about 2^27 samples, to improve SNR.
-    n_spectra = 2**27 // n_channels
+    # Collect about 2^27 samples, to improve SNR. However, for VLBI mode this
+    # would take far too long because we're only able to test one channel per
+    # antenna. It's a trade-off between test time and the strength of the
+    # test.
+    if narrowband_vlbi:
+        n_spectra = 2**23 // n_channels
+    else:
+        n_spectra = 2**27 // n_channels
     n_chunks = math.ceil(n_spectra / receiver.n_spectra_per_heap)
     n_spectra = n_chunks * receiver.n_spectra_per_heap
     chunk_timestamp_step = receiver.n_spectra_per_heap * receiver.n_samples_between_spectra
