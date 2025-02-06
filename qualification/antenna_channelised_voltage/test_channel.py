@@ -164,7 +164,7 @@ async def test_channelisation_and_sfdr(
     zoom_plot_range = 3
 
     # zoom_plot_range affects the plot range when zooming in on the channel of interest. If the plot_channel
-    # is on the boundarty of the spectrum an out of bounds could occur when plotting. Assert should prevent
+    # is on the boundary of the spectrum an out of bounds could occur when plotting. Assert should prevent
     # this by forcing a failure.
     assert plot_channel >= zoom_plot_range and plot_channel <= receiver.n_chans - zoom_plot_range - 1
 

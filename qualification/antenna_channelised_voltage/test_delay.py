@@ -19,12 +19,10 @@
 import asyncio
 import math
 from ast import literal_eval
-from collections.abc import Callable, Sequence
-from typing import cast
+from collections.abc import Callable
 
 import numpy as np
 import pytest
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from pytest_check import check
 
@@ -286,8 +284,7 @@ def check_phases(
         assert np.rad2deg(max_error) <= tolerance_deg, f"Maximum error is more than {tolerance_deg}°"
 
     fig = Figure(tight_layout=True)
-    # matplotlib's typing doesn't specialise for Nx1 case
-    ax, ax_err = cast(Sequence[Axes], fig.subplots(2))
+    ax, ax_err = fig.subplots(2)
     x = range(0, n_chans)
 
     ax.set_title(f"Phase with {caption}")
