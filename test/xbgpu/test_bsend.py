@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023-2024, National Research Foundation (SARAO)
+# Copyright (c) 2023-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -242,6 +242,8 @@ class TestBSend:
         outputs, time_converter, sensors
             Fixtures.
         """
+        for output in outputs:
+            assert sensors[f"{output.name}.tx.next-timestamp"].value == 0
         # The test still needs to have some idea of "which engine" this is in a
         # sequence of B-engines. The value is chosen arbitrarily, but to ensure
         # it satisfies all values of `n_engines`, which can be as small as 4.
@@ -298,3 +300,6 @@ class TestBSend:
             heap_timestamp_step,
             first_heap,
         )
+
+        for output in outputs:
+            assert sensors[f"{output.name}.tx.next-timestamp"].value == SEND_HEAPS_PER_SUBSTREAM * heap_timestamp_step
