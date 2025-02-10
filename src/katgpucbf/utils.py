@@ -188,12 +188,12 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[aiokatcp.DeviceStatus]):
             description=description,
         )
 
-    def update_aggregate(
+    def update_aggregate(  # noqa: D102
         self,
         updated_sensor: aiokatcp.Sensor[_T] | None,
         reading: aiokatcp.Reading[_T] | None,
         old_reading: aiokatcp.Reading[_T] | None,
-    ) -> aiokatcp.Reading[aiokatcp.DeviceStatus] | None:  # noqa: D102
+    ) -> aiokatcp.Reading[aiokatcp.DeviceStatus] | None:
         if reading is not None and old_reading is not None and reading.status == old_reading.status:
             return None  # Sensor didn't change state, so no change in overall device status
         return super().update_aggregate(updated_sensor, reading, old_reading)

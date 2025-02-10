@@ -15,7 +15,7 @@
 ################################################################################
 
 """
-This module defines the objects that implement an entire GPU XB-Engine pipeline.
+Define the objects that implement an entire GPU XB-Engine pipeline.
 
 The XBEngine comprises multiple Pipeline objects that facilitate output data
 products. Additionally, several subclasses of :class:`.QueueItem` are defined

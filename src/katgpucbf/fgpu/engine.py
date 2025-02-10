@@ -442,7 +442,7 @@ def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> n
         try:
             gains = np.array([complex(v) for v in values], dtype=np.complex64)
         except ValueError:
-            raise aiokatcp.FailReply("invalid formatting of complex number")
+            raise aiokatcp.FailReply("invalid formatting of complex number") from None
     if not np.all(np.isfinite(gains)):
         raise aiokatcp.FailReply("non-finite gains are not permitted")
     if len(gains) == 1:
