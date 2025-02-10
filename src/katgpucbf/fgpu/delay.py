@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -27,11 +27,8 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Callable, Sequence
-from typing import Generic, TypeVar
 
 import numpy as np
-
-_DM = TypeVar("_DM", bound="AbstractDelayModel")
 
 
 def wrap_angle(angle):
@@ -277,13 +274,13 @@ class MultiDelayModel(AbstractDelayModel):
             self.callback_func(self._models)
 
 
-class AlignedDelayModel(AbstractDelayModel, Generic[_DM]):
+class AlignedDelayModel[DM: AbstractDelayModel](AbstractDelayModel):
     """Wrap another delay model and enforce an alignment on original timestamp.
 
     Note that this can cause residual delays to be larger than 1.
     """
 
-    def __init__(self, base: _DM, align: int) -> None:
+    def __init__(self, base: DM, align: int) -> None:
         self.base = base
         self.align = align
 

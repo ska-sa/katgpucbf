@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,7 +23,7 @@ import re
 import traceback
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypedDict, TypeVar
+from typing import TypedDict
 from uuid import UUID, uuid4
 
 import aiokatcp
@@ -34,7 +34,6 @@ from katgpucbf import DIG_SAMPLE_BITS
 from .host_config import HostConfigQuerier
 from .reporter import Reporter, custom_report_log
 
-_T = TypeVar("_T")
 logger = logging.getLogger(__name__)
 DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
 
@@ -237,7 +236,7 @@ async def _report_cbf_config(
     cbf: CBFRemoteControl,
     master_controller_client: aiokatcp.Client,
 ) -> None:
-    async def get_task_details_multi(suffix: str, type: type[_T]) -> dict[str, dict[tuple[str, ...], _T]]:
+    async def get_task_details_multi[T](suffix: str, type: type[T]) -> dict[str, dict[tuple[str, ...], T]]:
         """Get values of a task-specific sensor for all tasks.
 
         The `suffix` is a regular expression, and may contain anonymous capture
@@ -247,7 +246,7 @@ async def _report_cbf_config(
         regex = rf"^(.*)\.{suffix}$"
         r = re.compile(regex)
         _, informs = await cbf.product_controller_client.request("sensor-value", f"/{regex}/")
-        result: dict[str, dict[tuple[str, ...], _T]] = {}
+        result: dict[str, dict[tuple[str, ...], T]] = {}
         for inform in informs:
             if inform.arguments[3] == b"nominal":
                 m = r.match(aiokatcp.decode(str, inform.arguments[2]))
@@ -258,7 +257,7 @@ async def _report_cbf_config(
                 result.setdefault(task, {})[key] = aiokatcp.decode(type, inform.arguments[4])
         return result
 
-    async def get_task_details(suffix: str, type: type[_T]) -> dict[str, _T]:
+    async def get_task_details[T](suffix: str, type: type[T]) -> dict[str, T]:
         """Get value of a task-specific sensor for all tasks."""
         raw = await get_task_details_multi(re.escape(suffix), type)
         return {key: value[()] for key, value in raw.items()}

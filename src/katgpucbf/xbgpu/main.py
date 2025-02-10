@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -35,7 +35,7 @@ import gc
 import logging
 import os
 from collections.abc import Callable, Sequence
-from typing import TypedDict, TypeVar
+from typing import TypedDict
 
 import katsdpsigproc.accel
 import prometheus_async
@@ -62,7 +62,6 @@ from ..utils import DitherType, add_gc_stats, add_signal_handlers, parse_dither,
 from .correlation import device_filter
 from .output import BOutput, XOutput
 
-_OD = TypeVar("_OD", bound="_OutputDict")
 logger = logging.getLogger(__name__)
 
 
@@ -97,7 +96,7 @@ class _XOutputDict(_OutputDict, total=False):
     heap_accumulation_threshold: int
 
 
-def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
+def _parse_stream[OD: _OutputDict](value: str, kws: OD, field_callback: Callable[[OD, str, str], None]) -> None:
     """Parse a correlation-product or beam stream description.
 
     This populates `kws` (which should initially be empty) from key=value pairs
