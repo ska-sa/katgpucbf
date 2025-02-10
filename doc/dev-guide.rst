@@ -70,16 +70,13 @@ to monitor Python development.
 - ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
   be run before committing to the repo.
 - ``pyproject.toml`` dictates the configuration of utilities such as
-  :external+black:doc:`black <getting_started>` and `isort`_.
-- ``.flake8`` for :external+flake8:doc:`flake8 <user/index>`, a tool for enforcing
-  :pep:`8`-based style guide for Python.
-- ``.pydocstyle.ini`` for :external+pydocstyle:doc:`pydocstyle <usage>`, a tool
-  for enforcing :pep:`257`-based docstring style guides for Python.
+  :external+black:doc:`black <getting_started>`, `isort`_ and `ruff_`.
 - ``mypy.ini`` file for :external+mypy:doc:`mypy <getting_started>`, a static type checker
   (or lint-like tool) for type annotations in the Python code - according to
   :pep:`484` and :pep:`526` notation.
 
 .. _isort: https://pycqa.github.io/isort/
+.. _ruff: https://docs.astral.sh/ruff/
 
 Installation Prerequisites
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
