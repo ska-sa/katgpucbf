@@ -779,6 +779,18 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+        sensors.add(
+            aiokatcp.Sensor(
+                int,
+                f"{self.output.name}.tx.next-timestamp",
+                "Timestamp (in samples) that has not yet been sent. This "
+                "is strictly greater than any timestamp of the previous "
+                "capture and less than or equal to any timestamp of the "
+                "following capture.",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
 
     async def _flush_accumulation(self, out_item: XOutQueueItem, next_accum: int) -> XOutQueueItem:
         """Emit the current `out_item` and prepare a new one."""
@@ -973,12 +985,16 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                     incomplete_accum_counter.labels(self.output.name).inc(1)
 
                 heap.timestamp = item.timestamp
+                end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
+                self.engine.sensors[f"{self.output.name}.tx.next-timestamp"].set_value(
+                    end_adc_timestamp,
+                    timestamp=self.engine.time_converter.adc_to_unix(item.timestamp),
+                )
                 if self.send_stream.send_enabled:
                     # Convert timestamp for the *end* of the heap (not the start)
                     # to a UNIX time for the sensor update. NB: this should be done
                     # *before* send_heap, because that gives away ownership of the
                     # heap.
-                    end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
                     end_timestamp = self.engine.time_converter.adc_to_unix(end_adc_timestamp)
                     clip_cnt_sensor = self.engine.sensors[f"{self.output.name}.xeng-clip-cnt"]
                     clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
