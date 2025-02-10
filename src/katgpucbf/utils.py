@@ -155,7 +155,7 @@ def comma_split(
         times.
     """
 
-    def func(value: str) -> list[_T]:  # noqa: D102
+    def func(value: str) -> list[_T]:
         parts = value.split(",")
         if parts == [""]:
             parts = []

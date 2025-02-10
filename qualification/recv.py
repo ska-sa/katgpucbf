@@ -117,7 +117,7 @@ class XBReceiver:
         all_timestamps: Literal[False] = False,
         max_delay: int = DEFAULT_MAX_DELAY,
         time_limit: float | None = None,
-    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk], None]:  # noqa: D102
+    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk], None]:
         yield ...  # type: ignore
 
     @overload
@@ -128,7 +128,7 @@ class XBReceiver:
         all_timestamps: bool = False,
         max_delay: int = DEFAULT_MAX_DELAY,
         time_limit: float | None = None,
-    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk | None], None]:  # noqa: D102
+    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk | None], None]:
         yield ...  # type: ignore
 
     async def complete_chunks(

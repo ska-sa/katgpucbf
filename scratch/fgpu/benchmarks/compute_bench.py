@@ -30,7 +30,7 @@ from katgpucbf.fgpu.output import WindowFunction
 from katgpucbf.utils import DitherType, parse_dither
 
 
-def main():  # noqa: C901
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--taps", type=int, default=16)
     parser.add_argument("--recv-chunk-samples", type=int, default=32 * 1024 * 1024)

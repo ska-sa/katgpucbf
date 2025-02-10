@@ -253,7 +253,7 @@ class InQueueItem(QueueItem):
         self.n_samples = 0
 
     @property
-    def capacity(self) -> int:  # noqa: D401
+    def capacity(self) -> int:
         """Memory capacity in samples.
 
         The amount of space allocated to each polarisation stored in
@@ -263,7 +263,7 @@ class InQueueItem(QueueItem):
         return self.samples.shape[1] * BYTE_BITS // self.dig_sample_bits
 
     @property
-    def end_timestamp(self) -> int:  # noqa: D401
+    def end_timestamp(self) -> int:
         """Past-the-end (i.e. latest plus 1) timestamp of the item."""
         return self.timestamp + self.n_samples
 
@@ -369,7 +369,7 @@ class OutQueueItem(QueueItem):
             self.dig_total_power.zero(command_queue)
 
     @property
-    def end_timestamp(self) -> int:  # noqa: D401
+    def end_timestamp(self) -> int:
         """Past-the-end timestamp of the item.
 
         Following Python's normal exclusive-end convention.
@@ -377,24 +377,24 @@ class OutQueueItem(QueueItem):
         return self.timestamp + self.n_spectra * self.spectra_samples
 
     @property
-    def channels(self) -> int:  # noqa: D401
+    def channels(self) -> int:
         """Number of channels stored in the item."""
         return self.spectra.shape[1]
 
     @property
-    def capacity(self) -> int:  # noqa: D401
+    def capacity(self) -> int:
         """Number of spectra stored in memory for each polarisation."""
         # PostProc's __init__ method gives this as (spectra // spectra_per_heap)*(spectra_per_heap), so
         # basically, the number of spectra.
         return self.spectra.shape[0] * self.spectra.shape[2]
 
     @property
-    def next_timestamp(self) -> int:  # noqa: D401
+    def next_timestamp(self) -> int:
         """Timestamp of the next :class:`OutQueueItem` after this one."""
         return self.timestamp + self.capacity * self.spectra_samples
 
     @property
-    def pols(self) -> int:  # noqa: D401
+    def pols(self) -> int:
         """Number of polarisations."""
         return self.spectra.shape[3]
 
@@ -649,7 +649,7 @@ class Pipeline:
         self._send_streams = self.engine.make_send_streams(self.output, n_data_heaps, send_chunks)
 
     @property
-    def spectra(self) -> int:  # noqa: D401
+    def spectra(self) -> int:
         """Number of spectra per output chunk."""
         return self.engine.chunk_jones // self.output.channels
 

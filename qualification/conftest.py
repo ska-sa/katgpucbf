@@ -199,7 +199,7 @@ def n_dsims() -> int:
 
 @pytest.fixture
 def int_time() -> float:
-    """Integration time in seconds."""  # noqa: D104
+    """Integration time in seconds."""
     return 0.5
 
 
