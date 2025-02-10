@@ -21,6 +21,7 @@ import enum
 import gc
 import ipaddress
 import logging
+import math
 import signal
 import time
 import weakref
@@ -167,6 +168,33 @@ def comma_split(
         return [base_type(part) for part in parts]
 
     return func
+
+
+# We have to use *args/**kwargs because the default for status_func is a
+# private function in aiokatcp and hence cannot be named.
+def rate_limited_sensor(
+    sensor_type: type[_T],
+    name: str,
+    description: str = "",
+    units: str = "",
+    default: _T | None = None,
+    initial_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.UNKNOWN,
+    *args,
+    **kwargs,
+) -> aiokatcp.Sensor[_T]:
+    """Create a sensor whose auto strategy has a minimum update interval of MIN_SENSOR_UPDATE_PERIOD."""
+    return aiokatcp.Sensor(
+        sensor_type,
+        name,
+        description,
+        units,
+        default,
+        initial_status,
+        *args,
+        auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
+        auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
+        **kwargs,
+    )
 
 
 class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[aiokatcp.DeviceStatus]):

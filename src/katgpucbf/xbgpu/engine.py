@@ -44,7 +44,6 @@ from .. import (
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
     GPU_PROC_TASK_NAME,
-    MIN_SENSOR_UPDATE_PERIOD,
     N_POLS,
     RECV_TASK_NAME,
     SEND_TASK_NAME,
@@ -58,7 +57,13 @@ from ..queue_item import QueueItem
 from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, steady_state_timestamp_sensor
+from ..utils import (
+    DeviceStatusSensor,
+    TimeConverter,
+    add_time_sync_sensors,
+    rate_limited_sensor,
+    steady_state_timestamp_sensor,
+)
 from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_IN_ITEMS, DEFAULT_N_OUT_ITEMS, DEFAULT_XPIPELINE_NAME, recv
 from .beamform import Beam, BeamformTemplate
 from .bsend import BSend
@@ -457,26 +462,22 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 )
             )
             sensors.add(
-                aiokatcp.Sensor(
+                rate_limited_sensor(
                     str,
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
                     # Cast to list first to add comma delimiter
                     default=str(list(self._weights[i])),
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
-                aiokatcp.Sensor(
+                rate_limited_sensor(
                     int,
                     f"{output.name}.beng-clip-cnt",
                     "Number of complex samples that saturated.",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
 

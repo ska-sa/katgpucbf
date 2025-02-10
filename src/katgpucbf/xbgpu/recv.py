@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,7 +17,6 @@
 """SPEAD receiver utilities."""
 import functools
 import logging
-import math
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from enum import IntEnum
@@ -26,19 +25,19 @@ import numba
 import numpy as np
 import spead2.recv.asyncio
 import spead2.send.asyncio
-from aiokatcp import Sensor, SensorSampler, SensorSet
+from aiokatcp import Sensor, SensorSet
 from aiokatcp.core import Timestamp
 from numba import types
 from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS, COMPLEX, MIN_SENSOR_UPDATE_PERIOD, N_POLS
+from .. import BYTE_BITS, COMPLEX, N_POLS
 from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
-from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
+from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, rate_limited_sensor
 from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
@@ -220,23 +219,19 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
     """
     sensors = SensorSet()
     timestamp_sensors: list[Sensor] = [
-        Sensor(
+        rate_limited_sensor(
             int,
             "rx.timestamp",
             "The timestamp (in samples) of the last chunk of data received from an F-engine",
             default=-1,
             initial_status=Sensor.Status.ERROR,
-            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-            auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
         ),
-        Sensor(
+        rate_limited_sensor(
             Timestamp,
             "rx.unixtime",
             "The timestamp (in UNIX time) of the last chunk of data received from an F-engine",
             default=Timestamp(-1.0),
             initial_status=Sensor.Status.ERROR,
-            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-            auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
         ),
     ]
     for sensor in timestamp_sensors:
@@ -244,14 +239,12 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
         sensors.add(sensor)
 
     missing_sensors: list[Sensor] = [
-        Sensor(
+        rate_limited_sensor(
             Timestamp,
             "rx.missing-unixtime",
             "The timestamp (in UNIX time) when missing data was last detected",
             default=Timestamp(-1.0),
             initial_status=Sensor.Status.NOMINAL,
-            auto_strategy=SensorSampler.Strategy.EVENT_RATE,
-            auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
         )
     ]
     for sensor in missing_sensors:
