@@ -298,6 +298,13 @@ class Chunk:
             for enabled, timestamp in zip(send_stream.send_enabled, send_stream.send_enabled_timestamp)
         )
         n_enabled = sum(send_enabled)
+        end_timestamp_adc = self._timestamp + self._timestamp_step * len(self._batches)
+        timestamp_unix = time_converter.adc_to_unix(self._timestamp)
+        # Update tx.next-timestamp immediately rather than in _inc_counters so
+        # that it's synchronised with reading send_enabled.
+        for output_name in send_stream.output_names:
+            sensors[f"{output_name}.tx.next-timestamp"].set_value(end_timestamp_adc, timestamp=timestamp_unix)
+
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         send_futures: list[asyncio.Future] = []
         if n_enabled > 0:
@@ -326,7 +333,6 @@ class Chunk:
             # TODO: Is it necessary to handle this case?
             self.future = asyncio.create_task(send_stream.stream.async_flush())
 
-        end_timestamp_adc = self._timestamp + self._timestamp_step * len(self._batches)
         end_timestamp_unix = time_converter.adc_to_unix(end_timestamp_adc)
         self.future.add_done_callback(
             functools.partial(

@@ -480,6 +480,18 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
+            sensors.add(
+                rate_limited_sensor(
+                    int,
+                    f"{output.name}.tx.next-timestamp",
+                    "Timestamp (in samples) that has not yet been sent. This "
+                    "is strictly greater than any timestamp of the previous "
+                    "capture and less than or equal to any timestamp of the "
+                    "following capture.",
+                    default=0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
 
     async def _get_in_item(self) -> InQueueItem | None:
         """Get the next :class:`InQueueItem`.

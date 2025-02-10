@@ -62,6 +62,7 @@ def sensors(outputs: Sequence[BOutput]) -> SensorSet:
     sensors = SensorSet()
     for output in outputs:
         sensors.add(Sensor(int, f"{output.name}.beng-clip-cnt", "Number of output samples that are saturated."))
+        sensors.add(Sensor(int, f"{output.name}.tx.next-timestamp", "Timestamp that has not yet been sent"))
     return sensors
 
 
