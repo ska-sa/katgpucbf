@@ -181,12 +181,9 @@ def _generate_ddc_weights_no_discard(
         Weight given to the passband in the filter design (relative to stopband
         weight of 1.0).
     """
-    # TODO: this is just a first attempt to get something workable. It can
-    # probably be tuned e.g. to weight rolloff versus alias rejection in
-    # the stopband.
     coeff = scipy.signal.remez(
         taps,
-        bands=[0.0, 0.5 * pass_fraction, 0.5, 0.5 * subsampling],
+        bands=[0.0, 0.5 * pass_fraction, 1.0 - 0.5 * pass_fraction, 0.5 * subsampling],
         desired=[1.0, 0.0],
         weight=[weight_pass, 1.0],
         fs=subsampling,
