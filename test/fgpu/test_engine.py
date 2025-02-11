@@ -862,15 +862,17 @@ class TestEngine:
 
         rng = np.random.default_rng(123)
         n_tones = 10
-        if not isinstance(output, NarrowbandOutputNoDiscard):
-            tone_channels = rng.integers(0, channels, size=n_tones)
-        else:
+        if isinstance(output, NarrowbandOutputNoDiscard):
             bandwidth = ADC_SAMPLE_RATE * 0.5
             pass_channels_half = int(output.pass_bandwidth / bandwidth * channels / 2)
             min_channel = channels // 2 - pass_channels_half
             max_channel = channels // 2 + pass_channels_half
-            # numpy <2.2 has a bug in inferring the type here.
-            tone_channels = rng.integers(min_channel, max_channel, size=n_tones, endpoint=True)  # type: ignore
+            # + 1 so that max_channel is included. It would be more idiomatic
+            # to pass endpoint=True, but numpy <2.2 has a bug in the type
+            # annotations for that case.
+            tone_channels = rng.integers(min_channel, max_channel + 1, size=n_tones)
+        else:
+            tone_channels = rng.integers(0, channels, size=n_tones)
         tone_channels[0] = channels // 2  # Ensure we test the intercept exactly
         tone_phases = rng.uniform(0, 2 * np.pi, size=n_tones)
         tones = [
