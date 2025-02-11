@@ -440,6 +440,9 @@ def verify_corrprod_sensors(
         # Verify sensor updates while we're here
         xsync_sensor_name = f"{xpipeline.output.name}.rx.synchronised"
         assert actual_sensor_updates[xsync_sensor_name] == expected_sensor_updates
+        assert (
+            xpipeline.engine.sensors[f"{xpipeline.output.name}.tx.next-timestamp"].value == batch_end * timestamp_step
+        )
 
     return skipped_accs_total
 

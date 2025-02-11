@@ -39,7 +39,6 @@ from .. import (
     BYTE_BITS,
     DESCRIPTOR_TASK_NAME,
     GPU_PROC_TASK_NAME,
-    MIN_SENSOR_UPDATE_PERIOD,
     N_POLS,
     RECV_TASK_NAME,
     SEND_TASK_NAME,
@@ -58,7 +57,8 @@ from ..utils import (
     TimeConverter,
     add_time_sync_sensors,
     gaussian_dtype,
-    steady_state_timestamp_sensor,
+    make_rate_limited_sensor,
+    make_steady_state_timestamp_sensor,
 )
 from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, DIG_RMS_DBFS_WINDOW, INPUT_CHUNK_PADDING, recv, send
 from .accum import Accum
@@ -579,14 +579,12 @@ class Pipeline:
                 )
             )
             sensors.add(
-                aiokatcp.Sensor(
+                make_rate_limited_sensor(
                     int,
                     f"{self.output.name}.input{pol}.feng-clip-cnt",
                     "Number of output samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
 
@@ -1365,14 +1363,12 @@ class Engine(aiokatcp.DeviceServer):
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
             sensors.add(
-                aiokatcp.Sensor(
+                make_rate_limited_sensor(
                     int,
                     f"input{pol}.dig-clip-cnt",
                     "Number of digitiser samples that are saturated",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
@@ -1387,7 +1383,7 @@ class Engine(aiokatcp.DeviceServer):
 
         for sensor in recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
-        sensors.add(steady_state_timestamp_sensor())
+        sensors.add(make_steady_state_timestamp_sensor())
         sensors.add(DeviceStatusSensor(sensors))
 
         time_sync_task = add_time_sync_sensors(sensors)

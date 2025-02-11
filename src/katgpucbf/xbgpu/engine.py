@@ -44,7 +44,6 @@ from .. import (
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
     GPU_PROC_TASK_NAME,
-    MIN_SENSOR_UPDATE_PERIOD,
     N_POLS,
     RECV_TASK_NAME,
     SEND_TASK_NAME,
@@ -58,7 +57,13 @@ from ..queue_item import QueueItem
 from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import DeviceStatusSensor, TimeConverter, add_time_sync_sensors, steady_state_timestamp_sensor
+from ..utils import (
+    DeviceStatusSensor,
+    TimeConverter,
+    add_time_sync_sensors,
+    make_rate_limited_sensor,
+    make_steady_state_timestamp_sensor,
+)
 from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_IN_ITEMS, DEFAULT_N_OUT_ITEMS, DEFAULT_XPIPELINE_NAME, recv
 from .beamform import Beam, BeamformTemplate
 from .bsend import BSend
@@ -457,26 +462,34 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 )
             )
             sensors.add(
-                aiokatcp.Sensor(
+                make_rate_limited_sensor(
                     str,
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
                     # Cast to list first to add comma delimiter
                     default=str(list(self._weights[i])),
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
                 )
             )
             sensors.add(
-                aiokatcp.Sensor(
+                make_rate_limited_sensor(
                     int,
                     f"{output.name}.beng-clip-cnt",
                     "Number of complex samples that saturated.",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                    auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                    auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
+                )
+            )
+            sensors.add(
+                make_rate_limited_sensor(
+                    int,
+                    f"{output.name}.tx.next-timestamp",
+                    "Timestamp (in samples) that has not yet been sent. This "
+                    "is strictly greater than any timestamp of the previous "
+                    "capture and less than or equal to any timestamp of the "
+                    "following capture.",
+                    default=0,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
 
@@ -766,6 +779,18 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
+        sensors.add(
+            aiokatcp.Sensor(
+                int,
+                f"{self.output.name}.tx.next-timestamp",
+                "Timestamp (in samples) that has not yet been sent. This "
+                "is strictly greater than any timestamp of the previous "
+                "capture and less than or equal to any timestamp of the "
+                "following capture.",
+                default=0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
 
     async def _flush_accumulation(self, out_item: XOutQueueItem, next_accum: int) -> XOutQueueItem:
         """Emit the current `out_item` and prepare a new one."""
@@ -960,12 +985,16 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                     incomplete_accum_counter.labels(self.output.name).inc(1)
 
                 heap.timestamp = item.timestamp
+                end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
+                self.engine.sensors[f"{self.output.name}.tx.next-timestamp"].set_value(
+                    end_adc_timestamp,
+                    timestamp=self.engine.time_converter.adc_to_unix(item.timestamp),
+                )
                 if self.send_stream.send_enabled:
                     # Convert timestamp for the *end* of the heap (not the start)
                     # to a UNIX time for the sensor update. NB: this should be done
                     # *before* send_heap, because that gives away ownership of the
                     # heap.
-                    end_adc_timestamp = item.timestamp + self.timestamp_increment_per_accumulation
                     end_timestamp = self.engine.time_converter.adc_to_unix(end_adc_timestamp)
                     clip_cnt_sensor = self.engine.sensors[f"{self.output.name}.xeng-clip-cnt"]
                     clip_cnt_sensor.set_value(clip_cnt_sensor.value + int(heap.saturated), timestamp=end_timestamp)
@@ -1263,7 +1292,7 @@ class XBEngine(DeviceServer):
         # Dynamic sensors
         for sensor in recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
-        sensors.add(steady_state_timestamp_sensor())
+        sensors.add(make_steady_state_timestamp_sensor())
         sensors.add(DeviceStatusSensor(sensors))
 
         time_sync_task = add_time_sync_sensors(sensors)

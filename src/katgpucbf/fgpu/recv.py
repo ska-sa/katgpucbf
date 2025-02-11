@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,7 +18,6 @@
 
 import functools
 import logging
-import math
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
@@ -32,11 +31,11 @@ from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
-from .. import BYTE_BITS, MIN_SENSOR_UPDATE_PERIOD, N_POLS
+from .. import BYTE_BITS, N_POLS
 from .. import recv as base_recv
 from ..recv import BaseLayout, Chunk, StatsCollector
 from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
-from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver
+from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
 from . import METRIC_NAMESPACE
 
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
@@ -232,23 +231,19 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
     sensors = aiokatcp.SensorSet()
     for pol in range(N_POLS):
         timestamp_sensors: list[aiokatcp.Sensor] = [
-            aiokatcp.Sensor(
+            make_rate_limited_sensor(
                 int,
                 f"input{pol}.rx.timestamp",
                 "The timestamp (in samples) of the last chunk of data received from the digitiser",
                 default=-1,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
-                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             ),
-            aiokatcp.Sensor(
+            make_rate_limited_sensor(
                 aiokatcp.core.Timestamp,
                 f"input{pol}.rx.unixtime",
                 "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
                 default=aiokatcp.core.Timestamp(-1.0),
                 initial_status=aiokatcp.Sensor.Status.ERROR,
-                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             ),
         ]
         for sensor in timestamp_sensors:
@@ -256,14 +251,12 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
             sensors.add(sensor)
 
         missing_sensors: list[aiokatcp.Sensor] = [
-            aiokatcp.Sensor(
+            make_rate_limited_sensor(
                 aiokatcp.core.Timestamp,
                 f"input{pol}.rx.missing-unixtime",
                 "The timestamp (in UNIX time) when missing data was last detected",
                 default=aiokatcp.core.Timestamp(-1.0),
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-                auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
             )
         ]
         for sensor in missing_sensors:
