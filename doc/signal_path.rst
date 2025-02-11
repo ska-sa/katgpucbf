@@ -253,7 +253,7 @@ factors such as passband ripple, rolloff, and alias rejection.
 
 .. todo::
 
-   Describe the filter design once it is finalised.
+   Describe the filter design once it is finalised (NGC-1399).
 
 The primary use case is for reconstructing a time-domain signal from the
 channelised output, where completely discarding channels appears to lose
