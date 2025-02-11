@@ -35,7 +35,7 @@ from .. import BYTE_BITS, N_POLS
 from .. import recv as base_recv
 from ..recv import BaseLayout, Chunk, StatsCollector
 from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
-from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, rate_limited_sensor
+from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
 from . import METRIC_NAMESPACE
 
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
@@ -231,14 +231,14 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
     sensors = aiokatcp.SensorSet()
     for pol in range(N_POLS):
         timestamp_sensors: list[aiokatcp.Sensor] = [
-            rate_limited_sensor(
+            make_rate_limited_sensor(
                 int,
                 f"input{pol}.rx.timestamp",
                 "The timestamp (in samples) of the last chunk of data received from the digitiser",
                 default=-1,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
             ),
-            rate_limited_sensor(
+            make_rate_limited_sensor(
                 aiokatcp.core.Timestamp,
                 f"input{pol}.rx.unixtime",
                 "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
@@ -251,7 +251,7 @@ def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
             sensors.add(sensor)
 
         missing_sensors: list[aiokatcp.Sensor] = [
-            rate_limited_sensor(
+            make_rate_limited_sensor(
                 aiokatcp.core.Timestamp,
                 f"input{pol}.rx.missing-unixtime",
                 "The timestamp (in UNIX time) when missing data was last detected",

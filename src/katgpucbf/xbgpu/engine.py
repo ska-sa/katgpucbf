@@ -61,8 +61,8 @@ from ..utils import (
     DeviceStatusSensor,
     TimeConverter,
     add_time_sync_sensors,
-    rate_limited_sensor,
-    steady_state_timestamp_sensor,
+    make_rate_limited_sensor,
+    make_steady_state_timestamp_sensor,
 )
 from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_IN_ITEMS, DEFAULT_N_OUT_ITEMS, DEFAULT_XPIPELINE_NAME, recv
 from .beamform import Beam, BeamformTemplate
@@ -462,7 +462,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 )
             )
             sensors.add(
-                rate_limited_sensor(
+                make_rate_limited_sensor(
                     str,
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
@@ -472,7 +472,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 )
             )
             sensors.add(
-                rate_limited_sensor(
+                make_rate_limited_sensor(
                     int,
                     f"{output.name}.beng-clip-cnt",
                     "Number of complex samples that saturated.",
@@ -481,7 +481,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 )
             )
             sensors.add(
-                rate_limited_sensor(
+                make_rate_limited_sensor(
                     int,
                     f"{output.name}.tx.next-timestamp",
                     "Timestamp (in samples) that has not yet been sent. This "
@@ -1292,7 +1292,7 @@ class XBEngine(DeviceServer):
         # Dynamic sensors
         for sensor in recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
-        sensors.add(steady_state_timestamp_sensor())
+        sensors.add(make_steady_state_timestamp_sensor())
         sensors.add(DeviceStatusSensor(sensors))
 
         time_sync_task = add_time_sync_sensors(sensors)

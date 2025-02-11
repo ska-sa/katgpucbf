@@ -37,7 +37,7 @@ from ..recv import BaseLayout, Chunk, StatsCollector
 from ..recv import make_stream as make_base_stream
 from ..recv import user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
-from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, rate_limited_sensor
+from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
 from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
@@ -219,14 +219,14 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
     """
     sensors = SensorSet()
     timestamp_sensors: list[Sensor] = [
-        rate_limited_sensor(
+        make_rate_limited_sensor(
             int,
             "rx.timestamp",
             "The timestamp (in samples) of the last chunk of data received from an F-engine",
             default=-1,
             initial_status=Sensor.Status.ERROR,
         ),
-        rate_limited_sensor(
+        make_rate_limited_sensor(
             Timestamp,
             "rx.unixtime",
             "The timestamp (in UNIX time) of the last chunk of data received from an F-engine",
@@ -239,7 +239,7 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
         sensors.add(sensor)
 
     missing_sensors: list[Sensor] = [
-        rate_limited_sensor(
+        make_rate_limited_sensor(
             Timestamp,
             "rx.missing-unixtime",
             "The timestamp (in UNIX time) when missing data was last detected",

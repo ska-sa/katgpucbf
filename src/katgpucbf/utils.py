@@ -172,7 +172,7 @@ def comma_split(
 
 # We have to use *args/**kwargs because the default for status_func is a
 # private function in aiokatcp and hence cannot be named.
-def rate_limited_sensor(
+def make_rate_limited_sensor(
     sensor_type: type[_T],
     name: str,
     description: str = "",
@@ -384,7 +384,7 @@ def add_time_sync_sensors(sensors: aiokatcp.SensorSet) -> asyncio.Task:
     return asyncio.create_task(run(), name=TIME_SYNC_TASK_NAME)
 
 
-def steady_state_timestamp_sensor() -> aiokatcp.Sensor[int]:
+def make_steady_state_timestamp_sensor() -> aiokatcp.Sensor[int]:
     """Create ``steady-state-timestamp`` sensor."""
     return aiokatcp.Sensor(
         int,
