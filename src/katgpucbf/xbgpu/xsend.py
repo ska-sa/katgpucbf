@@ -119,7 +119,7 @@ class Heap:
         return int(self._timestamp[()])
 
     @timestamp.setter
-    def timestamp(self, value: int) -> None:  # noqa: D102
+    def timestamp(self, value: int) -> None:
         self._timestamp[()] = value
 
 

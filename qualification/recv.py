@@ -117,7 +117,7 @@ class XBReceiver:
         all_timestamps: Literal[False] = False,
         max_delay: int = DEFAULT_MAX_DELAY,
         time_limit: float | None = None,
-    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk], None]:  # noqa: D102
+    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk], None]:
         yield ...  # type: ignore
 
     @overload
@@ -128,7 +128,7 @@ class XBReceiver:
         all_timestamps: bool = False,
         max_delay: int = DEFAULT_MAX_DELAY,
         time_limit: float | None = None,
-    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk | None], None]:  # noqa: D102
+    ) -> AsyncGenerator[tuple[int, katgpucbf.recv.Chunk | None], None]:
         yield ...  # type: ignore
 
     async def complete_chunks(
@@ -377,14 +377,13 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
 
     if TYPE_CHECKING:
         # Just refine the return type, without any run-time implementation
-        async def next_complete_chunk(
+        async def next_complete_chunk(  # noqa: D102
             self,
             min_timestamp: int | None = None,
             *,
             max_delay: int = DEFAULT_MAX_DELAY,
             timeout: float | None = DEFAULT_TIMEOUT,
-        ) -> tuple[int, NDArray[np.int32]]:  # noqa: D102
-            ...
+        ) -> tuple[int, NDArray[np.int32]]: ...
 
 
 class TiedArrayChannelisedVoltageReceiver(XBReceiver):

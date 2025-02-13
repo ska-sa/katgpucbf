@@ -10,7 +10,7 @@ import statsmodels.api as sm
 from patsy import build_design_matrices, dmatrices
 
 
-def main() -> None:  # noqa: D103
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("filename")
     parser.add_argument("--plot", action="store_true", help="Plot the fitted model")

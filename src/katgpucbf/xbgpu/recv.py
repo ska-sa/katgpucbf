@@ -116,7 +116,7 @@ class Layout(BaseLayout):
         )
 
     @property
-    def chunk_heaps(self) -> int:  # noqa: D401
+    def chunk_heaps(self) -> int:
         """Number of heaps per chunk."""
         return self.heaps_per_fengine_per_chunk * self.n_ants
 

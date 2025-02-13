@@ -9,27 +9,31 @@ build-backend = "setuptools.build_meta"
 
 [tool.black]
 line-length = 120
-include = '\.pyi?$'
-exclude ='''
-/(
-		  \.eggs	# exclude a few common directories
-		| \.git		# in the root of the project
-		| \.hg
-		| \.mypy_cache
-		| \.nox
-		| \.tox
-		| \.venv
-		| _build
-		| buck-out
-		| build
-		| dist
-)/
-'''
 
 [tool.isort]
 profile = "black"
 line_length = 120
 known_local_folder = ["noisy_search", "remote", "sighandler"]
+
+[tool.ruff]
+line-length = 120
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",  # pyflakes
+    "D",  # pydocstyle
+    "N",  # pep8-naming
+    "B",  # flake8-bugbear
+]
+extend-ignore = ["D105", "D107"]  # docstrings for magic methods
+[tool.ruff.lint.extend-per-file-ignores]
+"scratch/**/*.py" = ["D"]  # Don't fuss with docstrings in scratch/
+# Temporary, until the code can be cleaned up
+# (this is what pydocstyle used to do)
+"test_*.py" = ["D"]
+"test/**/*.py" = ["D"]
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
 
 [tool.pytest.ini_options]
 testpaths = "test"

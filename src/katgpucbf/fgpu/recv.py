@@ -104,17 +104,17 @@ class Layout(BaseLayout):
     mask_timestamp: bool
 
     @property
-    def heap_bytes(self) -> int:  # noqa: D401
+    def heap_bytes(self) -> int:
         """Number of payload bytes per heap."""
         return self.heap_samples * self.sample_bits // BYTE_BITS
 
     @property
-    def chunk_heaps(self) -> int:  # noqa: D401
+    def chunk_heaps(self) -> int:
         """Number of heaps per chunk, on time axis."""
         return self.chunk_samples // self.heap_samples
 
     @property
-    def timestamp_mask(self) -> np.uint64:  # noqa: D401
+    def timestamp_mask(self) -> np.uint64:
         """Mask to AND with incoming timestamps."""
         return ~np.uint64(self.heap_samples - 1 if self.mask_timestamp else 0)
 

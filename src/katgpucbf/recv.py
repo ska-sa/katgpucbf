@@ -214,18 +214,18 @@ class BaseLayout(ABC):
 
     @property
     @abstractmethod
-    def heap_bytes(self) -> int:  # noqa: D401
+    def heap_bytes(self) -> int:
         """Number of payload bytes per heap."""
         ...
 
     @property
     @abstractmethod
-    def chunk_heaps(self) -> int:  # noqa: D401
+    def chunk_heaps(self) -> int:
         """Number of heaps per chunk."""
         ...
 
     @property
-    def chunk_bytes(self) -> int:  # noqa: D401
+    def chunk_bytes(self) -> int:
         """Number of bytes per chunk."""
         return self.heap_bytes * self.chunk_heaps
 

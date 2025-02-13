@@ -17,7 +17,8 @@
 ################################################################################
 
 import copy
-from typing import Mapping, Self
+from collections.abc import Mapping
+from typing import Self
 
 import numpy as np
 import prometheus_client

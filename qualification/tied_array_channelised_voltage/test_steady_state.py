@@ -17,7 +17,7 @@
 """Test capture-start following state change requests."""
 
 import asyncio
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 import numpy as np
 import pytest
@@ -33,7 +33,7 @@ async def _test_capture_start(
     pdf_report: Reporter,
     prepare: Callable[[], Awaitable],
 ) -> np.ndarray:
-    """Implementation for tests of capture-start sequencing.
+    """Implement tests of capture-start sequencing.
 
     Each test provides a callback that issues a request to the product
     controller. The received data is returned for the test to do

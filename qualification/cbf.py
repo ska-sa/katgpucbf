@@ -70,7 +70,7 @@ class CBFRemoteControl(CBFBase):
     sensor_watcher: aiokatcp.SensorWatcher
 
     @property
-    def init_sensors(self) -> aiokatcp.SensorSet:  # noqa: D401
+    def init_sensors(self) -> aiokatcp.SensorSet:
         """Initial sensor values from the product controller.
 
         This is initialised once after starting the subarray product and not
