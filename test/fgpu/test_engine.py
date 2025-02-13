@@ -17,6 +17,7 @@
 """Unit tests for Engine functions."""
 
 import logging
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -36,7 +37,7 @@ from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import Engine, InQueueItem, Pipeline, generate_ddc_weights, generate_pfb_weights
 from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
-from katgpucbf.fgpu.output import NarrowbandOutput, Output
+from katgpucbf.fgpu.output import NarrowbandOutput, NarrowbandOutputNoDiscard, Output
 from katgpucbf.utils import TimeConverter
 
 from .. import PromDiff, packbits
@@ -142,6 +143,10 @@ def assert_angles_allclose(a, b, **kwargs) -> None:
 class TestEngine:
     r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
 
+    @pytest.fixture(params=["wideband", "narrowband_discard", "narrowband_no_discard"])
+    def output_type(self, request: pytest.FixtureRequest) -> str:
+        return request.param
+
     @pytest.fixture
     def wideband_args(self, channels: int, jones_per_batch: int) -> str:
         """Arguments to pass to the command-line parser for the wideband output."""
@@ -152,14 +157,25 @@ class TestEngine:
         return request.param
 
     @pytest.fixture
-    def narrowband_args(self, channels: int, jones_per_batch: int, decimation: int) -> str:
+    def narrowband_args(self, channels: int, jones_per_batch: int, decimation: int, output_type: str) -> str:
         """Arguments to pass to the command-line parser for the narrowband output."""
-        return f"{NARROWBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch},decimation={decimation}"
+        args = f"{NARROWBAND_ARGS},channels={channels},jones_per_batch={jones_per_batch},decimation={decimation}"
+        if output_type == "narrowband_no_discard":
+            bandwidth = 0.5 * ADC_SAMPLE_RATE / decimation
+            args += f",pass_bandwidth={0.6 * bandwidth}"
+        return args
 
-    @pytest.fixture(params=["wideband", "narrowband"])
-    def output(self, wideband_args: str, narrowband_args: str, request: pytest.FixtureRequest) -> Output:
+    @pytest.fixture
+    def output(
+        self,
+        output_type: str,
+        wideband_args: str,
+        narrowband_args: str,
+        decimation: int,
+        request: pytest.FixtureRequest,
+    ) -> Output:
         """The output to run tests against."""
-        if request.param == "wideband":
+        if output_type == "wideband":
             return parse_wideband(wideband_args)
         else:
             return parse_narrowband(narrowband_args)
@@ -216,7 +232,7 @@ class TestEngine:
         )
         gain = np.repeat(np.sum(pfb), output.channels)
         if isinstance(output, NarrowbandOutput):
-            ddc = generate_ddc_weights(output.ddc_taps, output.subsampling, output.weight_pass)
+            ddc = generate_ddc_weights(output, ADC_SAMPLE_RATE)
             response = np.fft.fftshift(scipy.signal.freqz(ddc, worN=output.spectra_samples, whole=True)[1])
             # Discard higher frequencies
             response = response[
@@ -230,7 +246,7 @@ class TestEngine:
     @pytest.fixture
     def default_gain(self, coherent_scale: np.ndarray) -> np.float32:
         """Default value passed to ``?gain`` command."""
-        # Centre chain gets defined power. In narrowband, other channels will
+        # Centre channel gets defined power. In narrowband, other channels will
         # have less power.
         return np.float32(1 / coherent_scale[len(coherent_scale) // 2])
 
@@ -499,7 +515,7 @@ class TestEngine:
         # The tones are placed in the second Nyquist zone (the "1 +" in
         # frac_channel) then down-converted to baseband, simulating what
         # happens in MeerKAT L-band.
-        tone_channels = [64, 271]
+        tone_channels = [192, 271]
         tone_phases = [0.0, 1.23]
         tones = [
             CW(
@@ -675,7 +691,7 @@ class TestEngine:
         """Test that delay rate and phase rate setting works."""
         # One tone at centre frequency to test the absolute phase, and one at another
         # frequency to test the slope across the band.
-        tone_channels = [CHANNELS // 2, CHANNELS - 123]
+        tone_channels = [CHANNELS // 2, CHANNELS // 2 + 123]
         tones = [
             CW(
                 frac_channel=frac_channel(output, channel),
@@ -818,6 +834,7 @@ class TestEngine:
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
+        default_gain: float,
         delay_samples: float,
     ) -> None:
         """Test the slope and intercept of the phase response to delay.
@@ -830,6 +847,10 @@ class TestEngine:
         delay_s = delay_samples / ADC_SAMPLE_RATE
         coeffs = ["0.0,0.0:0.0,0.0", f"{delay_s},0.0:0.0,0.0"]
         await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
+        # Increase the gain to use the full dynamic range. We can't use a higher
+        # tone_magnitude because it will lead to time-domain saturation.
+        tone_magnitude = 60
+        await engine_client.request("gain-all", output.name, 100 / tone_magnitude * default_gain)
 
         recv_layout = engine_server.recv_layout
         # Don't send the first chunk, to avoid complications with the step
@@ -841,11 +862,21 @@ class TestEngine:
 
         rng = np.random.default_rng(123)
         n_tones = 10
-        tone_channels = rng.integers(0, channels, size=n_tones)
+        if isinstance(output, NarrowbandOutputNoDiscard):
+            bandwidth = ADC_SAMPLE_RATE * 0.5
+            pass_channels_half = int(output.pass_bandwidth / bandwidth * channels / 2)
+            min_channel = channels // 2 - pass_channels_half
+            max_channel = channels // 2 + pass_channels_half
+            # + 1 so that max_channel is included. It would be more idiomatic
+            # to pass endpoint=True, but numpy <2.2 has a bug in the type
+            # annotations for that case.
+            tone_channels = rng.integers(min_channel, max_channel + 1, size=n_tones)
+        else:
+            tone_channels = rng.integers(0, channels, size=n_tones)
         tone_channels[0] = channels // 2  # Ensure we test the intercept exactly
         tone_phases = rng.uniform(0, 2 * np.pi, size=n_tones)
         tones = [
-            CW(frac_channel=frac_channel(output, channel), magnitude=60, phase=phase)
+            CW(frac_channel=frac_channel(output, channel), magnitude=tone_magnitude, phase=phase)
             for channel, phase in zip(tone_channels, tone_phases)
         ]
         dig_data = np.sum([self._make_tone(tone_timestamps, tone, 0) for tone in tones], axis=0)
@@ -873,9 +904,9 @@ class TestEngine:
             send_present=expected_spectra // output.spectra_per_heap,
         )
 
-        # Ensure we haven't saturated
-        assert np.max(np.abs(out_data.real)) < 127
-        assert np.max(np.abs(out_data.imag)) < 127
+        # Ensure we haven't saturated, but are also exploiting the full dynamic range
+        assert 90 < np.max(np.abs(out_data.real)) < 127
+        assert 90 < np.max(np.abs(out_data.imag)) < 127
         orig_phase = np.angle(out_data[tone_channels, :, 0])
         delayed_phase = np.angle(out_data[tone_channels, :, 1])
         channel_bw = ADC_SAMPLE_RATE / 2 / output.decimation / channels
@@ -1248,3 +1279,40 @@ class TestEngine:
         # Check that it doesn't affect the first timestamp, which would suggest
         # we've messed up the test setup.
         assert np.angle(out_data[CHANNELS // 2, 0, 0]) == pytest.approx(0, abs=0.1)
+
+    async def test_incoherent_gain(
+        self,
+        mock_recv_stream: spead2.InprocQueue,
+        mock_send_stream: list[spead2.InprocQueue],
+        engine_server: Engine,
+        engine_client: aiokatcp.Client,
+        output: Output,
+    ) -> None:
+        """Test that a ``?gain`` of 1 gives incoherent gain of 1."""
+        await engine_client.request("gain-all", output.name, 1.0)
+        n_samples = max(CHUNK_SAMPLES, 2 * output.spectra_samples * output.spectra_per_heap)
+        rng = np.random.default_rng(seed=1)
+        # Should be low enough to limit saturation but high enough to minimise
+        # impact of quantisation noise.
+        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        sigma = 40.0
+        dig_data = np.rint(rng.normal(scale=sigma, size=(2, n_samples)).clip(-dig_max, dig_max)).astype(int)
+        out_data, timestamps = await self._send_data(
+            mock_recv_stream,
+            mock_send_stream,
+            engine_server,
+            output,
+            dig_data,
+        )
+        if isinstance(output, NarrowbandOutputNoDiscard):
+            # Exclude the roll-off, since it will have less power
+            pass_fraction = output.pass_bandwidth / (0.5 * ADC_SAMPLE_RATE)
+            lo = math.ceil(output.channels * (1 - pass_fraction) * 0.5)
+            hi = math.floor(output.channels * (1 + pass_fraction) * 0.5) + 1
+            out_data = out_data[lo:hi]
+        # Compute sqrt of average power
+        out_sigma = np.sqrt(np.mean(np.square(np.abs(out_data))))
+        # The tolerance is quite loose because there is lots of noise
+        # (both from the random input data and from quantisation), and we're
+        # mostly worried about major errors like a missing factor of sqrt(2).
+        assert out_sigma == pytest.approx(sigma, rel=0.01)

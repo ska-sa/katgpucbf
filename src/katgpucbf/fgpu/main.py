@@ -53,7 +53,7 @@ from ..spead import DEFAULT_PORT
 from ..utils import DitherType, add_gc_stats, add_signal_handlers, comma_split, parse_dither, parse_enum, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
-from .output import NarrowbandOutput, WidebandOutput, WindowFunction
+from .output import NarrowbandOutput, NarrowbandOutputDiscard, NarrowbandOutputNoDiscard, WidebandOutput, WindowFunction
 
 _T = TypeVar("_T")
 _OD = TypeVar("_OD", bound="_OutputDict")
@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TAPS = 16
 DEFAULT_W_CUTOFF = 1.0
 #: Ratio of decimation factor to tap count
-DEFAULT_DDC_TAPS_RATIO = 12
+DEFAULT_DDC_TAPS_RATIO = 16
 DEFAULT_WEIGHT_PASS = 0.005
 
 
@@ -102,6 +102,7 @@ class _NarrowbandOutputDict(_OutputDict, total=False):
     decimation: int
     ddc_taps: int
     weight_pass: float
+    pass_bandwidth: float
 
 
 def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
@@ -187,7 +188,7 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
 
     def field_callback(kws: _NarrowbandOutputDict, key: str, data: str) -> None:
         match key:
-            case "centre_frequency" | "weight_pass":
+            case "centre_frequency" | "weight_pass" | "pass_bandwidth":
                 kws[key] = float(data)
             case "decimation" | "ddc_taps":
                 kws[key] = int(data)
@@ -202,17 +203,25 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
                 raise ValueError(f"{key} is missing")
         # Note that using **kws at the end means these are only defaults which
         # can be overridden by the user.
+        default_taps = DEFAULT_DDC_TAPS_RATIO * kws["decimation"]
+        if "pass_bandwidth" in kws:
+            default_taps *= 2  # sampling = 2 * decimation in this case
         kws = {
             "taps": DEFAULT_TAPS,
             "w_cutoff": DEFAULT_W_CUTOFF,
             "window_function": WindowFunction.DEFAULT,
             "jones_per_batch": DEFAULT_JONES_PER_BATCH,
             "weight_pass": DEFAULT_WEIGHT_PASS,
-            "ddc_taps": DEFAULT_DDC_TAPS_RATIO * kws["decimation"],
+            "ddc_taps": default_taps,
             "dither": DitherType.DEFAULT,
             **kws,
         }
-        return NarrowbandOutput(**kws)
+        if "pass_bandwidth" in kws:
+            return NarrowbandOutputNoDiscard(**kws)
+        else:
+            # mypy isn't smart enough to realise that "pass_bandwidth"
+            # isn't going to be in **kws.
+            return NarrowbandOutputDiscard(**kws)  # type: ignore[misc]
     except ValueError as exc:
         raise ValueError(f"--narrowband: {exc}") from exc
 
@@ -237,7 +246,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Add a narrowband output (may be repeated). "
             "The required keys are: name, centre_frequency, decimation, channels, dst. "
-            f"Optional keys: taps [{DEFAULT_TAPS}], ddc_taps [{DEFAULT_DDC_TAPS_RATIO}*decimation], "
+            f"Optional keys: taps [{DEFAULT_TAPS}], ddc_taps [{DEFAULT_DDC_TAPS_RATIO}*subsampling], "
             f"w_cutoff [{DEFAULT_W_CUTOFF}], window_function [hann], weight_pass [{DEFAULT_WEIGHT_PASS}], "
             "dither [uniform]."
         ),

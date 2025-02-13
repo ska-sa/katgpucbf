@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -30,6 +30,7 @@ async def test_channels(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     """Test that each input channel appears in the correct place in the output.
 
@@ -44,7 +45,7 @@ async def test_channels(
 
     pdf_report.step("Select channels")
     rng = random.Random(1)
-    channels = sorted(rng.sample(range(receiver.n_chans), 30))
+    channels = sorted(rng.sample(range(pass_channels.start, pass_channels.stop), 30))
     pdf_report.detail(f"Using channels {channels}")
 
     pdf_report.step("Configure dsim")
@@ -72,7 +73,7 @@ async def test_channels(
         power = np.sum(np.square(beam_data.astype(np.float64)), axis=(1, 2))
         # Detect tones. Assume anything over 50% of max is a tone.
         max_power = np.max(power)
-        tones = list(np.where(power > 0.5 * max_power)[0])
+        tones = np.where(power > 0.5 * max_power)[0].tolist()
         pdf_report.detail(f"Tones in {beam}: {tones}")
         with check:
             assert tones == channels

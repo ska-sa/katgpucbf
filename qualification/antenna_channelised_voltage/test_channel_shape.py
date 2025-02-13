@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -57,6 +57,7 @@ def cutoff_bandwidth(data: np.ndarray, cutoff: float, step: float) -> float:
     return (right - left) * step  # Scale from indices to channels
 
 
+@pytest.mark.no_vlbi
 @pytest.mark.requirements("CBF-REQ-0126")
 async def test_channel_shape(
     cbf: CBFRemoteControl,

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -33,6 +33,7 @@ async def test_gains(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test that gains can be applied.
 
@@ -98,7 +99,7 @@ async def test_gains(
         expected_gain = gains[a] * gains[b].conj()
         expected = orig[:, i] * expected_gain
         rel_error = np.abs(data[:, i] - expected) / np.abs(expected)
-        max_rel_error = max(max_rel_error, np.max(rel_error))
+        max_rel_error = max(max_rel_error, np.max(rel_error[pass_channels]))
     pdf_report.detail(f"Maximum relative error: {max_rel_error}.")
     # 10^-0.05 ~= 0.9, so a relative error of <0.1 implies that the gain is
     # accurate to 0.5 dB (in power - there is no spec for phase), and hence

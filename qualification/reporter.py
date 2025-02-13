@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -22,11 +22,15 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+import matplotlib.axes
+import matplotlib.colors
 import matplotlib.figure
+import matplotlib.lines
 import matplotlib.ticker
 import matplotlib.transforms
 import numpy as np
 import pytest
+from numpy.typing import ArrayLike
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,52 @@ class POTLocator(matplotlib.ticker.Locator):
         n = (vmax - vmin + 0.001 * step) // step
         locs = vmin - step + np.arange(n + 3) * step
         return self.raise_if_exceeds(locs)
+
+
+def plot_focus(
+    ax: matplotlib.axes.Axes, focus: slice, x: ArrayLike, y: ArrayLike, *args, **kwargs
+) -> list[matplotlib.lines.Line2D]:
+    """Plot a line where only an interval is of primary interest.
+
+    The parts outside the interval are shown semi-transparent and do not
+    affect the Y scaling. The implementation makes several calls to the
+    underlying plot function.
+
+    Parameters
+    ----------
+    ax
+        Axes on which to plot the line
+    focus
+        Slice from `x` and `y` which is to be in focus. This must have
+        a step of ``None`` and not fall outside the size of `x` and `y`.
+    x, y
+        Data to plot, which must be 1D and of the same size.
+    *args, **kwargs
+        Passed to :meth:`matplotlib.axes.Axes.plot`.
+    """
+    xarr = np.asarray(x)
+    yarr = np.asarray(y)
+    assert xarr.shape == yarr.shape
+    assert xarr.ndim == 1
+    assert focus.step is None or focus.step == 1
+    assert 0 <= focus.start < focus.stop <= len(xarr)
+
+    # Draw the focused part first, to get the color set
+    lines = ax.plot(xarr[focus], yarr[focus], *args, **kwargs)
+    # Make partially transparent color
+    faded = matplotlib.colors.to_rgba(lines[0].get_color(), alpha=0.3)
+    # Back up the y data limits
+    y0, y1 = ax.dataLim.intervaly
+    # We don't want a separate legend entry for the faded sections
+    kwargs.pop("label", None)
+    # Draw the faded sections
+    if 0 < focus.start:
+        lines += ax.plot(xarr[: focus.start], yarr[: focus.start], *args, **kwargs, color=faded)
+    if focus.stop < len(xarr):
+        lines += ax.plot(xarr[focus.stop :], yarr[focus.stop :], *args, **kwargs, color=faded)
+    # Restore y data limits
+    ax.dataLim.set_points(np.array([[ax.dataLim.x0, y0], [ax.dataLim.x1, y1]]))
+    return lines
 
 
 class Reporter:

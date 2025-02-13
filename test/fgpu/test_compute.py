@@ -22,13 +22,13 @@ import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from katgpucbf.fgpu import compute
-from katgpucbf.fgpu.engine import generate_ddc_weights
+from katgpucbf.fgpu.engine import _generate_ddc_weights_discard, _generate_ddc_weights_no_discard
 from katgpucbf.utils import DitherType
 
 pytestmark = [pytest.mark.cuda_only]
 
 
-@pytest.mark.parametrize("mode", ["wideband", "narrowband"])
+@pytest.mark.parametrize("mode", ["wideband", "narrowband-discard", "narrowband-no-discard"])
 @pytest.mark.parametrize("dither", DitherType)
 def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, mode: str, dither: DitherType) -> None:
     """Test creation and running of :class:`Compute`.
@@ -42,29 +42,39 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     ddc_taps = 128
     pfb_taps = 4
     spectra_per_heap = 32
-    subsampling = decimation
     nb_spectra = 64
 
     if mode == "wideband":
         narrowband: compute.NarrowbandConfig | None = None
         spectra = 160
-        internal_channels = channels
-    else:
+    elif mode == "narrowband-discard":
+        subsampling = decimation
         narrowband = compute.NarrowbandConfig(
             decimation=decimation,
             mix_frequency=Fraction(1, 5),
-            weights=generate_ddc_weights(ddc_taps, decimation, 0.1),
+            weights=_generate_ddc_weights_discard(ddc_taps, subsampling, 0.1),
+            discard=False,
         )
         spectra = nb_spectra
-        internal_channels = 2 * channels
+    elif mode == "narrowband-no-discard":
+        subsampling = 2 * decimation
+        narrowband = compute.NarrowbandConfig(
+            decimation=decimation,
+            mix_frequency=Fraction(1, 5),
+            weights=_generate_ddc_weights_no_discard(ddc_taps, decimation, 0.9, 0.1),
+            discard=True,
+        )
+        spectra = nb_spectra
+    else:
+        raise RuntimeError("unexpected mode")
+
     template = compute.ComputeTemplate(context, pfb_taps, channels, dig_sample_bits, out_bits, dither, narrowband)
-    # The sample count is the minimum that will produce the required number of
-    # output spectra for narrowband mode. For wideband there is more headroom.
+    # The sample count is large enough to produce the required number of
+    # output spectra for both narrowband modes. For wideband there is more
+    # headroom.
     fn = template.instantiate(
         command_queue,
-        nb_spectra * internal_channels * subsampling
-        + ddc_taps
-        + ((pfb_taps - 1) * internal_channels - 1) * subsampling,
+        nb_spectra * 2 * channels * decimation + ddc_taps + (pfb_taps - 1) * 2 * channels * decimation,
         spectra,
         spectra_per_heap,
         seed=123,

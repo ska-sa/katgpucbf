@@ -31,7 +31,7 @@ from katgpucbf.fgpu.delay import wrap_angle
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
-from ..reporter import POTLocator, Reporter
+from ..reporter import POTLocator, Reporter, plot_focus
 
 MAX_DELAY = 79.53e-6  # seconds
 MAX_DELAY_RATE = 2.56e-9
@@ -265,6 +265,7 @@ def check_phases(
     pdf_report: Reporter,
     actual: np.ndarray,
     expected: np.ndarray,
+    pass_channels: slice,
     caption: str,
     tolerance_deg: float = 1,
 ) -> None:
@@ -273,12 +274,10 @@ def check_phases(
     The error in phase is also plotted.
     """
     n_chans = len(actual)
-    # Exclude DC component, because it always has zero phase
-    actual = actual[1:]
-    expected = expected[1:]
     delta = wrap_angle(actual - expected)
-    max_error = np.max(np.abs(delta))
-    rms_error = np.sqrt(np.mean(np.square(delta)))
+    pass_delta = delta[pass_channels]
+    max_error = np.max(np.abs(pass_delta))
+    rms_error = np.sqrt(np.mean(np.square(pass_delta)))
     pdf_report.detail(f"Maximum error is {np.rad2deg(max_error):.3f}°.")
     pdf_report.detail(f"RMS error over channels is {np.rad2deg(rms_error):.5f}°.")
     with check:
@@ -286,21 +285,21 @@ def check_phases(
 
     fig = Figure(tight_layout=True)
     ax, ax_err = fig.subplots(2)
-    x = range(1, n_chans)
+    x = range(0, n_chans)
 
     ax.set_title(f"Phase with {caption}")
     ax.set_xlabel("Channel")
     ax.set_ylabel("Phase (degrees)")
     ax.xaxis.set_major_locator(POTLocator())
-    ax.plot(x, np.rad2deg(wrap_angle(actual)), label="Actual")
-    ax.plot(x, np.rad2deg(wrap_angle(expected)), label="Expected")
+    plot_focus(ax, pass_channels, x, np.rad2deg(wrap_angle(actual)), label="Actual")
+    plot_focus(ax, pass_channels, x, np.rad2deg(wrap_angle(expected)), label="Expected")
     ax.legend()
 
     ax_err.set_title(f"Phase error with {caption}")
     ax_err.set_xlabel("Channel")
     ax_err.set_ylabel("Error (degrees)")
     ax_err.xaxis.set_major_locator(POTLocator())
-    ax_err.plot(x, np.rad2deg(delta))
+    plot_focus(ax_err, pass_channels, x, np.rad2deg(delta))
 
     pdf_report.figure(fig)
 
@@ -320,6 +319,7 @@ async def _test_delay_phase_fixed(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
     delay_phases: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
     report_residual: bool,
@@ -331,7 +331,7 @@ async def _test_delay_phase_fixed(
 
     Parameters
     ----------
-    cbf, receive_baseline_correlation_products, pdf_report
+    cbf, receive_baseline_correlation_products, pdf_report, pass_channels
         Fixtures
     delay_phases
         Pairs of (delay, phase) to test
@@ -390,13 +390,14 @@ async def _test_delay_phase_fixed(
         # The delay in the dsim will affect the phase of the centre frequency,
         # which the delay compensation won't correct.
         expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.center_freq
-        check_phases(pdf_report, actual[:, bl_idx], expected, caption)
+        check_phases(pdf_report, actual[:, bl_idx], expected, pass_channels, caption)
 
 
 async def _test_delay_phase_rate(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
     rates: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
 ) -> None:
@@ -407,7 +408,7 @@ async def _test_delay_phase_rate(
 
     Parameters
     ----------
-    cbf, receive_baseline_correlation_products, pdf_report
+    cbf, receive_baseline_correlation_products, pdf_report, pass_channels
         Fixtures
     rates
         Pairs of (delay_rate, phase_rate) to test
@@ -458,7 +459,7 @@ async def _test_delay_phase_rate(
         expected = delay_phase(receiver, delay_rate * elapsed) + phase_rate * elapsed_s
         # Allow 2° rather than 1° because we're taking the difference between
         # two phases which each have a 1° tolerance.
-        check_phases(pdf_report, actual, expected, caption, tolerance_deg=2)
+        check_phases(pdf_report, actual, expected, pass_channels, caption, tolerance_deg=2)
 
 
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
@@ -466,6 +467,7 @@ async def test_delay(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test performance of delay compensation with a fixed delay.
 
@@ -483,6 +485,7 @@ async def test_delay(
         cbf,
         receive_baseline_correlation_products,
         pdf_report,
+        pass_channels,
         [(delay, 0.0) for delay in delays],
         lambda delay, phase: f"delay {delay * 1e12:.2f}ps",
         True,
@@ -494,6 +497,7 @@ async def test_delay_rate(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test performance of delay compensation with a delay rate.
 
@@ -510,6 +514,7 @@ async def test_delay_rate(
         cbf,
         receive_baseline_correlation_products,
         pdf_report,
+        pass_channels,
         [(delay_rate, 0.0) for delay_rate in rates],
         lambda delay_rate, phase_rate: f"delay rate {delay_rate}",
     )
@@ -520,6 +525,7 @@ async def test_delay_phase(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test performance of delay tracking with a fixed phase.
 
@@ -535,6 +541,7 @@ async def test_delay_phase(
         cbf,
         receive_baseline_correlation_products,
         pdf_report,
+        pass_channels,
         [(0.0, phase) for phase in phases],
         lambda delay, phase: f"phase {phase:.4f} rad ({np.rad2deg(phase):.2f}°)",
         False,
@@ -547,6 +554,7 @@ async def test_phase_rate(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test performance of delay tracking with a phase rate.
 
@@ -563,6 +571,7 @@ async def test_phase_rate(
         cbf,
         receive_baseline_correlation_products,
         pdf_report,
+        pass_channels,
         [(0.0, phase_rate) for phase_rate in rates],
         lambda delay_rate, phase_rate: f"phase rate {phase_rate}",
     )
@@ -572,6 +581,8 @@ async def test_group_delay(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
+    narrowband_vlbi: bool,
 ) -> None:
     r"""Test the ``filter-group-delay`` sensor.
 
@@ -607,16 +618,31 @@ async def test_group_delay(
     client = cbf.product_controller_client
 
     pdf_report.step("Choose channels.")
-    channel_step = 8  # Gap to minimise leakage between tones
+    # In VLBI mode we don't have a PFB, and there is too much leakage
+    # between channels to be able to multiplex multiple channels onto
+    # one signal.
+    n_dsims = len(cbf.dsim_clients)
+    if narrowband_vlbi:
+        channel_step = 1
+        channels_slice = slice(
+            pass_channels.start,
+            min(pass_channels.stop, pass_channels.start + n_dsims),
+        )
+    else:
+        # Pick channels to test, keeping some distance from the edges.
+        channel_step = 8  # Gap to minimise leakage between tones
+        channels_slice = slice(
+            pass_channels.start + channel_step // 2,
+            pass_channels.stop - channel_step // 2,
+            channel_step,
+        )
     freq_step = receiver.bandwidth / receiver.n_chans * channel_step
-    n_channels = receiver.n_chans // channel_step
-    channels = np.arange(channel_step // 2, channel_step * n_channels, channel_step, dtype=int)
-    channels_slice = slice(channel_step // 2, channel_step * n_channels, channel_step)
+    channels = np.arange(receiver.n_chans, dtype=int)[channels_slice]
+    n_channels = len(channels)
     cfreqs = receiver.channel_frequency(channels)
     pdf_report.detail(f"Using {n_channels} channels separated by {channel_step} channels ({freq_step} Hz).")
 
     # Distribute the channels amongst the dsims (round-robin)
-    n_dsims = len(cbf.dsim_clients)
     cfreqs_by_dsim: list[list[float]] = [[] for _ in range(n_dsims)]
     for i, freq in enumerate(cfreqs):
         cfreqs_by_dsim[i % n_dsims].append(freq)
@@ -644,8 +670,14 @@ async def test_group_delay(
                 tg.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *g))
     pdf_report.detail(f"Set gain to {gain} on chosen antenna/channel pairs.")
 
-    # Collect about 2^27 samples, to improve SNR.
-    n_spectra = 2**27 // n_channels
+    # Collect about 2^27 samples, to improve SNR. However, for VLBI mode this
+    # would take far too long because we're only able to test one channel per
+    # antenna. It's a trade-off between test time and the strength of the
+    # test.
+    if narrowband_vlbi:
+        n_spectra = 2**23 // n_channels
+    else:
+        n_spectra = 2**27 // n_channels
     n_chunks = math.ceil(n_spectra / receiver.n_spectra_per_heap)
     n_spectra = n_chunks * receiver.n_spectra_per_heap
     chunk_timestamp_step = receiver.n_spectra_per_heap * receiver.n_samples_between_spectra

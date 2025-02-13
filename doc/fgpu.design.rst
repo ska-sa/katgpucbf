@@ -582,7 +582,7 @@ of the approach to narrowband. As a reminder, the steps are:
 2. Low-pass filter
 3. Subsample
 4. Coarse delay and PFB
-5. Discard channels
+5. Discard channels (optional)
 
 The first three steps are implemented by a "digital down-conversion"
 ("DDC") kernel. This is applied to each input chunk, after copying the head of
