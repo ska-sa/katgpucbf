@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -41,19 +41,18 @@ async def test_baseline_correlation_products(
     expected output appears in the correct baseline product.
     """
     receiver = receive_baseline_correlation_products  # Just to reduce typing
-    pdf_report.step("Connect to CBF's product controller to retrieve configuration for the running CBF.")
-    pc_client = cbf.product_controller_client
+    pcc = cbf.product_controller_client
 
     pdf_report.step("Configure the D-sim with Gaussian noise.")
 
     amplitude = 0.2
-    await cbf.dsim_clients[0].request("signals", f"common=wgn({amplitude});common;common;")
+    await pcc.request("dsim-signals", cbf.dsim_names[0], f"common=wgn({amplitude});common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
     for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):
         end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
-        await pc_client.request("gain-all", "antenna-channelised-voltage", "0")
+        await pcc.request("gain-all", "antenna-channelised-voltage", "0")
         pdf_report.detail("Compute gains to enable one baseline per channel.")
         gains = {}
         for i in range(start_idx, end_idx):
@@ -64,7 +63,7 @@ async def test_baseline_correlation_products(
                 gains[inp][channel] = 1.0
         pdf_report.detail("Set gains.")
         for inp, g in gains.items():
-            await pc_client.request("gain", "antenna-channelised-voltage", inp, *g)
+            await pcc.request("gain", "antenna-channelised-voltage", inp, *g)
 
         _, data = await receiver.next_complete_chunk()
         everything_is_awesome = True

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -467,8 +467,8 @@ async def cbf(
     # Reset the CBF to default state
     pcc = cbf.product_controller_client
     async with asyncio.TaskGroup() as tg:
-        for client in cbf.dsim_clients:
-            tg.create_task(client.request("signals", "0;0;"))
+        for dsim_name in cbf.dsim_names:
+            tg.create_task(pcc.request("dsim-signals", dsim_name, "0;0;"))
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])

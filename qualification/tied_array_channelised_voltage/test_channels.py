@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -40,7 +40,7 @@ async def test_channels(
     that the tones appear in the same channels.
     """
     receiver = receive_tied_array_channelised_voltage
-    client = cbf.product_controller_client
+    pcc = cbf.product_controller_client
 
     pdf_report.step("Select channels")
     rng = random.Random(1)
@@ -51,17 +51,17 @@ async def test_channels(
     amplitude = 0.05
     freqs = [receiver.channel_frequency(c) for c in channels]
     signal = " + ".join(f"cw({amplitude}, {freq})" for freq in freqs)
-    await cbf.dsim_clients[0].request("signals", f"common = {signal}; common; common;")
+    await pcc.request("dsim-signals", cbf.dsim_names[0], f"common = {signal}; common; common;")
 
     pdf_report.step("Set F-engine gain")
     gain = receiver.compute_tone_gain(amplitude, 100)
-    await client.request("gain-all", "antenna-channelised-voltage", gain)
+    await pcc.request("gain-all", "antenna-channelised-voltage", gain)
     pdf_report.detail(f"Set gain to {gain} for all inputs")
 
     pdf_report.step("Set XB-engine quantisation gain")
     gain = 1.0 / receiver.n_ants  # Average rather than summing antennas
     for beam in receiver.stream_names:
-        await client.request("beam-quant-gains", beam, gain)
+        await pcc.request("beam-quant-gains", beam, gain)
     pdf_report.detail(f"Set quantisation gain to {gain} for all beams")
 
     pdf_report.step("Check results")

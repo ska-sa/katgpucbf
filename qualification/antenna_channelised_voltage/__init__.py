@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -118,7 +118,7 @@ async def sample_tone_response(
     """
     # Identify baselines using the two pols from each dsim.
     # The fixtures set up a one-to-one relationship between dsims and antennas.
-    assert len(receiver.input_labels) == N_POLS * len(receiver.cbf.dsim_clients)
+    assert len(receiver.input_labels) == N_POLS * len(receiver.cbf.dsim_names)
     corrs = []
     for i in range(0, len(receiver.input_labels), 2):
         corrs.append(receiver.bls_ordering.index((receiver.input_labels[i], receiver.input_labels[i + 1])))
@@ -130,13 +130,14 @@ async def sample_tone_response(
     # Each element is an (out_index, signal_spec) pair. When it fills up to the
     # number of antennas available, `flush` is called.
     tasks: list[tuple[tuple[int, ...], str]] = []
+    pcc = receiver.cbf.product_controller_client
 
     async def flush() -> None:
         """Execute all the work in `tasks`."""
         async with asyncio.TaskGroup() as tg:
             for i in range(len(tasks)):
                 signal = tasks[i][1] * N_POLS
-                tg.create_task(receiver.cbf.dsim_clients[i].request("signals", signal))
+                tg.create_task(pcc.request("dsim-signals", receiver.cbf.dsim_names[i], signal))
         _, data = await receiver.next_complete_chunk()
         for task, bl_idx in zip(tasks, corrs):
             # In the absence of noise this should be purely real, but
@@ -147,7 +148,7 @@ async def sample_tone_response(
     with np.nditer([freqs, amplitude], flags=["multi_index"]) as it:
         for f, a in it:
             tasks.append((it.multi_index, f"cw({a}, {f});"))
-            if len(tasks) == len(receiver.cbf.dsim_clients):
+            if len(tasks) == len(receiver.cbf.dsim_names):
                 await flush()
                 tasks = []
     if tasks:
