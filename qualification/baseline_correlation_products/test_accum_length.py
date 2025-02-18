@@ -51,6 +51,7 @@ async def test_accum_power(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     """
     Test that the actual accumulation length matches the reported length.
@@ -82,11 +83,11 @@ async def test_accum_power(
     # Sum over channels, but use only one baseline and real part because
     # the input signals are the same for all antennas.
     assert isinstance(chunks[1][1].data, np.ndarray)
-    total_power = np.sum(chunks[1][1].data[:, 0, 0], dtype=np.int64)
+    total_power = np.sum(chunks[1][1].data[pass_channels, 0, 0], dtype=np.int64)
     acc_len = round(
         receiver.int_time * receiver.scale_factor_timestamp / (2 * receiver.n_chans * receiver.decimation_factor)
     )
-    expected_power = acc_len * receiver.n_chans * (level * level)
+    expected_power = acc_len * (pass_channels.stop - pass_channels.start) * (level * level)
     pdf_report.detail(f"Total power: {total_power}; expected: {expected_power}.")
     # Statistical analysis of total_power is quite tricky because there is
     # quantisation and saturation in both the time and frequency domain, and

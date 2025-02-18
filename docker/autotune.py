@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -51,7 +51,7 @@ def main() -> None:  # noqa: D103
         should_delete = True
         try:
             os.environ["KATSDPSIGPROC_TUNE_DB"] = temp_db.name
-            for taps_ratio in range(8, 17):
+            for taps_ratio in range(8, 33):
                 for subsampling in [2, 4, 8, 16, 32]:
                     for input_sample_bits in range(2, 17):
                         DDCTemplate(context, taps_ratio * subsampling, subsampling, input_sample_bits)

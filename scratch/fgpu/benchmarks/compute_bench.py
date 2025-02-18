@@ -21,12 +21,19 @@ from fractions import Fraction
 
 import numpy as np
 from katsdpsigproc import accel
+from katsdptelstate.endpoint import Endpoint
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH, DIG_SAMPLE_BITS
 from katgpucbf.fgpu.compute import ComputeTemplate, NarrowbandConfig
 from katgpucbf.fgpu.engine import generate_ddc_weights, generate_pfb_weights
 from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
-from katgpucbf.fgpu.output import WindowFunction
+from katgpucbf.fgpu.output import (
+    NarrowbandOutput,
+    NarrowbandOutputDiscard,
+    NarrowbandOutputNoDiscard,
+    WidebandOutput,
+    WindowFunction,
+)
 from katgpucbf.utils import DitherType, parse_dither
 
 
@@ -42,7 +49,9 @@ def main():  # noqa: C901
     parser.add_argument("--passes", type=int, default=1000)
     parser.add_argument("--ddc-taps", type=int)  # Default is computed from decimation
     parser.add_argument("--dither", type=parse_dither, default=DitherType.DEFAULT)
-    parser.add_argument("--narrowband", action="store_true")
+    parser.add_argument(
+        "--mode", choices=["wideband", "narrowband-discard", "narrowband-no-discard"], default="wideband"
+    )
     parser.add_argument("--narrowband-decimation", type=int, default=8)
     parser.add_argument("--kernel", choices=["all", "ddc", "pfb_fir", "fft", "postproc"], default="all")
     parser.add_argument(
@@ -53,14 +62,17 @@ def main():  # noqa: C901
     )
     args = parser.parse_args()
     if args.ddc_taps is None:
-        args.ddc_taps = DEFAULT_DDC_TAPS_RATIO * args.narrowband_decimation
+        subsampling = args.narrowband_decimation
+        if args.mode == "narrowband-no-discard":
+            subsampling *= 2
+        args.ddc_taps = DEFAULT_DDC_TAPS_RATIO * subsampling
     if args.sem is not None:
         if args.sem <= 0:
             parser.error("--sem must be positive")
         if args.passes % args.sem != 0:
             parser.error("--sem must divide into --passes")
-    if args.kernel == "ddc" and not args.narrowband:
-        parser.error("--kernel=ddc requires --narrowband")
+    if args.kernel == "ddc" and not args.mode.startswith("narrowband"):
+        parser.error("--kernel=ddc is incompatible with --mode=wideband")
     if args.jones_per_batch % args.channels != 0:
         parser.error("--jones-per-batch must be a multiple of --channels")
     spectra_per_heap = args.jones_per_batch // args.channels
@@ -68,31 +80,55 @@ def main():  # noqa: C901
     rng = np.random.default_rng(seed=1)
     context = accel.create_some_context(device_filter=lambda device: device.is_cuda)
     with context:
-        if args.narrowband:
-            narrowband_config = NarrowbandConfig(
+        output_kwargs = dict(
+            name="benchmark",
+            channels=args.channels,
+            jones_per_batch=args.jones_per_batch,
+            taps=args.taps,
+            w_cutoff=1.0,
+            window_function=WindowFunction.DEFAULT,
+            dither=args.dither,
+            dst=[Endpoint("239.1.1.1", 7148)],
+        )
+        if args.mode.startswith("narrowband"):
+            # We don't care about the actual ADC sample rate, so we normalise
+            # it to 2*decimation "units", giving a total bandwidth of 1 unit. The values
+            # are mostly irrelevant to performance except for the decimation
+            # factor and tap count.
+            nb_kwargs = dict(
+                centre_frequency=0.75,
                 decimation=args.narrowband_decimation,
-                mix_frequency=Fraction(1, 4),
-                weights=generate_ddc_weights(args.ddc_taps, args.narrowband_decimation, 0.005),
+                ddc_taps=args.ddc_taps,
+                weight_pass=0.005,
             )
-            spectra_samples = 2 * args.channels * args.narrowband_decimation
-            window = args.taps * spectra_samples + args.ddc_taps - args.narrowband_decimation
+            if args.mode == "narrowband-discard":
+                output = NarrowbandOutputDiscard(**output_kwargs, **nb_kwargs)
+            else:
+                output = NarrowbandOutputNoDiscard(**output_kwargs, **nb_kwargs, pass_bandwidth=0.6)
+
+            narrowband_config = NarrowbandConfig(
+                decimation=output.decimation,
+                mix_frequency=Fraction(1, 4),
+                weights=generate_ddc_weights(output, 2.0 * output.decimation),
+                discard=args.mode == "narrowband-discard",
+            )
         else:
+            output = WidebandOutput(**output_kwargs)
             narrowband_config = None
             spectra_samples = 2 * args.channels
-            window = args.taps * spectra_samples
         template = ComputeTemplate(
             context,
-            args.taps,
-            args.channels,
+            output.taps,
+            output.channels,
             args.dig_sample_bits,
             args.send_sample_bits,
-            dither=args.dither,
+            dither=output.dither,
             narrowband=narrowband_config,
         )
         command_queue = context.create_tuning_command_queue()
-        out_spectra = accel.roundup(args.send_chunk_jones // args.channels, spectra_per_heap)
-        frontend_spectra = min(args.recv_chunk_samples // spectra_samples, out_spectra)
-        extra_samples = window - spectra_samples
+        out_spectra = accel.roundup(args.send_chunk_jones // output.channels, spectra_per_heap)
+        frontend_spectra = min(args.recv_chunk_samples // output.spectra_samples, out_spectra)
+        extra_samples = output.window - output.spectra_samples
         fn = template.instantiate(
             command_queue,
             samples=args.recv_chunk_samples + extra_samples,
@@ -104,7 +140,9 @@ def main():  # noqa: C901
         fn.ensure_all_bound()
 
         h_weights = fn.buffer("weights").empty_like()
-        h_weights[:] = generate_pfb_weights(2 * args.channels, args.taps, 1.0, WindowFunction.DEFAULT)
+        h_weights[:] = generate_pfb_weights(
+            output.spectra_samples // output.subsampling, output.taps, output.w_cutoff, output.window_function
+        )
         fn.buffer("weights").set(command_queue, h_weights)
 
         h_gains = fn.buffer("gains").empty_like()
@@ -136,7 +174,7 @@ def main():  # noqa: C901
             fn.postproc()
 
         def run_all():
-            if args.narrowband:
+            if isinstance(output, NarrowbandOutput):
                 fn.run_ddc(fn.buffer("in"), 0)
                 fn.run_narrowband_frontend([0, 0], 0, frontend_spectra)
             else:

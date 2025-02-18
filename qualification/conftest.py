@@ -21,11 +21,13 @@ import asyncio
 import copy
 import inspect
 import logging
+import math
 import os
 import subprocess
 import time
 from collections import deque, namedtuple
 from collections.abc import AsyncGenerator, Generator, Iterable, Sequence
+from typing import Any
 
 import matplotlib.style
 import pytest
@@ -41,6 +43,7 @@ from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
 FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
+PASS_FRACTION = 0.6  # Fraction of total narrowband bandwidth to use as pass_bandwidth
 pdf_report_data_key = pytest.StashKey[dict]()
 _CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
 
@@ -116,6 +119,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
     config.addinivalue_line("markers", "name(name): human-readable name for the test")
     config.addinivalue_line("markers", "wideband_only: do not run the test in narrowband configurations")
+    config.addinivalue_line("markers", "no_vlbi: do not run the test in VLBI narrowband configurations")
     config.addinivalue_line(
         "markers", "no_capture_start([stream, ...]): do not issue capture-start (on all streams if none specified)"
     )
@@ -154,14 +158,19 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "band" in metafunc.fixturenames:
         metafunc.parametrize("band", metafunc.config.getini("bands"))
     if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
-        configs = [(int(n_channels), 1) for n_channels in metafunc.config.getini("wideband_channels")]
+        configs = [(int(n_channels), 1, False) for n_channels in metafunc.config.getini("wideband_channels")]
         if not metafunc.definition.get_closest_marker("wideband_only"):
+            if metafunc.definition.get_closest_marker("no_vlbi"):
+                vlbi_params = [False]
+            else:
+                vlbi_params = [False, True]
             configs.extend(
-                (int(n_channels), int(decimation))
+                (int(n_channels), int(decimation), vlbi)
                 for decimation in metafunc.config.getini("narrowband_decimation")
                 for n_channels in metafunc.config.getini("narrowband_channels")
+                for vlbi in vlbi_params
             )
-        metafunc.parametrize("n_channels, narrowband_decimation", configs)
+        metafunc.parametrize("n_channels, narrowband_decimation, narrowband_vlbi", configs)
 
 
 @pytest.hookimpl(trylast=True)
@@ -178,7 +187,7 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         ans: list = [rel_path.parts[0] != "antenna_channelised_voltage"]
         callspec = getattr(item, "callspec", None)
         if callspec is not None:
-            for name in ["n_antennas", "narrowband_decimation", "n_channels", "band"]:
+            for name in ["n_antennas", "narrowband_decimation", "narrowband_vlbi", "n_channels", "band"]:
                 ans.append((name, callspec.params.get(name)))
         return tuple(ans)
 
@@ -304,11 +313,12 @@ async def _cbf_config_and_description(
     band: str,
     int_time: float,
     narrowband_decimation: int,
+    narrowband_vlbi: bool,
 ) -> tuple[dict, dict]:
     # shutdown_delay is set to zero to speed up the test. We don't care
     # that Prometheus might not get to scrape the final metric updates.
     config: dict = {
-        "version": "4.1",
+        "version": "4.5",
         "config": {"shutdown_delay": 0.0},
         "inputs": {},
         "outputs": {},
@@ -366,10 +376,15 @@ async def _cbf_config_and_description(
         # narrowband heap rate is 1/2**24 (jones-per-batch=2**20 and
         # narrowband factor 8).
         centre_frequency = adc_sample_rate * (3456789 / 2**24)
-        config["outputs"]["antenna-channelised-voltage"]["narrowband"] = {
+        nb_config: dict[str, Any] = {
             "decimation_factor": narrowband_decimation,
             "centre_frequency": centre_frequency,
         }
+        if narrowband_vlbi:
+            nb_config["vlbi"] = {
+                "pass_bandwidth": adc_sample_rate * 0.5 / narrowband_decimation * PASS_FRACTION,
+            }
+        config["outputs"]["antenna-channelised-voltage"]["narrowband"] = nb_config
     config["outputs"]["baseline-correlation-products"] = {
         "type": "gpucbf.baseline_correlation_products",
         "src_streams": ["antenna-channelised-voltage"],
@@ -396,6 +411,7 @@ async def _cbf_config_and_description(
         "band": f"{BANDS[band].long_name}",
         "integration_time": str(int_time),
         "narrowband_decimation": str(narrowband_decimation),
+        "narrowband_vlbi": str(narrowband_vlbi),
         "dsims": str(n_dsims),
         "beams": str(n_beams),
     }
@@ -405,6 +421,8 @@ async def _cbf_config_and_description(
     )
     if narrowband_decimation > 1:
         long_description += f", 1/{narrowband_decimation} narrowband"
+        if narrowband_vlbi:
+            long_description += " (VLBI)"
     logger.info("Config for CBF generation: %s.", long_description)
 
     return config, cbf_mode_config
@@ -490,6 +508,23 @@ async def cbf(
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] in _CAPTURE_TYPES:
             await pcc.request("capture-stop", name)
+
+
+@pytest.fixture
+def pass_channels(n_channels: int, narrowband_vlbi: bool) -> slice:
+    """Range of channels which form the passband.
+
+    Channels outside of this range will be attenuated by the narrowband
+    DDC filter. For modes other than VLBI, this will be the full channel range.
+    """
+    if narrowband_vlbi:
+        lo = math.ceil(n_channels * 0.5 * (1.0 - PASS_FRACTION))
+        # + 1 because this is an exclusive range
+        hi = math.floor(n_channels * 0.5 * (1.0 + PASS_FRACTION)) + 1
+    else:
+        lo = 0
+        hi = n_channels
+    return slice(lo, hi)
 
 
 class CoreAllocator:

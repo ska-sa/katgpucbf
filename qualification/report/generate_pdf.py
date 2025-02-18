@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -73,6 +73,17 @@ GROUP_NAMES = {
 }
 
 
+def str_to_bool(s: str) -> bool:
+    """Convert a string containing "True" or "False" to boolean."""
+    match s:
+        case "True":
+            return True
+        case "False":
+            return False
+        case _:
+            raise ValueError(f"Expected 'True' or 'False', received {s!r}")
+
+
 def cbf_sort_key(config: dict) -> tuple:
     """Generate a sort key to sort CBFs."""
     # It seems at least some of these get stringified, so ensure they are numeric
@@ -83,6 +94,8 @@ def cbf_sort_key(config: dict) -> tuple:
         int(config["beams"]),
         float(config["integration_time"]),
         int(config["dsims"]),
+        int(config["narrowband_decimation"]),
+        str_to_bool(config.get("narrowband_vlbi", "False")),
     )
 
 
@@ -263,6 +276,8 @@ class CBFConfiguration:
                 "integration_time": "0.5",
                 "dsims": "4",
                 "beams": "4",
+                "narrowband_decimation": "8",
+                "narrowband_vlbi": "False"
             }
 
         If `expand` is True, it will return a 'long description' as a sentence:
@@ -285,6 +300,9 @@ class CBFConfiguration:
         -------
         Short or long description of CBF mode.
         """
+        narrowband_decimation = int(self.mode_config["narrowband_decimation"])
+        # Older report files won't contain the narrowband_vlbi key
+        narrowband_vlbi = str_to_bool(self.mode_config.get("narrowband_vlbi", "False"))
         if expand:
             # Long description required
             parts = [
@@ -295,13 +313,17 @@ class CBFConfiguration:
                 f'{self.mode_config["integration_time"]}s integrations',
                 f'{self.mode_config["dsims"]} dsims',
             ]
-            if int(self.mode_config["narrowband_decimation"]) > 1:
-                parts.append(f'1/{self.mode_config["narrowband_decimation"]} narrowband')
+            if narrowband_decimation > 1:
+                parts.append(f"1/{narrowband_decimation} narrowband")
+                if narrowband_vlbi:
+                    parts[-1] += " (VLBI)"
             config_mode = ", ".join(parts) + "."
         else:
             antpols = int(self.mode_config["antennas"]) * 2
             chans = int(self.mode_config["channels"]) // 1000
             mode = "bc" if int(self.mode_config["beams"]) > 0 else "c"
+            if narrowband_decimation > 1 and narrowband_vlbi:
+                mode += "v"
             config_mode = f'{mode}{antpols}n{self.mode_config["bandwidth"]}M{chans}k'
 
         return config_mode

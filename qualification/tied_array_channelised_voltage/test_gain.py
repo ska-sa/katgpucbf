@@ -32,6 +32,7 @@ async def test_gain(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
+    pass_channels: slice,
 ) -> None:
     r"""Test that the ``?beam-quant-gains`` command functions.
 
@@ -68,6 +69,7 @@ async def test_gain(
     pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
 
     pdf_report.step("Check power level of each beam.")
+    data = data[:, pass_channels]
     for gain, stream_name, stream_data in zip(gains, stream_names, data):
         power = np.sum(np.square(stream_data, dtype=np.float32)) / (stream_data.shape[0] * stream_data.shape[1])
         expected_power = np.square(amplitude * dig_max * gain)

@@ -76,11 +76,13 @@ pipeline {
                   // We just want to know if they run without crashing, so we use a small
                   // number of passes to speed things up.
                   sh 'fgpu/benchmarks/compute_bench.py --kernel all --passes 10'
-                  sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --narrowband --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --mode=narrowband-discard --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --mode=narrowband-no-discard --passes 10'
                   sh 'fgpu/benchmarks/compute_bench.py --kernel pfb_fir --passes 10'
                   sh 'fgpu/benchmarks/compute_bench.py --kernel fft --passes 10'
                   sh 'fgpu/benchmarks/compute_bench.py --kernel postproc --passes 10'
-                  sh 'fgpu/benchmarks/compute_bench.py --kernel all --narrowband --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel all --mode=narrowband-discard --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel all --mode=narrowband-no-discard --passes 10'
 
                   sh 'fgpu/benchmarks/ddc_bench.py --passes 10'
 
