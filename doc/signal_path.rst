@@ -248,16 +248,22 @@ Narrowband without discard
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 The above combined time-frequency approach to narrowband can be disabled,
 giving a purely time-domain FIR filter. In this case, step 5 is skipped.
-The filter design in this case is more critical, and needs to trade off
-factors such as passband ripple, rolloff, and alias rejection.
-
-.. todo::
-
-   Describe the filter design once it is finalised (NGC-1399).
-
 The primary use case is for reconstructing a time-domain signal from the
 channelised output, where completely discarding channels appears to lose
 necessary information.
+
+The filter design in this case is more critical, and needs to trade off
+factors such as passband ripple, roll-off, and alias rejection.
+The user provides the desired pass bandwidth. We then use
+:func:`scipy.signal.remez` with the stop bandwidth calculated such that the
+roll-off is symmetrically located around the Nyquist frequency. This means
+that after subsampling, half of the roll-off region will alias, but it will
+not alias with the passband. As before, users can override a weighting factor
+that balances the priority of the passband and stopband.
+
+It may be possible to improve this further by leaving other aliases of the
+roll-off region unconstrained, as was done above, but this has not currently
+been investigated.
 
 Correlation
 -----------
