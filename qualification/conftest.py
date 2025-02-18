@@ -201,13 +201,13 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
 
 
 @pytest.fixture(scope="package")
-def n_dsims() -> int:  # noqa: D401
-    """Number of simulated digitisers."""
+def n_dsims() -> int:
+    """Number of simulated digitisers."""  # noqa: D401
     return 1
 
 
 @pytest.fixture
-def int_time() -> float:  # noqa: D104
+def int_time() -> float:
     """Integration time in seconds."""
     return 0.5
 

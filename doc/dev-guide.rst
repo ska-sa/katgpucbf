@@ -70,26 +70,23 @@ to monitor Python development.
 - ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
   be run before committing to the repo.
 - ``pyproject.toml`` dictates the configuration of utilities such as
-  :external+black:doc:`black <getting_started>` and `isort`_.
-- ``.flake8`` for :external+flake8:doc:`flake8 <user/index>`, a tool for enforcing
-  :pep:`8`-based style guide for Python.
-- ``.pydocstyle.ini`` for :external+pydocstyle:doc:`pydocstyle <usage>`, a tool
-  for enforcing :pep:`257`-based docstring style guides for Python.
+  :external+black:doc:`black <getting_started>`, `isort`_ and `ruff`_.
 - ``mypy.ini`` file for :external+mypy:doc:`mypy <getting_started>`, a static type checker
   (or lint-like tool) for type annotations in the Python code - according to
   :pep:`484` and :pep:`526` notation.
 
 .. _isort: https://pycqa.github.io/isort/
+.. _ruff: https://docs.astral.sh/ruff/
 
 Installation Prerequisites
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Although :external+black:doc:`black <getting_started>`, :external+flake8:doc:`flake8 <user/index>`,
-:external+pydocstyle:doc:`pydocstyle <usage>` and :external+mypy:doc:`mypy <getting_started>`
+Although :external+black:doc:`black <getting_started>`, `ruff`_,
+and :external+mypy:doc:`mypy <getting_started>`
 are used, the only prerequisite is the **pre-commit**  Python library. That is,
 the YAML configuration file is set up so that when the pre-commit hooks are
 installed, all dependencies are automatically installed. (Note, they won't be
-available to you in your Python environment, they will be used only by pre-commit.
+available to you in your Python environment; they will be used only by pre-commit.
 If you want to use them separately, you will need to install them separately with pip.)
 
 Light-weight installation

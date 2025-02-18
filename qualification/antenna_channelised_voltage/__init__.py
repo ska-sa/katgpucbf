@@ -65,7 +65,7 @@ async def sample_tone_response_hdr(
         List of channels (can be fractional units of channels) which CW will be generated.
 
     Returns
-    ----------
+    -------
     hdr_data
         HDR data per spectrum.
     """

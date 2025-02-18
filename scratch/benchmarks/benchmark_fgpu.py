@@ -415,7 +415,7 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
         return rates[result.low], rates[result.high]
 
 
-async def main():  # noqa: D103
+async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")
     parser.add_argument("--channels", type=int, default=1024, help="Wideband channel count [%(default)s]")

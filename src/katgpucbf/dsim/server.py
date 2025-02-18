@@ -229,7 +229,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         try:
             signals = parse_signals(signals_str)
         except (pp.ParseBaseException, TerminalError) as exc:
-            raise aiokatcp.FailReply(str(exc))
+            raise aiokatcp.FailReply(str(exc)) from None
         n_pol = self.spare.data.sizes["pol"]
         if len(signals) != n_pol:
             raise aiokatcp.FailReply(f"expected {n_pol} signals, received {len(signals)}")

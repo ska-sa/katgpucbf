@@ -542,7 +542,7 @@ def parse_signals(prog: str) -> list[Signal]:
         try:
             return var_table[tokens[0]]
         except KeyError:
-            raise pp.ParseFatalException("", loc, f"Unknown variable {tokens[0]!r}")
+            raise pp.ParseFatalException("", loc, f"Unknown variable {tokens[0]!r}") from None
 
     lpar = pp.Suppress("(")
     rpar = pp.Suppress(")")
