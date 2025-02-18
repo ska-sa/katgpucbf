@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -46,8 +46,8 @@ async def _test_capture_start(
     # validity of any of the tests that use this function.
     pdf_report.step("Inject white noise signal.")
     signals = "common = nodither(wgn(0.1)); common; common;"
-    await cbf.dsim_clients[0].request("signals", signals)
-    dsim_timestamp = await cbf.dsim_clients[0].sensor_value("steady-state-timestamp", int)
+    await pcc.request("dsim-signals", cbf.dsim_names[0], signals)
+    dsim_timestamp = await pcc.sensor_value(f"{cbf.dsim_names[0]}.steady-state-timestamp", int)
     pdf_report.detail(f"Set dsim signals to {signals}, starting with timestamp {dsim_timestamp}.")
 
     pdf_report.step("Wait for injected signal to reach XB-engines.")

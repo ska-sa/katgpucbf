@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -66,7 +66,7 @@ class CBFRemoteControl(CBFBase):
 
     product_controller_endpoint: tuple[str, int]
     product_controller_client: aiokatcp.Client
-    dsim_clients: list[aiokatcp.Client]
+    dsim_names: list[str]  # Names to pass to ?dsim-signals requests
     sensor_watcher: aiokatcp.SensorWatcher
 
     @property
@@ -94,25 +94,19 @@ class CBFRemoteControl(CBFBase):
         # firehose.
         pcc.remove_sensor_watcher(sensor_watcher)
 
-        dsim_endpoints = []
-        for sensor_name, sensor in sensor_watcher.sensors.items():
-            if match := re.fullmatch(r"sim\.dsim(\d+)\.\d+\.0\.port", sensor_name):
-                idx = int(match.group(1))
-                dsim_endpoints.append((idx, sensor.value))
-        assert dsim_endpoints
-        dsim_endpoints.sort()  # sorts by index
+        dsim_names = []
+        for sensor_name in sensor_watcher.sensors:
+            if match := re.fullmatch(r"(sim\.dsim\d+\.\d+\.0)\.port", sensor_name):
+                dsim_names.append(match.group(1))
+        dsim_names.sort()  # sorts by index
 
-        dsim_clients = []
-        for _, endpoint in dsim_endpoints:
-            dsim_clients.append(await aiokatcp.Client.connect(str(endpoint.host), endpoint.port))
-
-        logger.info("Sensors synchronised; %d dsims found", len(dsim_clients))
+        logger.info("Sensors synchronised; %d dsims found", len(dsim_names))
 
         return CBFRemoteControl(
             name=name,
             product_controller_endpoint=(host, port),
             product_controller_client=pcc,
-            dsim_clients=list(dsim_clients),
+            dsim_names=list(dsim_names),
             config=dict(config),
             mode_config=mode_config,
             sensor_watcher=sensor_watcher,
@@ -130,38 +124,24 @@ class CBFRemoteControl(CBFBase):
         acceptable for most cases.
         """
         timestamp = 0
-        # Although the dsim sensors will also appear in the product controller,
-        # we can't rely on that due to a race condition: if we make a change
-        # directly on the dsim, the subscription update it sends to the product
-        # controller might not be received before we ask the product controller
-        # for the sensor value. So we have to query every device server that we
-        # make state changes though.
-        clients = [self.product_controller_client] + self.dsim_clients
-        async with asyncio.TaskGroup() as tg:
-            requests = [
-                tg.create_task(client.request("sensor-value", r"/.*steady-state-timestamp$/")) for client in clients
-            ]
-        for client, request in zip(clients, requests):
-            _, informs = request.result()
-            for inform in informs:
-                # In theory there could be multiple sensors per inform, but aiokatcp
-                # never does this because timestamps are seldom shared.
-                sensor_value = int(inform.arguments[4])
-                if client is not self.product_controller_client:
-                    # values returned from the dsim do not account for delay,
-                    # so need to be offset to get an output timestamp.
-                    sensor_value += max_delay
-                timestamp = max(timestamp, sensor_value)
+        _, informs = await self.product_controller_client.request("sensor-value", r"/.*steady-state-timestamp$/")
+        for inform in informs:
+            # In theory there could be multiple sensors per inform, but aiokatcp
+            # never does this because timestamps are seldom shared.
+            sensor_name = inform.arguments[2]  # Byte string
+            sensor_value = int(inform.arguments[4])
+            if sensor_name.startswith(b"sim."):
+                # values returned from the dsim do not account for delay,
+                # so need to be offset to get an output timestamp.
+                sensor_value += max_delay
+            timestamp = max(timestamp, sensor_value)
         logger.debug("steady_state_timestamp: %d", timestamp)
         return timestamp
 
     async def close(self, master_controller_client: aiokatcp.Client | None) -> None:
         """Shut down all the connections and deconfigure the subarray product."""
-        clients = self.dsim_clients + [self.product_controller_client]
-        async with asyncio.TaskGroup() as tg:
-            for client in clients:
-                client.close()
-                tg.create_task(client.wait_closed())
+        self.product_controller_client.close()
+        await self.product_controller_client.wait_closed()
         if master_controller_client is not None:
             await master_controller_client.request("product-deconfigure", self.name)
 
@@ -171,7 +151,7 @@ class CBFRemoteControl(CBFBase):
         This helps make tests independent of the clock on the machine running
         the test; it depends only on the dsims to be synchronised with each other.
         """
-        reply, _ = await self.dsim_clients[dsim_idx].request("time")
+        reply, _ = await self.product_controller_client.request("dsim-time", self.dsim_names[dsim_idx])
         return aiokatcp.decode(float, reply[0])
 
     async def dsim_gaussian(
@@ -198,10 +178,10 @@ class CBFRemoteControl(CBFBase):
         amplitude /= dig_max  # Convert to be relative to full-scale
         signal = f"common=nodither(wgn({amplitude}));common;common;"
         if period is None:
-            await self.dsim_clients[0].request("signals", signal)
+            await self.product_controller_client.request("dsim-signals", self.dsim_names[dsim_idx], signal)
             suffix = ""
         else:
-            await self.dsim_clients[0].request("signals", signal, period)
+            await self.product_controller_client.request("dsim-signals", self.dsim_names[dsim_idx], signal, period)
             suffix = f" and period={period} samples"
         if pdf_report is not None:
             pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}{suffix}.")

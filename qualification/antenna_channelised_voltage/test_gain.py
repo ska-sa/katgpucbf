@@ -51,16 +51,19 @@ async def test_gains(
         return data
 
     receiver = receive_baseline_correlation_products
+    pcc = cbf.product_controller_client
 
     pdf_report.step("Inject white noise with fixed seed.")
     scale = 0.03
     signals = f"common=wgn({scale}, 1); common; common;"
     # Compute repeat period guaranteed to divide into accumulation length.
-    max_period = await cbf.dsim_clients[0].sensor_value("max-period", int)
+    max_period: int = cbf.init_sensors[f"{cbf.dsim_names[0]}.max-period"].value
     period = receiver.n_samples_between_spectra * receiver.n_spectra_per_heap
     period = min(period, max_period)
     pdf_report.detail(f"Set white Gaussian noise with scale {scale}, period {period} samples.")
-    await asyncio.gather(*[client.request("signals", signals, period) for client in cbf.dsim_clients])
+    async with asyncio.TaskGroup() as tg:
+        for dsim_name in cbf.dsim_names:
+            tg.create_task(pcc.request("dsim-signals", dsim_name, signals, period))
 
     pdf_report.step("Measure response with default gain.")
     orig = await next_chunk_data()
@@ -129,8 +132,8 @@ async def test_gains_capture_start(
 
     pdf_report.step("Inject white noise on first antenna.")
     signals = "common = wgn(0.1); common; common;"
-    await cbf.dsim_clients[0].request("signals", signals)
-    dsim_timestamp = await cbf.dsim_clients[0].sensor_value("steady-state-timestamp", int)
+    await pcc.request("dsim-signals", cbf.dsim_names[0], signals)
+    dsim_timestamp = await pcc.sensor_value(f"{cbf.dsim_names[0]}.steady-state-timestamp", int)
     pdf_report.detail(f"Set dsim signals to {signals}, starting with timestamp {dsim_timestamp}.")
 
     pdf_report.step("Wait for injected signal to reach F-engine.")

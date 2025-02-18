@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -49,7 +49,7 @@ async def test_weight_mapping(
     - Check that the other beams all output zero for that channel.
     """
     receiver = receive_tied_array_channelised_voltage
-    client = cbf.product_controller_client
+    pcc = cbf.product_controller_client
 
     assert receiver.n_inputs < receiver.n_chans, "Test assumes a unique channel per input"
     rng = np.random.default_rng()
@@ -58,7 +58,7 @@ async def test_weight_mapping(
     signals = "common=wgn(0.2); common; common;"
 
     pdf_report.step("Configure dsim with Gaussian noise.")
-    await cbf.dsim_clients[0].request("signals", signals)
+    await pcc.request("dsim-signals", cbf.dsim_names[0], signals)
     pdf_report.detail(f"Set dsim signals to {signals!r}.")
 
     pdf_report.step("Set eq gains to select one channel per input.")
@@ -66,7 +66,7 @@ async def test_weight_mapping(
         for input_label, channel in zip(receiver.input_labels, all_channels_under_test):
             gains = [0.0] * receiver.n_chans
             gains[channel] = 1.0
-            tg.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *gains))
+            tg.create_task(pcc.request("gain", "antenna-channelised-voltage", input_label, *gains))
             pdf_report.detail(f"Set input {input_label} to pass through only channel {channel}.")
 
     pdf_report.step("Test a random selection of inputs.")
@@ -91,11 +91,11 @@ async def test_weight_mapping(
         weights = [0.0] * len(source_indices)
         weights[input_pos] = 1.0
         inv_weights = [1.0 - w for w in weights]
-        await client.request("beam-weights", test_beam_name, *weights)
+        await pcc.request("beam-weights", test_beam_name, *weights)
         pdf_report.detail(f"Set beam-weights for {test_beam_name} to {weights}")
         for stream_name in receiver.stream_names:
             if stream_name != test_beam_name:
-                await client.request("beam-weights", stream_name, *inv_weights)
+                await pcc.request("beam-weights", stream_name, *inv_weights)
                 pdf_report.detail(f"Set beam-weights for {stream_name} to {inv_weights}")
 
         timestamp, data = await receiver.next_complete_chunk()

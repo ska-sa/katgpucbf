@@ -62,10 +62,12 @@ async def test_accum_power(
     power for the number of accumulations.
     """
     receiver = receive_baseline_correlation_products
+    pcc = cbf.product_controller_client
+
     pdf_report.step("Inject a white noise signal.")
     level = 32  # Expected magnitude of F-engine outputs
     input_std = level / 511  # dsim will scale up by 511 to fill [-511, 511] range
-    await cbf.dsim_clients[0].request("signals", f"common=wgn({input_std});common;common;")
+    await pcc.request("dsim-signals", cbf.dsim_names[0], f"common=wgn({input_std});common;common;")
 
     pdf_report.step("Collect two dumps and check the timestamp difference.")
     chunks = await receiver.consecutive_chunks(2)

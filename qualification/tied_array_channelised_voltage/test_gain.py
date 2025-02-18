@@ -43,24 +43,25 @@ async def test_gain(
     ratios.
     """
     receiver = receive_tied_array_channelised_voltage
+    pcc = cbf.product_controller_client
+
     pdf_report.step("Configure the D-sim with Gaussian noise.")
     dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
     amplitude = 32 / dig_max
-    await cbf.dsim_clients[0].request("signals", f"common=nodither(wgn({amplitude}));common;common;")
+    await pcc.request("dsim-signals", cbf.dsim_names[0], f"common=nodither(wgn({amplitude}));common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")
 
     gains = [0.5, 0.5, 1.0, 1.0, 2.0, 2.0]
     stream_names = receiver.stream_names[: len(gains)]  # Only need 3 beams for the test
     pdf_report.step("Set weights to 1/n_ants")
     weights = (1.0 / receiver.n_ants,) * receiver.n_ants
-    client = cbf.product_controller_client
     for stream_name in stream_names:
-        await client.request("beam-weights", stream_name, *weights)
+        await pcc.request("beam-weights", stream_name, *weights)
         pdf_report.detail(f"Set weights for {stream_name} to {weights}.")
 
     pdf_report.step("Set gains to 1/2, 1 and 2.")
     for gain, stream_name in zip(gains, stream_names):
-        await client.request("beam-quant-gains", stream_name, gain)
+        await pcc.request("beam-quant-gains", stream_name, gain)
         pdf_report.detail(f"Set gain for {stream_name} to {gain}.")
 
     pdf_report.step("Collect data.")

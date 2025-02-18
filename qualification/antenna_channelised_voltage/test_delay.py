@@ -55,9 +55,10 @@ async def test_delay_application_time(
     accumulation.
     """
     receiver = receive_baseline_correlation_products
+    pcc = cbf.product_controller_client
 
     pdf_report.step("Inject correlated white noise signal.")
-    await cbf.dsim_clients[0].request("signals", "common=nodither(wgn(0.1)); common; common;")
+    await pcc.request("dsim-signals", cbf.dsim_names[0], "common=nodither(wgn(0.1)); common; common;")
     pdf_report.detail("Wait for updated signal to propagate through the pipeline.")
     await receiver.next_complete_chunk()
 
@@ -144,6 +145,8 @@ async def test_delay_enable_disable(
         elapsed.append(finish - start)
 
     receiver = receive_baseline_correlation_products
+    pcc = cbf.product_controller_client
+
     channel = 3 * receiver.n_chans // 4
     freq = receiver.channel_frequency(channel)
     signal = f"cw(0.1, {freq})"
@@ -153,7 +156,7 @@ async def test_delay_enable_disable(
 
     pdf_report.step("Inject tone.")
     pdf_report.detail(f"Set signal to {signal} on both pols.")
-    await cbf.dsim_clients[0].request("signals", f"common={signal}; common; common;")
+    await pcc.request("dsim-signals", cbf.dsim_names[0], f"common={signal}; common; common;")
     pdf_report.detail(f"Set gain to {gain} for all inputs.")
     await cbf.product_controller_client.request("gain-all", "antenna-channelised-voltage", gain)
 
@@ -342,8 +345,9 @@ async def _test_delay_phase_fixed(
         signal and the delay compensation
     """
     receiver = receive_baseline_correlation_products
+    pcc = cbf.product_controller_client
     # Minimum, maximum, resolution step, and a small coarse delay
-    n_dsims = len(cbf.dsim_clients)
+    n_dsims = len(cbf.dsim_names)
     assert N_POLS * n_dsims > len(delay_phases)  # > rather than >= because we need a reference
 
     pdf_report.step("Set input signals and delays.")
@@ -358,10 +362,10 @@ async def _test_delay_phase_fixed(
         delay_spec[i] = f"{delay},0:{phase},0"
 
     async with asyncio.TaskGroup() as tg:
-        for i, client in enumerate(cbf.dsim_clients):
+        for i, dsim_name in enumerate(cbf.dsim_names):
             signal_spec = "".join(signals[i * N_POLS : (i + 1) * N_POLS])
             pdf_report.detail(f"Set signal to {signal_spec!r} on dsim {i}.")
-            tg.create_task(client.request("signals", signal_spec))
+            tg.create_task(pcc.request("dsim-signals", dsim_name, signal_spec))
     for i in range(len(delay_phases)):
         pdf_report.detail(f"Set delay model to {delay_spec[i]} on input {i}")
     await cbf.product_controller_client.request(
@@ -416,20 +420,21 @@ async def _test_delay_phase_rate(
         Callback to generate a figure caption from a delay rate and phase rate
     """
     receiver = receive_baseline_correlation_products
+    pcc = cbf.product_controller_client
     # Minimum, maximum, resolution step
-    n_dsims = len(cbf.dsim_clients)
+    n_dsims = len(cbf.dsim_names)
     assert N_POLS * n_dsims > len(rates)  # > rather than >= because we need a reference
 
     pdf_report.step("Set input signals and delays.")
     signal = "common = nodither(wgn(0.05, 1)); common; common;"
-    max_period = await cbf.dsim_clients[0].sensor_value("max-period", int)
+    max_period: int = cbf.init_sensors[f"{cbf.dsim_names[0]}.max-period"].value
     # Choose a period that makes all accumulations the same, so that we can
     # compare accumulations without extraneous noise.
     period = math.gcd(max_period, receiver.n_samples_between_spectra * receiver.n_spectra_per_acc)
     pdf_report.detail(f"Set signal to {signal!r} on all dsims.")
     async with asyncio.TaskGroup() as tg:
-        for client in cbf.dsim_clients:
-            tg.create_task(client.request("signals", signal, period))
+        for dsim_name in cbf.dsim_names:
+            tg.create_task(pcc.request("dsim-signals", dsim_name, signal, period))
     delay_spec = ["0,0:0,0"] * receiver.n_inputs
     for i, (delay_rate, phase_rate) in enumerate(rates):
         delay_spec[i] = f"0,{delay_rate}:0,{phase_rate}"
@@ -615,13 +620,13 @@ async def test_group_delay(
     the test.
     """
     receiver = receive_tied_array_channelised_voltage
-    client = cbf.product_controller_client
+    pcc = cbf.product_controller_client
 
     pdf_report.step("Choose channels.")
     # In VLBI mode we don't have a PFB, and there is too much leakage
     # between channels to be able to multiplex multiple channels onto
     # one signal.
-    n_dsims = len(cbf.dsim_clients)
+    n_dsims = len(cbf.dsim_names)
     if narrowband_vlbi:
         channel_step = 1
         channels_slice = slice(
@@ -649,7 +654,7 @@ async def test_group_delay(
     freq_step_dsim = freq_step * n_dsims
 
     pdf_report.step("Determine dsim frequency resolution.")
-    dsim_period = await cbf.dsim_clients[0].sensor_value("max-period", int)
+    dsim_period: int = cbf.init_sensors[f"{cbf.dsim_names[0]}.max-period"].value
     dsim_resolution = receiver.adc_sample_rate / dsim_period
     pdf_report.detail(f"Resolution is {dsim_resolution:.6f} Hz.")
 
@@ -667,7 +672,7 @@ async def test_group_delay(
         for i, g in enumerate(gains):
             for j in range(2):
                 input_label = receiver.input_labels[2 * i + j]
-                tg.create_task(client.request("gain", "antenna-channelised-voltage", input_label, *g))
+                tg.create_task(pcc.request("gain", "antenna-channelised-voltage", input_label, *g))
     pdf_report.detail(f"Set gain to {gain} on chosen antenna/channel pairs.")
 
     # Collect about 2^27 samples, to improve SNR. However, for VLBI mode this
@@ -688,7 +693,7 @@ async def test_group_delay(
     # phase 0 where quantisation effects are particularly bad.
     delay_model = f"0,0:0.1,{2 * np.pi / acc_time}"
     delay_models = [delay_model] * receiver.n_inputs
-    await client.request("delays", "antenna-channelised-voltage", receiver.sync_time, *delay_models)
+    await pcc.request("delays", "antenna-channelised-voltage", receiver.sync_time, *delay_models)
     pdf_report.detail(f"Set delays to {delay_model} for all inputs.")
 
     async def measure_once(rel_freqs: tuple[float, float]) -> tuple[float, float, float]:
@@ -715,7 +720,7 @@ async def test_group_delay(
             the Central Limit Theorem applies.
         """
         async with asyncio.TaskGroup() as tg:
-            for dsim_client, dsim_freqs in zip(cbf.dsim_clients, cfreqs_by_dsim):
+            for dsim_name, dsim_freqs in zip(cbf.dsim_names, cfreqs_by_dsim):
                 if dsim_freqs:
                     signal = " ".join(
                         f"multicw({len(dsim_freqs)}, {amplitude}, 0.0, {dsim_freqs[0] + rfreq}, {freq_step_dsim});"
@@ -723,7 +728,7 @@ async def test_group_delay(
                     )
                 else:
                     signal = "0;0;"
-                tg.create_task(dsim_client.request("signals", signal, dsim_period))
+                tg.create_task(pcc.request("dsim-signals", dsim_name, signal, dsim_period))
                 pdf_report.detail(f"Set dsim signal to {signal}.")
         pdf_report.detail("All dsim signals set.")
 
@@ -795,7 +800,7 @@ async def test_group_delay(
     std = std2
     pdf_report.detail(f"Measured delay is {delay} ± {std} samples.")
 
-    reported_delay = await client.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
+    reported_delay = await pcc.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
     pdf_report.detail(f"Reported delay is {reported_delay}.")
     assert abs(reported_delay - delay) < 5 * std
     pdf_report.detail("Measured value agrees with reported value to within 5 sigma.")
