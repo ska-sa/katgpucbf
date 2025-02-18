@@ -50,7 +50,7 @@ async def _test_capture_start(
     dsim_timestamp = await pcc.sensor_value(f"{cbf.dsim_names[0]}.steady-state-timestamp", int)
     pdf_report.detail(f"Set dsim signals to {signals}, starting with timestamp {dsim_timestamp}.")
 
-    pdf_report.step("Wait for injected signal to reach XB-engines.")
+    pdf_report.step("Wait for injected signal to reach XB-engines Tx.")
     # Only need to query one stream, since it's the same engine backing
     # all of them.
     stream_name = receiver.stream_names[0]
@@ -58,16 +58,16 @@ async def _test_capture_start(
         tasks = []
         async with asyncio.TaskGroup() as tg:
             for i in range(receiver.n_bengs):
-                tasks.append(tg.create_task(pcc.sensor_value(f"{stream_name}.{i}.rx.timestamp")))
+                tasks.append(tg.create_task(pcc.sensor_value(f"{stream_name}.{i}.tx.next-timestamp")))
         min_timestamp = min(task.result() for task in tasks)
-        pdf_report.detail(f"minimum rx.timestamp = {min_timestamp}.")
-        if min_timestamp >= dsim_timestamp:
+        pdf_report.detail(f"minimum tx.next-timestamp = {min_timestamp}.")
+        if min_timestamp > dsim_timestamp:
             break
         else:
             pdf_report.detail("Sleep for 0.5s.")
             await asyncio.sleep(0.5)
     else:
-        pytest.fail("Digitiser signal did not reach XB-engines.")
+        pytest.fail("Digitiser signal did not reach XB-engines Tx in time.")
 
     await prepare()
 
@@ -75,7 +75,9 @@ async def _test_capture_start(
     async with asyncio.TaskGroup() as tg:
         for stream in receiver.stream_names:
             tg.create_task(pcc.request("capture-start", stream))
-    _, data = await receiver.next_complete_chunk(min_timestamp=0)
+    # We use dsim_timestamp as a minimum to ensure that we're not receiving
+    # data from a *previous* capture-start/stop.
+    _, data = await receiver.next_complete_chunk(min_timestamp=dsim_timestamp)
     return data
 
 
