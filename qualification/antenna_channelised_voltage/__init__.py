@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -62,7 +62,7 @@ async def sample_tone_response_hdr(
     amplitude
         Required amplitude for generated CW tone. This is also used in computing initial gain.
     rel_freqs
-        List of channels (can be fractional units of channels) which CW will be generated.
+        List of channels (can be fractional units of channels) for which CWs will be generated.
 
     Returns
     -------
