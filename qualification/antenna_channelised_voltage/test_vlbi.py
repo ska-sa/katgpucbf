@@ -73,29 +73,28 @@ async def test_filter_response(
 
     data /= np.max(data)  # Normalise
     # data contains the complete spectral response to every input, but we're
-    # only interested in the response in the corresponding channel.
+    # only interested in the response in the corresponding channels.
     data = data[np.arange(len(channels)), out_channels]
     # Make relative to centre frequency
     freqs = receiver.channel_frequency(channels) - receiver.center_freq
-    # The maximum is to avoid errors when data is 0
     with np.errstate(divide="ignore"):  # Avoid warnings when taking log of 0
         data_db = 10 * np.log10(data)
 
     # Turn pass_channels (which slices the full set of channels) into
     # a mask over the channels collected.
     pass_select = (pass_channels.start <= channels) & (channels < pass_channels.stop)
-    ripple = np.max(data_db[pass_select]) - np.min(data_db[pass_select])
-    pdf_report.detail(f"Passband ripple is {ripple:.6f} dB.")
+    ripple_db = np.max(data_db[pass_select]) - np.min(data_db[pass_select])
+    pdf_report.detail(f"Passband ripple is {ripple_db:.6f} dB.")
     with check:
-        assert ripple < 0.1
+        assert ripple_db < 0.1
 
     # Mask for channels that alias into the passband
     alias_select = (pass_channels.start <= out_channels) & (out_channels < pass_channels.stop)
     alias_select &= ~pass_select  # Ignore the passband itself
-    max_alias = np.max(data_db[alias_select])
-    pdf_report.detail(f"Maximum alias into the passband is {max_alias:.3f} dB.")
+    max_alias_db = np.max(data_db[alias_select])
+    pdf_report.detail(f"Maximum alias into the passband is {max_alias_db:.3f} dB.")
     with check:
-        assert max_alias < -80.0
+        assert max_alias_db < -80.0
 
     stop_bandwidth = 2 * receiver.bandwidth - pass_bandwidth
     fig = Figure()
