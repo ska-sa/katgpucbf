@@ -62,7 +62,7 @@ async def sample_tone_response_hdr(
     amplitude
         Required amplitude for generated CW tone. This is also used in computing initial gain.
     rel_freqs
-        List of channels (can be fractional units of channels) which CW will be generated.
+        List of channels (can be fractional units of channels) for which CWs will be generated.
 
     Returns
     -------
