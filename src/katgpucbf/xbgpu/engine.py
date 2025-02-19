@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -28,7 +28,6 @@ import math
 import time
 from abc import abstractmethod
 from collections.abc import Sequence
-from typing import Generic, TypeVar
 
 import aiokatcp
 import katsdpsigproc
@@ -76,8 +75,6 @@ from .xsend import make_stream as make_xstream
 from .xsend import skipped_accum_counter
 
 logger = logging.getLogger(__name__)
-_O = TypeVar("_O", bound=Output)
-_T = TypeVar("_T", bound=QueueItem)
 
 
 class InQueueItem(QueueItem):
@@ -210,7 +207,7 @@ class BOutQueueItem(QueueItem):
         self.present.fill(True)
 
 
-class Pipeline(Generic[_O, _T]):
+class Pipeline[O: Output, T: QueueItem]:
     r"""Base Pipeline class to build on.
 
     SPEAD heaps utilised by this pipeline are first received at the
@@ -255,7 +252,7 @@ class Pipeline(Generic[_O, _T]):
 
     send_stream: Send
 
-    def __init__(self, outputs: Sequence[_O], name: str, engine: "XBEngine", context: AbstractContext) -> None:
+    def __init__(self, outputs: Sequence[O], name: str, engine: "XBEngine", context: AbstractContext) -> None:
         self.outputs = outputs
         self.name = name
         self.engine = engine
@@ -280,8 +277,8 @@ class Pipeline(Generic[_O, _T]):
         self._in_queue: asyncio.Queue[InQueueItem | None] = engine.monitor.make_queue(
             f"{name}.in_queue", self.n_in_items
         )
-        self._out_queue: asyncio.Queue[_T | None] = engine.monitor.make_queue(f"{name}.out_queue", self.n_out_items)
-        self._out_free_queue: asyncio.Queue[_T] = engine.monitor.make_queue(f"{name}.out_free_queue", self.n_out_items)
+        self._out_queue: asyncio.Queue[T | None] = engine.monitor.make_queue(f"{name}.out_queue", self.n_out_items)
+        self._out_free_queue: asyncio.Queue[T] = engine.monitor.make_queue(f"{name}.out_free_queue", self.n_out_items)
 
     def add_in_item(self, item: InQueueItem) -> None:
         """Append a newly-received :class:`InQueueItem` to the :attr:`_in_queue`."""

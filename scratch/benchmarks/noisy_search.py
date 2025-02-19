@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023, National Research Foundation (SARAO)
+# Copyright (c) 2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,12 +18,9 @@
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TypeVar
 
 import numpy as np
 from numpy.typing import ArrayLike
-
-_T = TypeVar("_T", covariant=True)
 
 
 def _entropy(a: ArrayLike, axis: int | tuple[int, ...] | None = None) -> np.floating:
@@ -41,14 +38,14 @@ class NoisySearchResult:
     confidence: float  #: Probability that the interval [low, high) contains the new element
 
 
-async def noisy_search(
-    items: Sequence[_T],
+async def noisy_search[T](
+    items: Sequence[T],
     noise: ArrayLike,
     tolerance: float,
-    compare: Callable[[_T], Awaitable[bool]],
+    compare: Callable[[T], Awaitable[bool]],
     *,
     max_interval: int = 1,
-    max_comparisons: int | None = None
+    max_comparisons: int | None = None,
 ) -> NoisySearchResult:
     """
     Perform a binary search with a noisy comparison function.

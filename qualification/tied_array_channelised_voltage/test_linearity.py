@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,7 +18,6 @@
 
 import itertools
 from collections.abc import Awaitable, Callable, Iterable, Iterator
-from typing import TypeVar
 
 import aiokatcp
 import numpy as np
@@ -29,11 +28,9 @@ from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
 from ..reporter import Reporter
 
-_T = TypeVar("_T")
-
 
 # TODO (NGC-1266): use itertools.batched once Python 3.12 is required.
-def batched(iterable: Iterable[_T], n: int) -> Iterator[tuple[_T, ...]]:
+def batched[T](iterable: Iterable[T], n: int) -> Iterator[tuple[T, ...]]:
     """Divide an iterable into fixed-sized batches.
 
     This is a backport of :func:`itertools.batched` from Python 3.12. The

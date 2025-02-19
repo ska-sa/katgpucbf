@@ -27,7 +27,7 @@ import gc
 import logging
 import math
 from collections.abc import Callable, Sequence
-from typing import TypedDict, TypeVar
+from typing import TypedDict
 
 import katsdpservices
 import katsdpsigproc.accel as accel
@@ -55,8 +55,6 @@ from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
 from .output import NarrowbandOutput, NarrowbandOutputDiscard, NarrowbandOutputNoDiscard, WidebandOutput, WindowFunction
 
-_T = TypeVar("_T")
-_OD = TypeVar("_OD", bound="_OutputDict")
 logger = logging.getLogger(__name__)
 DEFAULT_TAPS = 16
 DEFAULT_W_CUTOFF = 1.0
@@ -105,7 +103,7 @@ class _NarrowbandOutputDict(_OutputDict, total=False):
     pass_bandwidth: float
 
 
-def _parse_stream(value: str, kws: _OD, field_callback: Callable[[_OD, str, str], None]) -> None:
+def _parse_stream[OD: _OutputDict](value: str, kws: OD, field_callback: Callable[[OD, str, str], None]) -> None:
     """Parse a wideband or narrowband stream description.
 
     This populates `kws` (which should initially be empty) from key=value pairs
