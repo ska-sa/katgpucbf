@@ -136,18 +136,22 @@ async def test_gains_capture_start(
     dsim_timestamp = await pcc.sensor_value(f"{cbf.dsim_names[0]}.steady-state-timestamp", int)
     pdf_report.detail(f"Set dsim signals to {signals}, starting with timestamp {dsim_timestamp}.")
 
-    pdf_report.step("Wait for injected signal to reach F-engine.")
+    pdf_report.step("Wait for injected signal to reach XB-engines.")
     label = receiver.input_labels[0]
     for _ in range(10):
-        rx_timestamp = await pcc.sensor_value(f"antenna-channelised-voltage.{label}.rx.timestamp", int)
+        tasks = []
+        async with asyncio.TaskGroup() as tg:
+            for i in range(receiver.n_xengs):
+                tasks.append(tg.create_task(pcc.sensor_value(f"baseline-correlation-products.{i}.rx.timestamp")))
+        rx_timestamp = min(task.result() for task in tasks)
         pdf_report.detail(f"rx.timestamp = {rx_timestamp}")
-        if rx_timestamp >= dsim_timestamp:
+        if rx_timestamp > dsim_timestamp:
             break
         else:
             pdf_report.detail("Sleep for 0.5s.")
             await asyncio.sleep(0.5)
     else:
-        pytest.fail("Digitiser signal did not reach F-engine.")
+        pytest.fail("Digitiser signal did not reach XB-engines in time.")
 
     pdf_report.step("Set gains on input 0")
     gains = np.ones(receiver.n_chans)
@@ -158,7 +162,9 @@ async def test_gains_capture_start(
 
     pdf_report.step("Capture and verify output")
     await pcc.request("capture-start", "baseline-correlation-products")
-    _, data = await receiver.next_complete_chunk(min_timestamp=0)
+    # We use dsim_timestamp as a minimum to ensure that we're not receiving
+    # data from a *previous* capture-start/stop.
+    _, data = await receiver.next_complete_chunk(min_timestamp=dsim_timestamp)
     bls_idx = receiver.bls_ordering.index((label, label))
     data = data[:, bls_idx, 0]  # 0 to take just the real part (these are auto-correlations)
     np.testing.assert_equal(data[cut:], 0)
