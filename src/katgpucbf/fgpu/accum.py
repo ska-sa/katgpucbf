@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,31 +17,26 @@
 """Compute statistics by bucketing into windows."""
 
 from dataclasses import dataclass
-from typing import Final, Generic, Protocol, Self, TypeVar
-
-_T_co = TypeVar("_T_co", covariant=True)
+from typing import Final, Protocol, Self
 
 
 # Based on typing.SupportsAbs etc.
-class _SupportsAdd(Protocol[_T_co]):
-    def __add__(self, other: Self) -> _T_co:
+class _SupportsAdd[T](Protocol):
+    def __add__(self, other: Self) -> T:
         pass  # pragma: nocover
 
 
-_T = TypeVar("_T", bound=_SupportsAdd)
-
-
 @dataclass(frozen=True)
-class Measurement(Generic[_T]):
+class Measurement[T: _SupportsAdd]:
     """A measurement returned by :meth:`Accum.add`."""
 
     start_timestamp: int
     end_timestamp: int
     #: Total of the value over the provided data.
-    total: _T | None
+    total: T | None
 
 
-def _add(a: _T | None, b: _T | None) -> _T | None:
+def _add[T: _SupportsAdd](a: T | None, b: T | None) -> T | None:
     """Add two values, returning None if either of them is None."""
     if a is not None and b is not None:
         return a + b
@@ -49,7 +44,7 @@ def _add(a: _T | None, b: _T | None) -> _T | None:
         return None
 
 
-class Accum(Generic[_T]):
+class Accum[T: _SupportsAdd]:
     """Accumulator for a single statistic.
 
     The statistic is a linear measurement over intervals of time.
@@ -72,10 +67,10 @@ class Accum(Generic[_T]):
         Value to initialise the accumulator to
     """
 
-    def __init__(self, window_size: int, zero: _T) -> None:
+    def __init__(self, window_size: int, zero: T) -> None:
         self._window_size: Final = window_size
         self._zero: Final = zero
-        self._total: _T | None = zero  # Sum for current window, if valid
+        self._total: T | None = zero  # Sum for current window, if valid
         # Point up to which we have received calls to :meth:`add`
         self._end_timestamp = 0
         self._window_id = 0  # Start timestamp divided by the window size
@@ -101,7 +96,7 @@ class Accum(Generic[_T]):
         self._total = self._zero
         return ret
 
-    def add(self, start_timestamp: int, end_timestamp: int, value: _T | None) -> Measurement | None:
+    def add(self, start_timestamp: int, end_timestamp: int, value: T | None) -> Measurement | None:
         """Add new data.
 
         If the new data falls into a new window compared to the existing data

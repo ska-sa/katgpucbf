@@ -27,7 +27,6 @@ import time
 import weakref
 from collections import Counter
 from collections.abc import Callable
-from typing import TypeVar
 
 import aiokatcp
 import numpy as np
@@ -36,9 +35,6 @@ from katsdptelstate.endpoint import endpoint_list_parser
 
 from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME
 from .spead import DEFAULT_PORT
-
-_E = TypeVar("_E", bound=enum.Enum)
-_T = TypeVar("_T")
 
 # Sensor status threshold. These are mostly thumb-sucks.
 TIME_ESTERROR_WARN = 1e-3
@@ -107,7 +103,7 @@ def add_gc_stats() -> None:
     gc.callbacks.append(callback)
 
 
-def parse_enum(name: str, value: str, cls: type[_E]) -> _E:
+def parse_enum[E: enum.Enum](name: str, value: str, cls: type[E]) -> E:
     """Parse a command-line argument into an enum type."""
     table = {member.name.lower(): member for member in cls}
     try:
@@ -133,10 +129,10 @@ def parse_source(value: str) -> list[tuple[str, int]] | str:
         return value
 
 
-def comma_split(
-    base_type: Callable[[str], _T], count: int | None = None, allow_single=False
-) -> Callable[[str], list[_T]]:
-    """Return a function to split a comma-delimited str into a list of type _T.
+def comma_split[T](
+    base_type: Callable[[str], T], count: int | None = None, allow_single=False
+) -> Callable[[str], list[T]]:
+    """Return a function to split a comma-delimited str into a list of type T.
 
     This function is used to parse lists of CPU core numbers, which come from
     the command-line as comma-separated strings, but are obviously more useful
@@ -156,7 +152,7 @@ def comma_split(
         times.
     """
 
-    def func(value: str) -> list[_T]:
+    def func(value: str) -> list[T]:
         parts = value.split(",")
         if parts == [""]:
             parts = []
@@ -172,16 +168,16 @@ def comma_split(
 
 # We have to use *args/**kwargs because the default for status_func is a
 # private function in aiokatcp and hence cannot be named.
-def make_rate_limited_sensor(
-    sensor_type: type[_T],
+def make_rate_limited_sensor[T](
+    sensor_type: type[T],
     name: str,
     description: str = "",
     units: str = "",
-    default: _T | None = None,
+    default: T | None = None,
     initial_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.UNKNOWN,
     *args,
     **kwargs,
-) -> aiokatcp.Sensor[_T]:
+) -> aiokatcp.Sensor[T]:
     """Create a sensor whose auto strategy has a minimum update interval of MIN_SENSOR_UPDATE_PERIOD."""
     return aiokatcp.Sensor(
         sensor_type,
@@ -216,21 +212,21 @@ class DeviceStatusSensor(aiokatcp.SimpleAggregateSensor[aiokatcp.DeviceStatus]):
             description=description,
         )
 
-    def update_aggregate(  # noqa: D102
+    def update_aggregate[T](  # noqa: D102
         self,
-        updated_sensor: aiokatcp.Sensor[_T] | None,
-        reading: aiokatcp.Reading[_T] | None,
-        old_reading: aiokatcp.Reading[_T] | None,
+        updated_sensor: aiokatcp.Sensor[T] | None,
+        reading: aiokatcp.Reading[T] | None,
+        old_reading: aiokatcp.Reading[T] | None,
     ) -> aiokatcp.Reading[aiokatcp.DeviceStatus] | None:
         if reading is not None and old_reading is not None and reading.status == old_reading.status:
             return None  # Sensor didn't change state, so no change in overall device status
         return super().update_aggregate(updated_sensor, reading, old_reading)
 
-    def aggregate_add(self, sensor: aiokatcp.Sensor[_T], reading: aiokatcp.Reading[_T]) -> bool:  # noqa: D102
+    def aggregate_add[T](self, sensor: aiokatcp.Sensor[T], reading: aiokatcp.Reading[T]) -> bool:  # noqa: D102
         self._counts[reading.status] += 1
         return True
 
-    def aggregate_remove(self, sensor: aiokatcp.Sensor[_T], reading: aiokatcp.Reading[_T]) -> bool:  # noqa: D102
+    def aggregate_remove[T](self, sensor: aiokatcp.Sensor[T], reading: aiokatcp.Reading[T]) -> bool:  # noqa: D102
         self._counts[reading.status] -= 1
         return True
 
