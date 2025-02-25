@@ -131,7 +131,7 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
                     "band": args.band[:1],
                     "adc_sample_rate": args.adc_sample_rate,
                     "centre_frequency": args.centre_frequency,
-                    "antenna": f"m{number}",
+                    "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
                     "url": f"spead://{next_dig_ip}+7:7148",
                 }
                 next_dig_ip += 8
