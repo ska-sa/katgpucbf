@@ -25,11 +25,13 @@ instead of a simulated one, it gets the parameters from a live MK correlator.
 import argparse
 import asyncio
 import json
+import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import aiokatcp
+import katportalclient
 from katportalclient import KATPortalClient
 from katsdptelstate.endpoint import endpoint_parser
 
@@ -57,20 +59,56 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
+async def multi_sensor_values(client: KATPortalClient, names: Sequence[str]) -> Mapping[str, Any]:
+    """Query multiple sensors from katportal.
+
+    This is a workaround for the slow design of katportal, where every query
+    iterates over all the sensors even if only a single one is required.
+
+    The return value contains just the sensor value rather than a full sample.
+    """
+    regex = "|".join(re.escape(name) for name in names)
+    if not regex:
+        return {}  # Would get an error trying to query an empty regex
+    regex = f"^(?:{regex})$"  # Anchor the regex
+    samples = await client.sensor_values(regex)
+    out = {}
+    for name in names:
+        if name not in samples:
+            print(samples)
+            raise katportalclient.SensorNotFoundError(f"Value for sensor {name} not found")
+        out[name] = samples[name].value
+    return out
+
+
 async def async_main(args) -> int:
     portal_client = KATPortalClient(args.portal, None)
     # Get name of the CBF proxy e.g. "cbf_1"
     prefix = await portal_client.sensor_subarray_lookup("cbf", "")
+    cbf_sensor_names = [
+        "input_labels",
+        "wide_antenna_channelised_voltage_source",
+        "wide_sync_time",
+        "wide_antenna_channelised_voltage_n_chans",
+        "wide_adc_sample_rate",
+        "wide_baseline_correlation_products_int_time",
+        "band",
+        "delay_centre_frequency",
+        "subarray_product_id",
+    ]
+    cbf_sensor_values = await multi_sensor_values(
+        portal_client,
+        [f"{prefix}_{name}" for name in cbf_sensor_names],
+    )
 
-    async def cbf_sensor_value(name: str) -> Any:
-        sample = await portal_client.sensor_value(f"{prefix}_{name}")
-        return sample.value
+    def cbf_sensor_value(name: str) -> Any:
+        return cbf_sensor_values[f"{prefix}_{name}"]
 
-    input_labels = (await cbf_sensor_value("input_labels")).split(",")
+    input_labels: list[str] = cbf_sensor_value("input_labels").split(",")
     # Get the multicast groups. This is an annoying sensor because it's not
     # valid Python or JSON: it's a comma-separated list surrounded by brackets,
     # but the strings are not quoted.
-    mcast_groups_str = await cbf_sensor_value("wide_antenna_channelised_voltage_source")
+    mcast_groups_str: str = cbf_sensor_value("wide_antenna_channelised_voltage_source")
     mcast_groups = [group.strip() for group in mcast_groups_str[1:-1].split(",")]
     for n, group in enumerate(mcast_groups[1:], start=1):
         if group == mcast_groups[0]:
@@ -80,15 +118,22 @@ async def async_main(args) -> int:
             mcast_groups = mcast_groups[:n]
             break
 
-    sync_time: float = await cbf_sensor_value("wide_sync_time")
-    channels: int = await cbf_sensor_value("wide_antenna_channelised_voltage_n_chans")
-    adc_sample_rate: float = await cbf_sensor_value("wide_adc_sample_rate")
-    int_time: float = await cbf_sensor_value("wide_baseline_correlation_products_int_time")
-    band: str = await cbf_sensor_value("band")
-    centre_frequency: float = await cbf_sensor_value("delay_centre_frequency")
+    sync_time: float = cbf_sensor_value("wide_sync_time")
+    channels: int = cbf_sensor_value("wide_antenna_channelised_voltage_n_chans")
+    adc_sample_rate: float = cbf_sensor_value("wide_adc_sample_rate")
+    int_time: float = cbf_sensor_value("wide_baseline_correlation_products_int_time")
+    band: str = cbf_sensor_value("band")
+    centre_frequency: float = cbf_sensor_value("delay_centre_frequency")
     if args.name is None:
-        subarray_product_id: str = await cbf_sensor_value("subarray_product_id")
+        subarray_product_id: str = cbf_sensor_value("subarray_product_id")
         args.name = f"{subarray_product_id}_wide"
+
+    # Fetch the positions of the antennas
+    antennas = {label[:-1] for label in input_labels}
+    observers = await multi_sensor_values(
+        portal_client,
+        [f"{antenna}_observer" for antenna in antennas],
+    )
 
     config: dict = {
         "version": "4.5",
@@ -100,7 +145,7 @@ async def async_main(args) -> int:
                 "band": band,
                 "adc_sample_rate": adc_sample_rate,
                 "centre_frequency": centre_frequency,
-                "antenna": label[:-1],
+                "antenna": observers[f"{label[:-1]}_observer"],
                 "url": f"spead://{addr}",
             }
             for label, addr in zip(input_labels, mcast_groups)
