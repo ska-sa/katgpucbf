@@ -115,7 +115,7 @@ async def async_main(args) -> int:
     # This returns a string representation of a list of tuples, with each item
     # in the format (input-label, input-index, LRU host, index-on-host).
     input_labelling_str = await corr2_client.sensor_value("input-labelling", str)
-    input_labelling: list[tuple[str,]] = ast.literal_eval(input_labelling_str)
+    input_labelling: list[tuple[str, ...]] = ast.literal_eval(input_labelling_str)
     input_labels = [label[0] for label in input_labelling]
 
     # This won't distinguish between the different kinds of S-band. It'll be wrong. I'm not quite
