@@ -38,10 +38,15 @@ from katgpucbf.meerkat import BANDS
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments (which may be specified as a parameter)."""
+
+    def _parse_input_labels(value: str) -> list[str]:
+        return value.split(",")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("controller", help="Hostname of the SDP master controller")
     parser.add_argument("--port", type=int, default=5001, help="TCP port of the SDP master controller [%(default)s]")
     parser.add_argument("--name", default="sim_correlator", help="Subarray product name [%(default)s]")
+    parser.add_argument("--input-labels", type=_parse_input_labels, help="Input labels for F-engine sources")
     parser.add_argument("-a", "--antennas", type=int, required=True, help="Number of antennas")
     parser.add_argument("-d", "--digitisers", type=int, help="Number of digitisers [#antennas]")
     parser.add_argument("-c", "--channels", type=int, required=True, help="Number of channels")
@@ -96,6 +101,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         args.digitisers = args.antennas
     if args.digitiser_address is not None and args.sync_time is None:
         parser.error("--sync-time is required when specifying --digitiser-address")
+    if args.input_labels is None:
+        print("No input labels received")
+        args.input_labels = [f"m{800 + i}{pol}" for i in range(args.antennas) for pol in ["v", "h"]]
     return args
 
 
@@ -144,7 +152,7 @@ def generate_antenna_channelised_voltage(args: argparse.Namespace, outputs: dict
         "type": "gpucbf.antenna_channelised_voltage",
         # Cycle through digitisers as necessary
         "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * args.antennas)],
-        "input_labels": [f"m{800 + i}{pol}" for i in range(args.antennas) for pol in ["v", "h"]],
+        "input_labels": args.input_labels,
         "n_chans": args.channels,
     }
     if args.narrowband:
