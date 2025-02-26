@@ -23,6 +23,7 @@ instead of a simulated one, it gets the parameters from a live MK correlator.
 """
 
 import argparse
+import ast
 import asyncio
 import os
 import sys
@@ -114,7 +115,8 @@ async def async_main(args) -> int:
     # This returns a string representation of a list of tuples, with each item
     # in the format (input-label, input-index, LRU host, index-on-host).
     input_labelling_str = await corr2_client.sensor_value("input-labelling", str)
-    input_labels_list = [labels_tuple.split(",")[0][1:-1] for labels_tuple in input_labelling_str[1:-1].split("(")[1:]]
+    input_labelling: list[tuple[str,]] = ast.literal_eval(input_labelling_str)
+    input_labels = [label[0] for label in input_labelling]
 
     # This won't distinguish between the different kinds of S-band. It'll be wrong. I'm not quite
     # sure at this point how to match up the centre_frequency values in katgpucbf.meerkat.BANDS with
@@ -136,7 +138,8 @@ async def async_main(args) -> int:
         "sync-time": sync_time,
         "band": band,
         "develop": args.develop,
-        "input-labels": ",".join(input_labels_list),
+        # We don't want the dummy antennas for sim_correlator.py
+        "input-labels": ",".join(input_labels[: 2 * target.n_antennas]),
     }
 
     out_cmd = [os.path.join(os.path.dirname(__file__), "sim_correlator.py")]
