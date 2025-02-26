@@ -33,6 +33,7 @@ from collections.abc import Sequence
 
 import aiokatcp
 
+import katgpucbf.configure_tools
 from katgpucbf.meerkat import BANDS
 
 
@@ -80,14 +81,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--narrowband-beams", type=int, default=0, help="Number of dual-polarisation narrowband beams [%(default)s]"
     )
-    parser.add_argument("--image-tag", help="Docker image tag (for all images)")
-    parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
-    parser.add_argument(
-        "--develop",
-        nargs="?",
-        const=True,
-        help="Pass development options in the config. Use comma separation, or omit the arg to enable all.",
-    )
+    katgpucbf.configure_tools.add_arguments(parser)
     parser.add_argument(
         "-w", "--write", action="store_true", help="Write to file (give filename instead of the controller)"
     )
@@ -215,42 +209,15 @@ def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
         }
 
 
-def parse_develop_options(develop_argument: str) -> dict:
-    """Separate complex develop options into a dictionary."""
-    out_dict = {}
-    for item in develop_argument.split(","):
-        # data_timeout option isn't boolean, unlike the rest
-        if "data_timeout" in item:
-            k, v = item.split("=")
-            out_dict[k] = float(v)
-        else:
-            out_dict[item] = True
-    return out_dict
-
-
 def generate_config(args: argparse.Namespace) -> dict:
     """Produce the configuration dict from the parsed command-line arguments."""
     config: dict = {
-        "version": "4.3",
+        "version": "4.5",
         "config": {},
         "inputs": {},
         "outputs": {},
     }
-    if args.image_tag is not None:
-        config["config"]["image_tag"] = args.image_tag
-    if args.image_override is not None:
-        image_overrides = {}
-        for override in args.image_override:
-            name, image = override.split(":", 1)
-            image_overrides[name] = image
-        config["config"]["image_overrides"] = image_overrides
-    if args.develop is not None:
-        if args.develop is True or args.develop == "":
-            # User passed --develop with no argument or --develop= with empty argument
-            config["config"]["develop"] = True
-        else:
-            # User passed a comma-separated list of options
-            config["config"]["develop"] = parse_develop_options(args.develop)
+    katgpucbf.configure_tools.apply_arguments(config, args)
 
     dig_names = generate_digitisers(args, config)
     if args.last_stage == "d":

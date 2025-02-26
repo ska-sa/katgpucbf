@@ -18,6 +18,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   katgpucbf.configure_tools
    katgpucbf.curand_helpers
    katgpucbf.mapped_array
    katgpucbf.meerkat
