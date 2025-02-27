@@ -72,11 +72,17 @@ NARROWBAND_ARGS = f"name=test_narrowband,dst=239.10.12.0+{DSTS - 1}:7149,taps={T
 
 @pytest.fixture
 def channels() -> int:
+    """Number of channels."""
     return CHANNELS
 
 
 @pytest.fixture
 def jones_per_batch(channels: int, request: pytest.FixtureRequest) -> int:
+    """Number of Jones vectors per batch.
+
+    This defaults to :const:`JONES_PER_BATCH`, but can be overridden by
+    ``pytest.mark.spectra_per_heap(spectra_per_heap)``.
+    """
     if marker := request.node.get_closest_marker("spectra_per_heap"):
         return marker.args[0] * channels
     else:
