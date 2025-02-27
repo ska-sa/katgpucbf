@@ -25,13 +25,15 @@ instead of a simulated one, it gets the parameters from a live MK correlator.
 import argparse
 import ast
 import asyncio
-import os
+import json
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 import aiokatcp
+from katsdptelstate.endpoint import endpoint_parser
 
+import katgpucbf.configure_tools
 from katgpucbf.meerkat import BANDS
 
 
@@ -51,15 +53,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cmc-port", type=int, default=7147, help="KATCP port of the CMC. [%(default)s]")
     parser.add_argument("--subordinate", type=str, required=True, help="Which subordinate to copy.")
     parser.add_argument(
-        "--develop",
-        nargs="?",
-        const=True,
-        help="Pass development options in the config. Use comma separation, or omit the arg to enable all.",
+        "--controller",
+        type=endpoint_parser(5001),
+        default="cbf-mc.cbf.mkat.karoo.kat.ac.za",
+        help="Endpoint of the CBF master controller",
     )
-    parser.add_argument("--image-override", action="append", metavar="NAME:IMAGE:TAG", help="Override a single image")
-    parser.add_argument(
-        "--controller", default="cbf-mc.cbf.mkat.karoo.kat.ac.za", help="Hostname of the CBF master controller"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Print config only")
+    katgpucbf.configure_tools.add_arguments(parser)
     args = parser.parse_args(argv)
     return args
 
@@ -111,48 +111,81 @@ async def async_main(args) -> int:
     corr2_client = await aiokatcp.Client.connect(args.cmc_host, target.control_port)
     sync_time = await corr2_client.sensor_value("sync-time", float)
     channels = await corr2_client.sensor_value("antenna-channelised-voltage-n-chans", int)
-    sample_rate = await corr2_client.sensor_value("adc-sample-rate", float)
+    adc_sample_rate = await corr2_client.sensor_value("adc-sample-rate", float)
+    int_time = await corr2_client.sensor_value("baseline-correlation-products-int-time", float)
     # This returns a string representation of a list of tuples, with each item
     # in the format (input-label, input-index, LRU host, index-on-host).
     input_labelling_str = await corr2_client.sensor_value("input-labelling", str)
     input_labelling: list[tuple[str, int, str, int]] = ast.literal_eval(input_labelling_str)
     input_labels = [label[0] for label in input_labelling]
+    # Trim off the dummy labels
+    input_labels = input_labels[: 2 * target.n_antennas]
 
     # This won't distinguish between the different kinds of S-band. It'll be wrong. I'm not quite
     # sure at this point how to match up the centre_frequency values in katgpucbf.meerkat.BANDS with
     # what MK actually reports, even in the L and UHF cases, so for the purposes of getting
     # something producing a result, I am leaving it as-is for the time being.
-    band = next((k for k, v in BANDS.items() if v.adc_sample_rate == sample_rate), None)
+    band = next((k for k, v in BANDS.items() if v.adc_sample_rate == adc_sample_rate), None)
     if not band:
         print(
-            f"Unable to determine which band. Sample rate reported as {sample_rate}",
+            f"Unable to determine which band. Sample rate reported as {adc_sample_rate}",
             file=sys.stderr,
         )
         return 1
 
-    out_kwargs = {
-        "name": target.name.replace(".", "_"),
-        "antennas": target.n_antennas,
-        "channels": channels,
-        "digitiser-address": mcast_groups[0].split("+")[0],
-        "sync-time": sync_time,
-        "band": band,
-        "develop": args.develop,
-        # We don't want the dummy antennas for sim_correlator.py
-        "input-labels": ",".join(input_labels[: 2 * target.n_antennas]),
+    config: dict = {
+        "version": "4.5",
+        "config": {},
+        "inputs": {
+            label: {
+                "type": "dig.baseband_voltage",
+                "sync_time": sync_time,
+                "band": band,
+                "adc_sample_rate": adc_sample_rate,
+                "centre_frequency": BANDS[band].centre_frequency,  # TODO get from CAM
+                "antenna": label[:-1],
+                "url": f"spead://{addr}",
+            }
+            for label, addr in zip(input_labels, mcast_groups)
+        },
+        "outputs": {
+            "antenna-channelised-voltage": {
+                "type": "gpucbf.antenna_channelised_voltage",
+                "src_streams": input_labels,
+                "input_labels": input_labels,
+                "n_chans": channels,
+            },
+            "baseline-correlation-products": {
+                "type": "gpucbf.baseline_correlation_products",
+                "src_streams": ["antenna-channelised-voltage"],
+                "int_time": int_time,
+            },
+        },
     }
 
-    out_cmd = [os.path.join(os.path.dirname(__file__), "sim_correlator.py")]
-    out_cmd += [f"--{k}={v}" for k, v in out_kwargs.items() if v is not None]
+    katgpucbf.configure_tools.apply_arguments(config, args)
 
-    if args.image_override is not None:
-        for override in args.image_override:
-            out_cmd.append(f"--image-override={override}")
-
-    out_cmd.append(args.controller)
-
-    print(f"Executing: {out_cmd}\n")
-    os.execv(out_cmd[0], out_cmd)
+    if args.dry_run:
+        json.dump(config, sys.stdout, indent=2)
+    else:
+        client = await aiokatcp.Client.connect(args.controller.host, args.controller.port)
+        try:
+            reply, _ = await client.request("product-configure", target.name.replace(".", "_"), json.dumps(config))
+            pc_host = aiokatcp.decode(str, reply[1])
+            pc_port = aiokatcp.decode(int, reply[2])
+            print(f"Product controller is at {pc_host}:{pc_port}")
+            client.close()
+            await client.wait_closed()
+            client = await aiokatcp.Client.connect(pc_host, pc_port)
+            await client.request("capture-start", "baseline-correlation-products")
+            print("baseline-correlation-products is enabled")
+        except (aiokatcp.FailReply, ConnectionError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            client.close()
+            await client.wait_closed()
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

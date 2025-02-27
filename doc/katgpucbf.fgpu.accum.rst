@@ -1,5 +1,5 @@
 katgpucbf.fgpu.accum module
-===================================
+===========================
 
 .. automodule:: katgpucbf.fgpu.accum
    :members:
