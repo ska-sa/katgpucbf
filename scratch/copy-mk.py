@@ -31,8 +31,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import aiokatcp
-import katportalclient
-from katportalclient import KATPortalClient
+from katportalclient import KATPortalClient, SensorNotFoundError
 from katsdptelstate.endpoint import endpoint_parser
 
 import katgpucbf.configure_tools
@@ -52,7 +51,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="cbf-mc.cbf.mkat.karoo.kat.ac.za",
         help="Endpoint of the CBF master controller",
     )
-    parser.add_argument("--name", help="Name of the subarray product")
+    parser.add_argument("--name", help="Name of the subarray product to create")
     parser.add_argument("--dry-run", action="store_true", help="Print config only")
     katgpucbf.configure_tools.add_arguments(parser)
     args = parser.parse_args(argv)
@@ -75,8 +74,7 @@ async def multi_sensor_values(client: KATPortalClient, names: Sequence[str]) -> 
     out = {}
     for name in names:
         if name not in samples:
-            print(samples)
-            raise katportalclient.SensorNotFoundError(f"Value for sensor {name} not found")
+            raise SensorNotFoundError(f"Value for sensor {name} not found")
         out[name] = samples[name].value
     return out
 
