@@ -118,7 +118,7 @@ async def async_main(args) -> int:
     input_labelling_str = await corr2_client.sensor_value("input-labelling", str)
     input_labelling: list[tuple[str, int, str, int]] = ast.literal_eval(input_labelling_str)
     input_labels = [label[0] for label in input_labelling]
-    # Trip off the dummy labels
+    # Trim off the dummy labels
     input_labels = input_labels[: 2 * target.n_antennas]
 
     # This won't distinguish between the different kinds of S-band. It'll be wrong. I'm not quite
