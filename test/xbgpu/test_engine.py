@@ -641,7 +641,6 @@ class TestEngine:
     @pytest.fixture
     def corrprod_args(self, heap_accumulation_threshold: tuple[int, int]) -> list[str]:
         """Arguments to pass to the command-line parser for multiple --corrprods."""
-
         return [
             f"name=bcp1,dst=239.10.11.0:7148,heap_accumulation_threshold={heap_accumulation_threshold[0]}",
             f"name=bcp2,dst=239.10.11.1:7148,heap_accumulation_threshold={heap_accumulation_threshold[1]}",
@@ -1011,6 +1010,7 @@ class TestEngine:
         corrprod_args: list[str],
         beam_args: list[str],
     ) -> list[str]:
+        """Command-line arguments for the engine."""
         args = [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
@@ -1052,6 +1052,7 @@ class TestEngine:
 
     @pytest.fixture
     async def client(self, xbengine: XBEngine) -> AsyncGenerator[aiokatcp.Client, None]:
+        """Katcp client for controlling the engine."""
         host, port = xbengine.sockets[0].getsockname()[:2]
         async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
             client = await aiokatcp.Client.connect(host, port)
@@ -1501,6 +1502,7 @@ class TestEngine:
 
     @DEFAULT_PARAMETERS
     async def test_bad_requests(self, client: aiokatcp.Client, n_ants: int) -> None:
+        """Test various requests with invalid parameters."""
         # Trying to use beamformer request on wrong stream type
         with pytest.raises(aiokatcp.FailReply, match=r"not a tied-array-channelised-voltage stream"):
             await client.request("beam-quant-gains", "bcp1", 1.0)

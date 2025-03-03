@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -215,7 +215,7 @@ def check_timestamps(
 
 # TODO: once requirements spec is finalised, note which requirements
 # this corresponds to.
-async def test_control(
+async def test_control(  # noqa: D103
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
     receive_tied_array_channelised_voltage_manual_start: TiedArrayChannelisedVoltageReceiver,

@@ -77,6 +77,7 @@ class TestMultiCW:
     """Tests for :class:`katgpucbf.dsim.signal.MultiCW`."""
 
     def test_even(self) -> None:
+        """Test with an even-length signal."""
         adc_sample_rate = 1e9
         sig = MultiCW(4, 0.5, 0.25, 100e6, 200e6)
         n = 10000
@@ -91,6 +92,7 @@ class TestMultiCW:
         np.testing.assert_allclose(out, expected, atol=1e-6)
 
     def test_odd(self) -> None:
+        """Test with an odd-length signal."""
         adc_sample_rate = 1e9
         sig = MultiCW(3, 0.5, 0.25, 200e6, 400e6)
         n = 25
