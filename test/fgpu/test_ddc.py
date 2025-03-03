@@ -115,6 +115,7 @@ def test_bad_template_parameters(context: AbstractContext, taps: int, subsamplin
 
 
 def test_bad_tuning(context: AbstractContext) -> None:
+    """Test that :class:`DDCTemplate` raises ValueError when given bad tuning parameters."""
     with pytest.raises(ValueError, match="unroll must be a multiple of 16"):
         DDCTemplate(context, taps=255, subsampling=5, input_sample_bits=10, tuning={"wgs": 32, "unroll": 5})
 

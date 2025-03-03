@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2023, National Research Foundation (SARAO)
+# Copyright (c) 2020-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -78,11 +78,13 @@ def multi(linear, mdelay_callback_list) -> MultiDelayModel:
 
 @pytest.fixture
 def aligned(linear: LinearDelayModel) -> AlignedDelayModel:
+    """An :class:`AlignedDelayModel` with even alignment."""
     return AlignedDelayModel(linear, 16)
 
 
 @pytest.fixture
 def aligned_odd(linear: LinearDelayModel) -> AlignedDelayModel:
+    """An :class:`AlignedDelayModel` with odd alignment."""
     return AlignedDelayModel(linear, 17)
 
 
