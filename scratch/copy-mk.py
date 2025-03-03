@@ -27,6 +27,7 @@ import asyncio
 import json
 import re
 import sys
+import uuid
 from collections.abc import Mapping, Sequence
 from functools import partial
 from typing import Any
@@ -106,43 +107,46 @@ def delay_transfer_callback(
     loadmcnt, delay, delay_rate, phase, phase_rate = delay_sensor_value.replace(" ", "").split(",")
     request_args = f"{delay},{delay_rate}:{phase},{phase_rate[:-1]}"
     request_tuple = (int(loadmcnt[1:]), src_name, request_args)
-    print(f"Adding delays for: {src_name} | qsize: {delays_queue.qsize()}")
 
     if delays_queue.full():
         # TODO: Figure out a better approach
-        # Get rid of older items?
+        # Get rid of older items first (?)
         _ = delays_queue.get_nowait()
     delays_queue.put_nowait(request_tuple)
 
 
 def format_delay_request(
     delays_tuples: list[tuple[int, str, str]],
-    n_src_streams: int,
     sync_time: float,
     scale_factor_timestamp: float,
-) -> str:
+) -> tuple[float, str]:
     """Confirm there are enough arguments for a complete ?delays request.
 
-    Also convert the ADC mcnt to a UNIX timestamp.
+    Additionally, convert the ADC mcnt to a UNIX timestamp as required by
+    MK+ CBF F-engine ?delays request.
 
     Parameters
     ----------
     delays_tuples
         List of tuples in the format (loadmcnt, src_name, delay_request_args).
-    n_src_streams
-        Total number of source streams for the correlator.
+    sync_time
+        The time at which the digitisers were synchronised. Seconds since
+        Unix Epoch. Used to convert the loadmcnt to a unix timestamp.
+    scale_factor_timestamp
+        Factor by which to divide instrument timestamps to convert to unix
+        seconds. Used to conver the loadmcnt to a unix timestamp.
 
+    Returns
+    -------
+    unix_timestamp, coefficient_set
+        Arguments required for ?delays request. Time at which delays
+        will be applied. Coefficients for each input, in the format
+        ``delay,delay_rate:phase,phase_rate``.
     """
-    print(f"Need {n_src_streams} delay strs | Have {len(delays_tuples)} delay strs")
-    all_delays_str = " ".join(delays_tuple[-1] for delays_tuple in delays_tuples)
-    print("Do they all have the same loadmcnt?")
     ref_loadmcnt = delays_tuples[0][0]
     filtered_values = list(filter(lambda delays_tuple: delays_tuple[0] == ref_loadmcnt, delays_tuples))
-    print(f"Num filtered: {len(filtered_values)} | Expected: {n_src_streams}")
-
-    unix_timestamp = int(ref_loadmcnt) / scale_factor_timestamp + sync_time
-    delays_request_args = f"{unix_timestamp} {all_delays_str}"
-    return delays_request_args
+    unix_timestamp = ref_loadmcnt / scale_factor_timestamp + sync_time
+    return unix_timestamp, " ".join(filtered_value[-1] for filtered_value in filtered_values)
 
 
 async def async_main(args) -> int:
@@ -171,9 +175,9 @@ async def async_main(args) -> int:
         return cbf_sensor_values[f"{prefix}_{name}"]
 
     input_labels: list[str] = cbf_sensor_value("input_labels").split(",")
-    n_src_streams = len(input_labels)
+    n_src_inputs = len(input_labels)
     # Create asyncio Queue for the delay-callback to push items onto
-    delays_queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue(maxsize=n_src_streams * 2)
+    delays_queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue(maxsize=n_src_inputs * 8)
 
     # Get the multicast groups. This is an annoying sensor because it's not
     # valid Python or JSON: it's a comma-separated list surrounded by brackets,
@@ -239,6 +243,8 @@ async def async_main(args) -> int:
     katgpucbf.configure_tools.apply_arguments(config, args)
 
     client: aiokatcp.Client | None = None
+    pc_host: str = ""
+    pc_port: int = 0
     if args.dry_run:
         json.dump(config, sys.stdout, indent=2)
         return 1
@@ -262,15 +268,6 @@ async def async_main(args) -> int:
             await client.wait_closed()
 
     if args.transfer_delays:
-        # Need some kind of mapping between input-labels and delays
-        # Probably need
-        # - Current loadtime + things to pass for this loadtime
-        # - Once this request is stitched together, only then issue the request
-        # - Check if it's the correct length? All items are present
-        # *   - Indexing is important here
-        # - What happens if there is a new loadtime before the previous delay request is stitched together
-        #   - Print warning, dump what we're working on, start on new request args
-
         stream_names = [f"antenna-channelised-voltage-{input_label}" for input_label in input_labels]
         # New client because it needs to be initialised with the callback (?)
         callback_client = KATPortalClient(
@@ -282,34 +279,56 @@ async def async_main(args) -> int:
         )
         # Connect before subscribing
         await callback_client.connect()
-        mk_delay_sensors = [f"{prefix}_wide_{stream_name.replace("-", "_")}_delay" for stream_name in stream_names]
+        delay_sensors_regex = (
+            "^(?:"
+            + "|".join(f"{prefix}_wide_{stream_name.replace("-", "_")}_delay" for stream_name in stream_names)
+            + ")$"
+        )
         # TODO: Check against results returned from the following to
         # ensure the `callback_client` is ready to proceed.
-        await callback_client.subscribe(args.name)
-        await callback_client.set_sampling_strategies(args.name, mk_delay_sensors, "event")
+        namespace = f"{args.name}_{uuid.uuid4()}"
+        await callback_client.subscribe(namespace)
+        await callback_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
 
-        delay_args = []
+        def _reset_dict(dict_to_reset: dict[Any, Any], keys: list) -> dict[Any, None]:
+            dict_to_reset = {new_key: None for new_key in keys}
+            return dict_to_reset
+
+        delay_args: dict[str, tuple | None] = {}
+        _reset_dict(delay_args, input_labels)
+        ref_loadmcnt = 0
         try:
+            pc_client = await aiokatcp.Client.connect(pc_host, pc_port)
             while True:
-                # TODO: Wrap the following in a coroutine so it can run
-                # concurrently with sensor updates being pushed to the
-                # queue. It seems the queue is filling up first before
-                # the first item gets processed.
-                for i in range(n_src_streams):
-                    print(f"Getting item: {i}")
+                complete_requests = False
+                while not complete_requests:
+                    # delays_queue items are in the format
+                    # - (loadmcnt, src_name, delay_request_args)
                     delays_queue_item = await delays_queue.get()
-                    delay_args.append(delays_queue_item)
-                formatted_delays_request = format_delay_request(
-                    delay_args,
-                    n_src_streams=n_src_streams,
+                    if ref_loadmcnt == 0:
+                        # This is the first delay update we're seeing
+                        # TODO: Potentially move this back outside the while
+                        # so it doesn't need to be checked on every loop.
+                        ref_loadmcnt = delays_queue_item[0]
+                    if delays_queue_item[0] != ref_loadmcnt:
+                        ref_loadmcnt = delays_queue_item[0]
+                        print(f"{delays_queue_item[1]}: New loadmcnt {ref_loadmcnt}. Getting new delays.")
+                        _reset_dict(delay_args, input_labels)
+
+                    delay_args[delays_queue_item[1]] = delays_queue_item
+                    complete_requests = all(delay_args_value is not None for delay_args_value in delay_args.values())
+
+                unix_timestamp, coefficient_set = format_delay_request(
+                    [item[-1] for item in sorted(delay_args.items())],
                     sync_time=sync_time,
                     scale_factor_timestamp=scale_factor_timestamp,
                 )
-                print(f"Sending:\n{formatted_delays_request}")
-                # await client.request("delays", formatted_delays_request)
-                delay_args.clear()
+                await pc_client.request("delays", aiokatcp.encode(unix_timestamp), aiokatcp.encode(coefficient_set))
+                _reset_dict(delay_args, input_labels)
         finally:
             callback_client.disconnect()
+            pc_client.close()
+            await pc_client.wait_closed()
 
     return 0
 
