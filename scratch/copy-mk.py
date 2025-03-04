@@ -72,6 +72,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _assemble_regex(names: Sequence[str]) -> str:
+    """Assemble a regex from a sequence of strings."""
+    regex = "|".join(re.escape(name) for name in names)
+    if not regex:
+        return {}  # Would get an error trying to query an empty regex
+    return f"^(?:{regex})$"  # Anchor the regex and return
+
+
 async def multi_sensor_values(client: KATPortalClient, names: Sequence[str]) -> Mapping[str, Any]:
     """Query multiple sensors from katportal.
 
@@ -80,10 +88,7 @@ async def multi_sensor_values(client: KATPortalClient, names: Sequence[str]) -> 
 
     The return value contains just the sensor value rather than a full sample.
     """
-    regex = "|".join(re.escape(name) for name in names)
-    if not regex:
-        return {}  # Would get an error trying to query an empty regex
-    regex = f"^(?:{regex})$"  # Anchor the regex
+    regex = _assemble_regex(names)
     samples = await client.sensor_values(regex)
     out = {}
     for name in names:
@@ -260,8 +265,8 @@ async def async_main(args) -> int:
         )
         # Connect before subscribing
         await callback_client.connect()
-        delay_sensors_regex = (
-            "^(?:" + "|".join(f"{prefix}_wide_{qualified_label}_delay" for qualified_label in qualified_labels) + ")$"
+        delay_sensors_regex = _assemble_regex(
+            [f"{prefix}_wide_{qualified_label}_delay" for qualified_label in qualified_labels]
         )
         namespace = f"{args.name}_{uuid.uuid4()}"
         await callback_client.subscribe(namespace)
