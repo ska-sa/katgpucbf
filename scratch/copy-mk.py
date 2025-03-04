@@ -115,40 +115,6 @@ def delay_transfer_callback(
     delays_queue.put_nowait(request_tuple)
 
 
-def format_delay_request(
-    delays_tuples: list[tuple[int, str, str]],
-    sync_time: float,
-    scale_factor_timestamp: float,
-) -> tuple[float, str]:
-    """Confirm there are enough arguments for a complete ?delays request.
-
-    Additionally, convert the ADC mcnt to a UNIX timestamp as required by
-    MK+ CBF F-engine ?delays request.
-
-    Parameters
-    ----------
-    delays_tuples
-        List of tuples in the format (loadmcnt, src_name, delay_request_args).
-    sync_time
-        The time at which the digitisers were synchronised. Seconds since
-        Unix Epoch. Used to convert the loadmcnt to a unix timestamp.
-    scale_factor_timestamp
-        Factor by which to divide instrument timestamps to convert to unix
-        seconds. Used to conver the loadmcnt to a unix timestamp.
-
-    Returns
-    -------
-    unix_timestamp, coefficient_set
-        Arguments required for ?delays request. Time at which delays
-        will be applied. Coefficients for each input, in the format
-        ``delay,delay_rate:phase,phase_rate``.
-    """
-    ref_loadmcnt = delays_tuples[0][0]
-    filtered_values = list(filter(lambda delays_tuple: delays_tuple[0] == ref_loadmcnt, delays_tuples))
-    unix_timestamp = ref_loadmcnt / scale_factor_timestamp + sync_time
-    return unix_timestamp, " ".join(filtered_value[-1] for filtered_value in filtered_values)
-
-
 async def async_main(args) -> int:
     # Perhaps best to just start with a client to get subarray info
     portal_client = KATPortalClient(args.portal, None)
@@ -290,12 +256,11 @@ async def async_main(args) -> int:
         await callback_client.subscribe(namespace)
         await callback_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
 
-        def _reset_dict(dict_to_reset: dict[Any, Any], keys: list) -> dict[Any, None]:
-            dict_to_reset = {new_key: None for new_key in keys}
-            return dict_to_reset
+        def _create_empty_dict(keys: list[Any]) -> dict[Any, None]:
+            empty_dict = {new_key: None for new_key in keys}
+            return empty_dict
 
-        delay_args: dict[str, tuple | None] = {}
-        _reset_dict(delay_args, input_labels)
+        delay_args: dict[str, tuple[int, str, str] | None] = _create_empty_dict(input_labels)
         ref_loadmcnt = 0
         try:
             pc_client = await aiokatcp.Client.connect(pc_host, pc_port)
@@ -313,18 +278,20 @@ async def async_main(args) -> int:
                     if delays_queue_item[0] != ref_loadmcnt:
                         ref_loadmcnt = delays_queue_item[0]
                         print(f"{delays_queue_item[1]}: New loadmcnt {ref_loadmcnt}. Getting new delays.")
-                        _reset_dict(delay_args, input_labels)
+                        delay_args = _create_empty_dict(input_labels)
 
                     delay_args[delays_queue_item[1]] = delays_queue_item
                     complete_requests = all(delay_args_value is not None for delay_args_value in delay_args.values())
 
-                unix_timestamp, coefficient_set = format_delay_request(
-                    [item[-1] for item in sorted(delay_args.items())],
-                    sync_time=sync_time,
-                    scale_factor_timestamp=scale_factor_timestamp,
+                unix_timestamp = ref_loadmcnt / scale_factor_timestamp + sync_time
+                sorted_delay_args = dict(sorted(delay_args.items()))
+                await pc_client.request(
+                    "delays",
+                    "antenna-channelised-voltage",
+                    unix_timestamp,
+                    *[delay_arg_value[-1] for delay_arg_value in sorted_delay_args.values()],
                 )
-                await pc_client.request("delays", aiokatcp.encode(unix_timestamp), aiokatcp.encode(coefficient_set))
-                _reset_dict(delay_args, input_labels)
+                delay_args = _create_empty_dict(input_labels)
         finally:
             callback_client.disconnect()
             pc_client.close()
