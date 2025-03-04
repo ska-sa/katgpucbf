@@ -77,6 +77,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--transfer-delays", action="store_true", help="Continuously transfer F-engine delays from MK CBF to MK+ CBF"
     )
+    parser.add_argument("--sdp", choices=["ingest"], default=None, help="Configure SDP as well")
     parser.add_argument("--dry-run", action="store_true", help="Print config only")
     katgpucbf.configure_tools.add_arguments(parser)
     args = parser.parse_args(argv)
@@ -87,6 +88,12 @@ def _assemble_regex(names: Sequence[str]) -> str:
     """Assemble a regex from a sequence of strings."""
     regex = "|".join(re.escape(name) for name in names)
     return f"^(?:{regex})$"  # Anchor the regex and return
+
+
+async def single_sensor_value(client: KATPortalClient, name: str) -> Any:
+    """Query the value of a single sensor from katportal."""
+    regex = "^" + re.escape(name) + "$"  # Anchor and escape the regex
+    return (await client.sensor_value(regex)).value
 
 
 async def multi_sensor_values(client: KATPortalClient, names: Sequence[str]) -> Mapping[str, Any]:
@@ -166,13 +173,18 @@ async def async_main(args) -> int:
         "delay_centre_frequency",
         "subarray_product_id",
     ]
-    cbf_sensor_values = await multi_sensor_values(
-        portal_client,
-        [f"{prefix}_{name}" for name in cbf_sensor_names],
-    )
+    sensor_names = [f"{prefix}_{name}" for name in cbf_sensor_names]
+    if args.sdp is not None:
+        sdp_prefix = await portal_client.sensor_subarray_lookup("sdp", None)
+        sdp_subarray_product_id = await single_sensor_value(portal_client, f"{sdp_prefix}_subarray_product_ids")
+        # This is the int time for the first ingest process, but they should
+        # all be the same.
+        sdp_int_time_name = f"{sdp_prefix}_spmc_{sdp_subarray_product_id}_ingest_sdp_l0_1_output_int_time"
+        sensor_names.append(sdp_int_time_name)
+    sensor_values = await multi_sensor_values(portal_client, sensor_names)
 
     def cbf_sensor_value(name: str) -> Any:
-        return cbf_sensor_values[f"{prefix}_{name}"]
+        return sensor_values[f"{prefix}_{name}"]
 
     input_labels: list[str] = cbf_sensor_value("input_labels").split(",")
     # Get the multicast groups. This is an annoying sensor because it's not
@@ -235,6 +247,15 @@ async def async_main(args) -> int:
             },
         },
     }
+    if args.sdp is not None:
+        config["outputs"]["sdp_l0"] = {
+            "type": "sdp.vis",
+            "src_streams": ["baseline-correlation-products"],
+            "output_int_time": sensor_values[sdp_int_time_name],
+            "excise": False,
+            "archive": False,  # This is just for testing, so do not archive
+            "continuum_factor": 1,
+        }
 
     katgpucbf.configure_tools.apply_arguments(config, args)
 
