@@ -71,7 +71,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--name", help="Name of the subarray product to create")
     parser.add_argument(
         "--product-controller",
-        type=endpoint_parser(31000),  # Not the actual default port
+        type=endpoint_parser(None),
         help="Endpoint of the Product Controller already running",
     )
     parser.add_argument(
@@ -86,8 +86,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def _assemble_regex(names: Sequence[str]) -> str:
     """Assemble a regex from a sequence of strings."""
     regex = "|".join(re.escape(name) for name in names)
-    if not regex:
-        return {}  # Would get an error trying to query an empty regex
     return f"^(?:{regex})$"  # Anchor the regex and return
 
 
@@ -99,6 +97,8 @@ async def multi_sensor_values(client: KATPortalClient, names: Sequence[str]) -> 
 
     The return value contains just the sensor value rather than a full sample.
     """
+    if not names:
+        return {}  # Would get an error trying to query an empty regex
     regex = _assemble_regex(names)
     samples = await client.sensor_values(regex)
     out = {}
@@ -129,7 +129,7 @@ def delay_transfer_callback(
     # Example sensor name: cbf_1_wide_antenna_channelised_voltage_m000h_delay
     input_label: str = msg_dict["msg_data"]["name"].split("_")[-2]
     delay_queue_item = DelayQueueItem(
-        loadmcnt=int(loadmcnt),
+        loadmcnt=loadmcnt,
         input_label=input_label,
         delay_request_args=request_args,
     )
@@ -307,7 +307,8 @@ async def async_main(args) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     finally:
-        portal_client.disconnect()
+        if portal_client.is_connected:
+            portal_client.disconnect()
         client.close()
         await client.wait_closed()
 
