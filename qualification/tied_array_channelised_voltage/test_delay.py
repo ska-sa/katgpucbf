@@ -82,7 +82,7 @@ async def test_delay_small(
     ref_weights = [0.0] * len(receiver.source_indices[ref_beam])
     ref_weights[ref_input_idx] = 1.0
     await client.request("beam-weights", receiver.stream_names[ref_beam], *ref_weights)
-    pdf_report.detail(f"Set weights on {receiver.stream_names[ref_beam]} to {delay_weights}")
+    pdf_report.detail(f"Set weights on {receiver.stream_names[ref_beam]} to {ref_weights}")
 
     # TODO: need the final version of the requirements to know what values to test
     max_delay = 0.5 / receiver.adc_sample_rate
