@@ -109,16 +109,15 @@ def delay_transfer_callback(
     # delay-rate <unit-less or, seconds-per-second>, phase <radians>,
     # phase-rate <radians per second>)
     loadmcnt, delay, delay_rate, phase, phase_rate = ast.literal_eval(delay_sensor_value)
-    request_args = f"{delay},{delay_rate}:{phase},{phase_rate[:-1]}"
+    request_args = f"{delay},{delay_rate}:{phase},{phase_rate}"
     # Example sensor name: cbf_1_wide_antenna_channelised_voltage_m000h_delay
     input_label: str = msg_dict["msg_data"]["name"].split("_")[-2]
-    request_tuple = (int(loadmcnt[1:]), input_label, request_args)
+    request_tuple = (int(loadmcnt), input_label, request_args)
 
-    if delays_queue.full():
-        # TODO: Figure out a better approach
-        # Get rid of older items first (?)
-        _ = delays_queue.get_nowait()
-    delays_queue.put_nowait(request_tuple)
+    try:
+        delays_queue.put_nowait(request_tuple)
+    except asyncio.QueueFull:
+        print(f"Delay queue full. Dropping this update for {input_label}.")
 
 
 async def async_main(args) -> int:
@@ -271,11 +270,7 @@ async def async_main(args) -> int:
             if not result["success"]:
                 print(f"Failed to set sampling strategy for {sensor_name}")
 
-        def _create_empty_dict(keys: list[Any]) -> dict[Any, None]:
-            empty_dict = {new_key: None for new_key in keys}
-            return empty_dict
-
-        delay_args: dict[str, tuple[int, str, str] | None] = _create_empty_dict(input_labels)
+        delay_args: dict[str, tuple[int, str, str] | None] = dict.fromkeys(input_labels)
         ref_loadmcnt = 0
         try:
             pc_client = await aiokatcp.Client.connect(pc_host, pc_port)
@@ -291,20 +286,20 @@ async def async_main(args) -> int:
                     if delays_queue_item[0] != ref_loadmcnt:
                         ref_loadmcnt = delays_queue_item[0]
                         print(f"{delays_queue_item[1]}: New loadmcnt {ref_loadmcnt}. Getting new delays.")
-                        delay_args = _create_empty_dict(input_labels)
+                        delay_args = dict.fromkeys(input_labels)
 
                     delay_args[delays_queue_item[1]] = delays_queue_item
                     complete_requests = all(delay_args_value is not None for delay_args_value in delay_args.values())
 
                 unix_timestamp = ref_loadmcnt / scale_factor_timestamp + sync_time
-                sorted_delay_args = dict(sorted(delay_args.items()))
+                sorted_delay_args = [delay_args[label] for label in input_labels]
                 await pc_client.request(
                     "delays",
                     "antenna-channelised-voltage",
                     unix_timestamp,
-                    *[delay_arg_value[-1] for delay_arg_value in sorted_delay_args.values()],
+                    *[delay_arg[-1] for delay_arg in sorted_delay_args],
                 )
-                delay_args = _create_empty_dict(input_labels)
+                delay_args = dict.fromkeys(input_labels)
         finally:
             callback_client.disconnect()
             pc_client.close()
