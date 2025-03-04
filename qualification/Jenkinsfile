@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2021-2024, National Research Foundation (SARAO)
+ * Copyright (c) 2021-2025, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -16,22 +16,32 @@
 
 /* This file tells Jenkins how to execute the qualification tests for this repo.
  * Everything runs in docker containers, so in theory any Jenkins server should
- * be able to parse this file, however the pytest-jenkins.ini file needs to be
- * configured for the hardware it is running on. The Docker Engine being used needs
- * to have been configured to use the NVIDIA Container Runtime and the node which the
+ * be able to parse this file, but the ini-file needs to be configured for the
+ * hardware it is running on. The Docker Engine being used needs to have been
+ * configured to use the NVIDIA Container Runtime and the node which the
  * container runs on needs the NVIDIA OFED driver installed.
  *
  * Additionally the Jenkins server also needs access to an NVIDIA NIC that
  * supports ibverbs. The ibverbs drivers need to be passed into the Jenkins
  * container using specific flags.
  *
- * For more information on the qualification framework, see katgpucbf/doc/qualification.rst
+ * This Jenkinsfile is intended to be run from a parametrised job. The
+ * following parameters are required:
+ *
+ * - label: agent label where the task may run
+ * - katgpucbf_image: image path for katgpucbf (for system under test)
+ * - katsdpcontroller_image: image path for katsdpcontroller (for product controller)
+ * - branch: branch of katgpucbf from which to obtain test code
+ * - ini: relative path (from repo root) to pytest configuration file
+ *
+ * For more information on the qualification framework, see
+ * katgpucbf/doc/qualification.rst
  */
 def COMMIT_ID = 'unknown'
 pipeline {
   agent {
     dockerfile {
-      label 'qualification-katgpucbf'
+      label params.label
       registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
       /* Use the Jenkins-specific stage of the Dockerfile as the image for
@@ -87,7 +97,7 @@ pipeline {
           * tests and mark the build as unstable.
           */
          sh '''
-           spead2_net_raw pytest -v -c qualification/pytest-jenkins.ini qualification \
+           spead2_net_raw pytest -v -c ${ini} qualification \
            --suppress-tests-failed-exit-code \
            --image-override katgpucbf:${katgpucbf_image} \
            --image-override katsdpcontroller:${katsdpcontroller_image} \
@@ -149,28 +159,22 @@ pipeline {
    */
   post {
     always {
-      emailext attachLog: true,
-      body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
-      <b>Node:</b> ${env.NODE_NAME}<br>
-      <b>Duration:</b> ${currentBuild.durationString}<br>
-      <b>Build URL:</b> ${env.BUILD_URL}<br>
-      <b>Test Image Commit ID:</b> ${COMMIT_ID} (${params.katgpucbf_image})<br>
-      <b>katsdpcontroller image:</b> ${params.katsdpcontroller_image}<br>
-      <b>Qualification Tests Commit ID:</b> ${env.GIT_COMMIT} (${params.branch})<br>
-      <br>
-      <i>Note: This is an Automated email notification.</i>""",
-      recipientProviders: [developers(), requestor()],
-      subject: 'Qualification Tests - katgpucbf - $BUILD_STATUS!',
-      to: '$DEFAULT_RECIPIENTS'
-
-      script {
-        ARRAYS = sh(script: 'katcpcmd cbf-mc.cbf.mkat.karoo.kat.ac.za:5001 product-list', returnStdout: true).trim()
-        echo "Currently Running Arrays: ${ARRAYS}"
-        if (ARRAYS.contains("jenkins_qualification_cbf")) {
-          echo "Destroying jenkins_qualification_cbf"
-          sh 'katcpcmd cbf-mc.cbf.mkat.karoo.kat.ac.za:5001 product-deconfigure jenkins_qualification_cbf 1'
-        }
-      }
+      emailext(
+        attachLog: true,
+        body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
+        <b>Node:</b> ${env.NODE_NAME}<br>
+        <b>Duration:</b> ${currentBuild.durationString}<br>
+        <b>Build URL:</b> ${env.BUILD_URL}<br>
+        <b>Test Image Commit ID:</b> ${COMMIT_ID} (${params.katgpucbf_image})<br>
+        <b>katsdpcontroller image:</b> ${params.katsdpcontroller_image}<br>
+        <b>Qualification Tests Commit ID:</b> ${env.GIT_COMMIT} (${params.branch})<br>
+        <br>
+        <i>Note: This is an Automated email notification.</i>""",
+        recipientProviders: [developers(), requestor()],
+        subject: 'Qualification Tests - katgpucbf - $BUILD_STATUS!',
+        to: '$DEFAULT_RECIPIENTS'
+      )
+      sh "qualification/cleanup.py -- ${ini}"
     }
     // The final step removes the workspace when the build is complete.
     cleanup {
