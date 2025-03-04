@@ -20,6 +20,9 @@
 
 This script makes use of sim_correlator.py in order to start a correlator, but
 instead of a simulated one, it gets the parameters from a live MK correlator.
+
+It also provides the option for real-time transfer of delays from a live MK
+correlator to a MK+ CBF correlator.
 """
 
 import argparse
@@ -91,14 +94,10 @@ def delay_transfer_callback(
     """Transfer F-engine delays from MK subarray to MK+ F-engines.
 
     It currently puts a tuple on the `delays_queue` for each sensor update
-    in the format (loadmcnt, src_name, request_args). The `request_args`
-    is a string formatted as:
+    in the format (loadmcnt, src_name, request_args). `request_args` is a
+    string formatted as:
     - delay,delay_rate:phase,phase_rate
     """
-    # TODO: Some delay sensors are logging multiple entries to the queue
-    # before others even get a chance. Not sure if this is the place to
-    # control that. Either way, the queue is filling faster than it can
-    # be consumed.
     delay_sensor_value = msg_dict["msg_data"]["value"]
     src_name: str = msg_dict["msg_data"]["name"].split("_")[-2]
     # (loadmcnt <ADC sample count when model was loaded>, delay <in seconds>,
@@ -122,9 +121,9 @@ async def async_main(args) -> int:
     prefix = await portal_client.sensor_subarray_lookup("cbf", None)
     cbf_sensor_names = [
         "input_labels",
-        "wide_scale_factor_timestamp",
         "wide_antenna_channelised_voltage_source",
         "wide_sync_time",
+        "wide_scale_factor_timestamp",
         "wide_antenna_channelised_voltage_n_chans",
         "wide_adc_sample_rate",
         "wide_baseline_correlation_products_int_time",
@@ -141,9 +140,8 @@ async def async_main(args) -> int:
         return cbf_sensor_values[f"{prefix}_{name}"]
 
     input_labels: list[str] = cbf_sensor_value("input_labels").split(",")
-    n_src_inputs = len(input_labels)
     # Create asyncio Queue for the delay-callback to push items onto
-    delays_queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue(maxsize=n_src_inputs * 8)
+    delays_queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue(maxsize=len(input_labels) * 8)
 
     # Get the multicast groups. This is an annoying sensor because it's not
     # valid Python or JSON: it's a comma-separated list surrounded by brackets,
