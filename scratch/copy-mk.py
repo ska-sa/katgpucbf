@@ -33,6 +33,7 @@ import re
 import sys
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
@@ -41,6 +42,16 @@ from katportalclient import KATPortalClient, SensorNotFoundError
 from katsdptelstate.endpoint import endpoint_parser
 
 import katgpucbf.configure_tools
+
+
+@dataclass
+class DelayQueueItem:
+    """Information gathered during delay sensor updates."""
+
+    loadmcnt: int
+    input_label: str
+    #: In the format: delay,delay_rate:phase,phase_rate.
+    delay_request_args: str
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -100,13 +111,13 @@ async def multi_sensor_values(client: KATPortalClient, names: Sequence[str]) -> 
 
 def delay_transfer_callback(
     msg_dict: dict,
-    delays_queue: asyncio.Queue[tuple[int, str, str]],
-) -> tuple:
+    delays_queue: asyncio.Queue[DelayQueueItem],
+) -> None:
     """Receive delay sensor updates from katportal.
 
-    Put a tuple on the `delays_queue` for each sensor update in the
-    format (loadmcnt, input_label, request_args). `request_args` is a
-    string formatted as:
+    Populate the `delays_queue` with an item containing the loadmcnt,
+    input_label and request_args from the delay sensor. `request_args`
+    is a string formatted as:
     - delay,delay_rate:phase,phase_rate
     """
     delay_sensor_value = msg_dict["msg_data"]["value"]
@@ -117,19 +128,23 @@ def delay_transfer_callback(
     request_args = f"{delay},{delay_rate}:{phase},{phase_rate}"
     # Example sensor name: cbf_1_wide_antenna_channelised_voltage_m000h_delay
     input_label: str = msg_dict["msg_data"]["name"].split("_")[-2]
-    request_tuple = (int(loadmcnt), input_label, request_args)
+    delay_queue_item = DelayQueueItem(
+        loadmcnt=int(loadmcnt),
+        input_label=input_label,
+        delay_request_args=request_args,
+    )
 
     try:
-        delays_queue.put_nowait(request_tuple)
+        delays_queue.put_nowait(delay_queue_item)
     except asyncio.QueueFull:
-        print(f"Delay queue full. Dropping this update for {input_label}.")
+        print(f"Delay queue full. Dropping this update for {input_label} at {loadmcnt}.")
 
 
 async def async_main(args) -> int:
     # This queue is used in the case of --transfer-delays
     # but is needed by the callback below when instantiating
     # the portal client.
-    delays_queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue(maxsize=500)
+    delays_queue: asyncio.Queue[DelayQueueItem] = asyncio.Queue(maxsize=500)
     portal_client = KATPortalClient(
         args.portal,
         partial(
@@ -259,7 +274,7 @@ async def async_main(args) -> int:
                 if not result["success"]:
                     print(f"Failed to set sampling strategy for {sensor_name}")
 
-            delay_args: dict[str, tuple[int, str, str] | None] = dict.fromkeys(input_labels)
+            delay_args: dict[str, str | None] = dict.fromkeys(input_labels)
             ref_loadmcnt = 0
             while True:
                 complete_requests = False
@@ -269,13 +284,13 @@ async def async_main(args) -> int:
                     delays_queue_item = await delays_queue.get()
                     if ref_loadmcnt == 0:
                         # This is the first delay update we're seeing
-                        ref_loadmcnt = delays_queue_item[0]
-                    if delays_queue_item[0] != ref_loadmcnt:
-                        ref_loadmcnt = delays_queue_item[0]
-                        print(f"{delays_queue_item[1]}: New loadmcnt {ref_loadmcnt}. Getting new delays.")
+                        ref_loadmcnt = delays_queue_item.loadmcnt
+                    if delays_queue_item.loadmcnt != ref_loadmcnt:
+                        ref_loadmcnt = delays_queue_item.loadmcnt
+                        print(f"{delays_queue_item.input_label}: New loadmcnt {ref_loadmcnt}. Getting new delays.")
                         delay_args = dict.fromkeys(input_labels)
 
-                    delay_args[delays_queue_item[1]] = delays_queue_item
+                    delay_args[delays_queue_item.input_label] = delays_queue_item.delay_request_args
                     complete_requests = all(delay_args_value is not None for delay_args_value in delay_args.values())
 
                 unix_timestamp = ref_loadmcnt / scale_factor_timestamp + sync_time
@@ -284,7 +299,7 @@ async def async_main(args) -> int:
                     "delays",
                     "antenna-channelised-voltage",
                     unix_timestamp,
-                    *[delay_arg[-1] for delay_arg in sorted_delay_args],
+                    *sorted_delay_args,
                 )
                 delay_args = dict.fromkeys(input_labels)
 
