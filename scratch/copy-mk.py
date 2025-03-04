@@ -58,6 +58,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--name", help="Name of the subarray product to create")
     parser.add_argument(
+        "--product-controller",
+        type=endpoint_parser(31000),  # Not the actual default port
+        help="Endpoint of the Product Controller already running",
+    )
+    parser.add_argument(
         "--transfer-delays", action="store_true", help="Continuously transfer F-engine delays from MK CBF to MK+ CBF"
     )
     parser.add_argument("--dry-run", action="store_true", help="Print config only")
@@ -115,7 +120,6 @@ def delay_transfer_callback(
 
 
 async def async_main(args) -> int:
-    # Perhaps best to just start with a client to get subarray info
     portal_client = KATPortalClient(args.portal, None)
     # Get name of the CBF proxy e.g. "cbf_1"
     prefix = await portal_client.sensor_subarray_lookup("cbf", None)
@@ -212,6 +216,19 @@ async def async_main(args) -> int:
     if args.dry_run:
         json.dump(config, sys.stdout, indent=2)
         return 1
+    if args.product_controller:
+        try:
+            pc_host = args.product_controller.host
+            pc_port = args.product_controller.port
+            client = await aiokatcp.Client.connect(pc_host, pc_port)
+            print(f"{args.product_controller} - {client.is_connected()}")
+            return 1
+        except ConnectionError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            client.close()
+            await client.wait_closed()
     else:
         client = await aiokatcp.Client.connect(args.master_controller.host, args.master_controller.port)
         try:
@@ -252,7 +269,10 @@ async def async_main(args) -> int:
         # ensure the `callback_client` is ready to proceed.
         namespace = f"{args.name}_{uuid.uuid4()}"
         await callback_client.subscribe(namespace)
-        await callback_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
+        status = await callback_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
+        for sensor_name, result in sorted(status.items()):
+            if not result["success"]:
+                print(f"Failed to set sampling strategy for {sensor_name}")
 
         def _create_empty_dict(keys: list[Any]) -> dict[Any, None]:
             empty_dict = {new_key: None for new_key in keys}
