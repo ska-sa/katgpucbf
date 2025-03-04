@@ -126,7 +126,17 @@ def delay_transfer_callback(
 
 
 async def async_main(args) -> int:
-    portal_client = KATPortalClient(args.portal, None)
+    # This queue is used in the case of --transfer-delays
+    # but is needed by the callback below when instantiating
+    # the portal client.
+    delays_queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue(maxsize=500)
+    portal_client = KATPortalClient(
+        args.portal,
+        partial(
+            delay_transfer_callback,
+            delays_queue=delays_queue,
+        ),
+    )
     # Get name of the CBF proxy e.g. "cbf_1"
     prefix = await portal_client.sensor_subarray_lookup("cbf", None)
     cbf_sensor_names = [
@@ -150,9 +160,6 @@ async def async_main(args) -> int:
         return cbf_sensor_values[f"{prefix}_{name}"]
 
     input_labels: list[str] = cbf_sensor_value("input_labels").split(",")
-    # Create asyncio Queue for the delay-callback to push items onto
-    delays_queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue(maxsize=len(input_labels) * 8)
-
     # Get the multicast groups. This is an annoying sensor because it's not
     # valid Python or JSON: it's a comma-separated list surrounded by brackets,
     # but the strings are not quoted.
@@ -256,7 +263,7 @@ async def async_main(args) -> int:
     if args.transfer_delays:
         qualified_labels = [f"antenna_channelised_voltage_{input_label}" for input_label in input_labels]
         # New client because it needs to be initialised with the callback (?)
-        callback_client = KATPortalClient(
+        portal_client = KATPortalClient(
             args.portal,
             partial(
                 delay_transfer_callback,
@@ -264,13 +271,13 @@ async def async_main(args) -> int:
             ),
         )
         # Connect before subscribing
-        await callback_client.connect()
+        await portal_client.connect()
         delay_sensors_regex = _assemble_regex(
             [f"{prefix}_wide_{qualified_label}_delay" for qualified_label in qualified_labels]
         )
         namespace = f"{args.name}_{uuid.uuid4()}"
-        await callback_client.subscribe(namespace)
-        status = await callback_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
+        await portal_client.subscribe(namespace)
+        status = await portal_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
         for sensor_name, result in sorted(status.items()):
             if not result["success"]:
                 print(f"Failed to set sampling strategy for {sensor_name}")
@@ -306,7 +313,7 @@ async def async_main(args) -> int:
                 )
                 delay_args = dict.fromkeys(input_labels)
         finally:
-            callback_client.disconnect()
+            portal_client.disconnect()
             pc_client.close()
             await pc_client.wait_closed()
 
