@@ -52,7 +52,7 @@ You will need to create a :file:`qualification/pytest.ini` file.
 It is specific to your test environment, so do not commit it to
 git. You'll need to set it up only once per machine that you're deploying on,
 and it'll look something like this (but refer to
-:file:`qualification/pytest-jenkins.ini` for an up-to-date example):
+:file:`qualification/pytest-jenkins-karoo.ini` for an up-to-date example):
 
 .. code:: ini
 
