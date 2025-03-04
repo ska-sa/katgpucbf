@@ -26,6 +26,7 @@ correlator to a MK+ CBF correlator.
 """
 
 import argparse
+import ast
 import asyncio
 import json
 import re
@@ -96,21 +97,22 @@ def delay_transfer_callback(
     msg_dict: dict,
     delays_queue: asyncio.Queue[tuple[int, str, str]],
 ) -> tuple:
-    """Transfer F-engine delays from MK subarray to MK+ F-engines.
+    """Receive delay sensor updates from katportal.
 
-    It currently puts a tuple on the `delays_queue` for each sensor update
-    in the format (loadmcnt, src_name, request_args). `request_args` is a
+    Put a tuple on the `delays_queue` for each sensor update in the
+    format (loadmcnt, input_label, request_args). `request_args` is a
     string formatted as:
     - delay,delay_rate:phase,phase_rate
     """
     delay_sensor_value = msg_dict["msg_data"]["value"]
-    src_name: str = msg_dict["msg_data"]["name"].split("_")[-2]
     # (loadmcnt <ADC sample count when model was loaded>, delay <in seconds>,
     # delay-rate <unit-less or, seconds-per-second>, phase <radians>,
     # phase-rate <radians per second>)
-    loadmcnt, delay, delay_rate, phase, phase_rate = delay_sensor_value.replace(" ", "").split(",")
+    loadmcnt, delay, delay_rate, phase, phase_rate = ast.literal_eval(delay_sensor_value)
     request_args = f"{delay},{delay_rate}:{phase},{phase_rate[:-1]}"
-    request_tuple = (int(loadmcnt[1:]), src_name, request_args)
+    # Example sensor name: cbf_1_wide_antenna_channelised_voltage_m000h_delay
+    input_label: str = msg_dict["msg_data"]["name"].split("_")[-2]
+    request_tuple = (int(loadmcnt[1:]), input_label, request_args)
 
     if delays_queue.full():
         # TODO: Figure out a better approach
@@ -215,14 +217,13 @@ async def async_main(args) -> int:
     pc_port: int = 0
     if args.dry_run:
         json.dump(config, sys.stdout, indent=2)
-        return 1
+        return 0
     if args.product_controller:
         try:
             pc_host = args.product_controller.host
             pc_port = args.product_controller.port
             client = await aiokatcp.Client.connect(pc_host, pc_port)
-            print(f"{args.product_controller} - {client.is_connected()}")
-            return 1
+            print(f"Using existing MK+ CBF correlator at: {args.product_controller}")
         except ConnectionError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
@@ -249,7 +250,7 @@ async def async_main(args) -> int:
             await client.wait_closed()
 
     if args.transfer_delays:
-        stream_names = [f"antenna-channelised-voltage-{input_label}" for input_label in input_labels]
+        qualified_labels = [f"antenna_channelised_voltage_{input_label}" for input_label in input_labels]
         # New client because it needs to be initialised with the callback (?)
         callback_client = KATPortalClient(
             args.portal,
@@ -261,12 +262,8 @@ async def async_main(args) -> int:
         # Connect before subscribing
         await callback_client.connect()
         delay_sensors_regex = (
-            "^(?:"
-            + "|".join(f"{prefix}_wide_{stream_name.replace("-", "_")}_delay" for stream_name in stream_names)
-            + ")$"
+            "^(?:" + "|".join(f"{prefix}_wide_{qualified_label}_delay" for qualified_label in qualified_labels) + ")$"
         )
-        # TODO: Check against results returned from the following to
-        # ensure the `callback_client` is ready to proceed.
         namespace = f"{args.name}_{uuid.uuid4()}"
         await callback_client.subscribe(namespace)
         status = await callback_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
@@ -286,12 +283,10 @@ async def async_main(args) -> int:
                 complete_requests = False
                 while not complete_requests:
                     # delays_queue items are in the format
-                    # - (loadmcnt, src_name, delay_request_args)
+                    # - (loadmcnt, input_label, delay_request_args)
                     delays_queue_item = await delays_queue.get()
                     if ref_loadmcnt == 0:
                         # This is the first delay update we're seeing
-                        # TODO: Potentially move this back outside the while
-                        # so it doesn't need to be checked on every loop.
                         ref_loadmcnt = delays_queue_item[0]
                     if delays_queue_item[0] != ref_loadmcnt:
                         ref_loadmcnt = delays_queue_item[0]
