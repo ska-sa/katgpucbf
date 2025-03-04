@@ -229,21 +229,12 @@ async def async_main(args) -> int:
     if args.dry_run:
         json.dump(config, sys.stdout, indent=2)
         return 0
-    if args.product_controller:
-        try:
-            pc_host = args.product_controller.host
-            pc_port = args.product_controller.port
-            client = await aiokatcp.Client.connect(pc_host, pc_port)
+    try:
+        if args.product_controller:
+            client = await aiokatcp.Client.connect(args.product_controller.host, args.product_controller.port)
             print(f"Using existing MK+ CBF correlator at: {args.product_controller}")
-        except ConnectionError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
-        finally:
-            client.close()
-            await client.wait_closed()
-    else:
-        client = await aiokatcp.Client.connect(args.master_controller.host, args.master_controller.port)
-        try:
+        else:
+            client = await aiokatcp.Client.connect(args.master_controller.host, args.master_controller.port)
             reply, _ = await client.request("product-configure", args.name, json.dumps(config))
             pc_host = aiokatcp.decode(str, reply[1])
             pc_port = aiokatcp.decode(int, reply[2])
@@ -253,39 +244,23 @@ async def async_main(args) -> int:
             client = await aiokatcp.Client.connect(pc_host, pc_port)
             await client.request("capture-start", "baseline-correlation-products")
             print("baseline-correlation-products is enabled")
-        except (aiokatcp.FailReply, ConnectionError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
-        finally:
-            client.close()
-            await client.wait_closed()
 
-    if args.transfer_delays:
-        qualified_labels = [f"antenna_channelised_voltage_{input_label}" for input_label in input_labels]
-        # New client because it needs to be initialised with the callback (?)
-        portal_client = KATPortalClient(
-            args.portal,
-            partial(
-                delay_transfer_callback,
-                delays_queue=delays_queue,
-            ),
-        )
-        # Connect before subscribing
-        await portal_client.connect()
-        delay_sensors_regex = _assemble_regex(
-            [f"{prefix}_wide_{qualified_label}_delay" for qualified_label in qualified_labels]
-        )
-        namespace = f"{args.name}_{uuid.uuid4()}"
-        await portal_client.subscribe(namespace)
-        status = await portal_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
-        for sensor_name, result in sorted(status.items()):
-            if not result["success"]:
-                print(f"Failed to set sampling strategy for {sensor_name}")
+        if args.transfer_delays:
+            qualified_labels = [f"antenna_channelised_voltage_{input_label}" for input_label in input_labels]
+            # Connect before subscribing
+            await portal_client.connect()
+            delay_sensors_regex = _assemble_regex(
+                [f"{prefix}_wide_{qualified_label}_delay" for qualified_label in qualified_labels]
+            )
+            namespace = f"{args.name}_{uuid.uuid4()}"
+            await portal_client.subscribe(namespace)
+            status = await portal_client.set_sampling_strategies(namespace, delay_sensors_regex, "event")
+            for sensor_name, result in sorted(status.items()):
+                if not result["success"]:
+                    print(f"Failed to set sampling strategy for {sensor_name}")
 
-        delay_args: dict[str, tuple[int, str, str] | None] = dict.fromkeys(input_labels)
-        ref_loadmcnt = 0
-        try:
-            pc_client = await aiokatcp.Client.connect(pc_host, pc_port)
+            delay_args: dict[str, tuple[int, str, str] | None] = dict.fromkeys(input_labels)
+            ref_loadmcnt = 0
             while True:
                 complete_requests = False
                 while not complete_requests:
@@ -305,17 +280,21 @@ async def async_main(args) -> int:
 
                 unix_timestamp = ref_loadmcnt / scale_factor_timestamp + sync_time
                 sorted_delay_args = [delay_args[label] for label in input_labels]
-                await pc_client.request(
+                await client.request(
                     "delays",
                     "antenna-channelised-voltage",
                     unix_timestamp,
                     *[delay_arg[-1] for delay_arg in sorted_delay_args],
                 )
                 delay_args = dict.fromkeys(input_labels)
-        finally:
-            portal_client.disconnect()
-            pc_client.close()
-            await pc_client.wait_closed()
+
+    except (aiokatcp.FailReply, ConnectionError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        portal_client.disconnect()
+        client.close()
+        await client.wait_closed()
 
     return 0
 
