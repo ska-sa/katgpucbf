@@ -21,7 +21,7 @@ import spead2
 
 
 @pytest.fixture
-def n_recv_streams() -> int:  # noqa: D401
+def n_recv_streams() -> int:
     """Number of source streams for an xbgpu instance."""
     return 1
 

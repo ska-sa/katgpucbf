@@ -159,7 +159,7 @@ class TestTimeConverter:
     """Tests for :class:`katgpucbf.utils.TimeConverter`."""
 
     @pytest.fixture
-    def time_converter(self) -> TimeConverter:  # noqa: D401
+    def time_converter(self) -> TimeConverter:
         """A time converter.
 
         It has power-of-two ADC sample count so that tests do not need to worry

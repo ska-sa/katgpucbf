@@ -206,7 +206,7 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
 
 @pytest.fixture(scope="package")
 def n_dsims() -> int:
-    """Number of simulated digitisers."""  # noqa: D401
+    """Number of simulated digitisers."""
     return 1
 
 

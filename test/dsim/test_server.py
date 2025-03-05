@@ -37,7 +37,7 @@ from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
 @pytest.fixture
 async def katcp_server(
     sender: Sender, heap_sets: Sequence[HeapSet], descriptor_sender: DescriptorSender
-) -> AsyncGenerator[DeviceServer, None]:  # noqa: D401
+) -> AsyncGenerator[DeviceServer, None]:
     """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
     dither_seed = 42
@@ -58,7 +58,7 @@ async def katcp_server(
 
 
 @pytest.fixture
-async def katcp_client(katcp_server: DeviceServer) -> AsyncGenerator[aiokatcp.Client, None]:  # noqa: D401
+async def katcp_client(katcp_server: DeviceServer) -> AsyncGenerator[aiokatcp.Client, None]:
     """A katcp client connection to :func:`katcp_server`."""
     host, port = katcp_server.sockets[0].getsockname()[:2]
     async with asyncio.timeout(5):  # To fail the test quickly if unable to connect

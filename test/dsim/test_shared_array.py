@@ -33,7 +33,7 @@ _MPContext = (
 
 
 @pytest.fixture
-def array() -> Generator[SharedArray, None, None]:  # noqa: D401
+def array() -> Generator[SharedArray, None, None]:
     """A pre-created shared array."""
     array = SharedArray.create("test_shared_array", (10000,), np.int32)
     yield array
@@ -41,7 +41,7 @@ def array() -> Generator[SharedArray, None, None]:  # noqa: D401
 
 
 @pytest.fixture(params=["fork", "forkserver", "spawn"])
-def mp_context(request) -> multiprocessing.context.BaseContext:  # noqa: D401
+def mp_context(request) -> multiprocessing.context.BaseContext:
     """Multiprocessing context (launch method)."""
     return multiprocessing.get_context(request.param)
 

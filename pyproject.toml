@@ -24,6 +24,7 @@ select = [
     "D",  # pydocstyle
     "N",  # pep8-naming
     "B",  # flake8-bugbear
+    "RUF100",  # Unnecessary noqa directives
 ]
 extend-ignore = ["D105", "D107"]  # docstrings for magic methods
 [tool.ruff.lint.extend-per-file-ignores]

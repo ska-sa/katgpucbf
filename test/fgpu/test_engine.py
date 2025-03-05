@@ -90,7 +90,7 @@ def jones_per_batch(channels: int, request: pytest.FixtureRequest) -> int:
 
 
 @pytest.fixture
-def dig_rms_dbfs_window_chunks() -> int:  # noqa: D401
+def dig_rms_dbfs_window_chunks() -> int:
     """Number of chunks per window for ``dig-rms-dbfs`` sensors."""
     return 2
 
