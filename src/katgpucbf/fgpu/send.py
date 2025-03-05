@@ -256,7 +256,7 @@ class Chunk:
         """
         futures = []
         saturated = [0] * N_POLS
-        for present, batch in zip(self.present[:batches], self._batches[:batches]):
+        for present, batch in zip(self.present[:batches], self._batches[:batches], strict=True):
             if present:
                 futures.append(_multi_send(streams, batch.heaps))
                 futures[-1].add_done_callback(functools.partial(self._inc_counters, batch, output_name))

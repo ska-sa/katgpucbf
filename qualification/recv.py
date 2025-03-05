@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -480,7 +480,7 @@ def _create_receive_stream_group(
 
     # Needed for placing the individual heaps within the chunk.
     items = [FREQUENCY_ID, TIMESTAMP_ID, BEAM_ANTS_ID, spead2.HEAP_LENGTH_ID]
-    for i, (endpoints, core) in enumerate(zip(multicast_endpoints, cores)):
+    for i, (endpoints, core) in enumerate(zip(multicast_endpoints, cores, strict=True)):
         user_data = np.array([i], np.int64)
         chunk_stream_config = spead2.recv.ChunkStreamConfig(
             items=items,

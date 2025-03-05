@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2023-2024, National Research Foundation (SARAO)
+# Copyright (c) 2023-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -258,7 +258,7 @@ async def heap_counts(session: aiohttp.client.ClientSession, server: Server, n: 
             tg.create_task(_heap_counts1(session, f"http://{server.hostname}:{7250 + i}/metrics")) for i in range(n)
         ]
     partials = [task.result() for task in tasks]
-    heaps, missing_heaps = zip(*partials)
+    heaps, missing_heaps = zip(*partials, strict=True)
     return sum(heaps), sum(missing_heaps)
 
 
@@ -347,7 +347,7 @@ async def calibrate(args: argparse.Namespace) -> None:
                         print(f"{result.message()}, rerunning", flush=True, file=sys.stderr)
                     else:
                         print(f"{result.message()}, {successes[j]}/{trial + 1} passed", flush=True, file=sys.stderr)
-    for success, adc_sample_rate in zip(successes, rates):
+    for success, adc_sample_rate in zip(successes, rates, strict=True):
         print(adc_sample_rate, success, args.calibrate_repeat)
 
 

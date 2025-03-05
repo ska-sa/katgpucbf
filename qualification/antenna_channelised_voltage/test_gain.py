@@ -78,7 +78,7 @@ async def test_gains(
 
     loop = asyncio.get_running_loop()
     start_time = loop.time()
-    for input_gain, input_label in zip(gains_text, receiver.input_labels):
+    for input_gain, input_label in zip(gains_text, receiver.input_labels, strict=True):
         await cbf.product_controller_client.request(
             "gain",
             "antenna-channelised-voltage",

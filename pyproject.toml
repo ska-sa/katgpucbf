@@ -17,6 +17,7 @@ known_local_folder = ["noisy_search", "remote", "sighandler"]
 
 [tool.ruff]
 line-length = 120
+target-version = "py312"
 [tool.ruff.lint]
 select = [
     "E", "W",  # pycodestyle

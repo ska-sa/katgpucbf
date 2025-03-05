@@ -60,7 +60,7 @@ async def test_gain(
         pdf_report.detail(f"Set weights for {stream_name} to {weights}.")
 
     pdf_report.step("Set gains to 1/2, 1 and 2.")
-    for gain, stream_name in zip(gains, stream_names):
+    for gain, stream_name in zip(gains, stream_names, strict=True):
         await pcc.request("beam-quant-gains", stream_name, gain)
         pdf_report.detail(f"Set gain for {stream_name} to {gain}.")
 
@@ -69,8 +69,8 @@ async def test_gain(
     pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
 
     pdf_report.step("Check power level of each beam.")
-    data = data[:, pass_channels]
-    for gain, stream_name, stream_data in zip(gains, stream_names, data):
+    data = data[: len(gains), pass_channels]
+    for gain, stream_name, stream_data in zip(gains, stream_names, data, strict=True):
         power = np.sum(np.square(stream_data, dtype=np.float32)) / (stream_data.shape[0] * stream_data.shape[1])
         expected_power = np.square(amplitude * dig_max * gain)
         pdf_report.detail(f"{stream_name}: power measured as {power:.2f}, expected {expected_power:.2f}.")

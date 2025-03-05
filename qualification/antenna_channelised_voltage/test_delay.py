@@ -257,7 +257,7 @@ async def test_delay_sensors(
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
     await receiver.next_complete_chunk(min_timestamp=load_ts)
-    for expected, label in zip(delay_tuples, receiver.input_labels):
+    for expected, label in zip(delay_tuples, receiver.input_labels, strict=True):
         value = await delay_sensor_value(label)
         pdf_report.detail(f"Input {label} has delay sensor {value}, expected value {expected}.")
         with check:
@@ -720,7 +720,7 @@ async def test_group_delay(
             the Central Limit Theorem applies.
         """
         async with asyncio.TaskGroup() as tg:
-            for dsim_name, dsim_freqs in zip(cbf.dsim_names, cfreqs_by_dsim):
+            for dsim_name, dsim_freqs in zip(cbf.dsim_names, cfreqs_by_dsim, strict=True):
                 if dsim_freqs:
                     signal = " ".join(
                         f"multicw({len(dsim_freqs)}, {amplitude}, 0.0, {dsim_freqs[0] + rfreq}, {freq_step_dsim});"

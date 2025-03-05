@@ -295,7 +295,7 @@ class Chunk:
         """
         send_enabled = tuple(
             enabled and self.timestamp >= timestamp
-            for enabled, timestamp in zip(send_stream.send_enabled, send_stream.send_enabled_timestamp)
+            for enabled, timestamp in zip(send_stream.send_enabled, send_stream.send_enabled_timestamp, strict=True)
         )
         n_enabled = sum(send_enabled)
         end_timestamp_adc = self._timestamp + self._timestamp_step * len(self._batches)
@@ -308,7 +308,7 @@ class Chunk:
         rate = send_stream.bytes_per_second_per_beam * n_enabled
         send_futures: list[asyncio.Future] = []
         if n_enabled > 0:
-            for batch, antenna_presence in zip(self._batches, self._present_ants):
+            for batch, antenna_presence in zip(self._batches, self._present_ants, strict=True):
                 if antenna_presence == 0:
                     # No antennas were present in the received batch of heaps
                     # This check takes priority as we do not transmit batches
@@ -319,7 +319,7 @@ class Chunk:
                     batch.send_heaps = spead2.send.HeapReferenceList(
                         [
                             spead2.send.HeapReference(heap, substream_index=i, rate=rate)
-                            for i, (heap, enabled) in enumerate(zip(batch.heaps, send_enabled))
+                            for i, (heap, enabled) in enumerate(zip(batch.heaps, send_enabled, strict=True))
                             if enabled
                         ]
                     )

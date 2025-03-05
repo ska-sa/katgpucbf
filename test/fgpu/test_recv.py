@@ -220,7 +220,7 @@ class TestStream:
         if timestamps == "bad":
             bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567)
             # Interleave the sequences
-            heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps))
+            heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps, strict=True))
 
         # Heap with no payload - representing any sort of metadata heap such as descriptors
         heap = spead2.send.Heap(FLAVOUR)

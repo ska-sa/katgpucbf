@@ -48,7 +48,7 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> list[floa
     """
     sfdr_measurements = []
 
-    for spectrum, channel in zip(hdr_data_db, base_channel):
+    for spectrum, channel in zip(hdr_data_db, base_channel, strict=True):
         peak_value = spectrum[channel]
         next_peak_value = max(np.max(spectrum[:channel]), np.max(spectrum[channel + 1 :]))
         peak_diff = peak_value - next_peak_value
