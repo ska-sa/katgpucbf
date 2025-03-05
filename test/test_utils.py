@@ -211,6 +211,8 @@ class TestCommaSplit:
 
 
 class TestParseDither:
+    """Test :func:`.parse_dither`."""
+
     @pytest.mark.parametrize(
         "input, output",
         [("none", DitherType.NONE), ("uniform", DitherType.UNIFORM)],

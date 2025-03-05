@@ -28,10 +28,6 @@ select = [
 extend-ignore = ["D105", "D107"]  # docstrings for magic methods
 [tool.ruff.lint.extend-per-file-ignores]
 "scratch/**/*.py" = ["D"]  # Don't fuss with docstrings in scratch/
-# Temporary, until the code can be cleaned up
-# (this is what pydocstyle used to do)
-"test_*.py" = ["D"]
-"test/**/*.py" = ["D"]
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 property-decorators = ["pytest.fixture"]

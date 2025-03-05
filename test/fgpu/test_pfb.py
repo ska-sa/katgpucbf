@@ -113,6 +113,7 @@ def test_pfb_fir_real(
 
 @pytest.mark.parametrize("unzip_factor", [1, 2, 4])
 def test_pfb_fir_complex(context: AbstractContext, command_queue: AbstractCommandQueue, unzip_factor: int) -> None:
+    """Test PFB FIR with complex input."""
     samples = CHANNELS * (SPECTRA + TAPS - 1)
     shape = (N_POLS, samples)
     rng = np.random.default_rng(seed=1)

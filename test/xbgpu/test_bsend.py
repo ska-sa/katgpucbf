@@ -44,6 +44,7 @@ SEND_HEAPS_PER_SUBSTREAM: Final[int] = N_CHUNKS * BATCHES_PER_CHUNK
 
 @pytest.fixture
 def time_converter() -> TimeConverter:
+    """Time converter with arbitrary fixed parameters."""
     return TimeConverter(123456789.0, 1234e6)
 
 

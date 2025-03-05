@@ -48,17 +48,24 @@ NAME = "foo"
 
 @pytest.fixture(params=[4, 8])
 def sample_bits(request) -> int:
+    """Number of bits per output sample."""
     return request.param
 
 
 @pytest.fixture(params=[1, 2])
 def interfaces(request) -> Sequence[str]:
+    """Interface IP addresses for the test.
+
+    This is parametrised to check that both singleton and multiple interfaces
+    work.
+    """
     # request.param gives number of interfaces to use
     return ["10.0.0.1", "10.0.0.2"][: request.param]
 
 
 @pytest.fixture
 def time_converter() -> TimeConverter:
+    """Time converter with arbitrary fixed sync time."""
     return TimeConverter(1234567890.0, ADC_SAMPLE_RATE)
 
 
@@ -70,6 +77,7 @@ def queues(interfaces: Sequence[str]) -> dict[str, list[spead2.InprocQueue]]:
 
 @pytest.fixture
 def chunks(sample_bits) -> list[Chunk]:
+    """Chunks to populate the free queue with (initially all zero)."""
     dtype = gaussian_dtype(sample_bits)
     return [
         Chunk(

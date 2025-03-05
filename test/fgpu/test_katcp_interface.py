@@ -55,6 +55,7 @@ class TestKatcpRequests:
 
     @pytest.fixture
     def engine_arglist(self) -> list[str]:
+        """Command-line arguments to pass to the engine."""
         return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",
