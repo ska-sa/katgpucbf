@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -159,7 +159,7 @@ class TestTimeConverter:
     """Tests for :class:`katgpucbf.utils.TimeConverter`."""
 
     @pytest.fixture
-    def time_converter(self) -> TimeConverter:  # noqa: D401
+    def time_converter(self) -> TimeConverter:
         """A time converter.
 
         It has power-of-two ADC sample count so that tests do not need to worry
@@ -211,6 +211,8 @@ class TestCommaSplit:
 
 
 class TestParseDither:
+    """Test :func:`.parse_dither`."""
+
     @pytest.mark.parametrize(
         "input, output",
         [("none", DitherType.NONE), ("uniform", DitherType.UNIFORM)],

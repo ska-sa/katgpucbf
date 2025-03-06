@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -33,7 +33,7 @@ _MPContext = (
 
 
 @pytest.fixture
-def array() -> Generator[SharedArray, None, None]:  # noqa: D401
+def array() -> Generator[SharedArray, None, None]:
     """A pre-created shared array."""
     array = SharedArray.create("test_shared_array", (10000,), np.int32)
     yield array
@@ -41,7 +41,7 @@ def array() -> Generator[SharedArray, None, None]:  # noqa: D401
 
 
 @pytest.fixture(params=["fork", "forkserver", "spawn"])
-def mp_context(request) -> multiprocessing.context.BaseContext:  # noqa: D401
+def mp_context(request) -> multiprocessing.context.BaseContext:
     """Multiprocessing context (launch method)."""
     return multiprocessing.get_context(request.param)
 

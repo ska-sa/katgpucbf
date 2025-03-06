@@ -294,9 +294,9 @@ class TestIterChunks:
         # This is an async fixture because make_sensors requires a running event loop
         return make_sensors(sensor_timeout=1e6)  # Large timeout so that it doesn't affect the test
 
-    async def test(
+    async def test(  # noqa: D102
         self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter
-    ) -> None:  # noqa: D102
+    ) -> None:
         streams = [Mock() for _ in range(N_POLS)]
         # Fake up stream stats
         config = spead2.recv.StreamConfig()

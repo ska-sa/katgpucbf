@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2021, 2023 National Research Foundation (SARAO)
+# Copyright (c) 2020-2021, 2023, 2025 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -113,6 +113,7 @@ def test_pfb_fir_real(
 
 @pytest.mark.parametrize("unzip_factor", [1, 2, 4])
 def test_pfb_fir_complex(context: AbstractContext, command_queue: AbstractCommandQueue, unzip_factor: int) -> None:
+    """Test PFB FIR with complex input."""
     samples = CHANNELS * (SPECTRA + TAPS - 1)
     shape = (N_POLS, samples)
     rng = np.random.default_rng(seed=1)

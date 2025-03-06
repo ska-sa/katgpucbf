@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -21,7 +21,7 @@ import spead2
 
 
 @pytest.fixture
-def n_recv_streams() -> int:  # noqa: D401
+def n_recv_streams() -> int:
     """Number of source streams for an xbgpu instance."""
     return 1
 

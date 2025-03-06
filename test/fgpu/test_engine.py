@@ -90,7 +90,7 @@ def jones_per_batch(channels: int, request: pytest.FixtureRequest) -> int:
 
 
 @pytest.fixture
-def dig_rms_dbfs_window_chunks() -> int:  # noqa: D401
+def dig_rms_dbfs_window_chunks() -> int:
     """Number of chunks per window for ``dig-rms-dbfs`` sensors."""
     return 2
 
@@ -147,10 +147,15 @@ def assert_angles_allclose(a, b, **kwargs) -> None:
 
 
 class TestEngine:
-    r"""Grouping of unit tests for :class:`.Engine`\'s various functionality."""
+    r"""Test :class:`.Engine`."""
 
     @pytest.fixture(params=["wideband", "narrowband_discard", "narrowband_no_discard"])
     def output_type(self, request: pytest.FixtureRequest) -> str:
+        """Which output to test.
+
+        In all cases there are wideband and narrowband streams, but only one
+        of them is tested for each parametrisation.
+        """
         return request.param
 
     @pytest.fixture
@@ -160,6 +165,7 @@ class TestEngine:
 
     @pytest.fixture(params=[4, 8, 16])
     def decimation(self, request: pytest.FixtureRequest) -> int:
+        """Narrowband decimation factor."""
         return request.param
 
     @pytest.fixture
@@ -199,8 +205,6 @@ class TestEngine:
         """
         return []
 
-    # This is marked autouse to ensure it will be run before the engine_server
-    # fixture.
     @pytest.fixture(autouse=True)
     def mock_dig_rms_dbfs_window_samples(
         self,
@@ -209,6 +213,16 @@ class TestEngine:
         dig_rms_dbfs_window_chunks: int,
         output: Output,
     ) -> None:
+        """Mock :meth:`.Pipeline._dig_rms_dbfs_window_samples`.
+
+        This overrides the calculation to use
+        :func:`dig_rms_dbfs_window_chunks`, and also populates
+        :meth:`dig_rms_dbfs_window_samples` with the computed value.
+
+        This is marked autouse to ensure it will be run before the
+        engine_server fixture.
+        """
+
         def _dig_rms_dbfs_window_samples(self: Pipeline) -> int:
             chunk_samples = self.spectra * self.output.spectra_samples
             window_samples = dig_rms_dbfs_window_chunks * chunk_samples
@@ -288,6 +302,7 @@ class TestEngine:
 
     @pytest.fixture
     def engine_arglist(self, wideband_args: str, narrowband_args: str, default_gain: np.float32) -> list[str]:
+        """Command-line arguments to pass to the engine."""
         return [
             "--katcp-host=127.0.0.1",
             "--katcp-port=0",

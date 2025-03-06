@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, 2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -34,7 +34,7 @@ ADC_SAMPLE_RATE = 1712e6
 
 
 @pytest.fixture
-def inproc_queues() -> Sequence[spead2.InprocQueue]:  # noqa: D401
+def inproc_queues() -> Sequence[spead2.InprocQueue]:
     """An in-process queue for data per multicast destination."""
     return [spead2.InprocQueue() for _ in range(N_ENDPOINTS_PER_POL * N_POLS)]
 
@@ -89,7 +89,7 @@ def timestamps() -> np.ndarray:
 
 
 @pytest.fixture
-def heap_sets(timestamps: np.ndarray) -> Sequence[send.HeapSet]:  # noqa: D401
+def heap_sets(timestamps: np.ndarray) -> Sequence[send.HeapSet]:
     """Two instances of :class:`~katgpucbf.dsim.send.HeapSet` with random payload bytes."""
     heap_sets = [
         send.HeapSet.create(
@@ -104,15 +104,13 @@ def heap_sets(timestamps: np.ndarray) -> Sequence[send.HeapSet]:  # noqa: D401
 
 
 @pytest.fixture
-def sender(
-    send_stream: "spead2.send.asyncio.AsyncStream", heap_sets: Sequence[send.HeapSet]
-) -> send.Sender:  # noqa: D401
+def sender(send_stream: "spead2.send.asyncio.AsyncStream", heap_sets: Sequence[send.HeapSet]) -> send.Sender:
     """A :class:`~katgpucbf.dsim.Sender` using the first of :func:`heaps_sets`."""
     return send.Sender(send_stream, heap_sets[0], DIG_HEAP_SAMPLES)
 
 
 @pytest.fixture
-def descriptor_inproc_queues() -> Sequence[spead2.InprocQueue]:  # noqa: D401
+def descriptor_inproc_queues() -> Sequence[spead2.InprocQueue]:
     """An in-process queue for descriptors. Only one queue needed."""
     return [spead2.InprocQueue()]
 
@@ -153,7 +151,7 @@ def descriptor_send_stream(
 
 
 @pytest.fixture
-def descriptor_heap() -> spead2.send.Heap:  # noqa: D401
+def descriptor_heap() -> spead2.send.Heap:
     """One instances of :class:`~katgpucbf.dsim.descriptors.spead2.send.Heap`."""
     return descriptors.create_descriptors_heap()
 
@@ -161,7 +159,7 @@ def descriptor_heap() -> spead2.send.Heap:  # noqa: D401
 @pytest.fixture
 def descriptor_sender(
     descriptor_send_stream: "spead2.send.asyncio.AsyncStream", descriptor_heap: spead2.send.Heap
-) -> DescriptorSender:  # noqa: D401
+) -> DescriptorSender:
     """A :class:`~katgpucbf.dsim.descriptors.DescriptorSender`."""
     return DescriptorSender(
         descriptor_send_stream,
