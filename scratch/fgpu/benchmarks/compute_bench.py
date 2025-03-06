@@ -158,7 +158,8 @@ def main():
         # Fill these with zeros just to ensure performance isn't affected
         # by stray NaNs and the like.
         for name in ["fine_delay", "phase", "saturated", "dig_total_power"]:
-            fn.buffer(name).zero(command_queue)
+            if name in fn.slots:  # dig_total_power doesn't exist in narrowband modes
+                fn.buffer(name).zero(command_queue)
 
         def run_ddc():
             fn.ddc()
