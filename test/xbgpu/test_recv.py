@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -192,7 +192,7 @@ class TestStream:
         if timestamps == "bad":
             bad_heaps = gen_heaps(layout, ~data, first_timestamp + 1234567)
             # Interleave the sequences
-            heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps))
+            heaps = itertools.chain.from_iterable(zip(heaps, bad_heaps, strict=True))
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             # Heap with no payload - representing any sort of metadata heap such as descriptors

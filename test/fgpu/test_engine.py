@@ -562,7 +562,7 @@ class TestEngine:
         # Based on katpoint.delay.DelayCorrection.corrections
         phase = -2.0 * np.pi * sky_centre_frequency * -delay_s
         phase_correction = -phase
-        coeffs = [f"{d},0.0:{p},0.0" for d, p in zip(delay_s, phase_correction)]
+        coeffs = [f"{d},0.0:{p},0.0" for d, p in zip(delay_s, phase_correction, strict=True)]
         await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
 
         # Use constant-magnitude gains to avoid throwing off the magnitudes
@@ -730,7 +730,7 @@ class TestEngine:
         # Should wrap multiple times over the test
         phase_rate_per_sample = np.array([30, 32.5]) / n_samples
         phase_rate = phase_rate_per_sample * ADC_SAMPLE_RATE
-        coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate)]
+        coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate, strict=True)]
         await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
 
         first_timestamp = roundup(100 * recv_layout.chunk_samples, output.spectra_samples * output.spectra_per_heap)
@@ -811,7 +811,7 @@ class TestEngine:
         # Load some delay models for the future (the last one beyond the end of the data)
         update_times = [0, 123456, 400000, 1234567, 1234567890]  # in samples
         update_phases = [1.0, 0.2, -0.2, -2.0, 0.0]
-        for time, phase in zip(update_times, update_phases):
+        for time, phase in zip(update_times, update_phases, strict=True):
             coeffs = f"0.0,0.0:{phase},0.0"
             await engine_client.request("delays", output.name, SYNC_TIME + time / ADC_SAMPLE_RATE, coeffs, coeffs)
 
@@ -832,8 +832,10 @@ class TestEngine:
             assert_angles_allclose(phases, update_phases[i], atol=0.02)
 
         for delay_sensor in delay_sensors:
+            # Index with [:-1] because the last update is beyond the end of
+            # the data and hence won't actually be observed.
             for expected_time, expected_phase, sensor_update in zip(
-                update_times, update_phases, sensor_updates_dict[delay_sensor.name]
+                update_times[:-1], update_phases[:-1], sensor_updates_dict[delay_sensor.name], strict=True
             ):
                 # (timestamp, delay, delay_rate, phase, phase_rate)
                 sensor_values = sensor_update.value[1:-1].split(",")
@@ -898,7 +900,7 @@ class TestEngine:
         tone_phases = rng.uniform(0, 2 * np.pi, size=n_tones)
         tones = [
             CW(frac_channel=frac_channel(output, channel), magnitude=tone_magnitude, phase=phase)
-            for channel, phase in zip(tone_channels, tone_phases)
+            for channel, phase in zip(tone_channels, tone_phases, strict=True)
         ]
         dig_data = np.sum([self._make_tone(tone_timestamps, tone, 0) for tone in tones], axis=0)
         dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
@@ -1119,7 +1121,7 @@ class TestEngine:
         ]
         assert sensor_update_dict[sensors[1].name] == [
             aiokatcp.Reading(t, aiokatcp.Sensor.Status.NOMINAL, v)
-            for t, v in zip(expected_timestamps, [0, 0] + [10000] * 7)
+            for t, v in zip(expected_timestamps, [0, 0] + [10000] * 7, strict=True)
         ]
 
     # It's easier to use a constant voltage. Also need to check the case were

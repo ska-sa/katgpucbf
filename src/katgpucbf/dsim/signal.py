@@ -309,19 +309,6 @@ class MultiCW(Signal):
     frequency_step: float
     _class_name: ClassVar[str] = "multicw"
 
-    @staticmethod
-    def _sample_chunk(
-        offset: np.ndarray, *, amplitudes: np.ndarray, chunk_size: int, frequencies: np.ndarray
-    ) -> np.ndarray:
-        # Do intermediate computations in double precision, to minimise error
-        # accumulation in the sum.
-        accum = np.zeros(chunk_size, np.float64)
-        for amplitude, frequency in zip(amplitudes, frequencies):
-            accum += _cw(
-                offset[0], amplitude=amplitude, frequency=frequency, n=chunk_size, dtype=np.dtype(np.complex128)
-            )
-        return accum.astype(np.float32)
-
     def sample(self, n: int, sample_rate: float) -> da.Array:  # noqa: D102
         # Build the frequency domain
         spectrum = np.zeros(n // 2 + 1, np.float32)

@@ -334,7 +334,7 @@ def verify_corrprod_data(
         Boolean array of shape (n_batches, n_ants) indicating which heaps were
         present.
     """
-    for corrprod_output, acc_index_list in zip(corrprod_outputs, acc_indices):
+    for corrprod_output, acc_index_list in zip(corrprod_outputs, acc_indices, strict=True):
         for j, acc_index in enumerate(acc_index_list):
             n_batches = corrprod_output.heap_accumulation_threshold
             batch_start_index = acc_index * n_batches
@@ -874,7 +874,7 @@ class TestEngine:
 
         acc_indices = [
             [acc_index for acc_index, count in counts.items() if count == corrprod_output.heap_accumulation_threshold]
-            for counts, corrprod_output in zip(acc_counts, corrprod_outputs)
+            for counts, corrprod_output in zip(acc_counts, corrprod_outputs, strict=True)
         ]
 
         for queue in mock_recv_streams:
@@ -891,7 +891,7 @@ class TestEngine:
                 ),
                 dtype=np.int32,
             )
-            for corrprod_output, acc_index_list in zip(corrprod_outputs, acc_indices)
+            for corrprod_output, acc_index_list in zip(corrprod_outputs, acc_indices, strict=True)
         }
 
         out_config = spead2.recv.StreamConfig(max_heaps=100)
@@ -939,7 +939,7 @@ class TestEngine:
         if beam_capture_stop_heap_indices is None:
             # Rather be explicit for each `beam_output` to simplify the logic below
             beam_capture_stop_heap_indices = [None] * len(beam_outputs)
-        for beam_output, capture_stop_heap_index in zip(beam_outputs, beam_capture_stop_heap_indices):
+        for beam_output, capture_stop_heap_index in zip(beam_outputs, beam_capture_stop_heap_indices, strict=True):
             # If necessary, adjust the corresponding beam stream to only receive
             # the required amount of data (up until the capture-stop point).
             n_batches = len(batch_indices) if capture_stop_heap_index is None else capture_stop_heap_index
@@ -962,7 +962,7 @@ class TestEngine:
             items = ig_recv.update(heap)
             assert len(items) == 0, "This heap contains item values not just the expected descriptors."
             n_batches_to_receive = beam_results[beam_output.name].shape[0]
-            for j, index in zip(range(n_batches_to_receive), batch_indices):
+            for j, index in zip(range(n_batches_to_receive), batch_indices, strict=False):
                 assert await self.get_data_heap(stream, ig_recv) == {"frequency", "timestamp", "beam_ants", "bf_raw"}
                 assert ig_recv["timestamp"].value == index * timestamp_step
                 assert ig_recv["frequency"].value == frequency

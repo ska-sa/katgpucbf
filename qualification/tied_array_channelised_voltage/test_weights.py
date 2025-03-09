@@ -63,7 +63,7 @@ async def test_weight_mapping(
 
     pdf_report.step("Set eq gains to select one channel per input.")
     async with asyncio.TaskGroup() as tg:
-        for input_label, channel in zip(receiver.input_labels, all_channels_under_test):
+        for input_label, channel in zip(receiver.input_labels, all_channels_under_test, strict=True):
             gains = [0.0] * receiver.n_chans
             gains[channel] = 1.0
             tg.create_task(pcc.request("gain", "antenna-channelised-voltage", input_label, *gains))

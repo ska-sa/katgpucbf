@@ -218,7 +218,8 @@ class TestKatcpRequests:
             sensor_values_str = sensor_reading[1:-1].split(",")[1:]  # Drop the timestamp
             sensor_values = (float(field.strip()) for field in sensor_values_str)
 
-            for actual_value, expected_value in zip(sensor_values, parse_delay_string(correct_delay_strings[pol])):
+            expected_values = parse_delay_string(correct_delay_strings[pol])
+            for actual_value, expected_value in zip(sensor_values, expected_values, strict=True):
                 assert actual_value == pytest.approx(expected=expected_value)
 
     @pytest.mark.parametrize(

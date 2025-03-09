@@ -108,7 +108,7 @@ async def control_acv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pd
     all_elapsed = []
     try:
         async for _ in periodically(rng, DELAY_INTERVAL):
-            coeff = [f"{d},{dr}:{p},{pr}" for d, dr, p, pr in zip(delay, delay_rate, phase, phase_rate)]
+            coeff = [f"{d},{dr}:{p},{pr}" for d, dr, p, pr in zip(delay, delay_rate, phase, phase_rate, strict=True)]
             elapsed = await measure(pcc.request("delays", name, target_time, *coeff))
             pdf_report.detail(f"Set delays for {name} in {elapsed:.3f} s.")
             with check:
@@ -147,7 +147,7 @@ async def control_tacv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, p
         async for _ in periodically(rng, BEAM_DELAY_INTERVAL):
             delay = rng.uniform(-BEAM_MAX_DELAY, BEAM_MAX_DELAY, n_inputs)
             phase = rng.uniform(-np.pi, np.pi, n_inputs)
-            coeff = [f"{d}:{p}" for d, p in zip(delay, phase)]
+            coeff = [f"{d}:{p}" for d, p in zip(delay, phase, strict=True)]
             elapsed = await measure(pcc.request("beam-delays", name, *coeff))
             pdf_report.detail(f"Set delays for {name} in {elapsed:.3f} s.")
             with check:
