@@ -635,7 +635,10 @@ async def test_group_delay(
         )
     else:
         # Pick channels to test, keeping some distance from the edges.
-        channel_step = 8  # Gap to minimise leakage between tones
+        # The channel step is set to keep a fixed number of channels
+        # between tones in the same dsim, because that determines the
+        # spectral leakage between tones.
+        channel_step = math.ceil(256 / n_dsims)
         channels_slice = slice(
             pass_channels.start + channel_step // 2,
             pass_channels.stop - channel_step // 2,
