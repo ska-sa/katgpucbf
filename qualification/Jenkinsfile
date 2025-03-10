@@ -33,6 +33,8 @@
  * - katsdpcontroller_image: image path for katsdpcontroller (for product controller)
  * - branch: branch of katgpucbf from which to obtain test code
  * - ini: relative path (from repo root) to pytest configuration file
+ * - extra_args: extra user-provided command-line arguments
+ * - environment: name for the test environment (for use in email notification)
  *
  * For more information on the qualification framework, see
  * katgpucbf/doc/qualification.rst
@@ -101,7 +103,8 @@ pipeline {
            --suppress-tests-failed-exit-code \
            --image-override katgpucbf:${katgpucbf_image} \
            --image-override katsdpcontroller:${katsdpcontroller_image} \
-           --junitxml=result.xml
+           --junitxml=result.xml \
+           ${extra_args}
          '''
        }
      }
@@ -171,7 +174,7 @@ pipeline {
         <br>
         <i>Note: This is an Automated email notification.</i>""",
         recipientProviders: [developers(), requestor()],
-        subject: 'Qualification Tests - katgpucbf - $BUILD_STATUS!',
+        subject: "${params.environment} Qualification Tests - katgpucbf - \$BUILD_STATUS!",
         to: '$DEFAULT_RECIPIENTS'
       )
       sh "qualification/cleanup.py -- ${ini}"
