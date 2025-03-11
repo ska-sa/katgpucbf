@@ -127,7 +127,7 @@ janus==2.0.0
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
-jinja2==3.1.5
+jinja2==3.1.6
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
