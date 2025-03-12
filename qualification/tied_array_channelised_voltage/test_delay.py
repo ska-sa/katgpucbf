@@ -247,7 +247,7 @@ async def test_delay_update_time(
     pdf_report.step("Measure delay setting time")
     start = time.monotonic()
     pdf_report.detail(f"Start time is {start:.6f}.")
-    for stream_name, stream_params in zip(receiver.stream_names, params):
+    for stream_name, stream_params in zip(receiver.stream_names, params, strict=True):
         await client.request("beam-delays", stream_name, *stream_params)
         pdf_report.detail(f"Set delays on {stream_name} to {stream_params}")
     stop = time.monotonic()

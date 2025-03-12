@@ -231,7 +231,7 @@ async def async_main(args) -> int:
                 "antenna": observers[f"{label[:-1]}_observer"],
                 "url": f"spead://{addr}",
             }
-            for label, addr in zip(input_labels, mcast_groups)
+            for label, addr in zip(input_labels, mcast_groups, strict=True)
         },
         "outputs": {
             "antenna-channelised-voltage": {

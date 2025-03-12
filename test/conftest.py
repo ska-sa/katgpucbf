@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -102,8 +102,8 @@ def pytest_generate_tests(metafunc) -> None:
         for indices in itertools.product(*(range(len(value_list)) for value_list in values)):
             candidate = _CombinationsCandidate(
                 indices=indices,
-                values=tuple(value_list[i] for value_list, i in zip(values, indices)),
-                by_name={name: value_list[i] for name, value_list, i in zip(names, values, indices)},
+                values=tuple(value_list[i] for value_list, i in zip(values, indices, strict=True)),
+                by_name={name: value_list[i] for name, value_list, i in zip(names, values, indices, strict=True)},
             )
             if filter(candidate.by_name):
                 candidates.append(candidate)
@@ -121,7 +121,7 @@ def pytest_generate_tests(metafunc) -> None:
                 best: _CombinationsCandidate | None = None
                 best_score = 0
                 for candidate in candidates:
-                    score = sum(c[idx] for c, idx in zip(cover, candidate.indices))
+                    score = sum(c[idx] for c, idx in zip(cover, candidate.indices, strict=True))
                     if best is None or score <= best_score:
                         best = candidate
                         best_score = score
@@ -129,7 +129,7 @@ def pytest_generate_tests(metafunc) -> None:
                     raise RuntimeError("Filter is too strict: not all values can be tested")
                 combos.append(best)
                 candidates.remove(best)
-                for c, idx in zip(cover, best.indices):
+                for c, idx in zip(cover, best.indices, strict=True):
                     c[idx] += 1
             # First combo will have last element of each list. Make that the
             # last test rather than the first.
@@ -165,7 +165,7 @@ def mock_send_stream(
         stream_queues = [spead2.InprocQueue() for _ in endpoints]
         queues.extend(
             queue
-            for queue, endpoint in zip(stream_queues, endpoints)
+            for queue, endpoint in zip(stream_queues, endpoints, strict=True)
             if IPv4Address(endpoint[0]) in mock_send_stream_network
         )
         return spead2.send.asyncio.InprocStream(thread_pool, stream_queues, config)

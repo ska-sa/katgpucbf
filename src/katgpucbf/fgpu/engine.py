@@ -83,7 +83,7 @@ def _sample_models(
     # Each element of parts is a tuple of results from one delay model
     parts = [model.range(start, stop, step) for model in delay_models]
     # Transpose so that each element of groups is one result from all delay models
-    return tuple(np.stack(group) for group in zip(*parts))  # type: ignore
+    return tuple(np.stack(group) for group in zip(*parts, strict=True))  # type: ignore
 
 
 def generate_pfb_weights(step: int, taps: int, w_cutoff: float, window_function: WindowFunction) -> np.ndarray:
@@ -1007,7 +1007,7 @@ class Pipeline:
             The current :class:`OutQueueItem`
         """
         all_present = np.all(out_item.present)
-        for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power)):
+        for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power, strict=True)):
             power: int | None = int(trg)
             if not all_present:
                 power = None
@@ -1754,7 +1754,7 @@ class Engine(aiokatcp.DeviceServer):
                 )
             )
 
-        for delay_model, new_linear_model in zip(pipeline.delay_models, new_linear_models):
+        for delay_model, new_linear_model in zip(pipeline.delay_models, new_linear_models, strict=True):
             delay_model.base.add(new_linear_model)
         self._update_steady_state_timestamp(pipeline.delay_update_timestamp())
 
