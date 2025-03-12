@@ -70,8 +70,8 @@ async def _test_linearity(
     assert scales[middle] == pytest.approx(1.0)
     powers = np.zeros_like(scales)
     for batch in batched(enumerate(scales), len(receiver.stream_names)):
-        # The last batch might be short (since the number of scales won't be
-        # multiple of the number of streams. When zipping with streams, we
+        # The last batch might be short (since the number of scales won't be a
+        # multiple of the number of streams). When zipping with streams, we
         # don't expect the iterables to be the same length, and some streams
         # will be unused.
         for (_, scale), beam_name in zip(batch, receiver.stream_names, strict=False):
