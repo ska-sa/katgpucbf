@@ -242,8 +242,12 @@ async def async_main(args) -> int:
             "src_streams": ["baseline-correlation-products"],
             "output_int_time": sensor_values[sdp_int_time_name],
             "excise": False,
-            "archive": False,  # This is just for testing, so do not archive
+            "archive": False,
             "continuum_factor": 1,
+        }
+        config["inputs"]["camdata"] = {
+            "type": "cam.http",
+            "url": args.portal,
         }
 
     katgpucbf.configure_tools.apply_arguments(config, args)
