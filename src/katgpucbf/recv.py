@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -22,7 +22,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Self, TypeAlias
+from typing import Any, Self
 
 import numba.core.ccallback
 import numpy as np
@@ -47,7 +47,7 @@ RECV_SENSOR_TIMEOUT_MIN = 1.0
 #: Eviction mode to use when some streams fall behind
 EVICTION_MODE = spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY
 
-AnyStream: TypeAlias = spead2.recv.ChunkRingStream | spead2.recv.ChunkStreamGroupMember
+type AnyStream = spead2.recv.ChunkRingStream | spead2.recv.ChunkStreamGroupMember
 
 
 class Chunk(spead2.recv.Chunk):
@@ -165,7 +165,7 @@ class StatsCollector(Collector):
             for stat_name, (name, description) in counter_map.items()
         }
         self._labelnames = tuple(labelnames)
-        self._label_sets: dict[tuple[str, ...], "StatsCollector._LabelSet"] = {}
+        self._label_sets: dict[tuple[str, ...], StatsCollector._LabelSet] = {}
         if registry:
             registry.register(self)
 

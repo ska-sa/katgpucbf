@@ -25,6 +25,7 @@ select = [
     "D",  # pydocstyle
     "N",  # pep8-naming
     "B",  # flake8-bugbear
+    "UP", # pyupgrade
     "RUF100",  # Unnecessary noqa directives
 ]
 extend-ignore = ["D105", "D107"]  # docstrings for magic methods

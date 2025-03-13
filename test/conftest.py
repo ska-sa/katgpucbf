@@ -81,7 +81,7 @@ def pytest_generate_tests(metafunc) -> None:
     """Apply "combinations" marker."""
     all_combinations = metafunc.config.option.all_combinations
     for marker in metafunc.definition.iter_markers("combinations"):
-        if isinstance(marker.args[0], (tuple, list)):
+        if isinstance(marker.args[0], tuple | list):
             names = list(marker.args[0])
         else:
             names = [name.strip() for name in marker.args[0].split(",") if name.strip()]

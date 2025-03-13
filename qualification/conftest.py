@@ -256,7 +256,7 @@ def pytest_runtest_setup(item) -> Generator[None, None, None]:
         raise AssertionError(f"Test {item.name} has no docstring")
     reqs: list[str] = []
     for marker in item.iter_markers("requirements"):
-        if isinstance(marker.args[0], (tuple, list)):
+        if isinstance(marker.args[0], tuple | list):
             reqs.extend(marker.args[0])
         else:
             reqs.extend(name.strip() for name in marker.args[0].split(",") if name.strip())
