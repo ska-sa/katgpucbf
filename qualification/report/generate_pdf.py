@@ -30,8 +30,8 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
-from typing import Literal, Union
+from datetime import UTC, date, datetime
+from typing import Literal
 from uuid import UUID
 
 import docutils.writers.latex2e
@@ -193,7 +193,7 @@ class Figure:
     type: str
 
 
-Item = Union[Detail, Failure, Figure, RawFigure]  # Any information provided inside a ``pdf_report.step``
+type Item = Detail | Failure | Figure | RawFigure  # Any information provided inside a ``pdf_report.step``
 
 
 @dataclass
@@ -987,7 +987,7 @@ def _doc_outcomes(section: Container, result_set: ResultSet) -> None:
         table.add_hline()
         for result in result_set.results:
             if result.start_time is not None:
-                start_time = datetime.fromtimestamp(float(result.start_time), timezone.utc).strftime("%T")
+                start_time = datetime.fromtimestamp(float(result.start_time), UTC).strftime("%T")
             else:
                 start_time = ""
             table.add_row(
@@ -1011,9 +1011,7 @@ def _doc_outcome(section: Container, result: Result) -> None:
         section.append(f"({result.xfail_reason})")
     section.append(Command("hspace", "1cm"))
     if result.start_time is not None:
-        section.append(
-            f"Test start time: {datetime.fromtimestamp(float(result.start_time), timezone.utc).strftime('%F %T')}"
-        )
+        section.append(f"Test start time: {datetime.fromtimestamp(float(result.start_time), UTC).strftime('%F %T')}")
         section.append(Command("hspace", "1cm"))
     section.append(f"Duration: {readable_duration(result.duration)}\n")
 

@@ -316,7 +316,7 @@ def make_streams(
         # Adding len(endpoints) to accommodate descriptors sent for each substream
         max_heaps=n_data_heaps + len(endpoints),
     )
-    streams: list["spead2.send.asyncio.AsyncStream"]
+    streams: list[spead2.send.asyncio.AsyncStream]
     if ibv:
         ibv_configs = [
             spead2.send.UdpIbvConfig(
