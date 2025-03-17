@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2024, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -94,3 +94,21 @@ def test_xfail(pdf_report: Reporter) -> None:
     pdf_report.detail("Check that 1 == 2")
     with check:
         assert 1 == 2
+
+
+def test_numpy_fail(pdf_report: Reporter) -> None:
+    """Test saving of numpy arrays on test failure."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that arrays are equal")
+    arr1 = np.array([1, 2, 3])
+    arr2 = np.array([4, 5, 6])
+    np.testing.assert_equal(arr1, arr2)
+
+
+def test_numpy_fail_approx(pdf_report: Reporter) -> None:
+    """Test saving of numpy arrays on test failure with pytest.approx."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that arrays are equal")
+    arr1 = np.array([1, 2, 3])
+    arr2 = np.array([4, 5, 6])
+    np.testing.assert_equal(arr1, pytest.approx(arr2))
