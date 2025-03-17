@@ -94,3 +94,21 @@ def test_xfail(pdf_report: Reporter) -> None:
     pdf_report.detail("Check that 1 == 2")
     with check:
         assert 1 == 2
+
+
+def test_numpy_fail(pdf_report: Reporter) -> None:
+    """Test saving of numpy arrays on test failure."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that arrays are equal")
+    arr1 = np.array([1, 2, 3])
+    arr2 = np.array([4, 5, 6])
+    np.testing.assert_equal(arr1, arr2)
+
+
+def test_numpy_fail_approx(pdf_report: Reporter) -> None:
+    """Test saving of numpy arrays on test failure with pytest.approx."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that arrays are equal")
+    arr1 = np.array([1, 2, 3])
+    arr2 = np.array([4, 5, 6])
+    np.testing.assert_equal(arr1, pytest.approx(arr2))

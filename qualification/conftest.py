@@ -20,16 +20,18 @@ import ast
 import asyncio
 import copy
 import inspect
+import itertools
 import logging
 import math
 import os
 import subprocess
 import time
 from collections import deque, namedtuple
-from collections.abc import AsyncGenerator, Generator, Iterable, Sequence
+from collections.abc import AsyncGenerator, Generator, Iterable, Iterator, Sequence
 from typing import Any
 
 import matplotlib.style
+import numpy as np
 import pytest
 import pytest_asyncio
 import pytest_check
@@ -96,6 +98,7 @@ ini_options = [
     IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
     IniOption(name="beams", help="Number of beams to produce", type="string", default="4"),
     IniOption(name="raw_data", help="Include raw data for figures", type="bool", default=False),
+    IniOption(name="array_dir", help="Directory in which to save failed array comparisons", type="paths", default=[]),
 ]
 
 
@@ -246,6 +249,56 @@ def pdf_report(request, monkeypatch) -> Reporter:
     # patch it under that name.
     monkeypatch.setattr(pytest_check.context_manager, "log_failure", log_failure)
     return reporter
+
+
+@pytest.fixture(scope="session")
+def _array_compare_counter() -> Iterator[int]:
+    """Counter used to give unique filenames to array dumps."""
+    return itertools.count(0)
+
+
+def _unwrap_pytest_approx(a: np.ndarray) -> np.ndarray:
+    """Unwrap an array that has possibly been wrapped in :func:`pytest.approx`."""
+    # pytest doesn't explicitly expose this class, so we have to infer it
+    approx_cls = type(pytest.approx(np.array([1])))
+    if a.shape == () and isinstance(a[()], approx_cls):
+        return a[()].expected
+    return a
+
+
+@pytest.fixture(autouse=True)
+def _array_compare(
+    monkeypatch: pytest.MonkeyPatch, pytestconfig: pytest.Config, _array_compare_counter: Iterator[int]
+) -> None:
+    """Patch numpy.testing to save failed array comparisons if enabled."""
+    paths = pytestconfig.getini("array_dir")
+    if not paths:
+        return  # Not enabled
+    path = paths[0]
+    path.mkdir(parents=True, exist_ok=True)
+    orig_build_err_msg = np.testing.build_err_msg
+
+    def build_err_msg(arrays, *args, **kwargs) -> str:
+        # Original only requires Iterable, but we need to iterate multiple
+        # times.
+        arrays = list(arrays)
+        msg = orig_build_err_msg(arrays, *args, **kwargs)
+
+        # If any of the arrays are wrapped in pytest.approx, strip that off
+        # to avoid pickling the arrays (which could cause issues when loading
+        # them later).
+        arrays = [_unwrap_pytest_approx(array) for array in arrays]
+        counter = next(_array_compare_counter)
+        filename = path / f"arrays-{counter:06}.npz"
+        # This is not perfect, because names can be passed positionally, but
+        # the various call sites in numpy don't seem to do that.
+        names = kwargs.get("names", ["ACTUAL", "DESIRED"])
+        named_arrays = dict(zip(names, arrays, strict=True))
+        np.savez(filename, **named_arrays)
+        return msg + f"\n\nArrays written to {filename}"
+
+    # We have to patch in the private module since that's where it gets called.
+    monkeypatch.setattr("numpy.testing._private.utils.build_err_msg", build_err_msg)
 
 
 @pytest.hookimpl(wrapper=True)
