@@ -114,9 +114,9 @@ async def test_delay_small(
         # Need more precision to avoid overflows when subtracting
         data = data.astype(np.int16)
         max_error = np.max(np.abs(data[delay_beam] - data[ref_beam]))
-        with check:
-            assert max_error <= 3
         pdf_report.detail(f"Maximum difference is {max_error} ULP")
+        with check:
+            np.testing.assert_allclose(data[delay_beam], data[ref_beam], rtol=0, atol=3)
 
 
 @pytest.mark.requirements("CBF-REQ-0220")
