@@ -135,8 +135,8 @@ pipeline {
           keepAll: true,
           reportName: 'Qualification Test Raw Failed Arrays',
           reportDir: '',
-          reportFiles: 'arrays.tar.xz',
-          includes: 'arrays.tar.xz'
+          reportFiles: 'arrays.tar.zstd',
+          includes: 'arrays.tar.zstd'
         ])
 
         script {
