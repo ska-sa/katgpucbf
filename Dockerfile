@@ -101,7 +101,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     texlive-base \
     texlive-latex-extra \
     texlive-latex-recommended \
-    texlive-science
+    texlive-science \
+    zstd
 
 # Install required packages for testing to be able to run
 COPY requirements-dev.txt .
