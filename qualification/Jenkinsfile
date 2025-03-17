@@ -127,8 +127,10 @@ pipeline {
           includes: 'report.json.xz'
         ])
 
-        // Save any numpy arrays recorded by failing tests.
-        sh 'tar -Jcf arrays.tar.xz -C qualification arrays/'
+        // Save any numpy arrays recorded by failing tests. We use zstd
+        // because --xz and --gzip can be extremely slow if there is a
+        // lot of data.
+        sh 'tar --zstd -cf arrays.tar.zstd -C qualification arrays/'
         publishHTML(target: [
           keepAll: true,
           reportName: 'Qualification Test Raw Failed Arrays',
