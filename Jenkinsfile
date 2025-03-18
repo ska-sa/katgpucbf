@@ -154,7 +154,7 @@ pipeline {
         stage('Publish test results') {
           steps {
             junit 'reports/result.xml'
-            cobertura coberturaReportFile: 'coverage.xml'
+            recordCoverage sourceCodeEncoding: 'UTF-8', tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']]
           }
         }
       }
