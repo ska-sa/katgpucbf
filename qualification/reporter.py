@@ -14,7 +14,13 @@
 # limitations under the License.
 ################################################################################
 
-"""Mechanism for logging Pytest's output to a PDF."""
+"""Mechanism for logging Pytest's output to a PDF.
+
+The immediate output is not actually a PDF. Instead, custom JSON-compatible
+data structures are stored in the log output. These are post-processed by
+:file:`report/generate_pdf.py` to produce a PDF.
+"""
+
 import base64
 import io
 import logging
