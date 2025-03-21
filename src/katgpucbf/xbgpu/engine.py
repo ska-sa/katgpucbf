@@ -956,20 +956,6 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                     item.timestamp - old_timestamp,
                     time_difference_between_heaps_s,
                 )
-
-                # NOTE: As the output packets are rate limited in
-                # such a way to match the dump rate, receiving data too quickly
-                # will result in data bottlenecking at the sender, the pipeline
-                # eventually stalling and the input buffer overflowing.
-                if time_difference_between_heaps_s * 1.05 < self.dump_interval_s:
-                    logger.warning(
-                        "Time between output heaps: %.2f which is less the expected %.2f. "
-                        "If this warning occurs too often, the pipeline will stall "
-                        "because the rate limited sender will not keep up with the input rate.",
-                        time_difference_between_heaps_s,
-                        self.dump_interval_s,
-                    )
-
                 old_time_s = new_time_s
                 old_timestamp = item.timestamp
 
