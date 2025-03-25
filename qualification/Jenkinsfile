@@ -80,8 +80,12 @@ pipeline {
   stages {
     stage('Install requirements to run qualification tests') {
       steps {
-         sh 'pip install -r qualification/requirements.txt'
-         sh 'pip install --no-deps ".[qualification]" && pip check'
+        // Workaround for https://github.com/JelteF/PyLaTeX/issues/391
+        // See NGC-1657
+        sh 'echo "setuptools<78" > constrain-setuptools.txt'
+        sh 'PIP_CONSTRAINT="constrain-setuptools.txt qualification/requirements.txt" pip install pylatex'
+        sh 'pip install -r qualification/requirements.txt'
+        sh 'pip install --no-deps ".[qualification]" && pip check'
       }
     }
 
