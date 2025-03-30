@@ -70,7 +70,7 @@ cloudpickle==3.1.1
     #   dask
 coverage==7.6.10
     # via pytest-cov
-dask==2024.12.1
+dask==2025.3.0
     # via
     #   -c requirements.txt
     #   katgpucbf (setup.cfg)

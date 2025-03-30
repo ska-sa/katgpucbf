@@ -34,7 +34,7 @@ click==8.1.8
     #   dask
 cloudpickle==3.1.1
     # via dask
-dask==2024.12.1
+dask==2025.3.0
     # via katgpucbf (setup.cfg)
 decorator==5.1.1
     # via

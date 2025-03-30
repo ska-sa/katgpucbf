@@ -45,7 +45,7 @@ repos:
             'aiokatcp==2.0.2',
             'aiomonitor==0.7.1',
             'asyncssh==2.19.0',
-            'dask==2024.12.1',
+            'dask==2025.3.0',
             'katsdpsigproc==1.8.1',
             'katsdptelstate==0.14',
             'matplotlib==3.10.0',
