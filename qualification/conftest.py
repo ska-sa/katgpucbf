@@ -396,8 +396,8 @@ async def _cbf_config_and_description(
     # shutdown_delay is set to zero to speed up the test. We don't care
     # that Prometheus might not get to scrape the final metric updates.
     config: dict = {
-        "version": "4.5",
-        "config": {"shutdown_delay": 0.0},
+        "version": "4.6",
+        "config": {"shutdown_delay": 0.0, "mirror_sensors": False},
         "inputs": {},
         "outputs": {},
     }
