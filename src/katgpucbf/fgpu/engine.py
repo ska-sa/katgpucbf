@@ -462,8 +462,8 @@ def format_complex(value: numbers.Complex) -> str:
     as a Python complex may not give exactly the same value.
     """
     # 17 digits of precision is what Python itself uses for repr(float): it
-    # has enough precision to ambiguously represent all IEEE double-precision
-    # values.
+    # has enough precision to unambiguously represent all IEEE
+    # double-precision values.
     return f"{value:.17g}"
 
 
