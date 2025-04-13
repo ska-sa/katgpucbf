@@ -395,9 +395,15 @@ async def _cbf_config_and_description(
 ) -> tuple[dict, dict]:
     # shutdown_delay is set to zero to speed up the test. We don't care
     # that Prometheus might not get to scrape the final metric updates.
+    # Using data_timeout ensures that any major issues with the network
+    # fail early rather than during a test.
     config: dict = {
         "version": "4.6",
-        "config": {"shutdown_delay": 0.0, "mirror_sensors": False},
+        "config": {
+            "shutdown_delay": 0.0,
+            "develop": {"data_timeout": 30.0},
+            "mirror_sensors": False,
+        },
         "inputs": {},
         "outputs": {},
     }
