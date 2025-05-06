@@ -95,6 +95,12 @@ ini_options = [
         type="args",
         default=["8"],
     ),
+    IniOption(
+        name="vlbi_decimation",
+        help="Space-separated list of VLBI narrowband decimation factors to test",
+        type="args",
+        default=["8"],
+    ),
     IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
     IniOption(name="beams", help="Number of beams to produce", type="string", default="4"),
     IniOption(name="raw_data", help="Include raw data for figures", type="bool", default=False),
@@ -161,13 +167,24 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("n_antennas", values)
     if "band" in metafunc.fixturenames:
         metafunc.parametrize("band", metafunc.config.getini("bands"))
-    if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
+    if (
+        "n_channels" in metafunc.fixturenames
+        or "narrowband_decimation" in metafunc.fixturenames
+        or "vlbi_decimation" in metafunc.fixturenames
+    ):
+        # NOTE: Each config tuple is in the format (n_channels, decimation, vlbi_mode).
+        # The VLBI mode configs are constructed separately as it does not use the same
+        # decimation factors as 'normal' narrowband.
         configs = [(int(n_channels), 1, False) for n_channels in metafunc.config.getini("wideband_channels")]
         configs.extend(
-            (int(n_channels), int(decimation), vlbi)
-            for decimation in metafunc.config.getini("narrowband_decimation")
+            (int(n_channels), int(nb_decimation), False)
+            for nb_decimation in metafunc.config.getini("narrowband_decimation")
             for n_channels in metafunc.config.getini("narrowband_channels")
-            for vlbi in [False, True]
+        )
+        configs.extend(
+            (int(n_channels), int(vlbi_decimation), True)
+            for vlbi_decimation in metafunc.config.getini("vlbi_decimation")
+            for n_channels in metafunc.config.getini("narrowband_channels")
         )
         if metafunc.definition.get_closest_marker("wideband_only"):
             configs = [config for config in configs if config[1] == 1]
