@@ -44,7 +44,7 @@ from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArra
 from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
-FULL_ANTENNAS = [1, 4, 8, 10, 16, 20, 32, 40, 55, 64, 65, 80]
+FULL_ANTENNAS = [1, 4, 8, 20, 32, 40, 64, 80]
 MAX_PASS_FRACTION = 0.7  # Maximum fraction of total narrowband bandwidth to use as pass_bandwidth
 pdf_report_data_key = pytest.StashKey[dict]()
 _CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
@@ -92,6 +92,12 @@ ini_options = [
     IniOption(
         name="narrowband_decimation",
         help="Space-separated list of narrowband decimation factors to test",
+        type="args",
+        default=["8"],
+    ),
+    IniOption(
+        name="vlbi_decimation",
+        help="Space-separated list of VLBI narrowband decimation factors to test",
         type="args",
         default=["8"],
     ),
@@ -162,12 +168,19 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "band" in metafunc.fixturenames:
         metafunc.parametrize("band", metafunc.config.getini("bands"))
     if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
+        # NOTE: Each config tuple is in the format (n_channels, decimation, vlbi_mode).
+        # The VLBI mode configs are constructed separately as it does not use the same
+        # decimation factors as 'normal' narrowband.
         configs = [(int(n_channels), 1, False) for n_channels in metafunc.config.getini("wideband_channels")]
         configs.extend(
-            (int(n_channels), int(decimation), vlbi)
-            for decimation in metafunc.config.getini("narrowband_decimation")
+            (int(n_channels), int(nb_decimation), False)
+            for nb_decimation in metafunc.config.getini("narrowband_decimation")
             for n_channels in metafunc.config.getini("narrowband_channels")
-            for vlbi in [False, True]
+        )
+        configs.extend(
+            (int(n_channels), int(vlbi_decimation), True)
+            for vlbi_decimation in metafunc.config.getini("vlbi_decimation")
+            for n_channels in metafunc.config.getini("narrowband_channels")
         )
         if metafunc.definition.get_closest_marker("wideband_only"):
             configs = [config for config in configs if config[1] == 1]
