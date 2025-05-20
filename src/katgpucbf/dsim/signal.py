@@ -802,18 +802,27 @@ def sample(
     in_arrays = []
     out_arrays = []
     for i, sig in enumerate(signals):
-        data = sig.sample(period, sample_rate)
-        if sig.terminal:
-            sig_dither = da.zeros(period, np.float32, chunks=CHUNK_SIZE)
+        # Special case: make "0" extra-fast to speed up qualification tests.
+        if type(sig) is Constant and sig.value == 0.0:
+            data = da.zeros(out.isel(pol=i).data.size, np.float32, chunks=CHUNK_SIZE * sample_bits // BYTE_BITS)
+            if out_saturated is not None:
+                saturated = da.zeros(
+                    out_saturated.isel(pol=i).data.size, np.uint64, chunks=max(1, CHUNK_SIZE // saturation_group)
+                )
         else:
-            sig_dither = dither.isel(pol=i).data
-        data = quantise(data, sample_bits, sig_dither)
-        data = da.roll(data, -timestamp)
-        if period < n:
-            data = da.tile(data, n // period)
-        if out_saturated is not None:
-            saturated = saturation_counts(data.reshape(-1, saturation_group), 2 ** (sample_bits - 1) - 1)
-        data = packbits(data, sample_bits)
+            # Common case
+            data = sig.sample(period, sample_rate)
+            if sig.terminal:
+                sig_dither = da.zeros(period, np.float32, chunks=CHUNK_SIZE)
+            else:
+                sig_dither = dither.isel(pol=i).data
+            data = quantise(data, sample_bits, sig_dither)
+            data = da.roll(data, -timestamp)
+            if period < n:
+                data = da.tile(data, n // period)
+            if out_saturated is not None:
+                saturated = saturation_counts(data.reshape(-1, saturation_group), 2 ** (sample_bits - 1) - 1)
+            data = packbits(data, sample_bits)
         in_arrays.append(data)
         out_arrays.append(out.isel(pol=i).data.ravel())
         if out_saturated is not None:

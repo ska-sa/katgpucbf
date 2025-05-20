@@ -389,6 +389,12 @@ class TestSample:
         """Dual-pol signals."""
         return signal.parse_signals("wgn(0.2, 1); wgn(0.5, 2);")
 
+    def test_zero(self, out: xr.DataArray) -> None:
+        """Test special case for zero signals."""
+        zeros = [Constant(0.0), Constant(1e-30)]  # Should have same output, but one is a special case
+        signal.sample(zeros, 0, None, 1.0, 10, out)
+        np.testing.assert_array_equal(out.isel(pol=0), out.isel(pol=1))
+
     def test_bad_period(self, signals: list[Signal], out: xr.DataArray) -> None:
         """Test that an error is raised if `period` does not divide into data size."""
         with pytest.raises(ValueError):
@@ -400,7 +406,7 @@ class TestSample:
         # Each heap should be identical
         for i in range(out.sizes["time"]):
             np.testing.assert_array_equal(out.isel(time=i), out.isel(time=0))
-        # Period shouldn't be shorter then requested
+        # Period shouldn't be shorter than requested
         assert not (out.isel(time=0, data=np.s_[:2560]) == out.isel(time=0, data=np.s_[2560:])).all()
 
     def test_period_none(self, signals: list[Signal], out: xr.DataArray) -> None:
