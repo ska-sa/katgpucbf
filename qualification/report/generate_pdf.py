@@ -372,6 +372,7 @@ class Result:
     failure_messages: list[str] = field(default_factory=list)
     start_time: float | None = None
     duration: float = 0.0
+    overhead: float = 0.0
     config: dict = field(default_factory=dict)
     cbf: CBFConfiguration | None = None
 
@@ -410,6 +411,7 @@ class ResultSet:
         self.text_name = results[0].text_name
         self.blurb = results[0].blurb
         self.duration = 0.0
+        self.overhead = 0.0
         self.outcome_counts = {"passed": 0, "failed": 0, "skipped": 0, "xfail": 0}
         self.requirements: list[str] = []
         self.group = self.results[0].group
@@ -418,6 +420,7 @@ class ResultSet:
             self.text_name = self._merge(self.text_name, result.text_name, "text names")
             self.blurb = self._merge(self.blurb, result.blurb, "blurbs")
             self.duration += result.duration
+            self.overhead += result.overhead
             self.outcome_counts[result.outcome] += 1
             for requirement in result.requirements:
                 if requirement not in self.requirements:
@@ -651,8 +654,10 @@ def parse(input_data: list[dict]) -> tuple[TestConfiguration, list[Result]]:
             if report.outcome == "skipped" and getattr(report, "wasxfail", None) is not None:
                 result.outcome = "xfail"
                 result.xfail_reason = report.wasxfail
-        # The test duration will be the sum of setup, call and teardown.
-        result.duration += report.duration
+        if report.when == "call":
+            result.duration += report.duration
+        else:
+            result.overhead += report.duration
         if report.longrepr is not None:
             # Strip out ANSI color escape sequences
             failure_message = re.sub("\x1b\\[.*?m", "", report.longreprtext)
@@ -931,8 +936,9 @@ def _doc_test_configuration(doc: Document, test_configuration: TestConfiguration
 def _doc_result_summary(section: Container, result_sets: Sequence[ResultSet]) -> None:
     for key, group in itertools.groupby(result_sets, lambda result_set: result_set.group):
         with section.create(Subsection(GROUP_NAMES.get(key, key))) as group_section:
-            with group_section.create(LongTable(r"|l|r|c|c|c|")) as summary_table:
+            with group_section.create(LongTable(r"|l|r|r|c|c|c|")) as summary_table:
                 total_duration: float = 0.0
+                total_overhead: float = 0.0
                 passed = 0
                 failed = 0
                 skipped = 0
@@ -942,6 +948,7 @@ def _doc_result_summary(section: Container, result_sets: Sequence[ResultSet]) ->
                     [
                         bold("Test"),
                         bold("Duration"),
+                        bold("Overhead"),
                         bold("Passed"),
                         bold("Failed"),
                         bold("Skipped"),
@@ -956,6 +963,7 @@ def _doc_result_summary(section: Container, result_sets: Sequence[ResultSet]) ->
                         [
                             Hyperref(Marker(result_set.base_nodeid, prefix="subsec"), result_set.text_name),
                             readable_duration(result_set.duration),
+                            readable_duration(result_set.overhead),
                             str(set_passed) if set_passed else "",
                             TextColor("red", str(set_failed)) if set_failed else "",
                             str(set_skipped) if set_skipped else "",
@@ -963,12 +971,22 @@ def _doc_result_summary(section: Container, result_sets: Sequence[ResultSet]) ->
                     )
                     summary_table.add_hline()
                     total_duration += result_set.duration
+                    total_overhead += result_set.overhead
                     passed += set_passed
                     failed += set_failed
                     skipped += set_skipped
                     total += len(result_set.results)
-            group_section.append(f"{total} tests run, with {passed} passing, {failed} failing and {skipped} skipped.\n")
-            section.append(f"Total test duration: {readable_duration(total_duration)}")
+                summary_table.add_row(
+                    [
+                        bold("Total"),
+                        bold(readable_duration(total_duration)),
+                        bold(readable_duration(total_overhead)),
+                        bold(passed),
+                        bold(failed),
+                        bold(skipped),
+                    ]
+                )
+                summary_table.add_hline()
 
 
 def _doc_requirements(section: Container, requirements: Sequence[str]) -> None:
@@ -981,9 +999,9 @@ def _doc_requirements(section: Container, requirements: Sequence[str]) -> None:
 
 
 def _doc_outcomes(section: Container, result_set: ResultSet) -> None:
-    with section.create(LongTable("|r|r|l|l|")) as table:
+    with section.create(LongTable("|r|r|r|l|l|")) as table:
         table.add_hline()
-        table.add_row([bold("Start time"), bold("Duration"), bold("Configuration"), bold("Outcome")])
+        table.add_row([bold("Start time"), bold("Duration"), bold("Overhead"), bold("Configuration"), bold("Outcome")])
         table.add_hline()
         for result in result_set.results:
             if result.start_time is not None:
@@ -994,12 +1012,21 @@ def _doc_outcomes(section: Container, result_set: ResultSet) -> None:
                 [
                     start_time,
                     readable_duration(result.duration),
+                    readable_duration(result.overhead),
                     result.link,
                     TextColor(outcome_color(result.outcome), result.outcome.upper()),
                 ]
             )
             table.add_hline()
-        table.add_row([bold("Total"), bold(readable_duration(result_set.duration)), "", ""])
+        table.add_row(
+            [
+                bold("Total"),
+                bold(readable_duration(result_set.duration)),
+                bold(readable_duration(result_set.overhead)),
+                "",
+                "",
+            ]
+        )
         table.add_hline()
 
 
@@ -1009,11 +1036,13 @@ def _doc_outcome(section: Container, result: Result) -> None:
     if result.xfail_reason:
         section.append(NoEscape(r"\ "))
         section.append(f"({result.xfail_reason})")
-    section.append(Command("hspace", "1cm"))
+    section.append(Command("hspace", "0.5cm"))
     if result.start_time is not None:
-        section.append(f"Test start time: {datetime.fromtimestamp(float(result.start_time), UTC).strftime('%F %T')}")
-        section.append(Command("hspace", "1cm"))
-    section.append(f"Duration: {readable_duration(result.duration)}\n")
+        section.append(f"Start time: {datetime.fromtimestamp(float(result.start_time), UTC).strftime('%F %T')}")
+        section.append(Command("hspace", "0.5cm"))
+    section.append(
+        f"Duration: {readable_duration(result.duration)} " f"(+{readable_duration(result.overhead)} overhead)\n"
+    )
 
     with section.create(LongTable(r"|l|p{0.4\linewidth}|")) as config_table:
         config_table.add_hline()
