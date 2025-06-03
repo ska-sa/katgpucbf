@@ -93,7 +93,7 @@ gives a brief explanation of the arguments required. Below is an example of a
 full command to run a 4k, 4-antenna, L-band correlator::
 
     scratch/sim_correlator.py -a 4 -c 4096 -i 0.5 --band l \
-        --name my_test_correlator lab5.sdp.kat.ac.za
+        --name my_test_correlator lab-mc.sdp.kat.ac.za
 
 The execution of this command contacts the master controller to request a new
 correlator product to be configured. The master controller figures out how many
