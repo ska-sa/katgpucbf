@@ -243,7 +243,6 @@ class Compute(accel.OperationSequence):
             "phase": ["postproc:phase"],
             "gains": ["postproc:gains"],
         }
-
         aliases = {}
         if template.ddc is None:
             compounds["in"] = ["pfb_fir:in"]
