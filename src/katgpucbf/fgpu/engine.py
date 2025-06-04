@@ -578,7 +578,9 @@ class Pipeline:
         # Pre-allocate the memory for some buffers that we know we won't be
         # explicitly binding.
         if "fft_work" in self._compute.slots:
-            # See :class:`.Compute` for more information
+            # NOTE: If the implementation does not need any device memory
+            # for scratch space, this slot will not exist. See
+            # :class:`~katsdpsigproc.fft.Fft` for more information.
             self._compute.ensure_bound("fft_work")
         if narrowband_config:
             self._compute.ensure_bound("subsampled")

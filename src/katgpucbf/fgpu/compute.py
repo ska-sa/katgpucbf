@@ -234,6 +234,7 @@ class Compute(accel.OperationSequence):
         operations.append(("postproc", self.postproc))
 
         compounds = {
+            "fft_work": ["fft:work_area"],
             "fft_out": ["fft:dest", "postproc:in"],
             "weights": ["pfb_fir:weights"],
             "out": ["postproc:out"],
@@ -242,11 +243,6 @@ class Compute(accel.OperationSequence):
             "phase": ["postproc:phase"],
             "gains": ["postproc:gains"],
         }
-        # NOTE: As of CUDA 12.9, the required workspace for cuFFT is now
-        # zero for most small FFT work sizes that can be factored into
-        # small prime numbers. See :class:`~katsdpsigproc.fft.Fft`.
-        if "work_area" in self.fft.slots:
-            compounds["fft_work"] = ["fft:work_area"]
 
         aliases = {}
         if template.ddc is None:
