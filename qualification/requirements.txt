@@ -142,7 +142,7 @@ katsdpservices==1.4
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (setup.cfg)
-katsdpsigproc==1.8.1
+katsdpsigproc==1.9.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt

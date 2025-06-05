@@ -58,7 +58,7 @@ katcp-codec==0.1.0
     # via aiokatcp
 katsdpservices==1.4
     # via katgpucbf (setup.cfg)
-katsdpsigproc==1.8.1
+katsdpsigproc==1.9.0
     # via katgpucbf (setup.cfg)
 katsdptelstate==0.14
     # via katgpucbf (setup.cfg)

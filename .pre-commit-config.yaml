@@ -46,7 +46,7 @@ repos:
             'aiomonitor==0.7.1',
             'asyncssh==2.19.0',
             'dask==2025.3.0',
-            'katsdpsigproc==1.8.1',
+            'katsdpsigproc==1.9.0',
             'katsdptelstate==0.14',
             'matplotlib==3.10.0',
             'numpy==2.0.2',
