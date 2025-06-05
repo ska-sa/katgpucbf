@@ -130,7 +130,7 @@ def main() -> None:
     parser.add_argument(
         "--mc-address",
         type=endpoint_parser(5001),
-        default="lab5.sdp.kat.ac.za:5001",  # Naturally this applies only to our lab...
+        default="lab-mc.sdp.kat.ac.za:5001",  # Naturally this applies only to our lab...
         metavar="HOST:PORT",
         help="Master controller to query for details about the product. [%(default)s]",
     )
