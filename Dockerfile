@@ -31,6 +31,9 @@ FROM nvidia/cuda:12.9.0-base-ubuntu24.04 AS base
 # as well as libcufft, needed for fgpu.
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 
+# Work around intermittent problems with HTTP access to Ubuntu archive
+RUN sed -i 's!http://!https://!' /etc/apt/sources.list.d/ubuntu.sources
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cuda-nvcc-12-9 \
     cuda-profiler-api-12-9 \

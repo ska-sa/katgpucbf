@@ -262,7 +262,7 @@ pybtex==0.24.0
     #   sphinxcontrib-bibtex
 pybtex-docutils==1.0.3
     # via sphinxcontrib-bibtex
-pycuda==2024.1.2
+pycuda==2025.1.1
     # via
     #   -c requirements.txt
     #   katsdpsigproc
