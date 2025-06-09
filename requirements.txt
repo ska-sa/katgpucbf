@@ -126,7 +126,7 @@ psutil==6.1.1
     # via -r requirements.in
 pycparser==2.22
     # via cffi
-pycuda==2024.1.2
+pycuda==2025.1.1
     # via katsdpsigproc
 pygelf==0.4.2
     # via katsdpservices
