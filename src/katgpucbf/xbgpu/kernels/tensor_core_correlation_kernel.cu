@@ -37,7 +37,7 @@
  *
  * SARAO's modification is licenced as follows:
  *******************************************************************************
- * Copyright (c) 2020-2022, 2024, National Research Foundation (SARAO)
+ * Copyright (c) 2020-2022, 2024-2025, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -74,7 +74,7 @@ extern "C++" {
 #error this architecture has no suitable tensor cores
 #endif
 
-#if __CUDA_ARCH__ != 700 && __CUDA_ARCH__ != 720 && __CUDA_ARCH__ != 750 && __CUDA_ARCH__ != 800 && __CUDA_ARCH__ != 860 && __CUDA_ARCH__ != 870 && __CUDA_ARCH__ != 890 && __CUDA_ARCH__ != 900
+#if __CUDA_ARCH__ != 700 && __CUDA_ARCH__ != 720 && __CUDA_ARCH__ != 750 && __CUDA_ARCH__ != 800 && __CUDA_ARCH__ != 860 && __CUDA_ARCH__ != 870 && __CUDA_ARCH__ != 890 && __CUDA_ARCH__ != 900 && __CUDA_ARCH__ != 1200
 #define PORTABLE // unknown architecture -> write visibilities in portable way (via shared memory)
 #endif
 
@@ -380,7 +380,7 @@ template <bool add>__device__ inline void storeVisibilities(Visibilities visibil
   unsigned recvX    = firstReceiverX + NR_RECEIVERS_PER_TCM_X * x + ((threadIdx.x >> 2) & 2);
   unsigned polY     = threadIdx.x & 1;
   unsigned polX     = (threadIdx.x >> 1) & 1;
-#elif (__CUDA_ARCH__ == 720 && NR_BITS == 8) || __CUDA_ARCH__ == 750 || __CUDA_ARCH__ == 800 || __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890 || __CUDA_ARCH__ == 900
+#elif (__CUDA_ARCH__ == 720 && NR_BITS == 8) || __CUDA_ARCH__ == 750 || __CUDA_ARCH__ == 800 || __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890 || __CUDA_ARCH__ == 900 || __CUDA_ARCH__ == 1200
   unsigned recvY    = firstReceiverY + NR_RECEIVERS_PER_TCM_Y * y + ((threadIdx.x >> 3) & 3);
   unsigned recvX    = firstReceiverX + NR_RECEIVERS_PER_TCM_X * x + ((threadIdx.x >> 1) & 1);
   unsigned polY     = (threadIdx.x >> 2) & 1;
@@ -394,7 +394,7 @@ template <bool add>__device__ inline void storeVisibilities(Visibilities visibil
   storeVisibility<add>(visibilities, channel, baseline, recvY, recvX, 0, 1, polY, polX, skipCheckY, skipCheckX, sum.x[4], sum.x[5]);
   storeVisibility<add>(visibilities, channel, baseline, recvY, recvX, 1, 0, polY, polX, skipCheckY, skipCheckX, sum.x[2], sum.x[3]);
   storeVisibility<add>(visibilities, channel, baseline, recvY, recvX, 1, 1, polY, polX, skipCheckY, skipCheckX, sum.x[6], sum.x[7]);
-#elif (__CUDA_ARCH__ == 720 && NR_BITS == 8) || __CUDA_ARCH__ == 750 || __CUDA_ARCH__ == 800 || __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890 || __CUDA_ARCH__ == 900
+#elif (__CUDA_ARCH__ == 720 && NR_BITS == 8) || __CUDA_ARCH__ == 750 || __CUDA_ARCH__ == 800 || __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890 || __CUDA_ARCH__ == 900 || __CUDA_ARCH__ == 1200
   storeVisibility<add>(visibilities, channel, baseline, recvY, recvX, 0, 0, polY, polX, skipCheckY, skipCheckX, sum.x[0], sum.x[1]);
 #if NR_BITS == 8 || NR_BITS == 16
   storeVisibility<add>(visibilities, channel, baseline, recvY, recvX, 0, 2, polY, polX, skipCheckY, skipCheckX, sum.x[4], sum.x[5]);
