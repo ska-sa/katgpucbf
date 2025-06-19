@@ -415,6 +415,20 @@ async def search(args: argparse.Namespace) -> tuple[float, float]:
         return rates[result.low], rates[result.high]
 
 
+async def oneshot(args: argparse.Namespace):
+    """Measure at a single rate."""
+
+    adc_sample_rate = args.oneshot
+    while True:
+        result = await trial(adc_sample_rate, args)
+        if not result.good() and result.missing_heaps == 0:
+            if args.verbose >= VERBOSE_RESULTS:
+                print(f"{result.message()}, re-running", file=sys.stderr)
+        else:
+            print(result.message())
+            break
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")
@@ -476,8 +490,11 @@ async def main():
     parser.add_argument(
         "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
     )
+    parser.add_argument("--oneshot", type=float, help="Run one test at the given sampling rate")
     parser.add_argument("extra", nargs="*", help="Remaining arguments are passed to fgpu")
     args = parser.parse_args()
+    if args.calibrate and args.oneshot is not None:
+        parser.error("Cannot specify both --calibrate and --oneshot")
 
     servers = servers_from_toml(args.servers)
     args.dsim_server = servers[args.dsim_server]
@@ -485,6 +502,8 @@ async def main():
 
     if args.calibrate:
         await calibrate(args)
+    elif args.oneshot is not None:
+        await oneshot(args)
     else:
         low, high = await search(args)
         print(f"\n{low / 1e6} MHz - {high / 1e6} MHz")
