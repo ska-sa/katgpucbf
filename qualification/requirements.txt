@@ -327,7 +327,7 @@ redis==5.2.1
     #   katsdptelstate
 regex==2024.11.6
     # via dateparser
-requests==2.32.3
+requests==2.32.4
     # via
     #   -c qualification/../requirements-dev.txt
     #   httmock

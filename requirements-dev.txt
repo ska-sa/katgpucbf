@@ -322,7 +322,7 @@ redis==5.2.1
     # via
     #   -c requirements.txt
     #   katsdptelstate
-requests==2.32.3
+requests==2.32.4
     # via sphinx
 scipy==1.15.1
     # via
