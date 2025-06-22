@@ -13,7 +13,7 @@ line-length = 120
 [tool.isort]
 profile = "black"
 line_length = 120
-known_local_folder = ["noisy_search", "remote", "sighandler"]
+known_local_folder = ["benchmark_tools", "noisy_search", "remote", "sighandler"]
 
 [tool.ruff]
 line-length = 120
