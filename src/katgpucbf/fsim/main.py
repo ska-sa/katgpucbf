@@ -211,7 +211,7 @@ def make_stream(args: argparse.Namespace, idx: int, data: np.ndarray) -> "spead2
     # Data rate for the entire array, excluding packet overhead
     full_rate = args.adc_sample_rate * N_POLS * DTYPE.itemsize * args.array_size
     rate = full_rate * args.channels_per_substream / args.channels * overhead
-    print(f"Rate for {args.dest[idx]}: {rate * 8e-9:.3f} Gbps")
+    print(f"Rate for {args.dest[idx]}: {rate * 8e-9:.3f} Gbps", flush=True)
     config = spead2.send.StreamConfig(
         max_packet_size=args.send_packet_payload + PREAMBLE_SIZE,
         rate=rate,
