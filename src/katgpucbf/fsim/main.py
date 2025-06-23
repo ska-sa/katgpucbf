@@ -68,6 +68,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
     )
+    parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
     parser.add_argument(
         "--array-size", type=int, default=80, help="Number of antennas in the simulated array [%(default)s]"
@@ -321,7 +322,10 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
 
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
-    sync_time = time.time()
+    if args.sync_time is not None:
+        sync_time = args.sync_time
+    else:
+        sync_time = time.time()
     async with asyncio.TaskGroup() as sender_tg:
         for sender in senders:
             sender_tg.create_task(sender.run(sync_time, args.run_once))
