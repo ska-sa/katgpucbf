@@ -113,7 +113,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "dest",
         type=endpoint_list_parser(spead.DEFAULT_PORT),
         metavar="X.X.X.X[+N]:PORT",
-        help="Destination addresses (one per polarisation)",
+        help="Destination addresses (one per xb-engine)",
     )
     args = parser.parse_args(arglist)
 
@@ -210,7 +210,8 @@ def make_stream(args: argparse.Namespace, idx: int, data: np.ndarray) -> "spead2
     """
     overhead = 1 + PREAMBLE_SIZE / args.send_packet_payload
     # Data rate for the entire array, excluding packet overhead
-    full_rate = args.adc_sample_rate * N_POLS * DTYPE.itemsize * args.array_size
+    bandwidth = args.adc_sample_rate * args.channels / args.samples_between_spectra
+    full_rate = bandwidth * N_POLS * COMPLEX * DTYPE.itemsize * args.array_size
     rate = full_rate * args.channels_per_substream / args.channels * overhead
     print(f"Rate for {args.dest[idx]}: {rate * 8e-9:.3f} Gbps", flush=True)
     config = spead2.send.StreamConfig(

@@ -40,6 +40,16 @@ COMPLEX = 2
 KATCP_PORT_BASE = 7340
 
 
+class StreamInfo:
+    """Parameters describing the stream."""
+
+    def __init__(self, args: argparse.Namespace, adc_sample_rate: float) -> None:
+        self.channels_per_substream = args.channels // args.substreams
+        self.bandwidth = adc_sample_rate / 2 / args.narrowband_decimation
+        self.samples_between_spectra = 2 * args.channels * args.narrowband_decimation
+        self.spectra_per_heap = args.jones_per_batch // args.channels
+
+
 def fsim_factory(
     server: Server,
     server_info: ServerInfo,
@@ -47,6 +57,7 @@ def fsim_factory(
     index: int,
     *,
     adc_sample_rate: float,
+    sync_time: int,
     args: argparse.Namespace,
 ) -> str:
     """Generate command to run fsim."""
@@ -54,9 +65,9 @@ def fsim_factory(
     step = ncpus // args.n
     my_cpus = server_info.cpus[index * step : (index + 1) * step]
     interface = server.interfaces[index % len(server.interfaces)]
-    channels_per_substream = args.channels // args.substreams
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fsim-{index}"
+    info = StreamInfo(args, adc_sample_rate)
     command = (
         "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
         f"--name={name} --cap-add=SYS_NICE --net=host "
@@ -65,13 +76,15 @@ def fsim_factory(
         f"schedrr taskset -c {my_cpus[1]} fsim "
         "--ibv "
         f"--interface={interface} "
+        f"--sync-time={sync_time} "
         f"--affinity={my_cpus[0]} "
         f"--main-affinity={my_cpus[1]} "
         f"--prometheus-port={prometheus_port} "
         f"--adc-sample-rate={adc_sample_rate} "
         f"--array-size={args.array_size} "
         f"--channels={args.channels} "
-        f"--channels-per-substream={channels_per_substream} "
+        f"--channels-per-substream={info.channels_per_substream} "
+        f"--samples-between-spectra={info.samples_between_spectra} "
         f"--jones-per-batch={args.jones_per_batch} "
         f"239.102.199.{index}:7148 "
     )
