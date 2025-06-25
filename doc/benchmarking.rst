@@ -5,9 +5,9 @@ particular, with data transmitted over UDP) is difficult because there is no
 flow control, and the achievable rate can only be observed indirectly by
 running the system at a particular rate and checking whether it keeps up. We
 wish to know the largest rate at which we keep up most of the time; we'll call
-this the "critical" rate. The :file:`scratch/benchmarks` directory contains a
-script to help estimate the critical rate for fgpu (xbgpu support may be added
-later).
+this the "critical" rate. The :file:`scratch/benchmarks` directory contains
+scripts to help estimate the critical rate for fgpu and xbgpu (although xbgpu
+is only partially supported).
 
 To run it, you'll need
 
@@ -33,8 +33,10 @@ them. You do not need to have katgpucbf installed.
 
 On the client machine, you will need to create a TOML_ file describing the
 servers you want to use. Each table in the TOML file describes one server. You
-can give them any names you like, but by default the script will use the
-servers called ``dsim`` and ``fgpu``. A typical file looks like this:
+can give them any names you like, but by default the fgpu benchmark script
+will use the servers called ``dsim`` and ``fgpu``, and the xbgpu benchmark
+script will use the servers called ``fsim`` and ``xbgpu``.
+A typical file looks like this:
 
 .. code-block:: toml
 
@@ -58,14 +60,15 @@ directory, although the :option:`--servers` command-line option can override
 this.
 
 With all the requirements in place, change to the :file:`scratch/benchmarks`
-directory and run :program:`./benchmark_fgpu.py`. There are some options you
+directory and run :program:`./benchmark_fgpu.py` or
+:program:`./benchmark_xbgpu.py`. There are some options you
 may need:
 
 .. option:: -n <N>
 
    Set the number of engines to run simultaneously. The benchmark has been
-   developed for values 1 and 4, and may need further tuning to effectively
-   test other values.
+   developed for values 1, 2 and 4, and may need further tuning to
+   effectively test other values.
 
 .. option:: --image <image>
 
@@ -77,6 +80,12 @@ may need:
    Lower and upper bounds on the ADC sample rate. The critical rate will be
    searched between these two bounds. The benchmark will error out if the
    lower bound fails or the upper bound passes.
+
+.. option:: --oneshot <rate>
+
+   This is an alternative to specifying lower and upper bounds. In this mode,
+   the test will be run only once and report whether the given rate passed or
+   failed.
 
 .. option:: --interval <rate>
 
@@ -107,12 +116,15 @@ may need:
 
    Server description TOML file.
 
-.. option:: --dsim-server <name>, --fgpu-server <name>
+.. option:: --dsim-server <name>, --fsim-server <name>, --fgpu-server <name>, --xbgpu-server <name>
 
    Override the server names to find in the servers file.
 
 This is not a complete list of options; run the command with :option:`!--help`
 to see others.
+
+Note that at the time of writing, :program:`benchmark_xbgpu.py` only works in
+:option:`--oneshot` mode as it has not yet been calibrated for searches.
 
 Multicast groups
 ----------------
@@ -140,10 +152,10 @@ the largest expected decrease in the entropy of the distribution.
 Determining the success model is non-trivial and an incorrect model could lead
 to inaccurate answers (as a simple example, a model that considers trials to
 be perfect would reduce to classical binary search, which as already discussed
-is problematic). The benchmark script also supports a "calibration" mode, in
-which every candidate rate is tested a large number of times and the fraction
-of successes is printed. This does not automatically feed this information
-back into the (hard-coded) model.
+is problematic). The fgpu benchmark script also supports a "calibration" mode,
+in which every candidate rate is tested a large number of times and the
+fraction of successes is printed. This does not automatically feed this
+information back into the (hard-coded) model.
 
 .. option:: --calibrate
 
@@ -163,6 +175,6 @@ subdirectory, and new additions should go here too. After adding or updating
 one of these files, run :program:`./fit.py` and pass it the filename. It will
 print out the coefficients for a fitted logistic regression model. The key
 information is the ``np.log(rate)`` term, which can then be stored in the
-``slope`` variable in :file:`benchmark.py`. You can also pass
+``slope`` variable in :file:`benchmark_fgpu.py`. You can also pass
 :option:`!--plot` to :program:`./fit.py` to get a plot of the calibration
 results versus the fitted model (requires matplotlib).
