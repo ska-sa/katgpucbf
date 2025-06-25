@@ -160,9 +160,9 @@ def fgpu_factory(
         f"--wideband={wideband_arg} "
         f"239.102.{index}.64+15:7148 "
     )
-    if args.narrowband:
+    for i in range(args.narrowband):
         narrowband_kwargs = {
-            "name": "narrowband",
+            "name": f"narrowband{i}",
             "channels": args.narrowband_channels,
             "decimation": args.narrowband_decimation,
             "centre_frequency": adc_sample_rate / 4,
@@ -216,7 +216,13 @@ class FgpuBenchmark(Benchmark):
             args=self.args,
         )
         return await run_tasks(
-            self.generator_server, n, factory, self.args.image, port_base=KATCP_PORT_BASE, verbose=self.args.verbose
+            self.generator_server,
+            n,
+            factory,
+            self.args.image,
+            port_base=KATCP_PORT_BASE,
+            verbose=self.args.verbose,
+            timeout=self.args.init_time,
         )
 
     async def run_consumers(
@@ -242,6 +248,7 @@ class FgpuBenchmark(Benchmark):
             self.args.image,
             port_base=KATCP_PORT_BASE,
             verbose=self.args.verbose,
+            timeout=self.args.init_time,
         )
 
 
@@ -278,7 +285,9 @@ async def main():
         metavar="BITS",
         help="Number of bits per digitised sample",
     )
-    parser.add_argument("--narrowband", action="store_true", help="Enable a narrowband output [no]")
+    # For backwards compatibility, specifying --narrowband (without an argument) is
+    # equivalent to specifying --narrowband=1.
+    parser.add_argument("--narrowband", type=int, default=0, const=1, args="?", help="Number of narrowband outputs [0]")
     parser.add_argument(
         "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
     )
@@ -286,6 +295,9 @@ async def main():
     parser.add_argument("--xb", type=int, default=64, help="Number of XB-engines [%(default)s]")
     parser.add_argument("--fgpu-docker-arg", action="append", default=[], help="Add Docker argument for invoking fgpu")
 
+    parser.add_argument(
+        "--init-time", type=float, default=20.0, metavar="SECONDS", help="Time for engines to start [%(default)s]"
+    )
     parser.add_argument(
         "--startup-time", type=float, default=1.0, help="Time to run before starting measurement [%(default)s]"
     )
