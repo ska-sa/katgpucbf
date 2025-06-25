@@ -89,8 +89,6 @@ def fsim_factory(
         f"239.102.199.{index}:7148 "
     )
     return command
-    # TODO: do we actually need to add a katcp server to make startup reliable?
-    # TODO: narrowband?
 
 
 def xbgpu_factory(
@@ -114,16 +112,15 @@ def xbgpu_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"xbgpu-{index}"
 
-    channels_per_substream = args.channels // args.substreams
-    bandwidth = adc_sample_rate / 2 / args.narrowband_decimation
-    samples_between_spectra = 2 * args.channels * args.narrowband_decimation
-    spectra_per_heap = args.jones_per_batch // args.channels
-    heap_time = samples_between_spectra * spectra_per_heap / adc_sample_rate
+    info = StreamInfo(args, adc_sample_rate)
+    heap_time = info.samples_between_spectra * info.spectra_per_heap / adc_sample_rate
     threshold = max(1, round(args.int_time / heap_time))
     # Duplicate logic from katsdpcontroller's generator.py
-    batch_size = args.array_size * N_POL * spectra_per_heap * channels_per_substream * COMPLEX * SAMPLE_BITS // 8
+    batch_size = (
+        args.array_size * N_POL * info.spectra_per_heap * info.channels_per_substream * COMPLEX * SAMPLE_BITS // 8
+    )
     target_chunk_size = 64 * 1024**2
-    batches_per_chunk = math.ceil(max(128 / spectra_per_heap, target_chunk_size / batch_size))
+    batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
 
     command = (
         "docker run "
@@ -134,11 +131,11 @@ def xbgpu_factory(
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
         f"--adc-sample-rate={adc_sample_rate} "
-        f"--bandwidth={bandwidth} "
+        f"--bandwidth={info.bandwidth} "
         f"--array-size={args.array_size} "
         f"--channels={args.channels} "
-        f"--channels-per-substream={channels_per_substream} "
-        f"--samples-between-spectra={samples_between_spectra} "
+        f"--channels-per-substream={info.channels_per_substream} "
+        f"--samples-between-spectra={info.samples_between_spectra} "
         f"--jones-per-batch={args.jones_per_batch} "
         f"--sample-bits={SAMPLE_BITS} "
         f"--heaps-per-fengine-per-chunk={batches_per_chunk} "
@@ -159,7 +156,6 @@ def xbgpu_factory(
         for j in range(N_POL):
             idx = N_POL * i + j
             command += f"--beam=name=beam{idx},dst=239.102.197.{index * args.beams * N_POL + idx},pol={j} "
-    # TODO: channel-offset-value?
     return command
 
 
@@ -178,11 +174,10 @@ class XbgpuBenchmark(Benchmark):
         )
 
     async def run_generators(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
-        # Note: sync time isn't used. fsim doesn't support it, and I don't
-        # think it is really needed.
         factory = functools.partial(
             fsim_factory,
             adc_sample_rate=adc_sample_rate,
+            sync_time=sync_time,
             args=self.args,
         )
         return await run_tasks(
@@ -192,6 +187,7 @@ class XbgpuBenchmark(Benchmark):
             self.args.image,
             port_base=None,
             verbose=self.args.verbose,
+            timeout=self.args.init_time,
         )
 
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
@@ -208,6 +204,7 @@ class XbgpuBenchmark(Benchmark):
             self.args.image,
             port_base=KATCP_PORT_BASE,
             verbose=self.args.verbose,
+            timeout=self.args.init_time,
         )
 
 
@@ -221,6 +218,9 @@ async def main():
     parser.add_argument("--narrowband", action="store_true", help="Measure narrowband output [false]")
     parser.add_argument(
         "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
+    )
+    parser.add_argument(
+        "--init-time", type=float, default=20.0, metavar="SECONDS", help="Time for engines to start [%(default)s]"
     )
     parser.add_argument(
         "--startup-time",
