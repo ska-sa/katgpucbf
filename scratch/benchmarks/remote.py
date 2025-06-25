@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023-2024, National Research Foundation (SARAO)
+# Copyright (c) 2023-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -93,7 +93,7 @@ async def run_tasks(
     n: int,
     factory: Callable[[Server, ServerInfo, asyncssh.SSHClientConnection, int], str],
     image: str,
-    port_base: int,
+    port_base: int | None,
     *,
     verbose: int,
     timeout: float = 20.0,
@@ -121,7 +121,8 @@ async def run_tasks(
     image
         Docker image to pull before running
     port_base
-        Port number for the first task. The tasks must use consecutive ports.
+        Port number for the first task. The tasks must use consecutive ports. If
+        None, the server is assumed to be immediately ready.
     verbose
         If at least :const:`VERBOSE_PASS_OUTPUT`, pass through the stdout and
         stderr of the tasks
@@ -163,16 +164,17 @@ async def run_tasks(
         # Wait for the service to be ready by checking the katcp ports
         async with asyncio.timeout(timeout):
             for i in range(n):
-                # Wait until either the port is ready or the process dies
-                async with asyncio.TaskGroup() as tg:
-                    tasks = [
-                        tg.create_task(wait_port(server, port_base + i)),
-                        tg.create_task(procs[i].wait(check=True)),
-                    ]
-                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                    for task in pending:
-                        task.cancel()
-                if tasks[1] in done:
-                    raise RuntimeError("process shut down before becoming ready")
+                if port_base is not None:
+                    # Wait until either the port is ready or the process dies
+                    async with asyncio.TaskGroup() as tg:
+                        tasks: list[asyncio.Future] = [
+                            tg.create_task(wait_port(server, port_base + i)),
+                            tg.create_task(procs[i].wait(check=True)),
+                        ]
+                        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                        for task in pending:
+                            task.cancel()
+                    if tasks[1] in done:
+                        raise RuntimeError("process shut down before becoming ready")
         return stack.pop_all()
     raise AssertionError("should be unreachable")
