@@ -173,7 +173,7 @@ class XbgpuBenchmark(Benchmark):
             metric_prefix="xbgpu",
         )
 
-    async def run_generators(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
+    async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             fsim_factory,
             adc_sample_rate=adc_sample_rate,

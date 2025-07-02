@@ -193,7 +193,7 @@ class FgpuBenchmark(Benchmark):
             metric_prefix="fgpu",
         )
 
-    async def run_generators(
+    async def run_producers(
         self,
         adc_sample_rate: float,
         sync_time: int,

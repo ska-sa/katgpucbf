@@ -129,7 +129,7 @@ class Benchmark(ABC):
         return sum(heaps), sum(missing_heaps)
 
     @abstractmethod
-    async def run_generators(self, adc_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
+    async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
         pass
 
     @abstractmethod
@@ -157,7 +157,7 @@ class Benchmark(ABC):
     async def trial(self, adc_sample_rate: float) -> Result:
         """Perform a single trial."""
         sync_time = int(time.time())
-        async with await self.run_generators(adc_sample_rate, sync_time):
+        async with await self.run_producers(adc_sample_rate, sync_time):
             async with await self.run_consumers(adc_sample_rate, sync_time):
                 return await self.process(adc_sample_rate)
         raise AssertionError("should be unreachable")
@@ -191,7 +191,7 @@ class Benchmark(ABC):
                     redo = False
                     if self.verbose_results():
                         print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-                    async with await self.run_generators(adc_sample_rate, sync_time):
+                    async with await self.run_producers(adc_sample_rate, sync_time):
                         async with await self.run_consumers(adc_sample_rate, sync_time):
                             result = await self.process(adc_sample_rate)
                     if result.good():
