@@ -288,7 +288,9 @@ async def main():
     )
     # For backwards compatibility, specifying --narrowband (without an argument) is
     # equivalent to specifying --narrowband=1.
-    parser.add_argument("--narrowband", type=int, default=0, const=1, args="?", help="Number of narrowband outputs [0]")
+    parser.add_argument(
+        "--narrowband", type=int, default=0, const=1, nargs="?", help="Number of narrowband outputs [0]"
+    )
     parser.add_argument(
         "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
     )
