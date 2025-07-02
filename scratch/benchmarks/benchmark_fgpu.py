@@ -28,10 +28,11 @@ from contextlib import AsyncExitStack
 
 import asyncssh
 
+from katgpucbf import N_POLS
+
 from benchmark_tools import DEFAULT_IMAGE, PROMETHEUS_PORT_BASE, Benchmark
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
 
-N_POLS = 2
 KATCP_PORT_BASE = 7140
 
 

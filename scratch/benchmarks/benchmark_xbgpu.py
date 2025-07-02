@@ -29,14 +29,12 @@ from contextlib import AsyncExitStack
 
 import asyncssh
 
-from katgpucbf import DEFAULT_JONES_PER_BATCH
+from katgpucbf import COMPLEX, DEFAULT_JONES_PER_BATCH, N_POLS
 
 from benchmark_tools import DEFAULT_IMAGE, PROMETHEUS_PORT_BASE, Benchmark
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
 
 SAMPLE_BITS = 8
-N_POL = 2
-COMPLEX = 2
 KATCP_PORT_BASE = 7340
 
 
@@ -117,7 +115,7 @@ def xbgpu_factory(
     threshold = max(1, round(args.int_time / heap_time))
     # Duplicate logic from katsdpcontroller's generator.py
     batch_size = (
-        args.array_size * N_POL * info.spectra_per_heap * info.channels_per_substream * COMPLEX * SAMPLE_BITS // 8
+        args.array_size * N_POLS * info.spectra_per_heap * info.channels_per_substream * COMPLEX * SAMPLE_BITS // 8
     )
     target_chunk_size = 64 * 1024**2
     batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
@@ -153,9 +151,9 @@ def xbgpu_factory(
         f"--corrprod=name=corrprod,dst=239.102.198.{index},heap_accumulation_threshold={threshold} "
     )
     for i in range(args.beams):
-        for j in range(N_POL):
-            idx = N_POL * i + j
-            command += f"--beam=name=beam{idx},dst=239.102.197.{index * args.beams * N_POL + idx},pol={j} "
+        for j in range(N_POLS):
+            idx = N_POLS * i + j
+            command += f"--beam=name=beam{idx},dst=239.102.197.{index * args.beams * N_POLS + idx},pol={j} "
     return command
 
 
