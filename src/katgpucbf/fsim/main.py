@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -68,6 +68,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
     )
+    parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
     parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
     parser.add_argument(
         "--array-size", type=int, default=80, help="Number of antennas in the simulated array [%(default)s]"
@@ -112,7 +113,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "dest",
         type=endpoint_list_parser(spead.DEFAULT_PORT),
         metavar="X.X.X.X[+N]:PORT",
-        help="Destination addresses (one per polarisation)",
+        help="Destination addresses (one per xb-engine)",
     )
     args = parser.parse_args(arglist)
 
@@ -209,9 +210,10 @@ def make_stream(args: argparse.Namespace, idx: int, data: np.ndarray) -> "spead2
     """
     overhead = 1 + PREAMBLE_SIZE / args.send_packet_payload
     # Data rate for the entire array, excluding packet overhead
-    full_rate = args.adc_sample_rate * N_POLS * DTYPE.itemsize * args.array_size
+    bandwidth = args.adc_sample_rate * args.channels / args.samples_between_spectra
+    full_rate = bandwidth * N_POLS * COMPLEX * DTYPE.itemsize * args.array_size
     rate = full_rate * args.channels_per_substream / args.channels * overhead
-    print(f"Rate for {args.dest[idx]}: {rate * 8e-9:.3f} Gbps")
+    print(f"Rate for {args.dest[idx]}: {rate * 8e-9:.3f} Gbps", flush=True)
     config = spead2.send.StreamConfig(
         max_packet_size=args.send_packet_payload + PREAMBLE_SIZE,
         rate=rate,
@@ -321,7 +323,10 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
 
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
-    sync_time = time.time()
+    if args.sync_time is not None:
+        sync_time = args.sync_time
+    else:
+        sync_time = time.time()
     async with asyncio.TaskGroup() as sender_tg:
         for sender in senders:
             sender_tg.create_task(sender.run(sync_time, args.run_once))
