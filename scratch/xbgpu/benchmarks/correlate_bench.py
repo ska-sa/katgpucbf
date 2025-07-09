@@ -19,6 +19,7 @@
 import argparse
 
 import katsdpsigproc.accel
+import numpy as np
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH
 from katgpucbf.xbgpu.correlation import CorrelationTemplate
@@ -52,7 +53,12 @@ def main():
     fn = template.instantiate(command_queue, args.heaps_per_fengine_per_chunk)
 
     fn.ensure_all_bound()
-    fn.buffer("in_samples").zero(command_queue)
+    buf = fn.buffer("in_samples")
+    h_data = buf.empty_like()
+    assert h_data.dtype == np.int8
+    rng = np.random.default_rng(seed=1)
+    h_data = rng.integers(-128, 127, size=h_data.shape, dtype=h_data.dtype)
+    fn.buffer("in_samples").set(command_queue, h_data)
     fn.zero_visibilities()
 
     fn()  # Warmup pass

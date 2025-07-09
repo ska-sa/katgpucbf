@@ -19,6 +19,7 @@
 import argparse
 
 import katsdpsigproc.accel
+import numpy as np
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH
 from katgpucbf.utils import DitherType, parse_dither
@@ -73,7 +74,13 @@ def main():
     h_weights.fill(1)
     fn.buffer("weights").set(command_queue, h_weights)
     fn.buffer("delays").zero(command_queue)
-    fn.buffer("in").zero(command_queue)
+
+    buf = fn.buffer("in")
+    h_data = buf.empty_like()
+    assert h_data.dtype == np.int8
+    rng = np.random.default_rng(seed=1)
+    h_data = rng.integers(-128, 127, size=h_data.shape, dtype=h_data.dtype)
+    fn.buffer("in").set(command_queue, h_data)
     fn.buffer("saturated").zero(command_queue)
 
     fn()  # Warmup pass
