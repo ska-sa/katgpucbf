@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2024, National Research Foundation (SARAO)
+# Copyright (c) 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,6 +19,7 @@
 import argparse
 
 import katsdpsigproc.accel
+import numpy as np
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH
 from katgpucbf.xbgpu.correlation import CorrelationTemplate
@@ -52,7 +53,12 @@ def main():
     fn = template.instantiate(command_queue, args.heaps_per_fengine_per_chunk)
 
     fn.ensure_all_bound()
-    fn.buffer("in_samples").zero(command_queue)
+    buf = fn.buffer("in_samples")
+    h_data = buf.empty_like()
+    assert h_data.dtype == np.int8
+    rng = np.random.default_rng(seed=1)
+    h_data[:] = rng.integers(-128, 127, size=h_data.shape, dtype=h_data.dtype)
+    fn.buffer("in_samples").set(command_queue, h_data)
     fn.zero_visibilities()
 
     fn()  # Warmup pass
