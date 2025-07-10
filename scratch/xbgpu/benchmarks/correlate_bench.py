@@ -57,7 +57,7 @@ def main():
     h_data = buf.empty_like()
     assert h_data.dtype == np.int8
     rng = np.random.default_rng(seed=1)
-    h_data = rng.integers(-128, 127, size=h_data.shape, dtype=h_data.dtype)
+    h_data[:] = rng.integers(-128, 127, size=h_data.shape, dtype=h_data.dtype)
     fn.buffer("in_samples").set(command_queue, h_data)
     fn.zero_visibilities()
 
