@@ -346,7 +346,6 @@ async def _test_delay_phase_fixed(
     """
     receiver = receive_baseline_correlation_products
     pcc = cbf.product_controller_client
-    # Minimum, maximum, resolution step, and a small coarse delay
     n_dsims = len(cbf.dsim_names)
     assert N_POLS * n_dsims > len(delay_phases)  # > rather than >= because we need a reference
 
