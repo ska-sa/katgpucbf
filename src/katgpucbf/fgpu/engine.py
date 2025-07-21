@@ -26,7 +26,6 @@ from collections.abc import Iterable, Iterator, Sequence
 from fractions import Fraction
 from functools import partial
 from random import SystemRandom
-from sys import maxsize as sys_maxsize
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -40,6 +39,7 @@ from katsdpsigproc.resource import async_wait_for_events
 from .. import (
     BYTE_BITS,
     DESCRIPTOR_TASK_NAME,
+    ENGINE_DITHER_SEED_BITWIDTH,
     GPU_PROC_TASK_NAME,
     N_POLS,
     RECV_TASK_NAME,
@@ -565,7 +565,7 @@ class Pipeline:
             output.dither,
             narrowband=narrowband_config,
         )
-        seed = SystemRandom().randrange(sys_maxsize - 1)
+        seed = SystemRandom().randrange(ENGINE_DITHER_SEED_BITWIDTH)
         self._compute = template.instantiate(
             compute_queue,
             engine.n_samples,
@@ -621,10 +621,10 @@ class Pipeline:
         sensors = self.engine.sensors
         sensors.add(
             aiokatcp.Sensor(
-                int,
-                f"{self.output.name}.dithering-seed",
-                "Seed value used to initialise random states for dithering.",
-                default=seed,
+                str,
+                f"{self.output.name}.dither-seed",
+                "Random seed used in dithering for quantisation",
+                default=str(seed),
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )

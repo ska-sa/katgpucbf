@@ -29,7 +29,6 @@ import time
 from abc import abstractmethod
 from collections.abc import Sequence
 from random import SystemRandom
-from sys import maxsize as sys_maxsize
 
 import aiokatcp
 import katsdpsigproc
@@ -44,6 +43,7 @@ from katsdpsigproc.abc import AbstractContext
 from .. import (
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
+    ENGINE_DITHER_SEED_BITWIDTH,
     GPU_PROC_TASK_NAME,
     N_POLS,
     RECV_TASK_NAME,
@@ -361,7 +361,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             [Beam(pol=output.pol, dither=output.dither) for output in outputs],
             n_spectra_per_batch=engine.recv_layout.n_spectra_per_heap,
         )
-        seed = SystemRandom().randrange(sys_maxsize - 1)
+        seed = SystemRandom().randrange(ENGINE_DITHER_SEED_BITWIDTH)
         self._beamform = template.instantiate(
             self._proc_command_queue,
             n_batches=engine.heaps_per_fengine_per_chunk,
@@ -429,10 +429,10 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         sensors = self.engine.sensors
         sensors.add(
             aiokatcp.Sensor(
-                int,
-                f"{self.name}.dithering-seed",
-                "Seed value used to initialise random states for dithering.",
-                default=seed,
+                str,
+                f"{self.name}.dither-seed",
+                "Random seed used in dithering for quantisation",
+                default=str(seed),
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
