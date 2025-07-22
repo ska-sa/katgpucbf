@@ -565,15 +565,12 @@ class Pipeline:
             output.dither,
             narrowband=narrowband_config,
         )
-        seed = SystemRandom().randrange(ENGINE_DITHER_SEED_BITWIDTH)
+        seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITWIDTH)
         self._compute = template.instantiate(
             compute_queue,
             engine.n_samples,
             self.spectra,
             output.spectra_per_heap,
-            # The magic constant was chosen at random. It ensures that the
-            # seed won't be the same as in other types of engine that also use
-            # sync_time as the basis for seeding.
             seed=seed,
             sequence_first=engine.feng_id,
             sequence_step=engine.n_ants,
