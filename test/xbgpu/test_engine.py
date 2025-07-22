@@ -57,7 +57,7 @@ SYNC_TIME: Final[float] = 1234567890
 TIME_CONVERTER = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
 HEAPS_PER_FENGINE_PER_CHUNK: Final[int] = 2
 SEND_RATE_FACTOR: Final[float] = 1.1
-SAMPLE_BITWIDTH: Final[int] = 8
+SAMPLE_BITS: Final[int] = 8
 N_TOTAL_XB_HEAPS: Final[int] = 70
 N_BEAM_REQUESTS: Final[int] = 2
 # The latest chunk index at which updated beam parameters can be updated
@@ -847,7 +847,7 @@ class TestEngine:
         """
         batch_indices = list(np.nonzero(np.any(present, axis=1))[0])
         n_ants = present.shape[1]
-        max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITWIDTH // 8 + PREAMBLE_SIZE
+        max_packet_size = n_spectra_per_heap * N_POLS * COMPLEX * SAMPLE_BITS // 8 + PREAMBLE_SIZE
         max_heaps = n_ants * HEAPS_PER_FENGINE_PER_CHUNK * 10
         feng_stream = self._make_feng(mock_recv_streams, max_packet_size, max_heaps)
 
