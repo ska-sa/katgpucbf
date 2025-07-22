@@ -6,9 +6,9 @@
 #
 aioconsole==0.8.1
     # via aiomonitor
-aiohappyeyeballs==2.4.4
+aiohappyeyeballs==2.6.1
     # via aiohttp
-aiohttp==3.11.11
+aiohttp==3.12.14
     # via
     #   aiomonitor
     #   prometheus-async
@@ -16,7 +16,7 @@ aiokatcp==2.0.2
     # via katgpucbf (setup.cfg)
 aiomonitor==0.7.1
     # via katsdpservices
-aiosignal==1.3.2
+aiosignal==1.4.0
     # via aiohttp
 appdirs==1.4.4
     # via katsdpsigproc
@@ -166,6 +166,7 @@ typing-extensions==4.12.2
     # via
     #   aiokatcp
     #   aiomonitor
+    #   aiosignal
     #   katsdpsigproc
     #   pytools
 tzdata==2024.2
