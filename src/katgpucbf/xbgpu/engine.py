@@ -43,7 +43,7 @@ from katsdpsigproc.abc import AbstractContext
 from .. import (
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
-    ENGINE_DITHER_SEED_BITWIDTH,
+    ENGINE_DITHER_SEED_BITS,
     GPU_PROC_TASK_NAME,
     N_POLS,
     RECV_TASK_NAME,
@@ -361,7 +361,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             [Beam(pol=output.pol, dither=output.dither) for output in outputs],
             n_spectra_per_batch=engine.recv_layout.n_spectra_per_heap,
         )
-        seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITWIDTH)
+        seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITS)
         self._beamform = template.instantiate(
             self._proc_command_queue,
             n_batches=engine.heaps_per_fengine_per_chunk,

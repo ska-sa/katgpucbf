@@ -39,7 +39,7 @@ from katsdpsigproc.resource import async_wait_for_events
 from .. import (
     BYTE_BITS,
     DESCRIPTOR_TASK_NAME,
-    ENGINE_DITHER_SEED_BITWIDTH,
+    ENGINE_DITHER_SEED_BITS,
     GPU_PROC_TASK_NAME,
     N_POLS,
     RECV_TASK_NAME,
@@ -565,7 +565,7 @@ class Pipeline:
             output.dither,
             narrowband=narrowband_config,
         )
-        seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITWIDTH)
+        seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITS)
         self._compute = template.instantiate(
             compute_queue,
             engine.n_samples,
