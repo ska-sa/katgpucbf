@@ -13,19 +13,12 @@ repos:
         args: [--fix=lf]
       - id: no-commit-to-branch # without arguments, master/main will be protected.
       - id: trailing-whitespace
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
-    hooks:
-      - id: black
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        name: isort
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.6
+    rev: v0.12.1
     hooks:
-      - id: ruff
+      - id: ruff-format
+        types_or: [python, pyi]  # Prevent formatting notebooks
+      - id: ruff-check
         types_or: [python, pyi]
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: 'v1.14.1'

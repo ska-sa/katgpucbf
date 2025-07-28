@@ -7,21 +7,15 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 
-[tool.black]
-line-length = 120
-
-[tool.isort]
-profile = "black"
-line_length = 120
-known_local_folder = ["benchmark_tools", "noisy_search", "remote", "sighandler"]
-
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+extend-exclude = ["*.ipynb"]
 [tool.ruff.lint]
 select = [
     "E", "W",  # pycodestyle
     "F",  # pyflakes
+    "I",  # isort
     "D",  # pydocstyle
     "N",  # pep8-naming
     "B",  # flake8-bugbear
@@ -34,6 +28,8 @@ extend-ignore = ["D105", "D107"]  # docstrings for magic methods
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 property-decorators = ["pytest.fixture"]
+[tool.ruff.lint.isort]
+known-local-folder = ["benchmark_tools", "noisy_search", "remote", "sighandler"]
 
 [tool.pytest.ini_options]
 testpaths = "test"
