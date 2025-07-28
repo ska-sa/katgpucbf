@@ -68,7 +68,7 @@ for data in events:
             queues[name] = Queue(name, data["maxsize"])
         queue = queues[name]
         if data["maxsize"] != queue.maxsize:
-            raise RuntimeError(f'Queue {name} changed ({queue.maxsize} -> {data["maxsize"]}')
+            raise RuntimeError(f"Queue {name} changed ({queue.maxsize} -> {data['maxsize']}")
         queues[name].add(data["time"], data["qsize"])
     elif data["type"] == "qsize-delta":
         name = data["name"]

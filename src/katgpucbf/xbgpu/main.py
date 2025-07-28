@@ -196,8 +196,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=[],
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
-        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol. "
-        "Optional keys: dither.",
+        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol. Optional keys: dither.",
     )
     parser.add_argument(
         "--corrprod",

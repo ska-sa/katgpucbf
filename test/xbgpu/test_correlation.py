@@ -15,6 +15,7 @@
 ################################################################################
 
 """Unit tests for the Tensor Core correlation kernel."""
+
 import numpy as np
 import pytest
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext

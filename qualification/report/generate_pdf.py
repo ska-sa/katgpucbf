@@ -17,6 +17,7 @@
 ################################################################################
 
 """Generate a PDF based on the intermediate JSON output."""
+
 import argparse
 import base64
 import copy
@@ -306,12 +307,12 @@ class CBFConfiguration:
         if expand:
             # Long description required
             parts = [
-                f'{self.mode_config["antennas"]} antennas',
-                f'{self.mode_config["channels"]} channels',
-                f'{self.mode_config["beams"]} beams',
-                f'{self.mode_config["band"]}-band',
-                f'{self.mode_config["integration_time"]}s integrations',
-                f'{self.mode_config["dsims"]} dsims',
+                f"{self.mode_config['antennas']} antennas",
+                f"{self.mode_config['channels']} channels",
+                f"{self.mode_config['beams']} beams",
+                f"{self.mode_config['band']}-band",
+                f"{self.mode_config['integration_time']}s integrations",
+                f"{self.mode_config['dsims']} dsims",
             ]
             if narrowband_decimation > 1:
                 parts.append(f"1/{narrowband_decimation} narrowband")
@@ -324,7 +325,7 @@ class CBFConfiguration:
             mode = "bc" if int(self.mode_config["beams"]) > 0 else "c"
             if narrowband_decimation > 1 and narrowband_vlbi:
                 mode += "v"
-            config_mode = f'{mode}{antpols}n{self.mode_config["bandwidth"]}M{chans}k'
+            config_mode = f"{mode}{antpols}n{self.mode_config['bandwidth']}M{chans}k"
 
         return config_mode
 
@@ -1040,9 +1041,7 @@ def _doc_outcome(section: Container, result: Result) -> None:
     if result.start_time is not None:
         section.append(f"Start time: {datetime.fromtimestamp(float(result.start_time), UTC).strftime('%F %T')}")
         section.append(Command("hspace", "0.5cm"))
-    section.append(
-        f"Duration: {readable_duration(result.duration)} " f"(+{readable_duration(result.overhead)} overhead)\n"
-    )
+    section.append(f"Duration: {readable_duration(result.duration)} (+{readable_duration(result.overhead)} overhead)\n")
 
     with section.create(LongTable(r"|l|p{0.4\linewidth}|")) as config_table:
         config_table.add_hline()

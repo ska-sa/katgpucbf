@@ -15,6 +15,7 @@
 ################################################################################
 
 """CBF linearity test."""
+
 import numpy as np
 from matplotlib.figure import Figure
 
