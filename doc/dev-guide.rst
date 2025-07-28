@@ -98,8 +98,8 @@ remote system. If one does not use :program:`dev-setup.sh` but installs
 manually (in a virtual environment) using ``pip install -e .``, then only a
 subset of dependencies are installed. There are also some optional extras that
 can be installed, such as ``pip install -e ".[doc]"`` to install necessary
-dependencies for building the documentation. Refer to ``setup.cfg`` to see what
-extras are available.
+dependencies for building the documentation. Refer to ``pyproject.toml`` to see
+what extras are available.
 
 This is not recommended for day-to-day development, because it will install
 whatever is the latest version at the time, rather than the known-good versions
@@ -124,8 +124,6 @@ The module contains the following boiler-plate files:
   develop. Development requires an additional set of packages which are not
   required for users to run the software (such as pytest). Note that developers
   should install both sets of requirements, not just the development ones.
-- ``setup.cfg`` allows :external+setuptools:doc:`setuptools  <setuptools>`
-  to install this package.
 - ``pyproject.toml`` is a standard file included with many Python projects. It
   is used to store some configuration for pre-commit (as described above), some
   configuration options for :mod:`pytest`, and other configuration as described

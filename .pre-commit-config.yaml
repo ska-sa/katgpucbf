@@ -65,7 +65,7 @@ repos:
           - --extra=gpu
           # Avoid putting extras in the output, so that it can be used for constraints
           - --strip-extras
-          - setup.cfg
+          - pyproject.toml
           - requirements.in
         additional_dependencies:
           - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
@@ -77,7 +77,7 @@ repos:
           - --extra=test
           - --extra=doc
           - --strip-extras
-          - setup.cfg
+          - pyproject.toml
           - requirements-dev.in
         additional_dependencies:
           - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
@@ -88,7 +88,7 @@ repos:
           - --output-file=qualification/requirements.txt
           - --extra=qualification
           - --strip-extras
-          - setup.cfg
+          - pyproject.toml
           - qualification/requirements.in
         additional_dependencies:
           - "pip<24.3"  # Workaround for https://github.com/jazzband/pip-tools/issues/2131
