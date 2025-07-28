@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-	"setuptools>=45",
-	"setuptools_scm[toml]>=6.0",
+    "setuptools>=45",
+    "setuptools_scm[toml]>=6.0",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -46,8 +46,8 @@ asyncio_default_fixture_loop_scope = "function"
 branch = true
 command_line = "-m pytest"
 source = [
-	"katgpucbf",
-	"test/",
+    "katgpucbf",
+    "test/",
 ]
 
 [tool.coverage.html]
@@ -55,13 +55,13 @@ show_contexts = true
 
 [tool.coverage.paths]
 source = [
-	"src",
-	"*/site-packages",
+    "src",
+    "*/site-packages",
 ]
 
 [tool.coverage.report]
 exclude_lines = [
-	'#\s*(pragma|PRAGMA)[:\s]?\s*(no|NO)\s*(cover|COVER)',  # Default from coverage
-	'@(?:numba\.)?(?:njit|cfunc)',  # Compiled so coverage can't see the code being executed
-	'@(abc\.)?abstractmethod',
+    '#\s*(pragma|PRAGMA)[:\s]?\s*(no|NO)\s*(cover|COVER)',  # Default from coverage
+    '@(?:numba\.)?(?:njit|cfunc)',  # Compiled so coverage can't see the code being executed
+    '@(abc\.)?abstractmethod',
 ]
