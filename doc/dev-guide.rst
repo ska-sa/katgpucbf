@@ -116,10 +116,10 @@ The module contains the following boiler-plate files:
   tests automatically. Comments in the file document hardware requirements.
 - ``requirements.in`` and ``requirements-dev.in`` specify the Python
   prerequisites for running and developing with this package respectively.
-  They are used as inputs to `pip-compile`_.
+  They are used as inputs to `uv pip compile`_.
 - ``requirements.txt`` and ``requirements-dev.txt`` list complete pinned
   requirements, to ensure repeatable operation. These are the output of the
-  ``pip-compile`` process mentioned above. These should be passed to ``pip
+  ``uv pip compile`` process mentioned above. These should be passed to ``pip
   install`` with the ``-r`` flag to install the requirements either to run or
   develop. Development requires an additional set of packages which are not
   required for users to run the software (such as pytest). Note that developers
@@ -129,7 +129,7 @@ The module contains the following boiler-plate files:
   configuration options for :mod:`pytest`, and other configuration as described
   :external+pip:doc:`here <reference/build-system/pyproject-toml>`.
 
-.. _pip-compile: https://pip-tools.readthedocs.io/en/latest/#without-setup-py
+.. _uv pip compile: https://docs.astral.sh/uv/pip/compile/
 
 Preparing to raise a Pull Request
 ---------------------------------
