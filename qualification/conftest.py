@@ -17,7 +17,6 @@
 """Fixtures and options for qualification testing of the CBF."""
 
 import ast
-import asyncio
 import copy
 import inspect
 import itertools
@@ -580,11 +579,10 @@ async def cbf(
     if isinstance(cbf, FailedCBF):
         raise cbf.exc
     assert isinstance(cbf, CBFRemoteControl)
-    # Reset the CBF to default state
+    # Reset the CBF to default state, except for the actual signal, as
+    # doing so is expensive and tests set a chosen signal when they
+    # care.
     pcc = cbf.product_controller_client
-    async with asyncio.TaskGroup() as tg:
-        for dsim_name in cbf.dsim_names:
-            tg.create_task(pcc.request("dsim-signals", dsim_name, "0;0;"))
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] == "gpucbf.antenna_channelised_voltage":
             n_inputs = len(conf["src_streams"])
