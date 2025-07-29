@@ -94,15 +94,6 @@ class XBReceiver:
         self.cbf = cbf
         self._acv_name = acv_name
 
-    def start(self) -> None:
-        """Start receiving data.
-
-        This is not done by the constructor, to allow it to be delayed until a
-        test is ready for the incoming data.
-        """
-        for stream in self.stream_group:
-            stream.start()
-
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
         """Check whether this chunk is complete (no missing data)."""
         return bool(np.all(chunk.present))
@@ -517,7 +508,8 @@ def _create_receive_stream_group(
         else:
             for ep in endpoints:
                 stream.add_udp_reader(*ep, interface_address=interface_address)
-
+    for stream in group:
+        stream.start()
     return group
 
 
