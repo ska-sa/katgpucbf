@@ -36,7 +36,7 @@ from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
 
 @pytest.fixture
 async def katcp_server(
-    sender: Sender, heap_sets: Sequence[HeapSet], descriptor_sender: DescriptorSender
+    sender: Sender, heap_sets: list[HeapSet], descriptor_sender: DescriptorSender
 ) -> AsyncGenerator[DeviceServer, None]:
     """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
@@ -44,7 +44,7 @@ async def katcp_server(
     server = DeviceServer(
         sender=sender,
         descriptor_sender=descriptor_sender,
-        spare=heap_sets[1],
+        heap_sets=heap_sets,
         adc_sample_rate=ADC_SAMPLE_RATE,
         sample_bits=DIG_SAMPLE_BITS,
         dither_seed=dither_seed,

@@ -165,6 +165,7 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
         await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
     timestamps = np.zeros(args.max_period // args.heap_samples, dtype=">u8")
+    # One being currently sent, one spare, and one reserved for zeros
     heap_sets = [
         send.HeapSet.create(
             timestamps,
@@ -172,7 +173,7 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
             heap_size,
             range(args.first_id, args.first_id + len(args.dest)),
         )
-        for _ in range(2)
+        for _ in range(3)
     ]
 
     endpoints: list[tuple[str, int]] = []
@@ -230,7 +231,7 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
     server = DeviceServer(
         sender=sender,
         descriptor_sender=descriptor_sender,
-        spare=heap_sets[1],
+        heap_sets=heap_sets,
         adc_sample_rate=args.adc_sample_rate,
         dither_seed=args.dither_seed,
         sample_bits=args.sample_bits,
