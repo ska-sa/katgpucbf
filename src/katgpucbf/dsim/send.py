@@ -45,7 +45,7 @@ class HeapSet:
     The heaps are split into two parts, each of which is preprocessed to
     allow efficient transmission.
 
-    This class should normally be constructed with :meth:`factory`.
+    This class should normally be constructed with :meth:`create`.
 
     Parameters
     ----------
