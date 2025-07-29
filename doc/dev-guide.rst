@@ -98,8 +98,8 @@ remote system. If one does not use :program:`dev-setup.sh` but installs
 manually (in a virtual environment) using ``pip install -e .``, then only a
 subset of dependencies are installed. There are also some optional extras that
 can be installed, such as ``pip install -e ".[doc]"`` to install necessary
-dependencies for building the documentation. Refer to ``setup.cfg`` to see what
-extras are available.
+dependencies for building the documentation. Refer to ``pyproject.toml`` to see
+what extras are available.
 
 This is not recommended for day-to-day development, because it will install
 whatever is the latest version at the time, rather than the known-good versions
@@ -116,22 +116,20 @@ The module contains the following boiler-plate files:
   tests automatically. Comments in the file document hardware requirements.
 - ``requirements.in`` and ``requirements-dev.in`` specify the Python
   prerequisites for running and developing with this package respectively.
-  They are used as inputs to `pip-compile`_.
+  They are used as inputs to `uv pip compile`_.
 - ``requirements.txt`` and ``requirements-dev.txt`` list complete pinned
   requirements, to ensure repeatable operation. These are the output of the
-  ``pip-compile`` process mentioned above. These should be passed to ``pip
+  ``uv pip compile`` process mentioned above. These should be passed to ``pip
   install`` with the ``-r`` flag to install the requirements either to run or
   develop. Development requires an additional set of packages which are not
   required for users to run the software (such as pytest). Note that developers
   should install both sets of requirements, not just the development ones.
-- ``setup.cfg`` allows :external+setuptools:doc:`setuptools  <setuptools>`
-  to install this package.
 - ``pyproject.toml`` is a standard file included with many Python projects. It
   is used to store some configuration for pre-commit (as described above), some
   configuration options for :mod:`pytest`, and other configuration as described
   :external+pip:doc:`here <reference/build-system/pyproject-toml>`.
 
-.. _pip-compile: https://pip-tools.readthedocs.io/en/latest/#without-setup-py
+.. _uv pip compile: https://docs.astral.sh/uv/pip/compile/
 
 Preparing to raise a Pull Request
 ---------------------------------

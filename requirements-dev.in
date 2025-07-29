@@ -1,6 +1,6 @@
 -c requirements.txt
 ipython
-pip-tools>=6.6.0
+uv
 pre-commit
 pytest-cov
 pytest-xdist  # Allows for pytest to launch multiple threads

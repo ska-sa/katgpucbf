@@ -15,6 +15,7 @@
 ################################################################################
 
 """SPEAD receiver utilities."""
+
 import functools
 import logging
 from collections.abc import AsyncGenerator
@@ -33,9 +34,8 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
-from ..recv import BaseLayout, Chunk, StatsCollector
+from ..recv import BaseLayout, Chunk, StatsCollector, user_data_type
 from ..recv import make_stream as make_base_stream
-from ..recv import user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
 from . import METRIC_NAMESPACE

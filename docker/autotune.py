@@ -39,15 +39,18 @@ def main() -> None:  # noqa: D103
     # Do all the autotuning in a temporary database, so that the
     # original is preserved in the event of a failure. Put it in
     # the same directory so that it can be moved atomicly.
-    with katsdpsigproc.accel.create_some_context(
-        interactive=False,
-        device_filter=lambda device: device.is_cuda,
-    ) as context, tempfile.NamedTemporaryFile(
-        prefix="tuning",
-        suffix=".db",
-        dir=args.database.parent,
-        delete=False,
-    ) as temp_db:
+    with (
+        katsdpsigproc.accel.create_some_context(
+            interactive=False,
+            device_filter=lambda device: device.is_cuda,
+        ) as context,
+        tempfile.NamedTemporaryFile(
+            prefix="tuning",
+            suffix=".db",
+            dir=args.database.parent,
+            delete=False,
+        ) as temp_db,
+    ):
         should_delete = True
         try:
             os.environ["KATSDPSIGPROC_TUNE_DB"] = temp_db.name

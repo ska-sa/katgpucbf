@@ -70,9 +70,8 @@ from .bsend import make_stream as make_bstream
 from .correlation import CorrelationTemplate
 from .output import BOutput, Output, XOutput
 from .send import Send
-from .xsend import XSend, incomplete_accum_counter
+from .xsend import XSend, incomplete_accum_counter, skipped_accum_counter
 from .xsend import make_stream as make_xstream
-from .xsend import skipped_accum_counter
 
 logger = logging.getLogger(__name__)
 

@@ -1144,11 +1144,7 @@ class Pipeline:
         orig_phase = delay_models[0].phase
         orig_phase_rate = delay_models[0].phase_rate * adc_sample_rate
         delay_sensor.value = (
-            f"({delay_models[0].start}, "
-            f"{orig_delay}, "
-            f"{delay_models[0].delay_rate}, "
-            f"{orig_phase}, "
-            f"{orig_phase_rate})"
+            f"({delay_models[0].start}, {orig_delay}, {delay_models[0].delay_rate}, {orig_phase}, {orig_phase_rate})"
         )
 
     def set_gains(self, input: int, gains: np.ndarray) -> None:

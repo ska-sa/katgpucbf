@@ -302,9 +302,10 @@ class TestStream:
             shape=(n_chunks_to_send - n_chunks_to_delete, layout.chunk_heaps), dtype=np.uint8
         )
         received_chunk_ids = []
-        with caplog.at_level(logging.WARNING, logger="katgpucbf.xbgpu.recv"), PromDiff(
-            namespace=METRIC_NAMESPACE
-        ) as prom_diff:
+        with (
+            caplog.at_level(logging.WARNING, logger="katgpucbf.xbgpu.recv"),
+            PromDiff(namespace=METRIC_NAMESPACE) as prom_diff,
+        ):
             # Manually register the receiving stream with the StatsCollector,
             # as we haven't used the `recv.make_stream` utility.
             recv.stats_collector.add_stream(stream)

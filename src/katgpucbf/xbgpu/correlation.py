@@ -218,9 +218,9 @@ class Correlation(accel.Operation):
         )
 
         # TODO: NGC-1104 update this once 4-bit correlation is supported
-        assert (
-            self.template.input_sample_bits == 8
-        ), f"{self.template.input_sample_bits}-bit mode not supported yet, only 8-bit."
+        assert self.template.input_sample_bits == 8, (
+            f"{self.template.input_sample_bits}-bit mode not supported yet, only 8-bit."
+        )
         self.slots["in_samples"] = accel.IOSlot(dimensions=input_data_dimensions, dtype=np.int8)
         self.slots["mid_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions, dtype=np.int64)
         self.slots["out_visibilities"] = accel.IOSlot(dimensions=mid_data_dimensions[1:], dtype=np.int32)
