@@ -40,7 +40,7 @@ from katsdpservices import get_interface_address
 from katgpucbf.meerkat import BANDS
 
 from .cbf import CBFCache, CBFRemoteControl, FailedCBF
-from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+from .recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
 from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
@@ -702,17 +702,10 @@ def receive_baseline_correlation_products_manual_start(
 @pytest.fixture
 async def receive_baseline_correlation_products(
     receive_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
-    capture_start_streams: list[str],
 ) -> BaselineCorrelationProductsReceiver:
     """Create a spead2 receive stream for ingesting X-engine output."""
     receiver = receive_baseline_correlation_products_manual_start
     receiver.start()
-    # Ensure that the data is flowing, and that we throw away any data that
-    # predates the start of this test (to prevent any state leaks from previous
-    # tests). The timeout is increased since it may take some time to get the
-    # data flowing at the start.
-    if "baseline-correlation_products" in capture_start_streams:
-        await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver
 
 
@@ -765,20 +758,8 @@ def receive_tied_array_channelised_voltage_manual_start(
 @pytest.fixture
 async def receive_tied_array_channelised_voltage(
     receive_tied_array_channelised_voltage_manual_start: TiedArrayChannelisedVoltageReceiver,
-    cbf_config: dict,
-    capture_start_streams: list[str],
 ) -> TiedArrayChannelisedVoltageReceiver:
     """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
     receiver = receive_tied_array_channelised_voltage_manual_start
     receiver.start()
-    # Ensure that the data is flowing, and that we throw away any data that
-    # predates the start of this test (to prevent any state leaks from previous
-    # tests). The timeout is increased since it may take some time to get the
-    # data flowing at the start.
-    if all(
-        name in capture_start_streams
-        for name, config in cbf_config["outputs"].items()
-        if config["type"] == "gpucbf.tied_array_channelised_voltage"
-    ):
-        await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver
