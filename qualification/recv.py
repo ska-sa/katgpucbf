@@ -649,3 +649,36 @@ def create_tied_array_channelised_voltage_receive_stream_group(
             sink=stream_group,
         ),
     )
+
+
+class XBReceiverCache[T: XBReceiver]:
+    """Cache last-used receiver for a receiver class."""
+
+    def __init__(self, cls: Callable[..., T]) -> None:
+        self._cls = cls
+        self._receiver: T | None = None
+        self._args: tuple = ()
+        self._kwargs: dict = {}
+
+    def get_receiver(self, cbf: CBFRemoteControl, *args, **kwargs) -> T:
+        """Get an instance of the receiver.
+
+        If the arguments are the same as the previous call, the existing
+        receiver is returned. Otherwise, the arguments are used to construct
+        an instance.
+        """
+        if self._receiver is not None:
+            if self._receiver.cbf is cbf and args == self._args and kwargs == self._kwargs:
+                return self._receiver
+            # Shut down the old receiver
+            self.close()
+        self._receiver = self._cls(cbf, *args, **kwargs)
+        self._args = args
+        self._kwargs = kwargs
+        return self._receiver
+
+    def close(self) -> None:
+        """Stop the receiver, if any."""
+        if self._receiver is not None:
+            self._receiver.stream_group.stop()
+            self._receiver = None

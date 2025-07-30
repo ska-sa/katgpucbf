@@ -39,7 +39,12 @@ from katsdpservices import get_interface_address
 from katgpucbf.meerkat import BANDS
 
 from .cbf import CBFCache, CBFRemoteControl, FailedCBF
-from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+from .recv import (
+    DEFAULT_TIMEOUT,
+    BaselineCorrelationProductsReceiver,
+    TiedArrayChannelisedVoltageReceiver,
+    XBReceiverCache,
+)
 from .reporter import Reporter, custom_report_log
 
 logger = logging.getLogger(__name__)
@@ -545,6 +550,26 @@ async def cbf_cache(pytestconfig: pytest.Config) -> AsyncGenerator[CBFCache, Non
     await cache.close()
 
 
+@pytest.fixture(scope="session")
+def baseline_correlation_products_receiver_cache() -> Generator[
+    XBReceiverCache[BaselineCorrelationProductsReceiver], None, None
+]:
+    """Obtain the session-scoped cache for :class:`BaselineCorrelationProductsReceiver`."""
+    cache = XBReceiverCache(BaselineCorrelationProductsReceiver)
+    yield cache
+    cache.close()
+
+
+@pytest.fixture(scope="session")
+def tied_array_channelised_voltage_receiver_cache() -> Generator[
+    XBReceiverCache[TiedArrayChannelisedVoltageReceiver], None, None
+]:
+    """Obtain the session-scoped cache for :class:`TiedArrayChannelisedVoltageReceiver`."""
+    cache = XBReceiverCache(TiedArrayChannelisedVoltageReceiver)
+    yield cache
+    cache.close()
+
+
 @pytest.fixture
 async def capture_start_streams(request: pytest.FixtureRequest, cbf_config: dict) -> list[str]:
     """List of streams for which capture-start will automatically be issued."""
@@ -676,8 +701,11 @@ def core_allocator(cores: list[int]) -> CoreAllocator:
 
 @pytest.fixture
 def receive_baseline_correlation_products_manual_start(
-    pytestconfig: pytest.Config, cbf: CBFRemoteControl, core_allocator: CoreAllocator
-) -> Generator[BaselineCorrelationProductsReceiver, None, None]:
+    pytestconfig: pytest.Config,
+    cbf: CBFRemoteControl,
+    core_allocator: CoreAllocator,
+    baseline_correlation_products_receiver_cache: XBReceiverCache[BaselineCorrelationProductsReceiver],
+) -> BaselineCorrelationProductsReceiver:
     """Create a spead2 receive stream for ingesting X-engine output.
 
     This fixture does not start the receiver.
@@ -686,15 +714,13 @@ def receive_baseline_correlation_products_manual_start(
     # This will require running pytest with spead2_net_raw which is unusual.
     use_ibv = pytestconfig.getini("use_ibv")
 
-    receiver = BaselineCorrelationProductsReceiver(
+    return baseline_correlation_products_receiver_cache.get_receiver(
         cbf=cbf,
         stream_name="baseline-correlation-products",
         cores=core_allocator.allocate(4),
         interface_address=interface_address,
         use_ibv=use_ibv,
     )
-    yield receiver
-    receiver.stream_group.stop()
 
 
 @pytest.fixture
@@ -724,7 +750,8 @@ def receive_tied_array_channelised_voltage_manual_start(
     int_time: float,
     band: str,
     core_allocator: CoreAllocator,
-) -> Generator[TiedArrayChannelisedVoltageReceiver, None, None]:
+    tied_array_channelised_voltage_receiver_cache: XBReceiverCache[TiedArrayChannelisedVoltageReceiver],
+) -> TiedArrayChannelisedVoltageReceiver:
     """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams.
 
     This fixture does not start the receiver.
@@ -753,11 +780,9 @@ def receive_tied_array_channelised_voltage_manual_start(
 
     stream_names = stream_names[:max_streams]
     cores = core_allocator.allocate(len(stream_names))
-    receiver = TiedArrayChannelisedVoltageReceiver(
+    return tied_array_channelised_voltage_receiver_cache.get_receiver(
         cbf=cbf, stream_names=stream_names, cores=cores, interface_address=interface_address, use_ibv=use_ibv
     )
-    yield receiver
-    receiver.stream_group.stop()
 
 
 @pytest.fixture
