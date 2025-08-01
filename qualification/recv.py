@@ -189,6 +189,10 @@ class XBReceiver:
 
     def _worker(self, core: int) -> None:
         os.sched_setaffinity(0, [core])
+        try:
+            os.sched_setscheduler(0, os.SCHED_RR, os.sched_param(1))
+        except PermissionError:
+            pass
         data_ringbuffer = self.stream_group.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.ChunkRingbuffer)
         for chunk in data_ringbuffer:
