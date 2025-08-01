@@ -43,7 +43,6 @@ from .recv import (
     DEFAULT_TIMEOUT,
     BaselineCorrelationProductsReceiver,
     TiedArrayChannelisedVoltageReceiver,
-    XBReceiverCache,
 )
 from .reporter import Reporter, custom_report_log
 
@@ -550,26 +549,6 @@ async def cbf_cache(pytestconfig: pytest.Config) -> AsyncGenerator[CBFCache, Non
     await cache.close()
 
 
-@pytest.fixture(scope="session")
-def baseline_correlation_products_receiver_cache() -> Generator[
-    XBReceiverCache[BaselineCorrelationProductsReceiver], None, None
-]:
-    """Obtain the session-scoped cache for :class:`BaselineCorrelationProductsReceiver`."""
-    cache = XBReceiverCache(BaselineCorrelationProductsReceiver)
-    yield cache
-    cache.close()
-
-
-@pytest.fixture(scope="session")
-def tied_array_channelised_voltage_receiver_cache() -> Generator[
-    XBReceiverCache[TiedArrayChannelisedVoltageReceiver], None, None
-]:
-    """Obtain the session-scoped cache for :class:`TiedArrayChannelisedVoltageReceiver`."""
-    cache = XBReceiverCache(TiedArrayChannelisedVoltageReceiver)
-    yield cache
-    cache.close()
-
-
 @pytest.fixture
 async def capture_start_streams(request: pytest.FixtureRequest, cbf_config: dict) -> list[str]:
     """List of streams for which capture-start will automatically be issued."""
@@ -586,12 +565,91 @@ async def capture_start_streams(request: pytest.FixtureRequest, cbf_config: dict
     return out
 
 
+class CoreAllocator:
+    """Provide CPU cores to receivers that need them.
+
+    It is initialised with a list of cores (from pytest config), with earlier
+    entries considered better than later ones. Cores are allocated in this
+    order. There is no mechanism to return cores; simply create a new
+    allocator to start fresh.
+    """
+
+    def __init__(self, cores: Iterable[int]) -> None:
+        self._cores = deque(cores)
+
+    def allocate(self, n: int) -> Sequence[int]:
+        """Request `n` cores.
+
+        Raises
+        ------
+        ValueError
+            If there are insufficient cores available
+        """
+        if n > len(self._cores):
+            raise ValueError(f"{n} cores requested but only {len(self._cores)} cores available")
+        return [self._cores.popleft() for _ in range(n)]
+
+
+# Note: it's important that this has session scope, so that it's only run
+# before core_allocator calls os.sched_setaffinity.
+@pytest.fixture(scope="session")
+def cores(pytestconfig: pytest.Config) -> list[int]:
+    """Get the cores to use for core pinning for this test."""
+    cores = [int(x) for x in pytestconfig.getini("cores")]
+    if not cores:
+        cores = sorted(os.sched_getaffinity(0))
+    return cores
+
+
+@pytest.fixture
+def tied_array_channelised_voltage_receive_streams(
+    pytestconfig: pytest.Config,
+    cbf_config: dict,
+    n_antennas: int,
+    n_channels: int,
+    int_time: float,
+    band: str,
+) -> list[str]:
+    """Streams that will be captured by :func:`receive_tied_array_channelised_voltage`."""
+    interface_gbps = float(pytestconfig.getini("interface_gbps"))
+    stream_names = [
+        name
+        for name, config in cbf_config["outputs"].items()
+        if config["type"] == "gpucbf.tied_array_channelised_voltage"
+    ]
+
+    # Subscribe to only as many beams as can reliably be squeezed through a
+    # 100 Gb/s adapter.
+    n_bls = n_antennas * (n_antennas + 1) * 2
+    budget = interface_gbps * 1e9 - n_bls * n_channels / int_time * 64  # 64 bits per visibility
+    adc_sample_rate = BANDS[band].adc_sample_rate
+    stream_bandwidth = adc_sample_rate * 8  # 8 bits per component
+    max_streams = min(len(stream_names), int(budget // stream_bandwidth))
+    if max_streams < 4:
+        pytest.skip("Not enough network bandwidth for two dual-pol beams")
+    return stream_names[:max_streams]
+
+
+@pytest.fixture
+def core_allocator(cores: list[int]) -> CoreAllocator:
+    """Create a core allocator for the test."""
+    alloc = CoreAllocator(cores)
+    # Pin the main Python thread to a core, to ensure it won't conflict with
+    # any of the worker threads. Note that this is repeated for each test,
+    # but that is harmless.
+    os.sched_setaffinity(0, alloc.allocate(1))
+    return alloc
+
+
 @pytest.fixture
 async def cbf(
+    pytestconfig: pytest.Config,
     cbf_cache: CBFCache,
     cbf_config: dict,
     cbf_mode_config: dict,
+    core_allocator: CoreAllocator,
     capture_start_streams: list[str],
+    tied_array_channelised_voltage_receive_streams: list[str],
     pdf_report: Reporter,
 ) -> AsyncGenerator[CBFRemoteControl, None]:
     """Set up a CBF for a single test.
@@ -599,11 +657,36 @@ async def cbf(
     The returned CBF might not be specific to this test, but it will have
     been reset to a default state, with the dsim outputting zeros.
     """
+    interface_address = get_interface_address(pytestconfig.getini("interface"))
+    # This will require running pytest with spead2_net_raw which is unusual.
+    use_ibv = pytestconfig.getini("use_ibv")
+
     cbf = await cbf_cache.get_cbf(cbf_config, cbf_mode_config)
     pdf_report.config(cbf=str(cbf.uuid))
     if isinstance(cbf, FailedCBF):
         raise cbf.exc
     assert isinstance(cbf, CBFRemoteControl)
+
+    # If this is a new (rather than cached) CBF, set up the receivers.
+    if cbf.baseline_correlation_products_receiver is None:
+        logger.info("Subscribing to baseline-correlation-products")
+        cbf.baseline_correlation_products_receiver = BaselineCorrelationProductsReceiver(
+            cbf=cbf,
+            stream_name="baseline-correlation-products",
+            cores=core_allocator.allocate(4),
+            interface_address=interface_address,
+            use_ibv=use_ibv,
+        )
+    if cbf.tied_array_channelised_voltage_receiver is None:
+        logger.info("Subscribing to %d beam streams", len(tied_array_channelised_voltage_receive_streams))
+        cbf.tied_array_channelised_voltage_receiver = TiedArrayChannelisedVoltageReceiver(
+            cbf=cbf,
+            stream_names=tied_array_channelised_voltage_receive_streams,
+            cores=core_allocator.allocate(len(tied_array_channelised_voltage_receive_streams)),
+            interface_address=interface_address,
+            use_ibv=use_ibv,
+        )
+
     # Reset the CBF to default state, except for the actual signal, as
     # doing so is expensive and tests set a chosen signal when they
     # care.
@@ -652,85 +735,14 @@ def pass_channels(
     return slice(lo, hi)
 
 
-class CoreAllocator:
-    """Provide CPU cores to receivers that need them.
-
-    It is initialised with a list of cores (from pytest config), with earlier
-    entries considered better than later ones. Cores are allocated in this
-    order. There is no mechanism to return cores; simply create a new
-    allocator to start fresh.
-    """
-
-    def __init__(self, cores: Iterable[int]) -> None:
-        self._cores = deque(cores)
-
-    def allocate(self, n: int) -> Sequence[int]:
-        """Request `n` cores.
-
-        Raises
-        ------
-        ValueError
-            If there are insufficient cores available
-        """
-        if n > len(self._cores):
-            raise ValueError(f"{n} cores requested but only {len(self._cores)} cores available")
-        return [self._cores.popleft() for _ in range(n)]
-
-
-# Note: it's important that this has session scope, so that it's only run
-# before core_allocator calls os.sched_setaffinity.
-@pytest.fixture(scope="session")
-def cores(pytestconfig: pytest.Config) -> list[int]:
-    """Get the cores to use for core pinning for this test."""
-    cores = [int(x) for x in pytestconfig.getini("cores")]
-    if not cores:
-        cores = sorted(os.sched_getaffinity(0))
-    return cores
-
-
-@pytest.fixture
-def core_allocator(cores: list[int]) -> CoreAllocator:
-    """Create a core allocator for the test."""
-    alloc = CoreAllocator(cores)
-    # Pin the main Python thread to a core, to ensure it won't conflict with
-    # any of the worker threads. Note that this is repeated for each test,
-    # but that is harmless.
-    os.sched_setaffinity(0, alloc.allocate(1))
-    return alloc
-
-
-@pytest.fixture
-def receive_baseline_correlation_products_manual_start(
-    pytestconfig: pytest.Config,
-    cbf: CBFRemoteControl,
-    core_allocator: CoreAllocator,
-    baseline_correlation_products_receiver_cache: XBReceiverCache[BaselineCorrelationProductsReceiver],
-) -> BaselineCorrelationProductsReceiver:
-    """Create a spead2 receive stream for ingesting X-engine output.
-
-    This fixture does not start the receiver.
-    """
-    interface_address = get_interface_address(pytestconfig.getini("interface"))
-    # This will require running pytest with spead2_net_raw which is unusual.
-    use_ibv = pytestconfig.getini("use_ibv")
-
-    return baseline_correlation_products_receiver_cache.get_receiver(
-        cbf=cbf,
-        stream_name="baseline-correlation-products",
-        cores=core_allocator.allocate(4),
-        interface_address=interface_address,
-        use_ibv=use_ibv,
-    )
-
-
 @pytest.fixture
 async def receive_baseline_correlation_products(
-    receive_baseline_correlation_products_manual_start: BaselineCorrelationProductsReceiver,
+    cbf: CBFRemoteControl,
     capture_start_streams: list[str],
 ) -> BaselineCorrelationProductsReceiver:
-    """Create a spead2 receive stream for ingesting X-engine output."""
-    receiver = receive_baseline_correlation_products_manual_start
-    receiver.start()
+    """Get the spead2 receive stream for ingesting X-engine output."""
+    receiver = cbf.baseline_correlation_products_receiver
+    assert receiver is not None
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests). The timeout is increased since it may take some time to get the
@@ -741,66 +753,20 @@ async def receive_baseline_correlation_products(
 
 
 @pytest.fixture
-def receive_tied_array_channelised_voltage_manual_start(
-    pytestconfig: pytest.Config,
-    cbf: CBFRemoteControl,
-    cbf_config: dict,
-    n_antennas: int,
-    n_channels: int,
-    int_time: float,
-    band: str,
-    core_allocator: CoreAllocator,
-    tied_array_channelised_voltage_receiver_cache: XBReceiverCache[TiedArrayChannelisedVoltageReceiver],
-) -> TiedArrayChannelisedVoltageReceiver:
-    """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams.
-
-    This fixture does not start the receiver.
-    """
-    interface_address = get_interface_address(pytestconfig.getini("interface"))
-    use_ibv = pytestconfig.getini("use_ibv")
-    interface_gbps = float(pytestconfig.getini("interface_gbps"))
-
-    stream_names = [
-        name
-        for name, config in cbf_config["outputs"].items()
-        if config["type"] == "gpucbf.tied_array_channelised_voltage"
-    ]
-
-    # Subscribe to only as many beams as can reliably be squeezed through a
-    # 100 Gb/s adapter.
-    n_bls = n_antennas * (n_antennas + 1) * 2
-    budget = interface_gbps * 1e9 - n_bls * n_channels / int_time * 64  # 64 bits per visibility
-    adc_sample_rate = BANDS[band].adc_sample_rate
-    stream_bandwidth = adc_sample_rate * 8  # 8 bits per component
-    max_streams = min(len(stream_names), int(budget // stream_bandwidth))
-    if max_streams < 4:
-        pytest.skip("Not enough network bandwidth for two dual-pol beams")
-    else:
-        logger.info("Subscribing to %d beam streams", max_streams)
-
-    stream_names = stream_names[:max_streams]
-    cores = core_allocator.allocate(len(stream_names))
-    return tied_array_channelised_voltage_receiver_cache.get_receiver(
-        cbf=cbf, stream_names=stream_names, cores=cores, interface_address=interface_address, use_ibv=use_ibv
-    )
-
-
-@pytest.fixture
 async def receive_tied_array_channelised_voltage(
-    receive_tied_array_channelised_voltage_manual_start: TiedArrayChannelisedVoltageReceiver,
-    cbf_config: dict,
+    cbf: CBFRemoteControl,
     capture_start_streams: list[str],
 ) -> TiedArrayChannelisedVoltageReceiver:
-    """Create a spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
-    receiver = receive_tied_array_channelised_voltage_manual_start
-    receiver.start()
+    """Get the spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
+    receiver = cbf.tied_array_channelised_voltage_receiver
+    assert receiver is not None
     # Ensure that the data is flowing, and that we throw away any data that
     # predates the start of this test (to prevent any state leaks from previous
     # tests). The timeout is increased since it may take some time to get the
     # data flowing at the start.
     if all(
         name in capture_start_streams
-        for name, config in cbf_config["outputs"].items()
+        for name, config in cbf.config["outputs"].items()
         if config["type"] == "gpucbf.tied_array_channelised_voltage"
     ):
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
