@@ -924,9 +924,7 @@ class TestEngine:
                 )
 
                 assert ig_recv["frequency"].value == frequency, (
-                    "Output channel offset not correct. "
-                    f"Expected: {frequency}, "
-                    f"actual: {ig_recv['frequency'].value}."
+                    f"Output channel offset not correct. Expected: {frequency}, actual: {ig_recv['frequency'].value}."
                 )
 
                 corrprod_results[corrprod_output.name][j] = ig_recv["xeng_raw"].value
@@ -1213,9 +1211,10 @@ class TestEngine:
             client=client,
             requests=chain.from_iterable(katcp_requests[-1]),
         )
-        with caplog.at_level(WARNING, logger="katgpucbf.xbgpu.engine"), PromDiff(
-            namespace=METRIC_NAMESPACE
-        ) as prom_diff:
+        with (
+            caplog.at_level(WARNING, logger="katgpucbf.xbgpu.engine"),
+            PromDiff(namespace=METRIC_NAMESPACE) as prom_diff,
+        ):
             # We want to test a variety of scenarios:
             # - Transmission starts either on an accumulation boundary or not.
             # - Accumulations that are completely missing.

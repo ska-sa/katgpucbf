@@ -350,15 +350,18 @@ def pytest_runtest_call(item) -> Generator[None, None, None]:
 @pytest.fixture(autouse=True)
 def matplotlib_report_style() -> Generator[None, None, None]:
     """Set the style of all matplotlib plots."""
-    with matplotlib.style.context("ggplot"), matplotlib.rc_context(
-        {
-            # Serif fonts better match the rest of the document
-            "font.family": "serif",
-            "font.serif": ["Liberation Serif"],
-            # A lot of the graphs are noisy and a narrower linewidth makes
-            # the detail easier to see.
-            "lines.linewidth": 0.3,
-        }
+    with (
+        matplotlib.style.context("ggplot"),
+        matplotlib.rc_context(
+            {
+                # Serif fonts better match the rest of the document
+                "font.family": "serif",
+                "font.serif": ["Liberation Serif"],
+                # A lot of the graphs are noisy and a narrower linewidth makes
+                # the detail easier to see.
+                "lines.linewidth": 0.3,
+            }
+        ),
     ):
         yield
 

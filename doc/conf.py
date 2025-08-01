@@ -25,15 +25,19 @@ sys.path.insert(0, os.path.abspath("."))
 # -- Project information -----------------------------------------------------
 
 project = "katgpucbf"
-copyright = "2021-2024, National Research Foundation (SARAO)"
+copyright = "2021-2025, National Research Foundation (SARAO)"
 
 # Get the information from the installed package, no need to maintain it in
 # multiple places.
 dist = distribution(project)
 
+# PEP 621 specifies that the author name and email in pyproject.toml are
+# combined into the Author-email metadata field, in the format, so we need to
+# split them again. This isn't a fully general solution, but good enough since
+# we don't expect the field to contain anything too weird.
 # TODO: Sphinx doesn't recognise the "maintainer" field, which we don't use
 # right now but may in future. Should we concatenate them here?
-author = dist.metadata["Author"]
+author = dist.metadata["Author-email"].split("<")[0].strip()
 
 # Sphinx provides for "release" and "version" to be different. See here:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-release

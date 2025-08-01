@@ -15,6 +15,7 @@
 ################################################################################
 
 """Unit tests for DelayModel functions."""
+
 import copy
 from collections.abc import Sequence
 from functools import partial

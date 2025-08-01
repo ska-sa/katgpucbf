@@ -191,7 +191,7 @@ class TestDelay:
 
 
 @pytest.mark.parametrize("op, name", [(operator.add, "+"), (operator.sub, "-"), (operator.mul, "*")])
-def test_combine(op: Callable[[Any, Any], Any], name: str) -> None:  # noqa: D
+def test_combine(op: Callable[[Any, Any], Any], name: str) -> None:
     """Test :class:`katgpucbf.dsim.signal.CombinedSignal`."""
     n = 200
     frequency = 1000.0

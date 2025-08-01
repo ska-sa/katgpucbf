@@ -1,27 +1,107 @@
 [build-system]
 requires = [
-	"setuptools>=45",
-	"setuptools_scm[toml]>=6.0",
+    "setuptools>=77",
+    "setuptools_scm[toml]>=6.0",
 ]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "katgpucbf"
+description = "GPU-accelerated correlator for the MeerKAT Extension"
+readme = "README.md"
+license = "BSD-3-Clause"
+authors = [
+    {name = "SARAO DSP team", email = "cbf@sarao.ac.za"},
+]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "aiokatcp>=1.9.0",
+    "dask",
+    "katsdpservices[aiomonitor]",
+    "katsdpsigproc>=1.9.0",
+    "katsdptelstate",
+    "numba",
+    "numpy",
+    "prometheus-async[aiohttp]",
+    "prometheus-client>=0.4",  # First version to auto-append _total to counter names
+    "pyparsing>=3.0.0",
+    "scipy",
+    "spead2>=4.3.1",
+    "xarray",
+]
+requires-python = ">=3.12"
+dynamic = ["version"]  # Provided by setuptools_scm
+
+[project.optional-dependencies]
+vkgdr = [
+    "vkgdr",
+]
+
+gpu = [
+    "katsdpsigproc[CUDA]",
+    "vkgdr",
+]
+
+doc = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinxcontrib-bibtex",
+    "sphinxcontrib-tikz",
+    "sphinx-mathjax-offline",
+]
+
+test = [
+    "katsdpsigproc[CUDA]",
+    "async-solipsism>=0.6",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-custom_exit_code",
+    "pytest-mock",
+]
+
+qualification = [
+    "async-timeout",
+    "docutils>=0.18",
+    "matplotlib",
+    "prometheus-api-client",
+    "pylatex",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-check>=1.3,<2.2.3",  # Upper bound due to https://github.com/okken/pytest-check/issues/173
+    "pytest-custom_exit_code",
+    "pytest-reportlog",
+]
+
+copy-mk = [
+    "katportalclient",
+]
+
+[project.scripts]
+fgpu = "katgpucbf.fgpu.main:main"
+xbgpu = "katgpucbf.xbgpu.main:main"
+dsim = "katgpucbf.dsim.main:main"
+fsim = "katgpucbf.fsim.main:main"
+
+[project.urls]
+Homepage = "https://github.com/ska-sa/katgpucbf"
+Documentation = "https://katgpucbf.readthedocs.io"
+
 [tool.setuptools_scm]
-
-[tool.black]
-line-length = 120
-
-[tool.isort]
-profile = "black"
-line_length = 120
-known_local_folder = ["benchmark_tools", "noisy_search", "remote", "sighandler"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+extend-exclude = ["*.ipynb"]
 [tool.ruff.lint]
 select = [
     "E", "W",  # pycodestyle
     "F",  # pyflakes
+    "I",  # isort
     "D",  # pydocstyle
     "N",  # pep8-naming
     "B",  # flake8-bugbear
@@ -34,6 +114,8 @@ extend-ignore = ["D105", "D107"]  # docstrings for magic methods
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 property-decorators = ["pytest.fixture"]
+[tool.ruff.lint.isort]
+known-local-folder = ["benchmark_tools", "noisy_search", "remote", "sighandler"]
 
 [tool.pytest.ini_options]
 testpaths = "test"
@@ -46,8 +128,8 @@ asyncio_default_fixture_loop_scope = "function"
 branch = true
 command_line = "-m pytest"
 source = [
-	"katgpucbf",
-	"test/",
+    "katgpucbf",
+    "test/",
 ]
 
 [tool.coverage.html]
@@ -55,13 +137,13 @@ show_contexts = true
 
 [tool.coverage.paths]
 source = [
-	"src",
-	"*/site-packages",
+    "src",
+    "*/site-packages",
 ]
 
 [tool.coverage.report]
 exclude_lines = [
-	'#\s*(pragma|PRAGMA)[:\s]?\s*(no|NO)\s*(cover|COVER)',  # Default from coverage
-	'@(?:numba\.)?(?:njit|cfunc)',  # Compiled so coverage can't see the code being executed
-	'@(abc\.)?abstractmethod',
+    '#\s*(pragma|PRAGMA)[:\s]?\s*(no|NO)\s*(cover|COVER)',  # Default from coverage
+    '@(?:numba\.)?(?:njit|cfunc)',  # Compiled so coverage can't see the code being executed
+    '@(abc\.)?abstractmethod',
 ]
