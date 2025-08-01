@@ -146,10 +146,10 @@ class CBFRemoteControl(CBFBase):
     async def close(self, master_controller_client: aiokatcp.Client | None) -> None:
         """Shut down all the connections and deconfigure the subarray product."""
         if self.baseline_correlation_products_receiver is not None:
-            self.baseline_correlation_products_receiver.stream_group.stop()
+            self.baseline_correlation_products_receiver.stop()
             self.baseline_correlation_products_receiver = None  # Break reference cycle
         if self.tied_array_channelised_voltage_receiver is not None:
-            self.tied_array_channelised_voltage_receiver.stream_group.stop()
+            self.tied_array_channelised_voltage_receiver.stop()
             self.tied_array_channelised_voltage_receiver = None  # Break reference cycle
         self.product_controller_client.close()
         await self.product_controller_client.wait_closed()

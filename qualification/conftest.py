@@ -673,7 +673,7 @@ async def cbf(
         cbf.baseline_correlation_products_receiver = BaselineCorrelationProductsReceiver(
             cbf=cbf,
             stream_name="baseline-correlation-products",
-            cores=core_allocator.allocate(4),
+            cores=core_allocator.allocate(5),
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
@@ -682,7 +682,7 @@ async def cbf(
         cbf.tied_array_channelised_voltage_receiver = TiedArrayChannelisedVoltageReceiver(
             cbf=cbf,
             stream_names=tied_array_channelised_voltage_receive_streams,
-            cores=core_allocator.allocate(len(tied_array_channelised_voltage_receive_streams)),
+            cores=core_allocator.allocate(len(tied_array_channelised_voltage_receive_streams) + 1),
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
