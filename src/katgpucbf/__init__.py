@@ -1,7 +1,7 @@
 # noqa: D104
 
 ################################################################################
-# Copyright (c) 2020-2022, 2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, 2024-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -42,6 +42,7 @@ DEFAULT_KATCP_PORT: Final = 7147
 DEFAULT_JONES_PER_BATCH: Final = 2**20
 DIG_HEAP_SAMPLES: Final = 4096
 DIG_SAMPLE_BITS: Final = 10
+ENGINE_DITHER_SEED_BITS: Final = 64
 #: Minimum update period (in seconds) for katcp sensors where the underlying
 #: value may update extremely rapidly.
 MIN_SENSOR_UPDATE_PERIOD: Final = 1.0

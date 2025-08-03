@@ -25,6 +25,7 @@ import numbers
 from collections.abc import Iterable, Iterator, Sequence
 from fractions import Fraction
 from functools import partial
+from random import SystemRandom
 
 import aiokatcp
 import katsdpsigproc.accel as accel
@@ -38,6 +39,7 @@ from katsdpsigproc.resource import async_wait_for_events
 from .. import (
     BYTE_BITS,
     DESCRIPTOR_TASK_NAME,
+    ENGINE_DITHER_SEED_BITS,
     GPU_PROC_TASK_NAME,
     N_POLS,
     RECV_TASK_NAME,
@@ -563,15 +565,13 @@ class Pipeline:
             output.dither,
             narrowband=narrowband_config,
         )
+        seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITS)
         self._compute = template.instantiate(
             compute_queue,
             engine.n_samples,
             self.spectra,
             output.spectra_per_heap,
-            # The magic constant was chosen at random. It ensures that the
-            # seed won't be the same as in other types of engine that also use
-            # sync_time as the basis for seeding.
-            seed=int(engine.time_converter.sync_time) ^ 0x9CC11336C8B170B7,
+            seed=seed,
             sequence_first=engine.feng_id,
             sequence_step=engine.n_ants,
         )
@@ -605,7 +605,7 @@ class Pipeline:
         self.gains = np.zeros((output.channels, N_POLS), np.complex64)
         # A version number that is incremented every time the gains change
         self.gains_version = 0
-        self._populate_sensors()
+        self._populate_sensors(seed)
         self._init_delay_gain()
 
         self.descriptor_heap = send.make_descriptor_heap(
@@ -614,8 +614,17 @@ class Pipeline:
             sample_bits=engine.send_sample_bits,
         )
 
-    def _populate_sensors(self) -> None:
+    def _populate_sensors(self, seed: int) -> None:
         sensors = self.engine.sensors
+        sensors.add(
+            aiokatcp.Sensor(
+                str,
+                f"{self.output.name}.dither-seed",
+                "Random seed used in dithering for quantisation",
+                default=str(seed),
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
         for pol in range(N_POLS):
             sensors.add(
                 aiokatcp.Sensor(

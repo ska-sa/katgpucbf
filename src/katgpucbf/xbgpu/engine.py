@@ -28,6 +28,7 @@ import math
 import time
 from abc import abstractmethod
 from collections.abc import Sequence
+from random import SystemRandom
 
 import aiokatcp
 import katsdpsigproc
@@ -42,6 +43,7 @@ from katsdpsigproc.abc import AbstractContext
 from .. import (
     COMPLEX,
     DESCRIPTOR_TASK_NAME,
+    ENGINE_DITHER_SEED_BITS,
     GPU_PROC_TASK_NAME,
     N_POLS,
     RECV_TASK_NAME,
@@ -358,15 +360,13 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             [Beam(pol=output.pol, dither=output.dither) for output in outputs],
             n_spectra_per_batch=engine.recv_layout.n_spectra_per_heap,
         )
+        seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITS)
         self._beamform = template.instantiate(
             self._proc_command_queue,
             n_batches=engine.heaps_per_fengine_per_chunk,
             n_ants=engine.n_ants,
             n_channels_per_substream=engine.n_channels_per_substream,
-            # The magic constant was chosen at random. It ensures that the
-            # seed won't be the same as in other types of engine that also use
-            # sync_time as the basis for seeding.
-            seed=int(engine.time_converter.sync_time) ^ 0xFA9D9B2093B458D5,
+            seed=seed,
             sequence_first=engine.channel_offset_value,
             sequence_step=engine.n_channels,
         )
@@ -419,9 +419,9 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
             send_enabled=init_send_enabled,
         )
 
-        self._populate_sensors()
+        self._populate_sensors(seed)
 
-    def _populate_sensors(self) -> None:
+    def _populate_sensors(self, seed: int) -> None:
         sensors = self.engine.sensors
         for i, output in enumerate(self.outputs):
             # Static sensors
@@ -432,6 +432,15 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     "The range of channels processed by this B-engine, inclusive",
                     default=f"({self.engine.channel_offset_value},"
                     f"{self.engine.channel_offset_value + self.engine.n_channels_per_substream - 1})",
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
+            sensors.add(
+                aiokatcp.Sensor(
+                    str,
+                    f"{output.name}.dither-seed",
+                    "Random seed used in dithering for quantisation",
+                    default=str(seed),
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
