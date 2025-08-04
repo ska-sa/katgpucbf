@@ -460,10 +460,12 @@ def _create_receive_stream_group(
     n_extra_chunks = 2  # Chunks that are being processed
     free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_extra_chunks)
+    # TODO: remove the type: ignore once spead2 is upgraded
     group_config = spead2.recv.ChunkStreamGroupConfig(
         eviction_mode=spead2.recv.ChunkStreamGroupConfig.EvictionMode.LOSSY,
         max_chunks=max_chunks,
-    )
+        pop_if_full=True,
+    )  # type: ignore
     group = spead2.recv.ChunkStreamRingGroup(group_config, data_ringbuffer, free_ringbuffer)
     for _ in range(free_ringbuffer.maxsize):
         chunk = chunk_factory(group)
