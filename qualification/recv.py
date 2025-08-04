@@ -18,13 +18,14 @@
 
 import ast
 import asyncio
+import contextlib
 import ctypes
 import logging
 import math
 import os
 import threading
 from collections import deque
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Generator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self, overload
 
@@ -66,6 +67,23 @@ class _ChunkQueueWaiter:
         self.loop.call_soon_threadsafe(self._wake)
 
 
+class ChunkQueueAdder:
+    """Context manager for adding a batch of chunks to a :class:`ChunkQueue`.
+
+    This should not be constructed directly. Use :meth:`ChunkQueue.put_batch`.
+    """
+
+    def __init__(self, maxsize: int, chunks: deque[katgpucbf.recv.Chunk]) -> None:
+        self._maxsize = maxsize
+        self._chunks = chunks
+
+    def __call__(self, chunk: katgpucbf.recv.Chunk) -> None:
+        """Add a chunk."""
+        if len(self._chunks) == self._maxsize:
+            self._chunks.popleft().recycle()
+        self._chunks.append(chunk)
+
+
 class ChunkQueue:
     """Queue where oldest elements are discarded when full.
 
@@ -86,16 +104,21 @@ class ChunkQueue:
         # Event loops blocked in `get` (protected by the lock)
         self._waiters: list[_ChunkQueueWaiter] = list()
 
-    def put_nowait(self, chunk: katgpucbf.recv.Chunk) -> None:
-        """Add an item to the queue without blocking.
+    @contextlib.contextmanager
+    def put_batch(self) -> Generator[ChunkQueueAdder, None, None]:
+        """Add a batch of chunks.
 
-        If the queue is full, discard the oldest chunk.
+        Example
+        -------
+        .. code:: python
+
+            with q.put_batch() as adder:
+                adder(chunk1)
+                adder(chunk2)
         """
         with self._lock:
             empty = len(self._chunks) == 0
-            if len(self._chunks) == self.maxsize:
-                self._chunks.popleft().recycle()
-            self._chunks.append(chunk)
+            yield ChunkQueueAdder(self.maxsize, self._chunks)
             if empty:
                 # Note: waking up *all* waiters can cause a thundering heard in
                 # general, but we're only expecting a single consumer so it's
@@ -198,7 +221,18 @@ class XBReceiver:
         assert isinstance(data_ringbuffer, spead2.recv.ChunkRingbuffer)
         for chunk in data_ringbuffer:
             assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
-            self._queue.put_nowait(chunk)
+            with self._queue.put_batch() as adder:
+                adder(chunk)
+                # Opportunistically add more chunks that are available,
+                # to avoid waking up the receiver multiple times.
+                while True:
+                    try:
+                        chunk = data_ringbuffer.get_nowait()
+                    except spead2.Empty:
+                        break
+                    else:
+                        assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
+                        adder(chunk)
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
         """Check whether this chunk is complete (no missing data)."""
