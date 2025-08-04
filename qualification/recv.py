@@ -47,6 +47,7 @@ from katgpucbf.utils import TimeConverter
 
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
+CHUNK_QUEUE_SIZE = 2
 DEFAULT_TIMEOUT = 10.0
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,7 @@ class XBReceiver:
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
         self.cbf = cbf
         self._acv_name = acv_name
-        self._queue = ChunkQueue(maxsize=2)
+        self._queue = ChunkQueue(maxsize=CHUNK_QUEUE_SIZE)
         self._worker_thread = threading.Thread(target=self._worker, args=(worker_core,))
 
     def stop(self) -> None:
@@ -561,7 +562,12 @@ def _create_receive_stream_group(
     chunk_factory
         Factory function to initialise the chunks.
     """
-    n_extra_chunks = 2  # Chunks that are being processed
+    # Chunks that are being processed:
+    # - 2 for tests themselves
+    # - CHUNK_QUEUE_SIZE for the ChunkQueue
+    # - 1 for the worker thread (between taking a heap off the data_ringbuffer
+    #   and making room for it in the ChunkQueue).
+    n_extra_chunks = CHUNK_QUEUE_SIZE + 3
     free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
     data_ringbuffer = spead2.recv.ChunkRingbuffer(n_extra_chunks)
     group_config = spead2.recv.ChunkStreamGroupConfig(
