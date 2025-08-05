@@ -85,6 +85,9 @@ pipeline {
         sh 'echo "setuptools<78" > constrain-setuptools.txt'
         sh 'PIP_CONSTRAINT="constrain-setuptools.txt qualification/requirements.txt" pip install pylatex'
         sh 'pip install -r qualification/requirements.txt'
+        // TODO temporary hack
+        sh 'pip uninstall --yes spead2'  // Otherwise it won't actually get replaced
+        sh 'pip install "spead2@git+https://github.com/ska-sa/spead2@discard-oldest"'
         sh 'pip install --no-deps ".[qualification]" && pip check'
       }
     }
