@@ -132,7 +132,7 @@ katsdpservices==1.4
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
-katsdpsigproc==1.9.0
+katsdpsigproc==1.10.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
