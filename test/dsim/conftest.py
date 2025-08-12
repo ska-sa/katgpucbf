@@ -90,15 +90,15 @@ def timestamps() -> np.ndarray:
 
 @pytest.fixture
 def heap_sets(timestamps: np.ndarray) -> Sequence[send.HeapSet]:
-    """Two instances of :class:`~katgpucbf.dsim.send.HeapSet` with random payload bytes."""
+    """Two instances of :class:`~katgpucbf.dsim.send.HeapSet` with random payload bytes and one with zeros."""
     heap_sets = [
         send.HeapSet.create(
             timestamps, [N_ENDPOINTS_PER_POL] * N_POLS, DIG_HEAP_SAMPLES * DIG_SAMPLE_BITS // BYTE_BITS, range(N_POLS)
         )
-        for _ in range(2)
+        for _ in range(3)
     ]
     rng = np.random.default_rng(1)
-    for heap_set in heap_sets:
+    for heap_set in heap_sets[:2]:
         heap_set.data["payload"][:] = rng.integers(0, 256, size=heap_set.data["payload"].shape, dtype=np.uint8)
     return heap_sets
 

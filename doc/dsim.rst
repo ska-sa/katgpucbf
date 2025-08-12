@@ -215,3 +215,8 @@ new signal is computed asynchronously into a spare second window. Once that's
 completed, the spare and active windows are swapped. The new spare window may
 still be referenced by in-flight heaps, so it is necessary to await
 transmission of those heaps before allowing the signal to be changed again.
+
+The qualification test framework resets state between tests by setting the
+dsim signal to all zeros. To speed this up, a third window is reserved for
+this purpose, which is pre-filled with zeros. Setting the signal to
+all-zeros thus needs only to switch windows, but not to compute new values.

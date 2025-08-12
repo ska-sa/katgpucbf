@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -45,7 +45,7 @@ class HeapSet:
     The heaps are split into two parts, each of which is preprocessed to
     allow efficient transmission.
 
-    This class should normally be constructed with :meth:`factory`.
+    This class should normally be constructed with :meth:`create`.
 
     Parameters
     ----------

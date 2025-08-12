@@ -36,7 +36,7 @@ from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
 
 @pytest.fixture
 async def katcp_server(
-    sender: Sender, heap_sets: Sequence[HeapSet], descriptor_sender: DescriptorSender
+    sender: Sender, heap_sets: list[HeapSet], descriptor_sender: DescriptorSender
 ) -> AsyncGenerator[DeviceServer, None]:
     """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
@@ -44,7 +44,7 @@ async def katcp_server(
     server = DeviceServer(
         sender=sender,
         descriptor_sender=descriptor_sender,
-        spare=heap_sets[1],
+        heap_sets=heap_sets,
         adc_sample_rate=ADC_SAMPLE_RATE,
         sample_bits=DIG_SAMPLE_BITS,
         dither_seed=dither_seed,
@@ -118,6 +118,22 @@ async def test_signals(
     # Check that sensors were updated
     assert await katcp_client.sensor_value("signals-orig", str) == signals_str
     assert await katcp_client.sensor_value("period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
+    assert parse_signals(await katcp_client.sensor_value("signals", str)) == parse_signals(signals_str)
+
+
+async def test_signals_zero(
+    katcp_server: DeviceServer,
+    katcp_client: aiokatcp.Client,
+    sender: Sender,
+    heap_sets: Sequence[HeapSet],
+) -> None:
+    """Test the fast path for setting all signals to zero."""
+    signals_str = "0;0;"
+    await katcp_client.request("signals", signals_str)
+    assert sender.heap_set is heap_sets[2]
+    np.testing.assert_equal(sender.heap_set.data["payload"].data, 0)
+    np.testing.assert_equal(sender.heap_set.data["digitiser_status"].data, 0)
+    assert await katcp_client.sensor_value("signals-orig", str) == signals_str
     assert parse_signals(await katcp_client.sensor_value("signals", str)) == parse_signals(signals_str)
 
 

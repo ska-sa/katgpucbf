@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -31,7 +31,7 @@ from ..send import DescriptorSender
 from ..spead import DIGITISER_STATUS_SATURATION_COUNT_SHIFT, DIGITISER_STATUS_SATURATION_FLAG_BIT
 from .send import HeapSet, Sender
 from .shared_array import SharedArray
-from .signal import Signal, SignalService, TerminalError, format_signals, parse_signals
+from .signal import Constant, Signal, SignalService, TerminalError, format_signals, parse_signals
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,9 @@ class DeviceServer(aiokatcp.DeviceServer):
     ----------
     sender
         Sender which is streaming data out. It is halted when the server is stopped.
-    spare
-        Heap set which is not currently being used, but is available to swap in
+    heap_sets
+        Heap sets which can be transmitted (must have length 3). The first element
+        must be currently set on `sender.`
     adc_sample_rate
         Sampling rate in Hz
     sample_bits
@@ -64,7 +65,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self,
         sender: Sender,
         descriptor_sender: DescriptorSender,
-        spare: HeapSet,
+        heap_sets: list[HeapSet],
         adc_sample_rate: float,
         sample_bits: int,
         dither_seed: int,
@@ -74,7 +75,8 @@ class DeviceServer(aiokatcp.DeviceServer):
         super().__init__(*args, **kwargs)
         self.sender = sender
         self.descriptor_sender = descriptor_sender
-        self.spare = spare
+        assert len(heap_sets) == 3
+        self.heap_sets = heap_sets
         self.adc_sample_rate = adc_sample_rate
         self.sample_bits = sample_bits
         # Scratch space for computing saturation counts. It is passed to
@@ -86,9 +88,10 @@ class DeviceServer(aiokatcp.DeviceServer):
             shared_saturated.buffer, dims=["pol", "time"], attrs={"shared_array": shared_saturated}
         )
         self._signals_lock = asyncio.Lock()  # Serialises request_signals
-        heap_sets = [sender.heap_set, spare]
+        # First two are for dynamic signals, while the 3rd is reserved for
+        # sending zeros.
         self._signal_service = SignalService(
-            [heap_set.data["payload"] for heap_set in heap_sets] + [self._saturated],
+            [heap_set.data["payload"] for heap_set in heap_sets[:2]] + [self._saturated],
             sample_bits,
             dither_seed,
         )
@@ -132,7 +135,7 @@ class DeviceServer(aiokatcp.DeviceServer):
                 "max-period",
                 "Maximum period that may be passed to ?signals",
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
-                default=spare.data["payload"].isel(pol=0).size * BYTE_BITS // sample_bits,
+                default=heap_sets[0].data["payload"].isel(pol=0).size * BYTE_BITS // sample_bits,
             )
         )
         self.sensors.add(
@@ -179,27 +182,36 @@ class DeviceServer(aiokatcp.DeviceServer):
         if period is None:
             period = self.sensors["max-period"].value
         async with self._signals_lock:
-            await self._signal_service.sample(
-                signals,
-                0,
-                period,
-                self.adc_sample_rate,
-                self.spare.data["payload"],
-                self._saturated,
-                self.sender.heap_samples,
-            )
-            # As per M1000-0001-053: bits [47:32] hold saturation count, while
-            # bit 1 holds a boolean flag.
-            # np.left_shift is << but xarray doesn't seem to implement the
-            # operator overload.
-            digitiser_status = np.left_shift(self._saturated, DIGITISER_STATUS_SATURATION_COUNT_SHIFT)
-            digitiser_status |= xr.where(
-                digitiser_status, np.uint64(1 << DIGITISER_STATUS_SATURATION_FLAG_BIT), np.uint64(0)
-            )
-            self.spare.data["digitiser_status"][:] = digitiser_status
-            spare = self.sender.heap_set
-            timestamp = await self.sender.set_heaps(self.spare)
-            self.spare = spare
+            if all(type(signal) is Constant and signal.value == 0.0 for signal in signals):
+                # We've been asked to generate just zeros. We have a heap set
+                # reserved for that.
+                target = self.heap_sets[2]
+            else:
+                # Find an unused heap set that is not the reserved-for-zeros one
+                if self.sender.heap_set is self.heap_sets[0]:
+                    target = self.heap_sets[1]
+                else:
+                    target = self.heap_sets[0]
+                await self._signal_service.sample(
+                    signals,
+                    0,
+                    period,
+                    self.adc_sample_rate,
+                    target.data["payload"],
+                    self._saturated,
+                    self.sender.heap_samples,
+                )
+                # As per M1000-0001-053: bits [47:32] hold saturation count, while
+                # bit 1 holds a boolean flag.
+                # np.left_shift is << but xarray doesn't seem to implement the
+                # operator overload.
+                digitiser_status = np.left_shift(self._saturated, DIGITISER_STATUS_SATURATION_COUNT_SHIFT)
+                digitiser_status |= xr.where(
+                    digitiser_status, np.uint64(1 << DIGITISER_STATUS_SATURATION_FLAG_BIT), np.uint64(0)
+                )
+                target.data["digitiser_status"][:] = digitiser_status
+
+            timestamp = await self.sender.set_heaps(target)
             self._signals_orig_sensor.value = signals_str
             self._signals_sensor.value = format_signals(signals)
             self._period_sensor.value = period
@@ -230,7 +242,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             signals = parse_signals(signals_str)
         except (pp.ParseBaseException, TerminalError) as exc:
             raise aiokatcp.FailReply(str(exc)) from None
-        n_pol = self.spare.data.sizes["pol"]
+        n_pol = self.heap_sets[0].data.sizes["pol"]
         if len(signals) != n_pol:
             raise aiokatcp.FailReply(f"expected {n_pol} signals, received {len(signals)}")
         return await self.set_signals(signals, signals_str, period)
