@@ -214,8 +214,7 @@ def make_stream_group(
         user_data=user_data,
         explicit_start=True,
     )
-    for stream in group:
-        stats_collector.add_stream(stream)
+    stats_collector.add_stream_group(group)
     return group
 
 

@@ -93,11 +93,34 @@ class Chunk(spead2.recv.Chunk):
 class StatsCollector(Collector):
     """Collect statistics from spead2 streams as Prometheus metrics."""
 
+    class _GroupMemberWeakref:
+        """Weak reference to a member of a stream group.
+
+        This is complicated by the way spead2 exposes stream group members:
+        accessing a group member returns a freshly-minted Python wrapper,
+        which will disappear even if the group member itself still exists
+        in C++. That makes :class:`spead2.recv.ChunkStreamGroupMember`
+        unsuitable for use with weakrefs. Instead, we hold a weakref to the
+        group.
+        """
+
+        def __init__(self, stream_group: spead2.recv.ChunkStreamRingGroup, index: int) -> None:
+            self._stream_group = weakref.ref(stream_group)
+            self._index = index
+
+        def __call__(self) -> spead2.recv.ChunkStreamGroupMember | None:
+            """Obtain a strong reference to the stream, if it still exists."""
+            stream_group = self._stream_group()
+            if stream_group is None:
+                return None
+            else:
+                return stream_group[self._index]
+
     @dataclass
     class _StreamInfo:
         """Information about a single registered stream."""
 
-        stream: weakref.ReferenceType[AnyStream]
+        stream: "weakref.ReferenceType[spead2.recv.ChunkRingStream] | StatsCollector._GroupMemberWeakref"
         indices: list[int]  # Indices of counters, in the order given by counter_map
         prev: list[int]  # Amounts already counted
 
@@ -115,8 +138,11 @@ class StatsCollector(Collector):
             self.created = time.time()
             self.streams = []
 
-        def add_stream(self, stream: AnyStream) -> None:
-            """Register a new stream."""
+        def _add_stream(
+            self, stream_weak: "weakref.ReferenceType[spead2.recv.ChunkRingStream] | StatsCollector._GroupMemberWeakref"
+        ) -> None:
+            stream = stream_weak()
+            assert stream is not None  # Caller guarantees it holds a strong reference
             config = stream.config
             indices = [config.get_stat_index(name) for name in self.totals.keys()]
             # Get the current statistics and immediately update with them
@@ -126,7 +152,15 @@ class StatsCollector(Collector):
                 cur = stats[indices[i]]
                 self.totals[stat_name] += cur
                 prev.append(cur)
-            self.streams.append(StatsCollector._StreamInfo(weakref.ref(stream), indices, prev))
+            self.streams.append(StatsCollector._StreamInfo(stream_weak, indices, prev))
+
+        def add_stream(self, stream: spead2.recv.ChunkRingStream) -> None:
+            """Register a new stream."""
+            self._add_stream(weakref.ref(stream))
+
+        def add_stream_group(self, stream_group: spead2.recv.ChunkStreamRingGroup) -> None:
+            for i in range(len(stream_group)):
+                self._add_stream(StatsCollector._GroupMemberWeakref(stream_group, i))
 
         def update(self) -> None:
             """Fetch statistics from all streams and update totals."""
@@ -180,7 +214,7 @@ class StatsCollector(Collector):
         for label_set in self._label_sets.values():
             label_set.update()
 
-    def add_stream(self, stream: AnyStream, labels: Iterable[str] = ()) -> None:
+    def add_stream(self, stream: spead2.recv.ChunkRingStream, labels: Iterable[str] = ()) -> None:
         """Register a new stream.
 
         If the collector was constructed with a non-empty ``labelnames``, then
@@ -198,6 +232,25 @@ class StatsCollector(Collector):
         if labels_tuple not in self._label_sets:
             self._label_sets[labels_tuple] = self._LabelSet(labels_tuple, self._counter_map.keys())
         self._label_sets[labels_tuple].add_stream(stream)
+
+    def add_stream_group(self, stream_group: spead2.recv.ChunkStreamRingGroup, labels: Iterable[str] = ()) -> None:
+        """Register all the streams in a stream group.
+
+        If the collector was constructed with a non-empty ``labelnames``, then
+        ``labels`` must contain the same number of elements to provide the
+        labels for the metrics that this stream will update.
+
+        .. warning::
+
+           Calling this more than once with the same stream group will cause
+           that group's statistics to be counted multiple times.
+        """
+        labels_tuple = tuple(labels)
+        if len(labels_tuple) != len(self._labelnames):
+            raise ValueError("labels must have the same length as labelnames")
+        if labels_tuple not in self._label_sets:
+            self._label_sets[labels_tuple] = self._LabelSet(labels_tuple, self._counter_map.keys())
+        self._label_sets[labels_tuple].add_stream_group(stream_group)
 
     def collect(self) -> Iterable[Metric]:
         """Implement Prometheus' Collector interface."""
