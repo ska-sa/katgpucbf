@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022, National Research Foundation (SARAO)
+# Copyright (c) 2022, 2025 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -48,6 +48,21 @@ def mock_stream(extra_stats: Iterable[str] = ("too_old_heaps",)) -> mock.Mock:
     for stat_config in stream.config.stats:
         stream.stats[stream.config.get_stat_index(stat_config.name)] = 0
     return stream
+
+
+def mock_stream_group(n: int, extra_stats: Iterable[str] = ("too_old_heaps",)) -> mock.Mock:
+    """Create a mock of :Class:`spead2.recv.ChunkStreamRingGroup`.
+
+    The mock has just enough in it to work with
+    :class:`~katgpucbf.recv.StatsCollector`.
+    """
+    group = mock.Mock()
+    group._streams = [mock_stream(extra_stats) for _ in range(n)]
+    # Make the group behave like a sequence
+    group.__getitem__ = lambda self, x: self._streams[x]
+    group.__iter__ = lambda self: iter(self._streams)
+    group.__len__ = lambda self: len(self._streams)
+    return group
 
 
 def inc_stat(stream: mock.Mock, name: str, value: int) -> None:
@@ -115,7 +130,7 @@ class TestStatsCollector:
         assert registry.get_sample_value("test_input_incomplete_heaps_created", labels) == now
         assert registry.get_sample_value("test_input_too_old_heaps_created", labels) == now
 
-        # Garbage-collect the heap, and ensure that its stats are retained
+        # Garbage-collect the stream, and ensure that its stats are retained
         weak = weakref.ref(stream)
         del stream
         # Do it multiple times because some Python implementations need to be
@@ -125,3 +140,37 @@ class TestStatsCollector:
         assert weak() is None, "Stream was not garbage collected"
 
         assert registry.get_sample_value("test_input_incomplete_heaps_total", labels) == 6
+
+    def test_stream_group(self, registry: CollectorRegistry, stats_collector: StatsCollector) -> None:
+        """Test basic functionality with a stream group."""
+        group = mock_stream_group(2)
+        inc_stat(group[0], "incomplete_heaps_evicted", 2)
+        inc_stat(group[1], "incomplete_heaps_evicted", 1)
+        inc_stat(group[1], "too_old_heaps", 5)
+        labels = {"label1": "value1", "label2": "value2"}
+        now = 123456780.5
+        with mock.patch("time.time", return_value=now):
+            stats_collector.add_stream_group(group, labels.values())
+        assert registry.get_sample_value("test_input_incomplete_heaps_total", labels) == 3
+        assert registry.get_sample_value("test_input_too_old_heaps_total", labels) == 5
+        assert registry.get_sample_value("test_input_incomplete_heaps_created", labels) == now
+        assert registry.get_sample_value("test_input_too_old_heaps_created", labels) == now
+
+        # Update, check that the updates are collected, but `created` is not changed
+        inc_stat(group[1], "incomplete_heaps_evicted", 4)
+        inc_stat(group[0], "too_old_heaps", 10)
+        assert registry.get_sample_value("test_input_incomplete_heaps_total", labels) == 7
+        assert registry.get_sample_value("test_input_too_old_heaps_total", labels) == 15
+        assert registry.get_sample_value("test_input_incomplete_heaps_created", labels) == now
+        assert registry.get_sample_value("test_input_too_old_heaps_created", labels) == now
+
+        # Garbage-collect the group, and ensure that its stats are retained
+        weak = weakref.ref(group)
+        del group
+        # Do it multiple times because some Python implementations need to be
+        # pushed to collect everything.
+        for _ in range(5):
+            gc.collect()
+        assert weak() is None, "Group was not garbage collected"
+
+        assert registry.get_sample_value("test_input_incomplete_heaps_total", labels) == 7
