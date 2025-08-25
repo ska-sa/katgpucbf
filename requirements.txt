@@ -8,7 +8,7 @@ aiohttp==3.12.14
     # via
     #   aiomonitor
     #   prometheus-async
-aiokatcp==2.0.2
+aiokatcp==2.2.0
     # via katgpucbf (pyproject.toml)
 aiomonitor==0.7.1
     # via katsdpservices
@@ -50,7 +50,7 @@ janus==2.0.0
     # via aiomonitor
 jinja2==3.1.6
     # via aiomonitor
-katcp-codec==0.1.0
+katcp-codec==0.2.0
     # via aiokatcp
 katsdpservices==1.4
     # via katgpucbf (pyproject.toml)
@@ -163,6 +163,7 @@ typing-extensions==4.12.2
     #   aiokatcp
     #   aiomonitor
     #   aiosignal
+    #   katcp-codec
     #   katsdpsigproc
     #   pytools
 tzdata==2024.2

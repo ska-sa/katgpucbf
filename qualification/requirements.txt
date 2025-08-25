@@ -16,7 +16,7 @@ aiohttp==3.12.14
     #   -c qualification/../requirements.txt
     #   aiomonitor
     #   prometheus-async
-aiokatcp==2.0.2
+aiokatcp==2.2.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -128,7 +128,7 @@ jinja2==3.1.6
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
-katcp-codec==0.1.0
+katcp-codec==0.2.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -373,6 +373,7 @@ typing-extensions==4.12.2
     #   aiokatcp
     #   aiomonitor
     #   aiosignal
+    #   katcp-codec
     #   katsdpsigproc
 tzdata==2024.2
     # via
