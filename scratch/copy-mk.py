@@ -45,9 +45,9 @@ import katgpucbf.configure_tools
 
 #: Scale factors between MK and MK+ wideband gains, based on number of channels
 GAIN_SCALE = {
-    1024: 5687.284403271646,
-    4096: 2973.030598589153,
-    32768: 1147.5800238145268,
+    1024: 5687.316784598243,
+    4096: 2973.0378395784287,
+    32768: 1147.5821089181798,
 }
 
 
