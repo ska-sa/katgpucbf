@@ -451,7 +451,7 @@ async def _cbf_config_and_description(
         "type": "gpucbf.antenna_channelised_voltage",
         "src_streams": [dig_names[i % len(dig_names)] for i in range(2 * n_antennas)],
         # m8xx is used to avoid possible confusion with real antennas
-        "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["v", "h"]],
+        "input_labels": [f"m{800 + i}{pol}" for i in range(n_antennas) for pol in ["h", "v"]],
         "n_chans": n_channels,
     }
     if narrowband_decimation > 1:
