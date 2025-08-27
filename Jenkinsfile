@@ -168,8 +168,8 @@ pipeline {
       }
       steps {
         script {
-          branch = env.BRANCH_NAME
-          tag = (branch == "main") ? "latest" : branch
+          String branch = env.BRANCH_NAME
+          String tag = (branch == "main") ? "latest" : branch
           // Supply credentials to Dockerhub so that we can reliably pull the base image
           docker.withRegistry("", "dockerhub") {
             dockerImage = docker.build(
