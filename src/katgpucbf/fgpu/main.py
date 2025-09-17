@@ -23,18 +23,16 @@ actual running of the processing.
 
 import argparse
 import asyncio
-import gc
+import contextlib
 import logging
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, MutableMapping, Sequence
 from typing import TypedDict
 
-import katsdpservices
 import katsdpsigproc.accel as accel
-import prometheus_async
 import vkgdr
 from katsdpservices import get_interface_address
-from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
+from katsdpservices.aiomonitor import add_aiomonitor_arguments
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
@@ -47,10 +45,11 @@ from .. import (
     DIG_SAMPLE_BITS,
     __version__,
 )
+from ..main import engine_main
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import DitherType, add_gc_stats, add_signal_handlers, comma_split, parse_dither, parse_enum, parse_source
+from ..utils import DitherType, comma_split, parse_dither, parse_enum, parse_source
 from . import DIG_SAMPLE_BITS_VALID
 from .engine import Engine
 from .output import NarrowbandOutput, NarrowbandOutputDiscard, NarrowbandOutputNoDiscard, WidebandOutput, WindowFunction
@@ -524,34 +523,31 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
     return engine, monitor
 
 
-async def async_main() -> None:
-    """Start the F-Engine asynchronously."""
-    args = parse_args()
+async def start_engine(
+    args: argparse.Namespace,
+    tg: asyncio.TaskGroup,
+    exit_stack: contextlib.AsyncExitStack,
+    locals_: MutableMapping[str, object],
+) -> Engine:
+    """Start the F-Engine asynchronously.
+
+    See Also
+    --------
+    katgpucbf.main.engine_main
+    """
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     vkgdr_handle = make_vkgdr(ctx.device)
     logger.info("Initialising F-engine on %s", ctx.device.name)
     engine, monitor = make_engine(ctx, vkgdr_handle, args)
-    add_signal_handlers(engine)
-    add_gc_stats()
-    prometheus_server: prometheus_async.aio.web.MetricsHTTPServer | None = None
-    if args.prometheus_port is not None:
-        prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
-    with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
-        await engine.start()
-        # Avoid garbage collections needing to iterate over all the objects
-        # allocated so far. That makes garbage collection much faster, and we
-        # don't expect to free up much of what's currently allocated.
-        gc.freeze()
-        await engine.join()
-        gc.unfreeze()  # Allow objects to be tidied away during shutdown
-        if prometheus_server:
-            await prometheus_server.close()
+    exit_stack.enter_context(monitor)
+    locals_.update(locals())
+    await engine.start()
+    return engine
 
 
 def main() -> None:
-    """Start the F-engine."""
-    katsdpservices.setup_logging()
-    asyncio.run(async_main())
+    """Run the F-engine."""
+    engine_main(parse_args(), start_engine)
 
 
 if __name__ == "__main__":

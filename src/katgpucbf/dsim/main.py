@@ -21,21 +21,22 @@ Simulates the packet structure of MeerKAT digitisers.
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import math
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import MutableMapping, Sequence
 
 import katsdpservices
 import numpy as np
-import prometheus_async
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
+from ..main import engine_main
 from ..send import DescriptorSender
-from ..utils import TimeConverter, add_gc_stats, add_signal_handlers
+from ..utils import TimeConverter
 from . import descriptors, send, signal
 from .server import DeviceServer
 
@@ -152,17 +153,19 @@ def first_timestamp(time_converter: TimeConverter, now: float, align: int) -> in
     return samples
 
 
-async def _async_main(tg: asyncio.TaskGroup) -> None:
-    """Real implementation of :func:`async_main`.
+async def start_engine(
+    args: argparse.Namespace,
+    tg: asyncio.TaskGroup,
+    exit_stack: contextlib.AsyncExitStack,
+    locals_: MutableMapping[str, object],
+) -> DeviceServer:
+    """Start the device server.
 
-    This is split into a separate function to avoid having to indent the whole
-    thing inside the `tg` context manager.
+    See Also
+    --------
+    katgpucbf.main.engine_main
     """
-    args = parse_args()
     heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
-
-    if args.prometheus_port is not None:
-        await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
     timestamps = np.zeros(args.max_period // args.heap_samples, dtype=">u8")
     # One being currently sent, one spare, and one reserved for zeros
@@ -250,12 +253,10 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
     server.sensors["sync-time"].value = args.sync_time
     await server.start()
 
-    add_signal_handlers(server)
-    add_gc_stats()
-
     time_converter = TimeConverter(args.sync_time, args.adc_sample_rate)
     timestamp = first_timestamp(time_converter, time.time(), args.max_period)
     start_time = time_converter.adc_to_unix(timestamp)
+    locals_.update(locals())
 
     logger.info("First timestamp will be %#x", timestamp)
     # Sleep until start_time. Python doesn't seem to have an interface
@@ -265,20 +266,13 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
     await asyncio.sleep(max(0, start_time - time.time()))
     logger.info("Starting transmission")
     tg.create_task(sender.run(timestamp, time_converter))
-    tg.create_task(server.join())
+    return server
     # The caller will exit the scope of tg, thus waiting for everything to finish
-
-
-async def async_main() -> None:
-    """Asynchronous main entry point."""
-    async with asyncio.TaskGroup() as tg:
-        await _async_main(tg)
 
 
 def main() -> None:
     """Run main program."""
-    katsdpservices.setup_logging()
-    asyncio.run(async_main())
+    engine_main(parse_args(), start_engine)
 
 
 if __name__ == "__main__":

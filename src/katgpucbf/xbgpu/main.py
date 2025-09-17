@@ -31,17 +31,16 @@ everything required to run the XB-Engine.
 
 import argparse
 import asyncio
-import gc
+import contextlib
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, MutableMapping, Sequence
 from typing import TypedDict
 
 import katsdpsigproc.accel
-import prometheus_async
 import vkgdr
-from katsdpservices import get_interface_address, setup_logging
-from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
+from katsdpservices import get_interface_address
+from katsdpservices.aiomonitor import add_aiomonitor_arguments
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_parser
 
@@ -55,10 +54,11 @@ from .. import (
     DEFAULT_TTL,
     __version__,
 )
+from ..main import engine_main
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import DitherType, add_gc_stats, add_signal_handlers, parse_dither, parse_source
+from ..utils import DitherType, parse_dither, parse_source
 from .correlation import device_filter
 from .output import BOutput, XOutput
 
@@ -441,57 +441,40 @@ def make_engine(
     return xbengine, monitor
 
 
-async def async_main(args: argparse.Namespace) -> None:
+async def start_engine(
+    args: argparse.Namespace,
+    tg: asyncio.TaskGroup,
+    exit_stack: contextlib.AsyncExitStack,
+    locals_: MutableMapping[str, object],
+) -> XBEngine:
     """Create and launch the XB-Engine.
 
     Attach the ibverbs sender transport to the XBEngine object and then tell
     the object to launch all its internal asyncio functions.
 
-    Parameters
-    ----------
-    args
-        Parsed arguments returned from :func:`parse_args`.
+    See Also
+    --------
+    katgpucbf.main.engine_main
     """
     context = katsdpsigproc.accel.create_some_context(device_filter=device_filter)
     vkgdr_handle = make_vkgdr(context.device)
     xbengine, monitor = make_engine(context, vkgdr_handle, args)
+    exit_stack.enter_context(monitor)
 
-    prometheus_server: prometheus_async.aio.web.MetricsHTTPServer | None = None
-    if args.prometheus_port is not None:
-        prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
+    # katsdpcontroller launches us with real-time scheduling, but we don't
+    # want that for the main Python thread since it can starve the
+    # latency-sensitive network threads.
+    os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
 
-    with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
-        logger.info("Starting main processing loop")
-
-        add_signal_handlers(xbengine)
-        add_gc_stats()
-        # katsdpcontroller launches us with real-time scheduling, but we don't
-        # want that for the main Python thread since it can starve the
-        # latency-sensitive network threads.
-        os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
-
-        await xbengine.start()
-        # Avoid garbage collections needing to iterate over all the objects
-        # allocated so far. That makes garbage collection much faster, and we
-        # don't expect to free up much of what's currently allocated.
-        gc.freeze()
-        await xbengine.join()
-        gc.unfreeze()  # Allow objects to be tidied away during shutdown
-
-        if prometheus_server:
-            await prometheus_server.close()
+    logger.info("Starting main processing loop")
+    locals_.update(locals())
+    await xbengine.start()
+    return xbengine
 
 
 def main() -> None:
-    """
-    Launch the XB-Engine pipeline.
-
-    This method only sets up the asyncio loop and calls the async_main() method
-    which is where the real work is done.
-    """
-    args = parse_args()
-    setup_logging()
-    asyncio.run(async_main(args))
+    """Run the XB-engine."""
+    engine_main(parse_args(), start_engine)
 
 
 if __name__ == "__main__":

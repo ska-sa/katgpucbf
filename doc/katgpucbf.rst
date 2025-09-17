@@ -20,6 +20,7 @@ Submodules
 
    katgpucbf.configure_tools
    katgpucbf.curand_helpers
+   katgpucbf.main
    katgpucbf.mapped_array
    katgpucbf.meerkat
    katgpucbf.monitor
