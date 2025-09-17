@@ -441,15 +441,16 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.Namespace) -> tuple[Engine, Monitor]:
-    """Make an :class:`Engine` object, given a GPU context.
+    """Make an :class:`~katgpucbf.fgpu.engine.Engine` object, given a GPU context.
 
     Parameters
     ----------
     ctx
-        The GPU context in which the :class:`.Engine` will operate.
+        The GPU context in which the :class:`~katgpucbf.fgpu.engine.Engine`
+        will operate.
     vkgdr_handle
-        The Vkgdr handle in which the :class:`.Engine` will operate. It
-        must use the same device as `ctx`.
+        The Vkgdr handle in which the :class:`~katgpucbf.fgpu.engine.Engine`
+        will operate. It must use the same device as `ctx`.
     args
         Parsed arguments returned from :func:`parse_args`.
     """

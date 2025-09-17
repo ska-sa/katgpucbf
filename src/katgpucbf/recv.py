@@ -440,7 +440,8 @@ def add_reader(
 ) -> None:
     """Connect a stream to an underlying transport.
 
-    See the documentation for :class:`.Engine` for an explanation of the parameters.
+    See the documentation for :class:`~katgpucbf.fgpu.engine.Engine` for an
+    explanation of the parameters.
     """
     if isinstance(src, str):
         stream.add_udp_pcap_file_reader(src)

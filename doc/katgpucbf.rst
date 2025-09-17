@@ -10,6 +10,7 @@ Subpackages
    katgpucbf.dsim
    katgpucbf.fgpu
    katgpucbf.fsim
+   katgpucbf.vgpu
    katgpucbf.xbgpu
 
 Submodules

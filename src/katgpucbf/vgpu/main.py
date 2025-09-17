@@ -37,7 +37,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def make_engine(args: argparse.Namespace) -> Engine:
-    """Create the :class:`~katgpucbf.vgpu.Engine`."""
+    """Create the :class:`~katgpucbf.vgpu.engine.Engine`."""
     return Engine(args.katcp_host, args.katcp_port)
 
 
