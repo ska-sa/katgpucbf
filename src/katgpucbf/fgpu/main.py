@@ -32,20 +32,16 @@ from typing import TypedDict
 import katsdpsigproc.accel as accel
 import vkgdr
 from katsdpservices import get_interface_address
-from katsdpservices.aiomonitor import add_aiomonitor_arguments
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from .. import (
     DEFAULT_JONES_PER_BATCH,
-    DEFAULT_KATCP_HOST,
-    DEFAULT_KATCP_PORT,
     DEFAULT_PACKET_PAYLOAD_BYTES,
     DEFAULT_TTL,
     DIG_SAMPLE_BITS,
-    __version__,
 )
-from ..main import engine_main
+from ..main import add_common_arguments, engine_main
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
@@ -260,24 +256,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             "window_function [hann], dither [uniform]"
         ),
     )
-    parser.add_argument(
-        "--katcp-host",
-        type=str,
-        default=DEFAULT_KATCP_HOST,
-        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
-    )
-    parser.add_argument(
-        "--katcp-port",
-        type=int,
-        default=DEFAULT_KATCP_PORT,
-        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
-    )
-    parser.add_argument(
-        "--prometheus-port",
-        type=int,
-        help="Network port on which to serve Prometheus metrics [none]",
-    )
-    add_aiomonitor_arguments(parser)
+    add_common_arguments(parser)
     parser.add_argument(
         "--recv-interface",
         type=comma_split(get_interface_address),
@@ -433,7 +412,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--use-peerdirect", action="store_true", help="Send chunks directly from GPU memory (requires supported GPU)"
     )
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
-    parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Source endpoints (or pcap file)")
     args = parser.parse_args(arglist)
 

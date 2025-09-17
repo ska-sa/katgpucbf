@@ -33,8 +33,8 @@ import numpy as np
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
-from ..main import engine_main
+from .. import BYTE_BITS, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
+from ..main import add_common_arguments, engine_main
 from ..send import DescriptorSender
 from ..utils import TimeConverter
 from . import descriptors, send, signal
@@ -73,23 +73,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--max-period", type=int, help="Maximum supported period for pre-computed signals [same as --period]"
     )
     parser.add_argument("--dither-seed", type=int, help="Fixed seed for reproducible dithering [random]")
-    parser.add_argument(
-        "--katcp-host",
-        type=str,
-        default=DEFAULT_KATCP_HOST,
-        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
-    )
-    parser.add_argument(
-        "--katcp-port",
-        type=int,
-        default=DEFAULT_KATCP_PORT,
-        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
-    )
-    parser.add_argument(
-        "--prometheus-port",
-        type=int,
-        help="Network port on which to serve Prometheus metrics [none]",
-    )
+    add_common_arguments(parser)
     parser.add_argument(
         "dest",
         nargs="+",

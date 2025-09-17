@@ -40,7 +40,6 @@ from typing import TypedDict
 import katsdpsigproc.accel
 import vkgdr
 from katsdpservices import get_interface_address
-from katsdpservices.aiomonitor import add_aiomonitor_arguments
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_parser
 
@@ -48,13 +47,10 @@ from katgpucbf.xbgpu.engine import XBEngine
 
 from .. import (
     DEFAULT_JONES_PER_BATCH,
-    DEFAULT_KATCP_HOST,
-    DEFAULT_KATCP_PORT,
     DEFAULT_PACKET_PAYLOAD_BYTES,
     DEFAULT_TTL,
-    __version__,
 )
-from ..main import engine_main
+from ..main import add_common_arguments, engine_main
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
@@ -207,24 +203,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Add a baseline-correlation-products output (may be repeated). The required keys are: "
         "name, dst, heap_accumulation_threshold.",
     )
-    parser.add_argument(
-        "--katcp-host",
-        type=str,
-        default=DEFAULT_KATCP_HOST,
-        help="Hostname or IP address on which to listen for KATCP C&M connections [all interfaces]",
-    )
-    parser.add_argument(
-        "--katcp-port",
-        type=int,
-        default=DEFAULT_KATCP_PORT,
-        help="TCP port on which to listen for KATCP C&M connections [%(default)s]",
-    )
-    parser.add_argument(
-        "--prometheus-port",
-        type=int,
-        help="Network port on which to serve Prometheus metrics [none]",
-    )
-    add_aiomonitor_arguments(parser)
+    add_common_arguments(parser)
     parser.add_argument(
         "--adc-sample-rate",
         type=float,
@@ -359,8 +338,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Start with correlator output transmission enabled, without having to issue a katcp command.",
     )
-    parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
-    parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
 
     args = parser.parse_args(arglist)

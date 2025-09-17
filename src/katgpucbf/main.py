@@ -29,9 +29,45 @@ import aiokatcp
 import katsdpservices
 import prometheus_async
 import prometheus_client
-from katsdpservices.aiomonitor import start_aiomonitor
+from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
+
+from . import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, __version__
 
 logger = logging.getLogger(__name__)
+
+
+def add_common_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    katcp: bool = True,
+    prometheus: bool = True,
+    aiomonitor: bool = True,
+    version: bool = True,
+) -> None:
+    """Add command-line arguments to the parser."""
+    if katcp:
+        parser.add_argument(
+            "--katcp-host",
+            type=str,
+            default=DEFAULT_KATCP_HOST,
+            help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
+        )
+        parser.add_argument(
+            "--katcp-port",
+            type=int,
+            default=DEFAULT_KATCP_PORT,
+            help="Network port on which to listen for KATCP C&M connections [%(default)s]",
+        )
+    if prometheus:
+        parser.add_argument(
+            "--prometheus-port",
+            type=int,
+            help="Network port on which to serve Prometheus metrics [none]",
+        )
+    if aiomonitor:
+        add_aiomonitor_arguments(parser)
+    if version:
+        parser.add_argument("--version", action="version", version=__version__)
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:

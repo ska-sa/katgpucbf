@@ -47,7 +47,7 @@ from .. import (
     spead,
 )
 from ..fgpu.send import PREAMBLE_SIZE, make_descriptor_heap, make_item_group
-from ..main import add_gc_stats
+from ..main import add_common_arguments, add_gc_stats
 from ..send import DescriptorSender
 from ..utils import TimeConverter, comma_split
 from . import METRIC_NAMESPACE
@@ -104,11 +104,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--main-affinity", type=int, default=-1, help="Core affinity for the main Python thread [not bound]"
     )
-    parser.add_argument(
-        "--prometheus-port",
-        type=int,
-        help="Network port on which to serve Prometheus metrics [none]",
-    )
+    add_common_arguments(parser, katcp=False, aiomonitor=False)
     parser.add_argument("--run-once", action="store_true", help="Transmit a single collection of heaps before exiting")
     parser.add_argument(
         "dest",

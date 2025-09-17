@@ -22,39 +22,15 @@ import contextlib
 from collections.abc import MutableMapping, Sequence
 
 import aiokatcp
-from katsdpservices.aiomonitor import add_aiomonitor_arguments
 
-from .. import (
-    DEFAULT_KATCP_HOST,
-    DEFAULT_KATCP_PORT,
-    __version__,
-)
-from ..main import engine_main
+from ..main import add_common_arguments, engine_main
 from .engine import Engine
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser(prog="vgpu")
-    parser.add_argument(
-        "--katcp-host",
-        type=str,
-        default=DEFAULT_KATCP_HOST,
-        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
-    )
-    parser.add_argument(
-        "--katcp-port",
-        type=int,
-        default=DEFAULT_KATCP_PORT,
-        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
-    )
-    parser.add_argument(
-        "--prometheus-port",
-        type=int,
-        help="Network port on which to serve Prometheus metrics [none]",
-    )
-    add_aiomonitor_arguments(parser)
-    parser.add_argument("--version", action="version", version=__version__)
+    add_common_arguments(parser)
 
     args = parser.parse_args(arglist)
     return args
