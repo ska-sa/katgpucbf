@@ -338,6 +338,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Start with correlator output transmission enabled, without having to issue a katcp command.",
     )
+    parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
 
     args = parser.parse_args(arglist)
