@@ -50,11 +50,11 @@ from .. import (
     DEFAULT_PACKET_PAYLOAD_BYTES,
     DEFAULT_TTL,
 )
-from ..main import add_common_arguments, engine_main
+from ..main import add_common_arguments, add_recv_arguments, engine_main
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import DitherType, parse_dither, parse_source
+from ..utils import DitherType, parse_dither, parse_source_ipv4
 from .correlation import device_filter
 from .output import BOutput, XOutput
 
@@ -287,29 +287,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         required=True,
         help="UNIX time at which digitisers were synced.",
     )
-    parser.add_argument(
-        "--recv-affinity", type=int, default=-1, help="Core to which the receiver thread will be bound [not bound]."
-    )
-    parser.add_argument(
-        "--recv-comp-vector",
-        type=int,
-        default=0,
-        help="Completion vector for source streams, or -1 for polling [%(default)s].",
-    )
-    parser.add_argument(
-        "--recv-interface",
-        type=get_interface_address,
-        required=True,
-        help="Name of the interface receiving data from the F-Engines, e.g. eth0.",
-    )
-    parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for input [no].")
-    parser.add_argument(
-        "--recv-buffer",
-        type=int,
-        default=128 * 1024 * 1024,
-        metavar="BYTES",
-        help="Size of network receive buffer [128MiB]",
-    )
+    add_recv_arguments(parser, multi=False)
     parser.add_argument(
         "--send-affinity", type=int, default=-1, help="Core to which the sender thread will be bound [not bound]."
     )
@@ -339,7 +317,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Start with correlator output transmission enabled, without having to issue a katcp command.",
     )
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
-    parser.add_argument("src", type=parse_source, help="Multicast address data is received from.")
+    parser.add_argument("src", type=parse_source_ipv4, help="Multicast address data is received from.")
 
     args = parser.parse_args(arglist)
     if args.jones_per_batch % args.channels != 0:

@@ -22,15 +22,22 @@ import contextlib
 from collections.abc import MutableMapping, Sequence
 
 import aiokatcp
+from katsdptelstate.endpoint import endpoint_list_parser
 
-from ..main import add_common_arguments, engine_main
+from ..main import add_common_arguments, add_recv_arguments, engine_main
+from ..spead import DEFAULT_PORT
 from .engine import VEngine
+
+VTP_DEFAULT_PORT = 52030
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser(prog="vgpu")
     add_common_arguments(parser)
+    add_recv_arguments(parser)
+    parser.add_argument("src", type=endpoint_list_parser(DEFAULT_PORT), nargs=2, help="Source endpoints")
+    parser.add_argument("dst", type=endpoint_list_parser(VTP_DEFAULT_PORT), help="Destination endpoints")
 
     args = parser.parse_args(arglist)
     return args

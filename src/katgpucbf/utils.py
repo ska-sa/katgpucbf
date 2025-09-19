@@ -21,6 +21,7 @@ import enum
 import ipaddress
 import logging
 import math
+import os
 import weakref
 from collections import Counter
 from collections.abc import Callable
@@ -69,15 +70,22 @@ def parse_dither(value: str) -> DitherType:
     return parse_enum("dither", value, DitherType)
 
 
+def parse_source_ipv4(value: str) -> list[tuple[str, int]]:
+    """Parse a string into a list of IPv4 endpoints."""
+    endpoints = endpoint_list_parser(DEFAULT_PORT)(value)
+    for endpoint in endpoints:
+        ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
+    return [(ep.host, ep.port) for ep in endpoints]
+
+
 def parse_source(value: str) -> list[tuple[str, int]] | str:
-    """Parse a string into a list of IP endpoints."""
+    """Parse a string into a list of IP endpoints or a filename."""
     try:
-        endpoints = endpoint_list_parser(DEFAULT_PORT)(value)
-        for endpoint in endpoints:
-            ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
-        return [(ep.host, ep.port) for ep in endpoints]
+        return parse_source_ipv4(value)
     except ValueError:
-        return value
+        if os.path.exists(value):
+            return value
+        raise ValueError(f"{value} is not an endpoint list or a filename") from None
 
 
 def comma_split[T](

@@ -24,14 +24,17 @@ import logging
 import signal
 import time
 from collections.abc import Awaitable, Callable, MutableMapping
+from typing import Any
 
 import aiokatcp
 import katsdpservices
 import prometheus_async
 import prometheus_client
+from katsdpservices import get_interface_address
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 
 from . import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, __version__
+from .utils import comma_split
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,60 @@ def add_common_arguments(
         add_aiomonitor_arguments(parser)
     if version:
         parser.add_argument("--version", action="version", version=__version__)
+
+
+def _identity[T](x: T) -> T:
+    return x
+
+
+def _make_array[T](x: T) -> list[T]:
+    return [x]
+
+
+def add_recv_arguments(parser: argparse.ArgumentParser, *, multi: bool = False) -> None:
+    """Add arguments for receiving interface (supporting ibverbs).
+
+    If `multi` is true, the arguments take comma-separated lists.
+    """
+    if multi:
+        split: Callable[[Callable[[str], Any]], Callable[[str], Any]] = comma_split
+        array: Callable = _make_array
+        s = "(s)"
+        dots = ",..."
+    else:
+        split = _identity
+        array = _identity
+        s = ""
+        dots = ""
+
+    parser.add_argument(
+        "--recv-interface",
+        type=split(get_interface_address),
+        metavar=f"IFACE{dots}",
+        help=f"Name{s} of input network device{s}",
+    )
+    parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for receiving [no]")
+    parser.add_argument(
+        "--recv-affinity",
+        type=split(int),
+        metavar=f"CORE{dots}",
+        default=array(-1),
+        help=f"Core{s} for input-handling thread{s} [not bound]",
+    )
+    parser.add_argument(
+        "--recv-comp-vector",
+        type=comma_split(int),
+        metavar=f"VECTOR{dots}",
+        default=array(0),
+        help=f"Completion vector{s} for source streams, or -1 for polling [0]",
+    )
+    parser.add_argument(
+        "--recv-buffer",
+        type=int,
+        default=128 * 1024 * 1024,
+        metavar="BYTES",
+        help="Size of network receive buffer [128MiB]",
+    )
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:

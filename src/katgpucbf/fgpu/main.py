@@ -41,7 +41,7 @@ from .. import (
     DEFAULT_TTL,
     DIG_SAMPLE_BITS,
 )
-from ..main import add_common_arguments, engine_main
+from ..main import add_common_arguments, add_recv_arguments, engine_main
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
@@ -257,35 +257,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     add_common_arguments(parser)
-    parser.add_argument(
-        "--recv-interface",
-        type=comma_split(get_interface_address),
-        help="Name(s) of input network device(s)",
-    )
-    parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for receiving [no]")
-    parser.add_argument(
-        "--recv-affinity",
-        type=comma_split(int),
-        metavar="CORE,...",
-        default=[-1],
-        help="Cores for input-handling threads (comma-separated) [not bound]",
-    )
-    parser.add_argument(
-        "--recv-comp-vector",
-        type=comma_split(int),
-        metavar="VECTOR,...",
-        default=[0],
-        help="Completion vectors for source streams, or -1 for polling [0]",
-    )
+    add_recv_arguments(parser, multi=True)
     parser.add_argument(
         "--recv-packet-samples", type=int, default=4096, help="Number of samples per digitiser packet [%(default)s]"
-    )
-    parser.add_argument(
-        "--recv-buffer",
-        type=int,
-        default=128 * 1024 * 1024,
-        metavar="BYTES",
-        help="Size of network receive buffer [128MiB]",
     )
     parser.add_argument(
         "--send-interface", type=comma_split(get_interface_address), required=True, help="Name of output network device"
