@@ -25,7 +25,7 @@ import pytest
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu.delay import wrap_angle
-from katgpucbf.fgpu.engine import Engine
+from katgpucbf.fgpu.engine import FEngine
 
 pytestmark = [pytest.mark.cuda_only]
 
@@ -51,7 +51,7 @@ def assert_valid_complex_list(value: str) -> None:
 
 
 class TestKatcpRequests:
-    """Unit tests for the Engine's KATCP requests."""
+    """Unit tests for the FEngine's KATCP requests."""
 
     @pytest.fixture
     def engine_arglist(self) -> list[str]:
@@ -77,7 +77,7 @@ class TestKatcpRequests:
         assert sensor_value == "[0.125+0j]"
 
     @pytest.mark.parametrize("pol", range(N_POLS))
-    async def test_gain_set_scalar(self, engine_client: aiokatcp.Client, engine_server: Engine, pol: int) -> None:
+    async def test_gain_set_scalar(self, engine_client: aiokatcp.Client, engine_server: FEngine, pol: int) -> None:
         """Test that the eq gain is correctly set with a scalar value."""
         # TODO[nb]: need to update for multiple pipelines
         reply, _informs = await engine_client.request("gain", "wideband", pol, "0.2-3j")
@@ -97,7 +97,7 @@ class TestKatcpRequests:
         # Other pol must not have been affected
         np.testing.assert_equal(engine_server._pipelines[0].gains[:, 1 - pol], np.full(CHANNELS, GAIN, np.complex64))
 
-    async def test_gain_set_vector(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
+    async def test_gain_set_vector(self, engine_client: aiokatcp.Client, engine_server: FEngine) -> None:
         """Test that the eq gain is correctly set with a vector of values."""
         # This test doesn't parametrize over pols. It's assumed that anything
         # causing the wrong pol to be set would be picked up by the scalar
@@ -144,7 +144,7 @@ class TestKatcpRequests:
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("gain", "wideband", 0, "1", "2")
 
-    async def test_gain_all_set_scalar(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
+    async def test_gain_all_set_scalar(self, engine_client: aiokatcp.Client, engine_server: FEngine) -> None:
         """Test that ``?gain-all`` works correctly with a vector of values."""
         # TODO[nb]: need to update for multiple pipelines
         reply, _informs = await engine_client.request("gain-all", "wideband", "0.2-3j")
@@ -157,7 +157,7 @@ class TestKatcpRequests:
                 engine_server._pipelines[0].gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64)
             )
 
-    async def test_gain_all_set_vector(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
+    async def test_gain_all_set_vector(self, engine_client: aiokatcp.Client, engine_server: FEngine) -> None:
         """Test that ``?gain-all`` works correctly with a scalar value."""
         # TODO[nb]: need to update for multiple pipelines
         gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
@@ -169,7 +169,7 @@ class TestKatcpRequests:
             assert_valid_complex_list(sensor_value)
             np.testing.assert_equal(np.array(literal_eval(sensor_value)), gains)
 
-    async def test_gain_all_set_default(self, engine_client: aiokatcp.Client, engine_server: Engine) -> None:
+    async def test_gain_all_set_default(self, engine_client: aiokatcp.Client, engine_server: FEngine) -> None:
         """Test ``?gain-all default``."""
         await engine_client.request("gain-all", "wideband", "2+3j")
         await engine_client.request("gain-all", "wideband", "default")
@@ -189,7 +189,7 @@ class TestKatcpRequests:
 
     @pytest.mark.parametrize("correct_delay_strings", [("3.76e-9,0.12e-9:7.322,1.91", "2.67e-9,0.02e-9:5.678,1.81")])
     async def test_delay_model_update_correct(
-        self, engine_server: Engine, engine_client: aiokatcp.Client, correct_delay_strings: tuple[str, str]
+        self, engine_server: FEngine, engine_client: aiokatcp.Client, correct_delay_strings: tuple[str, str]
     ) -> None:
         """Test correctly-formed delay strings and validate the updates.
 

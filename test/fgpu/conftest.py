@@ -27,7 +27,7 @@ from katsdpsigproc.abc import AbstractContext
 
 import katgpucbf.fgpu.engine
 import katgpucbf.fgpu.recv
-from katgpucbf.fgpu.engine import Engine
+from katgpucbf.fgpu.engine import FEngine
 from katgpucbf.fgpu.main import make_engine, parse_args
 
 
@@ -80,12 +80,12 @@ async def engine_server(
     recv_max_chunks_one,
     context: AbstractContext,
     vkgdr_handle: vkgdr.Vkgdr,
-) -> AsyncGenerator[Engine, None]:
-    """Create a dummy :class:`.fgpu.Engine` for unit testing.
+) -> AsyncGenerator[FEngine, None]:
+    """Create a dummy :class:`.FEngine` for unit testing.
 
     The arguments passed are based on the default arguments from
     :mod:`~katgpucbf.fgpu.main`, and are a set of simple parameters just to
-    get the :class:`~.fgpu.Engine` running so that the KATCP interface can be
+    get the :class:`.FEngine` running so that the KATCP interface can be
     tested.
 
     Extra command-line arguments can be added using a ``cmdline_args`` marker.
@@ -108,7 +108,7 @@ async def engine_server(
 
 
 @pytest.fixture
-async def engine_client(engine_server: Engine) -> AsyncGenerator[aiokatcp.Client, None]:
+async def engine_client(engine_server: FEngine) -> AsyncGenerator[aiokatcp.Client, None]:
     """Create a KATCP client for communicating with the dummy server."""
     host, port = engine_server.sockets[0].getsockname()[:2]
     async with asyncio.timeout(5):  # To fail the test quickly if unable to connect

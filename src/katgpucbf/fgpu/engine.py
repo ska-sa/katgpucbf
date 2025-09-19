@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Engine class, which combines all the processing steps for a single digitiser data stream."""
+"""FEngine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
 import copy
@@ -521,7 +521,7 @@ class Pipeline:
         such as dig-rms-dbfs.
     """
 
-    def __init__(self, output: Output, engine: "Engine", context: AbstractContext, dig_stats: bool) -> None:
+    def __init__(self, output: Output, engine: "FEngine", context: AbstractContext, dig_stats: bool) -> None:
         assert isinstance(output, WidebandOutput) or not dig_stats, "wideband output required for digitiser stats"
         # Tuning knobs not exposed via arguments
         n_send = 4
@@ -1179,12 +1179,12 @@ class Pipeline:
         sensor.value = "[" + ", ".join(format_complex(gain) for gain in gains.tolist()) + "]"
 
 
-class Engine(aiokatcp.DeviceServer):
+class FEngine(aiokatcp.DeviceServer):
     """Top-level class running the whole thing.
 
     .. todo::
 
-      The :class:`Engine` needs to have more sensors and requests added to it,
+      The :class:`FEngine` needs to have more sensors and requests added to it,
       according to whatever the design is going to be. SKARAB didn't have katcp
       capability, that was all in corr2, so we need to figure out how to best
       control these engines. This docstring should also be updated to reflect
@@ -1197,7 +1197,7 @@ class Engine(aiokatcp.DeviceServer):
     katcp_port
         Network port on which to listen for KATCP C&M connections.
     context
-        The accelerator (CUDA) context to use for running the Engine.
+        The accelerator (CUDA) context to use for running the FEngine.
     vkgdr_handle
         Handle to vkgdr for the same device as `context`.
     srcs

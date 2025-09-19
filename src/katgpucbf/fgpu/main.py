@@ -17,7 +17,7 @@
 """fgpu main script.
 
 This is what kicks everything off. Command-line arguments are parsed, and used
-to create an :class:`~katgpucbf.fgpu.engine.Engine` object, which then takes over the
+to create an :class:`~katgpucbf.fgpu.engine.FEngine` object, which then takes over the
 actual running of the processing.
 """
 
@@ -47,7 +47,7 @@ from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
 from ..utils import DitherType, comma_split, parse_dither, parse_enum, parse_source
 from . import DIG_SAMPLE_BITS_VALID
-from .engine import Engine
+from .engine import FEngine
 from .output import NarrowbandOutput, NarrowbandOutputDiscard, NarrowbandOutputNoDiscard, WidebandOutput, WindowFunction
 
 logger = logging.getLogger(__name__)
@@ -440,16 +440,16 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.Namespace) -> tuple[Engine, Monitor]:
-    """Make an :class:`~katgpucbf.fgpu.engine.Engine` object, given a GPU context.
+def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.Namespace) -> tuple[FEngine, Monitor]:
+    """Make an :class:`~katgpucbf.fgpu.engine.FEngine` object, given a GPU context.
 
     Parameters
     ----------
     ctx
-        The GPU context in which the :class:`~katgpucbf.fgpu.engine.Engine`
+        The GPU context in which the :class:`~katgpucbf.fgpu.engine.FEngine`
         will operate.
     vkgdr_handle
-        The Vkgdr handle in which the :class:`~katgpucbf.fgpu.engine.Engine`
+        The Vkgdr handle in which the :class:`~katgpucbf.fgpu.engine.FEngine`
         will operate. It must use the same device as `ctx`.
     args
         Parsed arguments returned from :func:`parse_args`.
@@ -462,7 +462,7 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
 
     batch_jones_lcm = math.lcm(*(output.jones_per_batch for output in args.outputs))
     chunk_jones = accel.roundup(args.send_chunk_jones, batch_jones_lcm)
-    engine = Engine(
+    engine = FEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         context=ctx,
@@ -507,7 +507,7 @@ async def start_engine(
     tg: asyncio.TaskGroup,
     exit_stack: contextlib.AsyncExitStack,
     locals_: MutableMapping[str, object],
-) -> Engine:
+) -> FEngine:
     """Start the F-Engine asynchronously.
 
     See Also

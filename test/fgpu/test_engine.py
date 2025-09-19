@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Unit tests for Engine functions."""
+"""Unit tests for FEngine functions."""
 
 import logging
 import math
@@ -35,7 +35,7 @@ from numpy.typing import ArrayLike
 from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
-from katgpucbf.fgpu.engine import Engine, InQueueItem, Pipeline, generate_ddc_weights, generate_pfb_weights
+from katgpucbf.fgpu.engine import FEngine, InQueueItem, Pipeline, generate_ddc_weights, generate_pfb_weights
 from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
 from katgpucbf.fgpu.output import NarrowbandOutput, NarrowbandOutputNoDiscard, Output
 from katgpucbf.utils import TimeConverter
@@ -146,8 +146,8 @@ def assert_angles_allclose(a, b, **kwargs) -> None:
     np.testing.assert_allclose(wrap_angle(a - b), 0.0, **kwargs)
 
 
-class TestEngine:
-    r"""Test :class:`.Engine`."""
+class TestFEngine:
+    r"""Test :class:`.FEngine`."""
 
     @pytest.fixture(params=["wideband", "narrowband_discard", "narrowband_no_discard"])
     def output_type(self, request: pytest.FixtureRequest) -> str:
@@ -322,7 +322,7 @@ class TestEngine:
             "239.10.10.0+15:7149",  # src
         ]
 
-    def test_engine_required_arguments(self, engine_server: Engine) -> None:
+    def test_engine_required_arguments(self, engine_server: FEngine) -> None:
         """Test proper setting of required arguments.
 
         .. note::
@@ -375,7 +375,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine: Engine,
+        engine: FEngine,
         output: Output,
         dig_data: np.ndarray,
         *,
@@ -519,7 +519,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         coherent_scale: np.ndarray,
@@ -625,7 +625,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         coherent_scale: np.ndarray,
@@ -701,7 +701,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         extra_delay_samples: float,
@@ -788,7 +788,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         extra_delay_samples: float,
         extra_phase: float,
@@ -853,7 +853,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
@@ -951,7 +951,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
@@ -1096,7 +1096,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
     ) -> None:
@@ -1133,7 +1133,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         input_voltage: int,
@@ -1168,7 +1168,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         default_gain: np.float32,
@@ -1235,7 +1235,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         monkeypatch,
@@ -1270,7 +1270,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         monkeypatch,
@@ -1307,7 +1307,7 @@ class TestEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: Engine,
+        engine_server: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
     ) -> None:
