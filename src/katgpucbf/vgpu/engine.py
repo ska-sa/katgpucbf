@@ -16,15 +16,12 @@
 
 """Engine class, which does all the actual processing."""
 
-import aiokatcp
-
-from .. import __version__
+from ..utils import Engine
 
 
-class VEngine(aiokatcp.DeviceServer):
+class VEngine(Engine):
     """Top-level class running the whole thing."""
 
     # TODO: VERSION means interface version, rather than software version. It
     # will need to wait on a proper ICD for a release.
     VERSION = "katgpucbf-vgpu-icd-0.1"
-    BUILD_STATE = __version__

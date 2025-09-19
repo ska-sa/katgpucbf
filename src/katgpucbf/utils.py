@@ -29,7 +29,7 @@ import aiokatcp
 import numpy as np
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME
+from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME, __version__
 from .spead import DEFAULT_PORT
 
 # Sensor status threshold. These are mostly thumb-sucks.
@@ -389,3 +389,49 @@ def gaussian_dtype(bits: int) -> np.dtype:
         return np.dtype("V1")
     else:
         return np.dtype([("real", f"int{bits}"), ("imag", f"int{bits}")])
+
+
+class Engine(aiokatcp.DeviceServer):
+    """Common base for device servers."""
+
+    BUILD_STATE = __version__
+
+    def __init__(self, katcp_host: str, katcp_port: int) -> None:
+        super().__init__(katcp_host, katcp_port)
+        self._wait_tasks: list[asyncio.Task] = []  # Tasks that need to be waited for on shutdown
+
+        self.sensors.add(make_steady_state_timestamp_sensor())
+        self.sensors.add(DeviceStatusSensor(self.sensors))
+
+        time_sync_task = add_time_sync_sensors(self.sensors)
+        self.add_service_task(time_sync_task, wait_on_stop=False)
+
+    def add_service_task(self, task: asyncio.Task, *, wait_on_stop: bool = False) -> None:
+        """Register an asynchronous task that runs as part of the server.
+
+        This extends :meth:`aiokatcp.DeviceServer.add_service_task` with
+        the `wait_on_stop` parameter. If true, stopping the server will wait
+        for the task to complete rather than cancelling it, unless one of the
+        service tasks raised an exception (in which case waiting may hang
+        because things are not shutting down cleanly).
+        """
+        super().add_service_task(task)
+        if wait_on_stop:
+            self._wait_tasks.append(task)
+
+    def update_steady_state_timestamp(self, timestamp: int) -> None:
+        """Update ``steady-state-timestamp`` sensor to at least `timestamp`."""
+        sensor = self.sensors["steady-state-timestamp"]
+        sensor.value = max(sensor.value, timestamp)
+
+    async def on_stop(self) -> None:
+        """Cancel tasks registered with :meth:`add_cancel_task` on shutdown."""
+        await super().on_stop()
+        # When service tasks finish gracefully (or are cancelled) they are
+        # removed from service_tasks, so only tasks with exceptions are in
+        # service_tasks. If there is an exception, we don't risk hanging
+        # by waiting for a task that may not complete due to something else
+        # crashing.
+        if not any(task.done() for task in self.service_tasks):
+            for task in self._wait_tasks:
+                await task

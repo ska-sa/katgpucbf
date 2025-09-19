@@ -36,7 +36,6 @@ import katsdpsigproc.resource
 import numpy as np
 import spead2.recv
 import vkgdr.pycuda
-from aiokatcp import DeviceServer
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
 
@@ -49,7 +48,6 @@ from .. import (
     RECV_TASK_NAME,
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
-    __version__,
 )
 from .. import recv as base_recv
 from ..mapped_array import MappedArray
@@ -58,13 +56,7 @@ from ..queue_item import QueueItem
 from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
-from ..utils import (
-    DeviceStatusSensor,
-    TimeConverter,
-    add_time_sync_sensors,
-    make_rate_limited_sensor,
-    make_steady_state_timestamp_sensor,
-)
+from ..utils import Engine, TimeConverter, make_rate_limited_sensor
 from . import DEFAULT_BPIPELINE_NAME, DEFAULT_N_IN_ITEMS, DEFAULT_N_OUT_ITEMS, DEFAULT_XPIPELINE_NAME, recv
 from .beamform import Beam, BeamformTemplate
 from .bsend import BSend
@@ -1001,7 +993,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         self.send_stream.send_enabled_timestamp = timestamp
 
 
-class XBEngine(DeviceServer):
+class XBEngine(Engine):
     r"""GPU XB-Engine pipeline.
 
     Currently the B-Engine functionality has not been added. This class currently
@@ -1114,7 +1106,6 @@ class XBEngine(DeviceServer):
     """
 
     VERSION = "katgpucbf-xbgpu-icd-0.1"
-    BUILD_STATE = __version__
 
     def __init__(
         self,
@@ -1283,12 +1274,6 @@ class XBEngine(DeviceServer):
         # Dynamic sensors
         for sensor in recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
-        sensors.add(make_steady_state_timestamp_sensor())
-        sensors.add(DeviceStatusSensor(sensors))
-
-        time_sync_task = add_time_sync_sensors(sensors)
-        self.add_service_task(time_sync_task)
-        self._cancel_tasks.append(time_sync_task)
 
     def free_in_item(self, item: InQueueItem) -> None:
         """Return an InQueueItem to the free queue if its refcount hits zero."""
@@ -1308,11 +1293,6 @@ class XBEngine(DeviceServer):
         item.refcount = len(self._pipelines)
         for pipeline in self._pipelines:
             pipeline.add_in_item(item)
-
-    def update_steady_state_timestamp(self, timestamp: int) -> None:
-        """Update ``steady-state-timestamp`` sensor to at least `timestamp`."""
-        sensor = self.sensors["steady-state-timestamp"]
-        sensor.value = max(sensor.value, timestamp)
 
     async def _receiver_loop(self) -> None:
         """
@@ -1505,8 +1485,7 @@ class XBEngine(DeviceServer):
             descriptor_task = asyncio.create_task(
                 descriptor_sender.run(), name=f"{pipeline.name}.{DESCRIPTOR_TASK_NAME}"
             )
-            self.add_service_task(descriptor_task)
-            self._cancel_tasks.append(descriptor_task)
+            self.add_service_task(descriptor_task, wait_on_stop=False)
 
         base_recv.add_reader(
             self.receiver_stream,
@@ -1517,20 +1496,23 @@ class XBEngine(DeviceServer):
             buffer=self._recv_buffer,
         )
 
-        self.add_service_task(asyncio.create_task(self._receiver_loop(), name=RECV_TASK_NAME))
+        self.add_service_task(
+            asyncio.create_task(self._receiver_loop(), name=RECV_TASK_NAME),
+            wait_on_stop=True,
+        )
 
         for pipeline in self._pipelines:
             proc_task = asyncio.create_task(
                 pipeline.gpu_proc_loop(),
                 name=f"{pipeline.name}.{GPU_PROC_TASK_NAME}",
             )
-            self.add_service_task(proc_task)
+            self.add_service_task(proc_task, wait_on_stop=True)
 
             send_task = asyncio.create_task(
                 pipeline.sender_loop(),
                 name=f"{pipeline.name}.{SEND_TASK_NAME}",
             )
-            self.add_service_task(send_task)
+            self.add_service_task(send_task, wait_on_stop=True)
 
         await super().start()
 
@@ -1539,17 +1521,7 @@ class XBEngine(DeviceServer):
         Shut down processing when the device server is stopped.
 
         This is called by aiokatcp after closing the listening socket.
-        Also handle any Exceptions thrown unexpectedly in any of the
-        processing loops.
         """
-        for task in self._cancel_tasks:
-            task.cancel()
         self.receiver_stream.stop()
-        # If any of the tasks are already done then we had an exception, and
-        # waiting for the rest may hang as the shutdown path won't proceed
-        # neatly.
-        if not any(task.done() for task in self.service_tasks):
-            for task in self.service_tasks:
-                if task not in self._cancel_tasks:
-                    await task
+        await super().on_stop()  # Waits for service tasks to complete
         self._pipelines.clear()  # Breaks circular references
