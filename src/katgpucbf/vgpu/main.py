@@ -24,7 +24,7 @@ from collections.abc import MutableMapping, Sequence
 import aiokatcp
 
 from ..main import add_common_arguments, engine_main
-from .engine import Engine
+from .engine import VEngine
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
@@ -36,9 +36,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def make_engine(args: argparse.Namespace) -> Engine:
-    """Create the :class:`~katgpucbf.vgpu.engine.Engine`."""
-    return Engine(args.katcp_host, args.katcp_port)
+def make_engine(args: argparse.Namespace) -> VEngine:
+    """Create the :class:`.VEngine`."""
+    return VEngine(args.katcp_host, args.katcp_port)
 
 
 async def start_engine(
