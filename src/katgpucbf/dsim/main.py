@@ -28,7 +28,6 @@ import os
 import time
 from collections.abc import MutableMapping, Sequence
 
-import katsdpservices
 import numpy as np
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
@@ -166,12 +165,11 @@ async def start_engine(
             endpoints.append((ep.host, ep.port))
 
     config = descriptors.create_config()
-    interface_address = katsdpservices.get_interface_address(args.interface)
     descriptor_stream = send.make_stream_base(
         endpoints=endpoints,
         config=config,
         ttl=args.ttl,
-        interface_address=interface_address,
+        interface_address=args.interface,
         ibv=args.ibv,
         comp_vector=args.comp_vector,
     )
@@ -205,7 +203,7 @@ async def start_engine(
         sample_bits=args.sample_bits,
         max_heaps=heap_sets[0].data["heaps"].size,
         ttl=args.ttl,
-        interface_address=interface_address,
+        interface_address=args.interface,
         ibv=args.ibv,
         affinity=args.affinity,
         comp_vector=args.comp_vector,
