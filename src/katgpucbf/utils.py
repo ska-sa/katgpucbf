@@ -329,8 +329,8 @@ class Engine(aiokatcp.DeviceServer):
 
     BUILD_STATE = __version__
 
-    def __init__(self, katcp_host: str, katcp_port: int) -> None:
-        super().__init__(katcp_host, katcp_port)
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__(host, port)
         self._wait_tasks: list[asyncio.Task] = []  # Tasks that need to be waited for on shutdown
 
         self.sensors.add(make_steady_state_timestamp_sensor())

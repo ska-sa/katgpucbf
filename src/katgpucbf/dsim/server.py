@@ -26,9 +26,10 @@ import numpy as np
 import pyparsing as pp
 import xarray as xr
 
-from .. import BYTE_BITS, __version__
+from .. import BYTE_BITS
 from ..send import DescriptorSender
 from ..spead import DIGITISER_STATUS_SATURATION_COUNT_SHIFT, DIGITISER_STATUS_SATURATION_FLAG_BIT
+from ..utils import Engine
 from .send import HeapSet, Sender
 from .shared_array import SharedArray
 from .signal import Constant, Signal, SignalService, TerminalError, format_signals, parse_signals
@@ -36,7 +37,7 @@ from .signal import Constant, Signal, SignalService, TerminalError, format_signa
 logger = logging.getLogger(__name__)
 
 
-class DeviceServer(aiokatcp.DeviceServer):
+class DeviceServer(Engine):
     """katcp server.
 
     Parameters
@@ -59,7 +60,6 @@ class DeviceServer(aiokatcp.DeviceServer):
     # TODO: VERSION means interface version, rather than software version. It
     # will need to wait on a proper ICD for a release.
     VERSION = "katgpucbf-dsim-0.1"
-    BUILD_STATE = __version__
 
     def __init__(
         self,
@@ -111,15 +111,9 @@ class DeviceServer(aiokatcp.DeviceServer):
             "period",
             "Number of samples after which the signals will be repeated",
         )
-        self._steady_state_sensor = aiokatcp.Sensor(
-            int,
-            "steady-state-timestamp",
-            "Heaps with this timestamp or greater are guaranteed to reflect the effects of previous katcp requests.",
-        )
         self.sensors.add(self._signals_orig_sensor)
         self.sensors.add(self._signals_sensor)
         self.sensors.add(self._period_sensor)
-        self.sensors.add(self._steady_state_sensor)
         self.sensors.add(
             aiokatcp.Sensor(
                 str,
@@ -171,6 +165,7 @@ class DeviceServer(aiokatcp.DeviceServer):
         self.sender.halt()
         self.descriptor_sender.halt()
         await self._signal_service.stop()
+        await super().on_stop()
 
     async def set_signals(self, signals: Sequence[Signal], signals_str: str, period: int | None = None) -> int:
         """Change the signals :meth:`request_signals`.
@@ -215,7 +210,7 @@ class DeviceServer(aiokatcp.DeviceServer):
             self._signals_orig_sensor.value = signals_str
             self._signals_sensor.value = format_signals(signals)
             self._period_sensor.value = period
-            self._steady_state_sensor.value = max(self._steady_state_sensor.value, timestamp)
+            self.update_steady_state_timestamp(timestamp)
             return timestamp
 
     async def request_signals(self, ctx, signals_str: str, period: int | None = None) -> int:
