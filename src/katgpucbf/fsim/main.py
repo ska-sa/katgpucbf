@@ -47,9 +47,9 @@ from .. import (
     spead,
 )
 from ..fgpu.send import PREAMBLE_SIZE, make_descriptor_heap, make_item_group
-from ..main import add_common_arguments, add_gc_stats
+from ..main import add_common_arguments, add_gc_stats, comma_split
 from ..send import DescriptorSender
-from ..utils import TimeConverter, comma_split
+from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
 DTYPE = np.dtype(np.int8)

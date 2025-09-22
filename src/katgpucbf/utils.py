@@ -18,20 +18,15 @@
 
 import asyncio
 import enum
-import ipaddress
 import logging
 import math
-import os
 import weakref
 from collections import Counter
-from collections.abc import Callable
 
 import aiokatcp
 import numpy as np
-from katsdptelstate.endpoint import endpoint_list_parser
 
 from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME, __version__
-from .spead import DEFAULT_PORT
 
 # Sensor status threshold. These are mostly thumb-sucks.
 TIME_ESTERROR_WARN = 1e-3
@@ -53,76 +48,6 @@ class DitherType(enum.Enum):
     NONE = 0  # Don't change this value: we rely on it being falsey
     UNIFORM = 1
     DEFAULT = 1  # Alias used to determine default when none is specified
-
-
-def parse_enum[E: enum.Enum](name: str, value: str, cls: type[E]) -> E:
-    """Parse a command-line argument into an enum type."""
-    table = {member.name.lower(): member for member in cls}
-    try:
-        return table[value]
-    except KeyError:
-        raise ValueError(f"Invalid {name} value {value} (valid values are {list(table.keys())})") from None
-
-
-def parse_dither(value: str) -> DitherType:
-    """Parse a string into a dither type."""
-    # Note: this allows only the non-aliases, so excludes DEFAULT
-    return parse_enum("dither", value, DitherType)
-
-
-def parse_source_ipv4(value: str) -> list[tuple[str, int]]:
-    """Parse a string into a list of IPv4 endpoints."""
-    endpoints = endpoint_list_parser(DEFAULT_PORT)(value)
-    for endpoint in endpoints:
-        ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
-    return [(ep.host, ep.port) for ep in endpoints]
-
-
-def parse_source(value: str) -> list[tuple[str, int]] | str:
-    """Parse a string into a list of IP endpoints or a filename."""
-    try:
-        return parse_source_ipv4(value)
-    except ValueError:
-        if os.path.exists(value):
-            return value
-        raise ValueError(f"{value} is not an endpoint list or a filename") from None
-
-
-def comma_split[T](
-    base_type: Callable[[str], T], count: int | None = None, allow_single=False
-) -> Callable[[str], list[T]]:
-    """Return a function to split a comma-delimited str into a list of type T.
-
-    This function is used to parse lists of CPU core numbers, which come from
-    the command-line as comma-separated strings, but are obviously more useful
-    as a list of ints. It's generic enough that it could process lists of other
-    types as well though if necessary.
-
-    Parameters
-    ----------
-    base_type
-        The base type of thing you expect in the list, e.g. `int`, `float`.
-    count
-        How many of them you expect to be in the list. `None` means the list
-        could be any length.
-    allow_single
-        If true (defaults to false), allow a single value to be used when
-        `count` is greater than 1. In this case, it will be repeated `count`
-        times.
-    """
-
-    def func(value: str) -> list[T]:
-        parts = value.split(",")
-        if parts == [""]:
-            parts = []
-        n = len(parts)
-        if count is not None and n == 1 and allow_single:
-            parts = parts * count
-        elif count is not None and n != count:
-            raise ValueError(f"Expected {count} comma-separated fields, received {n}")
-        return [base_type(part) for part in parts]
-
-    return func
 
 
 # We have to use *args/**kwargs because the default for status_func is a
