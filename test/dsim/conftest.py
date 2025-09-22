@@ -79,6 +79,7 @@ def send_stream(
             interface_address="",
             ibv=False,
             affinity=-1,
+            comp_vector=0,
         )
 
 

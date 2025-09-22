@@ -39,7 +39,6 @@ from typing import TypedDict
 
 import katsdpsigproc.accel
 import vkgdr
-from katsdpservices import get_interface_address
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_parser
 
@@ -48,9 +47,15 @@ from katgpucbf.xbgpu.engine import XBEngine
 from .. import (
     DEFAULT_JONES_PER_BATCH,
     DEFAULT_PACKET_PAYLOAD_BYTES,
-    DEFAULT_TTL,
 )
-from ..main import add_common_arguments, add_recv_arguments, engine_main, parse_dither, parse_source_ipv4
+from ..main import (
+    add_common_arguments,
+    add_recv_arguments,
+    add_send_arguments,
+    engine_main,
+    parse_dither,
+    parse_source_ipv4,
+)
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
@@ -288,29 +293,13 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="UNIX time at which digitisers were synced.",
     )
     add_recv_arguments(parser, multi=False)
-    parser.add_argument(
-        "--send-affinity", type=int, default=-1, help="Core to which the sender thread will be bound [not bound]."
-    )
-    parser.add_argument(
-        "--send-comp-vector",
-        type=int,
-        default=1,
-        help="Completion vector for transmission, or -1 for polling [%(default)s].",
-    )
-    parser.add_argument(
-        "--send-interface",
-        type=get_interface_address,
-        required=True,
-        help="Name of the interface that this engine will transmit data on, e.g. eth1.",
-    )
+    add_send_arguments(parser, multi=False)
     parser.add_argument(
         "--send-packet-payload",
         type=int,
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         help="Size in bytes for output packets (payload only) [%(default)s]",
     )
-    parser.add_argument("--send-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
-    parser.add_argument("--send-ibv", action="store_true", help="Use ibverbs for output [no].")
     parser.add_argument(
         "--send-enabled",
         action="store_true",

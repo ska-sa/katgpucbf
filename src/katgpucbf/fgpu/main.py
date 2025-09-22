@@ -31,20 +31,18 @@ from typing import TypedDict
 
 import katsdpsigproc.accel as accel
 import vkgdr
-from katsdpservices import get_interface_address
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from .. import (
     DEFAULT_JONES_PER_BATCH,
     DEFAULT_PACKET_PAYLOAD_BYTES,
-    DEFAULT_TTL,
     DIG_SAMPLE_BITS,
 )
 from ..main import (
     add_common_arguments,
     add_recv_arguments,
-    comma_split,
+    add_send_arguments,
     engine_main,
     parse_dither,
     parse_enum,
@@ -269,11 +267,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--recv-packet-samples", type=int, default=4096, help="Number of samples per digitiser packet [%(default)s]"
     )
-    parser.add_argument(
-        "--send-interface", type=comma_split(get_interface_address), required=True, help="Name of output network device"
-    )
-    parser.add_argument("--send-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
-    parser.add_argument("--send-ibv", action="store_true", help="Use ibverbs for output [no]")
+    add_send_arguments(parser, multi=True)
     parser.add_argument(
         "--send-packet-payload",
         type=int,
@@ -281,20 +275,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
     )
-    parser.add_argument(
-        "--send-affinity",
-        type=int,
-        default=-1,
-        metavar="CORE,...",
-        help="Cores for output-handling threads [not bound]",
-    )
-    parser.add_argument(
-        "--send-comp-vector",
-        type=int,
-        default=0,
-        metavar="VECTOR",
-        help="Completion vector for transmission, or -1 for polling [0]",
-    )
+    # TODO: add this argument to xbgpu/dsim so it can be incorporated into
+    # add_send_arguments.
     parser.add_argument(
         "--send-buffer",
         type=int,

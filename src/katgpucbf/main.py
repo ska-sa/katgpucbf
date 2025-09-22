@@ -27,7 +27,6 @@ import os
 import signal
 import time
 from collections.abc import Awaitable, Callable, MutableMapping
-from typing import Any
 
 import aiokatcp
 import katsdpservices
@@ -37,7 +36,7 @@ from katsdpservices import get_interface_address
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from . import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, __version__, spead, utils
+from . import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, __version__, spead, utils
 
 logger = logging.getLogger(__name__)
 
@@ -146,12 +145,43 @@ def add_common_arguments(
         parser.add_argument("--version", action="version", version=__version__)
 
 
-def _identity[T](x: T) -> T:
-    return x
+def _multi_add_argument(multi: bool, parser: argparse.ArgumentParser, *args, **kwargs) -> None:
+    """Add an argument to a parser in either singular to multi form.
 
+    In the multi form, the user passes a comma-separated list, and the argument
+    becomes an array. To make the help text appropriate to either case, the
+    `metavar` and `help` arguments are processed with :meth:`str.format`,
+    with the following substitutions:
 
-def _make_array[T](x: T) -> list[T]:
-    return [x]
+    ====== ============= ==============
+    Key    multi=False   multi=True
+    ====== ============= ==============
+    s      ""            "(s)"
+    dots   ""            ",..."
+    ====== ============= ==============
+
+    If a default is specified, it will become a singleton array in the multi
+    case. However, if no default is specified, the default remains ``None``
+    regardless of `multi`.
+    """
+    if multi:
+        subst = {"s": "(s)", "dots": ",..."}
+        kwargs["type"] = comma_split(kwargs.get("type", str))
+        if "default" in kwargs:
+            # Avoid showing the array in the help text. This is somewhat
+            # hacky because it only handles one specific way of writing
+            # the default. Unfortunately there isn't an easy way to do
+            # %-formatting with only one token substituted.
+            default = kwargs["default"]
+            if "help" in kwargs:
+                kwargs["help"] = kwargs["help"].replace("%(default)s", str(default))
+            kwargs["default"] = [default]
+    else:
+        subst = {"s": "", "dots": ""}
+    for key in ["metavar", "help"]:
+        if key in kwargs:
+            kwargs[key] = kwargs[key].format(**subst)
+    parser.add_argument(*args, **kwargs)
 
 
 def add_recv_arguments(parser: argparse.ArgumentParser, *, multi: bool = False) -> None:
@@ -159,37 +189,32 @@ def add_recv_arguments(parser: argparse.ArgumentParser, *, multi: bool = False) 
 
     If `multi` is true, the arguments take comma-separated lists.
     """
-    if multi:
-        split: Callable[[Callable[[str], Any]], Callable[[str], Any]] = comma_split
-        array: Callable = _make_array
-        s = "(s)"
-        dots = ",..."
-    else:
-        split = _identity
-        array = _identity
-        s = ""
-        dots = ""
-
-    parser.add_argument(
+    _multi_add_argument(
+        multi,
+        parser,
         "--recv-interface",
-        type=split(get_interface_address),
-        metavar=f"IFACE{dots}",
-        help=f"Name{s} of input network device{s}",
+        type=get_interface_address,
+        metavar="IFACE{dots}",
+        help="Name{s} of input network device{s}",
     )
     parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for receiving [no]")
-    parser.add_argument(
+    _multi_add_argument(
+        multi,
+        parser,
         "--recv-affinity",
-        type=split(int),
-        metavar=f"CORE{dots}",
-        default=array(-1),
-        help=f"Core{s} for input-handling thread{s} [not bound]",
+        type=int,
+        metavar="CORE{dots}",
+        default=-1,
+        help="Core{s} for input-handling thread{s} [not bound]",
     )
-    parser.add_argument(
+    _multi_add_argument(
+        multi,
+        parser,
         "--recv-comp-vector",
-        type=comma_split(int),
-        metavar=f"VECTOR{dots}",
-        default=array(0),
-        help=f"Completion vector{s} for source streams, or -1 for polling [0]",
+        type=int,
+        metavar="VECTOR{dots}",
+        default=0,
+        help="Completion vector{s} for source streams, or -1 for polling [0]",
     )
     parser.add_argument(
         "--recv-buffer",
@@ -198,6 +223,47 @@ def add_recv_arguments(parser: argparse.ArgumentParser, *, multi: bool = False) 
         metavar="BYTES",
         help="Size of network receive buffer [128MiB]",
     )
+
+
+def add_send_arguments(parser: argparse.ArgumentParser, *, prefix: str = "send-", multi: bool = False) -> None:
+    """Add arguments for sending interface (supporting ibverbs).
+
+    Parameters
+    ----------
+    parser
+        Parser to which arguments are added.
+    prefix
+        Prefix to use on argument names.
+    multi
+        If true, multiple interfaces are supported.
+    """
+    parser.add_argument(
+        f"--{prefix}affinity",
+        type=int,
+        default=-1,
+        metavar="CORE",
+        help="Core for output-handling thread [not bound]",
+    )
+    parser.add_argument(
+        f"--{prefix}comp-vector",
+        type=int,
+        default=0,
+        metavar="VECTOR",
+        help="Completion vector for transmission, or -1 for polling [%(default)s]",
+    )
+    _multi_add_argument(
+        multi,
+        parser,
+        f"--{prefix}interface",
+        type=get_interface_address,
+        required=True,
+        metavar="IFACE{dots}",
+        help="Name{s} of output network device{s}",
+    )
+    parser.add_argument(
+        f"--{prefix}ttl", type=int, default=DEFAULT_TTL, metavar="TTL", help="TTL for outgoing packets [%(default)s]"
+    )
+    parser.add_argument(f"--{prefix}ibv", action="store_true", help="Use ibverbs for output [no]")
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:

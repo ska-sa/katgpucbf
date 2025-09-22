@@ -33,8 +33,8 @@ import numpy as np
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
-from ..main import add_common_arguments, engine_main
+from .. import BYTE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
+from ..main import add_common_arguments, add_send_arguments, engine_main
 from ..send import DescriptorSender
 from ..utils import TimeConverter
 from . import descriptors, send, signal
@@ -56,13 +56,10 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "The specification must produce either a single signal, or one per output stream. [%(default)s]",
     )
     parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
-    parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
     parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")
     parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
     parser.add_argument("--first-id", type=int, default=0, help="Digitiser ID for first stream [%(default)s]")
-    parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
-    parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
-    parser.add_argument("--affinity", type=int, default=-1, help="Core affinity for the sending thread [not bound]")
+    add_send_arguments(parser, prefix="")
     parser.add_argument(
         "--main-affinity", type=int, default=-1, help="Core affinity for the main Python thread [not bound]"
     )
@@ -176,6 +173,7 @@ async def start_engine(
         ttl=args.ttl,
         interface_address=interface_address,
         ibv=args.ibv,
+        comp_vector=args.comp_vector,
     )
     descriptor_stream.set_cnt_sequence(1, 2)
 
@@ -210,6 +208,7 @@ async def start_engine(
         interface_address=interface_address,
         ibv=args.ibv,
         affinity=args.affinity,
+        comp_vector=args.comp_vector,
     )
     # Set spead stream to have heap id in even numbers for dsim data.
     stream.set_cnt_sequence(2, 2)

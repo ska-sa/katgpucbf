@@ -16,9 +16,11 @@
 
 """Tests for :mod:`katcbfgpu.main`."""
 
+import argparse
+
 import pytest
 
-from katgpucbf.main import comma_split, parse_dither
+from katgpucbf.main import _multi_add_argument, comma_split, parse_dither
 from katgpucbf.utils import DitherType
 
 
@@ -73,3 +75,68 @@ class TestParseDither:
             match=rf"Invalid dither value {input} \(valid values are \['none', 'uniform'\]\)",
         ):
             parse_dither(input)
+
+
+class TestMultiAddArguments:
+    """Test the :func:`._multi_add_arguments` helper."""
+
+    @staticmethod
+    def _make_parser(multi: bool) -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser()
+        _multi_add_argument(
+            multi,
+            parser,
+            "--foo",
+            default=0,
+            type=int,
+            metavar="THING{dots}",
+            help="Name{s} of the foo{s} [%(default)s]",
+        )
+        # Variant with no default or explicit type
+        _multi_add_argument(
+            multi,
+            parser,
+            "--bar",
+            help="Name{s} of the bar{s}",
+        )
+        return parser
+
+    @pytest.fixture
+    def singular_parser(self) -> argparse.ArgumentParser:
+        """Parser whose arguments are singular."""
+        return self._make_parser(False)
+
+    @pytest.fixture
+    def multi_parser(self) -> argparse.ArgumentParser:
+        """Parser whose arguments are multi."""
+        return self._make_parser(True)
+
+    def test_parse_singular(self, singular_parser: argparse.ArgumentParser) -> None:
+        """Test parsing singular arguments."""
+        args = singular_parser.parse_args(["--foo=4"])
+        assert args.foo == 4
+        args = singular_parser.parse_args([])
+        assert args.foo == 0
+        assert args.bar is None
+
+    def test_parse_multi(self, multi_parser: argparse.ArgumentParser) -> None:
+        """Test parsing multi-arguments."""
+        args = multi_parser.parse_args(["--foo=4"])
+        assert args.foo == [4]
+        args = multi_parser.parse_args(["--foo=4,5"])
+        assert args.foo == [4, 5]
+        args = multi_parser.parse_args([])
+        assert args.foo == [0]
+        assert args.bar is None
+
+    def test_help_singular(self, singular_parser: argparse.ArgumentParser) -> None:
+        """Test the help string for a singular argument."""
+        help_text = singular_parser.format_help()
+        assert "--foo THING " in help_text
+        assert "Name of the foo [0]\n" in help_text
+
+    def test_help_multi(self, multi_parser: argparse.ArgumentParser) -> None:
+        """Test the help string for a multi-argument."""
+        help_text = multi_parser.format_help()
+        assert "--foo THING,... " in help_text
+        assert "Name(s) of the foo(s) [0]\n" in help_text
