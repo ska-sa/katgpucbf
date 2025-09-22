@@ -24,7 +24,7 @@ from collections.abc import MutableMapping, Sequence
 import aiokatcp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from ..main import add_common_arguments, add_recv_arguments, engine_main
+from ..main import add_common_arguments, add_recv_arguments, add_send_arguments, engine_main
 from ..spead import DEFAULT_PORT
 from .engine import VEngine
 
@@ -36,6 +36,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="vgpu")
     add_common_arguments(parser)
     add_recv_arguments(parser)
+    add_send_arguments(parser, ibverbs=False)
     parser.add_argument("src", type=endpoint_list_parser(DEFAULT_PORT), nargs=2, help="Source endpoints")
     parser.add_argument("dst", type=endpoint_list_parser(VTP_DEFAULT_PORT), help="Destination endpoints")
 

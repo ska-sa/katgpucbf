@@ -225,8 +225,10 @@ def add_recv_arguments(parser: argparse.ArgumentParser, *, multi: bool = False) 
     )
 
 
-def add_send_arguments(parser: argparse.ArgumentParser, *, prefix: str = "send-", multi: bool = False) -> None:
-    """Add arguments for sending interface (supporting ibverbs).
+def add_send_arguments(
+    parser: argparse.ArgumentParser, *, prefix: str = "send-", multi: bool = False, ibverbs: bool = True
+) -> None:
+    """Add arguments for sending interface (optionally supporting ibverbs).
 
     Parameters
     ----------
@@ -236,6 +238,8 @@ def add_send_arguments(parser: argparse.ArgumentParser, *, prefix: str = "send-"
         Prefix to use on argument names.
     multi
         If true, multiple interfaces are supported.
+    ibverbs
+        If true, ibverbs-related options will be added.
     """
     parser.add_argument(
         f"--{prefix}affinity",
@@ -244,13 +248,14 @@ def add_send_arguments(parser: argparse.ArgumentParser, *, prefix: str = "send-"
         metavar="CORE",
         help="Core for output-handling thread [not bound]",
     )
-    parser.add_argument(
-        f"--{prefix}comp-vector",
-        type=int,
-        default=0,
-        metavar="VECTOR",
-        help="Completion vector for transmission, or -1 for polling [%(default)s]",
-    )
+    if ibverbs:
+        parser.add_argument(
+            f"--{prefix}comp-vector",
+            type=int,
+            default=0,
+            metavar="VECTOR",
+            help="Completion vector for transmission, or -1 for polling [%(default)s]",
+        )
     _multi_add_argument(
         multi,
         parser,
@@ -263,7 +268,8 @@ def add_send_arguments(parser: argparse.ArgumentParser, *, prefix: str = "send-"
     parser.add_argument(
         f"--{prefix}ttl", type=int, default=DEFAULT_TTL, metavar="TTL", help="TTL for outgoing packets [%(default)s]"
     )
-    parser.add_argument(f"--{prefix}ibv", action="store_true", help="Use ibverbs for output [no]")
+    if ibverbs:
+        parser.add_argument(f"--{prefix}ibv", action="store_true", help="Use ibverbs for output [no]")
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
