@@ -22,7 +22,8 @@ import katsdpsigproc.accel
 import numpy as np
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH
-from katgpucbf.utils import DitherType, parse_dither
+from katgpucbf.main import parse_dither
+from katgpucbf.utils import DitherType
 from katgpucbf.xbgpu.beamform import Beam, BeamformTemplate
 
 
