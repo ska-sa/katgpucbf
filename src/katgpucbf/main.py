@@ -327,16 +327,16 @@ async def _engine_main_async(
     katsdpservices.setup_logging()
     add_gc_stats()
     locals_: dict[str, object] = {}
-    async with contextlib.AsyncExitStack() as exit_stack:
+    # We enter the task group separately from the exit_stack, so that we
+    # always wait for the task group to complete before performing any
+    # of the exit_stack cleanup.
+    async with contextlib.AsyncExitStack() as exit_stack, asyncio.TaskGroup() as tg:
         if getattr(args, "prometheus_port", None) is not None:
             prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
             exit_stack.push_async_callback(prometheus_server.close)
 
         if getattr(args, "aiomonitor", False):
             exit_stack.enter_context(start_aiomonitor(asyncio.get_running_loop(), args, locals_))
-
-        tg = asyncio.TaskGroup()
-        await exit_stack.enter_async_context(tg)
 
         engine = await start_engine(args, tg, exit_stack, locals_)
         add_signal_handlers(engine)
