@@ -20,7 +20,7 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:12.9.0-base-ubuntu24.04 AS base
+FROM nvidia/cuda:12.9.1-base-ubuntu24.04 AS base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
@@ -74,7 +74,7 @@ RUN python3 -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==24.3.1 setuptools==75.8.0 wheel==0.45.1
+RUN pip install pip==25.2 setuptools==80.9.0 wheel==0.45.1
 
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
