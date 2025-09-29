@@ -755,7 +755,7 @@ async def receive_tied_array_channelised_voltage(
     cbf: CBFRemoteControl,
     capture_start_streams: list[str],
 ) -> TiedArrayChannelisedVoltageReceiver:
-    """Get the spead2 receive stream for ingest the tied-array-channelised-voltage streams."""
+    """Get the spead2 receive stream for ingesting the tied-array-channelised-voltage streams."""
     receiver = cbf.tied_array_channelised_voltage_receiver
     assert receiver is not None
     # Ensure that the data is flowing, and that we throw away any data that
