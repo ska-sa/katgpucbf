@@ -343,6 +343,7 @@ async def _engine_main_async(
         # Avoid garbage collections needing to iterate over all the objects
         # allocated so far. That makes garbage collection much faster, and we
         # don't expect to free up much of what's currently allocated.
+        gc.collect()  # Free up any current garbage before it gets frozen
         gc.freeze()
         exit_stack.callback(gc.unfreeze)
         tg.create_task(engine.join())
