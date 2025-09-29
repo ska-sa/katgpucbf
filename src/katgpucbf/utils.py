@@ -331,7 +331,8 @@ class Engine(aiokatcp.DeviceServer):
 
     def __init__(self, host: str, port: int) -> None:
         super().__init__(host, port)
-        self._wait_tasks: list[asyncio.Task] = []  # Tasks that need to be waited for on shutdown
+        # Tasks that we don't need to wait for on shutdown
+        self._no_wait_tasks: weakref.WeakSet[asyncio.Task] = weakref.WeakSet()
 
         self.sensors.add(make_steady_state_timestamp_sensor())
         self.sensors.add(DeviceStatusSensor(self.sensors))
@@ -349,8 +350,8 @@ class Engine(aiokatcp.DeviceServer):
         because things are not shutting down cleanly).
         """
         super().add_service_task(task)
-        if wait_on_stop:
-            self._wait_tasks.append(task)
+        if not wait_on_stop:
+            self._no_wait_tasks.add(task)
 
     def update_steady_state_timestamp(self, timestamp: int) -> None:
         """Update ``steady-state-timestamp`` sensor to at least `timestamp`."""
@@ -366,5 +367,8 @@ class Engine(aiokatcp.DeviceServer):
         # by waiting for a task that may not complete due to something else
         # crashing.
         if not any(task.done() for task in self.service_tasks):
-            for task in self._wait_tasks:
-                await task
+            # We have to copy the list because it will mutate and we
+            # complete tasks.
+            for task in list(self.service_tasks):
+                if task not in self._no_wait_tasks:
+                    await task
