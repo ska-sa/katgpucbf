@@ -248,14 +248,6 @@ def add_send_arguments(
         metavar="CORE",
         help="Core for output-handling thread [not bound]",
     )
-    if ibverbs:
-        parser.add_argument(
-            f"--{prefix}comp-vector",
-            type=int,
-            default=0,
-            metavar="VECTOR",
-            help="Completion vector for transmission, or -1 for polling [%(default)s]",
-        )
     _multi_add_argument(
         multi,
         parser,
@@ -270,6 +262,13 @@ def add_send_arguments(
     )
     if ibverbs:
         parser.add_argument(f"--{prefix}ibv", action="store_true", help="Use ibverbs for output [no]")
+        parser.add_argument(
+            f"--{prefix}comp-vector",
+            type=int,
+            default=0,
+            metavar="VECTOR",
+            help="Completion vector for transmission, or -1 for polling [%(default)s]",
+        )
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
