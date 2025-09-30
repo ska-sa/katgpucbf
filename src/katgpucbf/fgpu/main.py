@@ -17,8 +17,8 @@
 """fgpu main script.
 
 This is what kicks everything off. Command-line arguments are parsed, and used
-to create an :class:`~katgpucbf.fgpu.engine.FEngine` object, which then takes over the
-actual running of the processing.
+to create an :class:`.FEngine` object, which then takes over the actual running
+of the processing.
 """
 
 import argparse
@@ -405,15 +405,15 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.Namespace) -> tuple[FEngine, Monitor]:
-    """Make an :class:`~katgpucbf.fgpu.engine.FEngine` object, given a GPU context.
+    """Make an :class:`.FEngine` object, given a GPU context.
 
     Parameters
     ----------
     ctx
-        The GPU context in which the :class:`~katgpucbf.fgpu.engine.FEngine`
+        The GPU context in which the :class:`.FEngine`
         will operate.
     vkgdr_handle
-        The Vkgdr handle in which the :class:`~katgpucbf.fgpu.engine.FEngine`
+        The Vkgdr handle in which the :class:`.FEngine`
         will operate. It must use the same device as `ctx`.
     args
         Parsed arguments returned from :func:`parse_args`.
