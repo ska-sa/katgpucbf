@@ -63,7 +63,7 @@ repos:
           - --python-version=3.12
           - pyproject.toml
           - requirements.in
-        files: '^(requirements\.(in|txt)|setup\.cfg)$'
+        files: '^(requirements\.(in|txt)|pyproject\.toml)$'
       - id: pip-compile
         name: pip-compile requirements-dev.txt
         args:
@@ -73,7 +73,7 @@ repos:
           - --python-version=3.12
           - pyproject.toml
           - requirements-dev.in
-        files: '^(requirements(-dev)?\.(in|txt))$'
+        files: '^(requirements(-dev)?\.(in|txt)|pyproject\.toml)$'
       - id: pip-compile
         name: pip-compile qualification/requirements.txt
         args:
@@ -82,7 +82,7 @@ repos:
           - --python-version=3.12
           - pyproject.toml
           - qualification/requirements.in
-        files: '(.*requirements(-dev)?\.(in|txt))$'
+        files: '(.*requirements(-dev)?\.(in|txt)|pyproject\.toml)$'
       - id: pip-compile
         name: pip-compile scratch/benchmarks/requirements.txt
         args:
