@@ -147,7 +147,7 @@ def _generate_ddc_weights_discard(taps: int, subsampling: int, weight_pass: floa
         Weight given to the passband in the filter design (relative to stopband
         weight of 1.0).
     """
-    edges = [0, 0.25]
+    edges: list[float | np.floating] = [0.0, 0.25]
     desired = [1.0]
     weights = [weight_pass]
     for x in np.arange(0.75, 0.5 * subsampling):
