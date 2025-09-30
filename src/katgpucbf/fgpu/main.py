@@ -275,8 +275,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
     )
-    # TODO: add this argument to xbgpu/dsim so it can be incorporated into
-    # add_send_arguments.
+    # TODO (NGC-1758): add this argument to xbgpu/dsim so it can be
+    # incorporated into add_send_arguments.
     parser.add_argument(
         "--send-buffer",
         type=int,
