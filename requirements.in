@@ -1,1 +1,2 @@
 psutil  # Gives more accurate dask.system.CPU_COUNT
+cupy-cuda12x  # Not listed in package metadata because CUDA version is unknown

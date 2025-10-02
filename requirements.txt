@@ -40,12 +40,16 @@ click==8.1.8
     #   dask
 cloudpickle==3.1.1
     # via dask
+cupy-cuda12x==13.6.0
+    # via -r requirements.in
 dask==2025.3.0
     # via katgpucbf (pyproject.toml)
 decorator==5.1.1
     # via
     #   aiokatcp
     #   katsdpsigproc
+fastrlock==0.8.3
+    # via cupy-cuda12x
 frozenlist==1.5.0
     # via
     #   aiohttp
@@ -106,6 +110,7 @@ numpy==2.0.2
     # via
     #   katgpucbf (pyproject.toml)
     #   astropy
+    #   cupy-cuda12x
     #   h5py
     #   katcbf-vlbi-resample
     #   katsdpsigproc
