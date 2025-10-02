@@ -367,7 +367,7 @@ class Engine(aiokatcp.DeviceServer):
         # by waiting for a task that may not complete due to something else
         # crashing.
         if not any(task.done() for task in self.service_tasks):
-            # We have to copy the list because it will mutate and we
+            # We have to copy the list because it will mutate as we
             # complete tasks.
             for task in list(self.service_tasks):
                 if task not in self._no_wait_tasks:
