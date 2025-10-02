@@ -46,7 +46,12 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
 
 def make_engine(args: argparse.Namespace) -> VEngine:
     """Create the :class:`.VEngine`."""
-    return VEngine(args.katcp_host, args.katcp_port)
+    return VEngine(
+        katcp_host=args.katcp_host,
+        katcp_port=args.katcp_port,
+        input_pols=("x", "y"),  # TODO get from command line
+        output_pols=("x", "y"),  # TODO get from command line
+    )
 
 
 async def start_engine(

@@ -16,6 +16,8 @@
 
 """Engine class, which does all the actual processing."""
 
+import aiokatcp
+
 from ..utils import Engine
 
 
@@ -25,3 +27,51 @@ class VEngine(Engine):
     # TODO: VERSION means interface version, rather than software version. It
     # will need to wait on a proper ICD for a release.
     VERSION = "katgpucbf-vgpu-icd-0.1"
+
+    def __init__(
+        self,
+        *,
+        katcp_host: str,
+        katcp_port: int,
+        input_pols: tuple[str, str],
+        output_pols: tuple[str, str],
+    ) -> None:
+        super().__init__(katcp_host, katcp_port)
+        self.input_pols = input_pols
+        self.output_pols = output_pols
+        self._populate_sensors(self.sensors, output_pols)
+
+    def _populate_sensors(self, sensors: aiokatcp.SensorSet, output_pols: tuple[str, str]) -> None:
+        """Define the sensors for the engine."""
+        for pol in self.output_pols:
+            for channel in range(2):
+                sensors.add(
+                    aiokatcp.Sensor(
+                        float,
+                        f"{pol}{channel}.mean-power",
+                        "Mean power over the previous interval of length power-int-time",
+                    )
+                )
+        sensors.add(
+            aiokatcp.Sensor(
+                float,
+                "delay",
+                "Delay introduced by processing",
+                units="s",
+                default=0.0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
+
+    async def request_vlbi_delay(self, ctx: aiokatcp.RequestContext, delay: float) -> None:
+        """Set the delay applied to the stream, in second."""
+        # TODO: will need to be rounded/quantised
+        self.sensors["delay"].value = delay
+
+    async def request_capture_start(self, ctx: aiokatcp.RequestContext) -> None:
+        """Start capturing and emitting data."""
+        pass
+
+    async def request_capture_stop(self, ctx: aiokatcp.RequestContext) -> None:
+        """Stop capturing and emitting data."""
+        pass
