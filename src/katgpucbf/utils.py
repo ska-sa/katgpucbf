@@ -325,7 +325,7 @@ def gaussian_dtype(bits: int) -> np.dtype:
 
 
 class Engine(aiokatcp.DeviceServer):
-    """Common base for device servers."""
+    """Common base for engines (katcp device servers)."""
 
     BUILD_STATE = __version__
 

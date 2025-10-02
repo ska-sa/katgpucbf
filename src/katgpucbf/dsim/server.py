@@ -37,7 +37,7 @@ from .signal import Constant, Signal, SignalService, TerminalError, format_signa
 logger = logging.getLogger(__name__)
 
 
-class DeviceServer(Engine):
+class DEngine(Engine):
     """katcp server.
 
     Parameters

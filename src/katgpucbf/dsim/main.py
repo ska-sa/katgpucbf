@@ -37,7 +37,7 @@ from ..main import add_common_arguments, add_send_arguments, engine_main
 from ..send import DescriptorSender
 from ..utils import TimeConverter
 from . import descriptors, send, signal
-from .server import DeviceServer
+from .server import DEngine
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,7 @@ async def start_engine(
     tg: asyncio.TaskGroup,
     exit_stack: contextlib.AsyncExitStack,
     locals_: MutableMapping[str, object],
-) -> DeviceServer:
+) -> DEngine:
     """Start the device server.
 
     See Also
@@ -212,7 +212,7 @@ async def start_engine(
     stream.set_cnt_sequence(2, 2)
     sender = send.Sender(stream, heap_sets[0], args.heap_samples)
 
-    server = DeviceServer(
+    server = DEngine(
         sender=sender,
         descriptor_sender=descriptor_sender,
         heap_sets=heap_sets,
@@ -224,7 +224,7 @@ async def start_engine(
     )
     await server.set_signals(args.signals, args.signals_orig, args.period)
 
-    # Only set this affinity after constructing DeviceServer, which creates
+    # Only set this affinity after constructing DEngine, which creates
     # a separate process for the signal service that shouldn't inherit this.
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
