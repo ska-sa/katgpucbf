@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Engine class, which combines all the processing steps for a single digitiser data stream."""
+"""FEngine class, which combines all the processing steps for a single digitiser data stream."""
 
 import asyncio
 import copy
@@ -45,7 +45,6 @@ from .. import (
     RECV_TASK_NAME,
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
-    __version__,
 )
 from .. import recv as base_recv
 from ..mapped_array import MappedArray
@@ -55,12 +54,10 @@ from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..send import DescriptorSender
 from ..utils import (
-    DeviceStatusSensor,
+    Engine,
     TimeConverter,
-    add_time_sync_sensors,
     gaussian_dtype,
     make_rate_limited_sensor,
-    make_steady_state_timestamp_sensor,
 )
 from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, DIG_RMS_DBFS_WINDOW, INPUT_CHUNK_PADDING, recv, send
 from .accum import Accum
@@ -521,7 +518,7 @@ class Pipeline:
         such as dig-rms-dbfs.
     """
 
-    def __init__(self, output: Output, engine: "Engine", context: AbstractContext, dig_stats: bool) -> None:
+    def __init__(self, output: Output, engine: "FEngine", context: AbstractContext, dig_stats: bool) -> None:
         assert isinstance(output, WidebandOutput) or not dig_stats, "wideband output required for digitiser stats"
         # Tuning knobs not exposed via arguments
         n_send = 4
@@ -1116,7 +1113,7 @@ class Pipeline:
                 self._chunk_send_and_cleanup(self._send_streams, n_batches, chunk),
                 name="Chunk Send and Cleanup Task",
             )
-            self.engine.add_service_task(task)
+            self.engine.add_service_task(task, wait_on_stop=True)
 
         if task:
             try:
@@ -1169,7 +1166,7 @@ class Pipeline:
         # self._out_item. If a less conservative answer is needed, one would
         # need to track a separate timestamp in the class that is updated
         # as gains are copied to the OutQueueItem.
-        self.engine._update_steady_state_timestamp(self._out_item.end_timestamp)
+        self.engine.update_steady_state_timestamp(self._out_item.end_timestamp)
         if np.all(gains == gains[0]):
             # All the values are the same, so it can be reported as a single value
             gains = gains[:1]
@@ -1179,16 +1176,8 @@ class Pipeline:
         sensor.value = "[" + ", ".join(format_complex(gain) for gain in gains.tolist()) + "]"
 
 
-class Engine(aiokatcp.DeviceServer):
+class FEngine(Engine):
     """Top-level class running the whole thing.
-
-    .. todo::
-
-      The :class:`Engine` needs to have more sensors and requests added to it,
-      according to whatever the design is going to be. SKARAB didn't have katcp
-      capability, that was all in corr2, so we need to figure out how to best
-      control these engines. This docstring should also be updated to reflect
-      its new nature as an inheritor of :class:`aiokatcp.DeviceServer`.
 
     Parameters
     ----------
@@ -1197,7 +1186,7 @@ class Engine(aiokatcp.DeviceServer):
     katcp_port
         Network port on which to listen for KATCP C&M connections.
     context
-        The accelerator (CUDA) context to use for running the Engine.
+        The accelerator (CUDA) context to use for running the FEngine.
     vkgdr_handle
         Handle to vkgdr for the same device as `context`.
     srcs
@@ -1274,7 +1263,6 @@ class Engine(aiokatcp.DeviceServer):
     # TODO: VERSION means interface version, rather than software version. It
     # will need to wait on a proper ICD for a release.
     VERSION = "katgpucbf-fgpu-icd-0.1"
-    BUILD_STATE = __version__
 
     def __init__(
         self,
@@ -1315,7 +1303,6 @@ class Engine(aiokatcp.DeviceServer):
         monitor: Monitor,
     ) -> None:
         super().__init__(katcp_host, katcp_port)
-        self._cancel_tasks: list[asyncio.Task] = []  # Tasks that need to be cancelled on shutdown
         self._populate_sensors(
             self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
@@ -1446,12 +1433,6 @@ class Engine(aiokatcp.DeviceServer):
 
         for sensor in recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
-        sensors.add(make_steady_state_timestamp_sensor())
-        sensors.add(DeviceStatusSensor(sensors))
-
-        time_sync_task = add_time_sync_sensors(sensors)
-        self.add_service_task(time_sync_task)
-        self._cancel_tasks.append(time_sync_task)
 
     def make_send_streams(
         self, output: Output, n_data_heaps: int, chunks: Sequence[send.Chunk]
@@ -1478,11 +1459,6 @@ class Engine(aiokatcp.DeviceServer):
             chunks=chunks,
         )
 
-    def _update_steady_state_timestamp(self, timestamp: int) -> None:
-        """Update the ``steady-state-timestamp`` sensor to at least a given value."""
-        sensor = self.sensors["steady-state-timestamp"]
-        sensor.value = max(sensor.value, timestamp)
-
     def free_in_item(self, item: InQueueItem) -> None:
         """Return an InQueueItem to the free queue if its refcount hits zero."""
         item.refcount -= 1
@@ -1497,7 +1473,7 @@ class Engine(aiokatcp.DeviceServer):
                     self._push_recv_chunks([chunk], item.events),
                     name="Receive Chunk Recycle Task",
                 )
-                self.add_service_task(task)
+                self.add_service_task(task, wait_on_stop=True)
             self._in_free_queue.put_nowait(item)
 
     @staticmethod
@@ -1765,7 +1741,7 @@ class Engine(aiokatcp.DeviceServer):
 
         for delay_model, new_linear_model in zip(pipeline.delay_models, new_linear_models, strict=True):
             delay_model.base.add(new_linear_model)
-        self._update_steady_state_timestamp(pipeline.delay_update_timestamp())
+        self.update_steady_state_timestamp(pipeline.delay_update_timestamp())
 
     async def start(self, descriptor_interval_s: float = SPEAD_DESCRIPTOR_INTERVAL_S) -> None:
         """Start the engine.
@@ -1795,8 +1771,7 @@ class Engine(aiokatcp.DeviceServer):
             descriptor_task = asyncio.create_task(
                 descriptor_sender.run(), name=f"{pipeline.output.name}.{DESCRIPTOR_TASK_NAME}"
             )
-            self.add_service_task(descriptor_task)
-            self._cancel_tasks.append(descriptor_task)
+            self.add_service_task(descriptor_task, wait_on_stop=False)
 
         recv_comp_vector_iter = iter(self._recv_comp_vector)
         if self._recv_interface is None:
@@ -1822,20 +1797,20 @@ class Engine(aiokatcp.DeviceServer):
             self._run_receive(self._recv_group, self.recv_layout),
             name=RECV_TASK_NAME,
         )
-        self.add_service_task(recv_task)
+        self.add_service_task(recv_task, wait_on_stop=True)
 
         for pipeline in self._pipelines:
             proc_task = asyncio.create_task(
                 pipeline.run_processing(),
                 name=f"{pipeline.output.name}.{GPU_PROC_TASK_NAME}",
             )
-            self.add_service_task(proc_task)
+            self.add_service_task(proc_task, wait_on_stop=True)
 
             send_task = asyncio.create_task(
                 pipeline.run_transmit(),
                 name=f"{pipeline.output.name}.{SEND_TASK_NAME}",
             )
-            self.add_service_task(send_task)
+            self.add_service_task(send_task, wait_on_stop=True)
 
         await super().start()
 
@@ -1846,14 +1821,6 @@ class Engine(aiokatcp.DeviceServer):
         Also handle any Exceptions thrown unexpectedly in any of the
         processing loops.
         """
-        for task in self._cancel_tasks:
-            task.cancel()
         self._recv_group.stop()
-        # If any of the tasks are already done then we had an exception, and
-        # waiting for the rest may hang as the shutdown path won't proceed
-        # neatly.
-        if not any(task.done() for task in self.service_tasks):
-            for task in self.service_tasks:
-                if task not in self._cancel_tasks:
-                    await task
+        await super().on_stop()  # Waits for service tasks to complete
         self._pipelines.clear()  # Breaks circular references

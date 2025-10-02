@@ -10,6 +10,7 @@ Subpackages
    katgpucbf.dsim
    katgpucbf.fgpu
    katgpucbf.fsim
+   katgpucbf.vgpu
    katgpucbf.xbgpu
 
 Submodules
@@ -20,6 +21,7 @@ Submodules
 
    katgpucbf.configure_tools
    katgpucbf.curand_helpers
+   katgpucbf.main
    katgpucbf.mapped_array
    katgpucbf.meerkat
    katgpucbf.monitor

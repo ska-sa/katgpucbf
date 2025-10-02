@@ -17,42 +17,43 @@
 """fgpu main script.
 
 This is what kicks everything off. Command-line arguments are parsed, and used
-to create an :class:`~katgpucbf.fgpu.engine.Engine` object, which then takes over the
-actual running of the processing.
+to create an :class:`.FEngine` object, which then takes over the actual running
+of the processing.
 """
 
 import argparse
 import asyncio
-import gc
+import contextlib
 import logging
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, MutableMapping, Sequence
 from typing import TypedDict
 
-import katsdpservices
 import katsdpsigproc.accel as accel
-import prometheus_async
 import vkgdr
-from katsdpservices import get_interface_address
-from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
 
 from .. import (
     DEFAULT_JONES_PER_BATCH,
-    DEFAULT_KATCP_HOST,
-    DEFAULT_KATCP_PORT,
     DEFAULT_PACKET_PAYLOAD_BYTES,
-    DEFAULT_TTL,
     DIG_SAMPLE_BITS,
-    __version__,
+)
+from ..main import (
+    add_common_arguments,
+    add_recv_arguments,
+    add_send_arguments,
+    engine_main,
+    parse_dither,
+    parse_enum,
+    parse_source,
 )
 from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
-from ..utils import DitherType, add_gc_stats, add_signal_handlers, comma_split, parse_dither, parse_enum, parse_source
+from ..utils import DitherType
 from . import DIG_SAMPLE_BITS_VALID
-from .engine import Engine
+from .engine import FEngine
 from .output import NarrowbandOutput, NarrowbandOutputDiscard, NarrowbandOutputNoDiscard, WidebandOutput, WindowFunction
 
 logger = logging.getLogger(__name__)
@@ -261,59 +262,12 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
             "window_function [hann], dither [uniform]"
         ),
     )
-    parser.add_argument(
-        "--katcp-host",
-        type=str,
-        default=DEFAULT_KATCP_HOST,
-        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
-    )
-    parser.add_argument(
-        "--katcp-port",
-        type=int,
-        default=DEFAULT_KATCP_PORT,
-        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
-    )
-    parser.add_argument(
-        "--prometheus-port",
-        type=int,
-        help="Network port on which to serve Prometheus metrics [none]",
-    )
-    add_aiomonitor_arguments(parser)
-    parser.add_argument(
-        "--recv-interface",
-        type=comma_split(get_interface_address),
-        help="Name(s) of input network device(s)",
-    )
-    parser.add_argument("--recv-ibv", action="store_true", help="Use ibverbs for receiving [no]")
-    parser.add_argument(
-        "--recv-affinity",
-        type=comma_split(int),
-        metavar="CORE,...",
-        default=[-1],
-        help="Cores for input-handling threads (comma-separated) [not bound]",
-    )
-    parser.add_argument(
-        "--recv-comp-vector",
-        type=comma_split(int),
-        metavar="VECTOR,...",
-        default=[0],
-        help="Completion vectors for source streams, or -1 for polling [0]",
-    )
+    add_common_arguments(parser)
+    add_recv_arguments(parser, multi=True)
     parser.add_argument(
         "--recv-packet-samples", type=int, default=4096, help="Number of samples per digitiser packet [%(default)s]"
     )
-    parser.add_argument(
-        "--recv-buffer",
-        type=int,
-        default=128 * 1024 * 1024,
-        metavar="BYTES",
-        help="Size of network receive buffer [128MiB]",
-    )
-    parser.add_argument(
-        "--send-interface", type=comma_split(get_interface_address), required=True, help="Name of output network device"
-    )
-    parser.add_argument("--send-ttl", type=int, default=DEFAULT_TTL, help="TTL for outgoing packets [%(default)s]")
-    parser.add_argument("--send-ibv", action="store_true", help="Use ibverbs for output [no]")
+    add_send_arguments(parser, multi=True)
     parser.add_argument(
         "--send-packet-payload",
         type=int,
@@ -321,20 +275,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
     )
-    parser.add_argument(
-        "--send-affinity",
-        type=int,
-        default=-1,
-        metavar="CORE,...",
-        help="Cores for output-handling threads [not bound]",
-    )
-    parser.add_argument(
-        "--send-comp-vector",
-        type=int,
-        default=0,
-        metavar="VECTOR",
-        help="Completion vector for transmission, or -1 for polling [0]",
-    )
+    # TODO (NGC-1758): add this argument to xbgpu/dsim so it can be
+    # incorporated into add_send_arguments.
     parser.add_argument(
         "--send-buffer",
         type=int,
@@ -434,7 +376,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--use-peerdirect", action="store_true", help="Send chunks directly from GPU memory (requires supported GPU)"
     )
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
-    parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("src", type=parse_source, help="Source endpoints (or pcap file)")
     args = parser.parse_args(arglist)
 
@@ -463,16 +404,17 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.Namespace) -> tuple[Engine, Monitor]:
-    """Make an :class:`Engine` object, given a GPU context.
+def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.Namespace) -> tuple[FEngine, Monitor]:
+    """Make an :class:`.FEngine` object, given a GPU context.
 
     Parameters
     ----------
     ctx
-        The GPU context in which the :class:`.Engine` will operate.
+        The GPU context in which the :class:`.FEngine`
+        will operate.
     vkgdr_handle
-        The Vkgdr handle in which the :class:`.Engine` will operate. It
-        must use the same device as `ctx`.
+        The Vkgdr handle in which the :class:`.FEngine`
+        will operate. It must use the same device as `ctx`.
     args
         Parsed arguments returned from :func:`parse_args`.
     """
@@ -484,7 +426,7 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
 
     batch_jones_lcm = math.lcm(*(output.jones_per_batch for output in args.outputs))
     chunk_jones = accel.roundup(args.send_chunk_jones, batch_jones_lcm)
-    engine = Engine(
+    engine = FEngine(
         katcp_host=args.katcp_host,
         katcp_port=args.katcp_port,
         context=ctx,
@@ -524,34 +466,31 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
     return engine, monitor
 
 
-async def async_main() -> None:
-    """Start the F-Engine asynchronously."""
-    args = parse_args()
+async def start_engine(
+    args: argparse.Namespace,
+    tg: asyncio.TaskGroup,
+    exit_stack: contextlib.AsyncExitStack,
+    locals_: MutableMapping[str, object],
+) -> FEngine:
+    """Start the F-Engine asynchronously.
+
+    See Also
+    --------
+    katgpucbf.main.engine_main
+    """
     ctx = accel.create_some_context(device_filter=lambda x: x.is_cuda)
     vkgdr_handle = make_vkgdr(ctx.device)
     logger.info("Initialising F-engine on %s", ctx.device.name)
     engine, monitor = make_engine(ctx, vkgdr_handle, args)
-    add_signal_handlers(engine)
-    add_gc_stats()
-    prometheus_server: prometheus_async.aio.web.MetricsHTTPServer | None = None
-    if args.prometheus_port is not None:
-        prometheus_server = await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
-    with monitor, start_aiomonitor(asyncio.get_running_loop(), args, locals()):
-        await engine.start()
-        # Avoid garbage collections needing to iterate over all the objects
-        # allocated so far. That makes garbage collection much faster, and we
-        # don't expect to free up much of what's currently allocated.
-        gc.freeze()
-        await engine.join()
-        gc.unfreeze()  # Allow objects to be tidied away during shutdown
-        if prometheus_server:
-            await prometheus_server.close()
+    exit_stack.enter_context(monitor)
+    locals_.update(locals())
+    await engine.start()
+    return engine
 
 
 def main() -> None:
-    """Start the F-engine."""
-    katsdpservices.setup_logging()
-    asyncio.run(async_main())
+    """Run the F-engine."""
+    engine_main(parse_args(), start_engine)
 
 
 if __name__ == "__main__":

@@ -84,6 +84,7 @@ copy-mk = [
 [project.scripts]
 fgpu = "katgpucbf.fgpu.main:main"
 xbgpu = "katgpucbf.xbgpu.main:main"
+vgpu = "katgpucbf.vgpu.main:main"
 dsim = "katgpucbf.dsim.main:main"
 fsim = "katgpucbf.fsim.main:main"
 

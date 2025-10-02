@@ -164,6 +164,7 @@ def make_stream_base(
     interface_address: str,
     ibv: bool = False,
     affinity: int = -1,
+    comp_vector: int = 0,
     memory_regions: list | None = None,
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create a spead2 stream for sending.
@@ -178,6 +179,7 @@ def make_stream_base(
             endpoints=endpoints_list,
             interface_address=interface_address,
             ttl=ttl,
+            comp_vector=comp_vector,
         )
         if memory_regions is not None:
             ibv_config.memory_regions = memory_regions
@@ -203,6 +205,7 @@ def make_stream(
     interface_address: str,
     ibv: bool,
     affinity: int,
+    comp_vector: int,
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create a spead2 stream for sending.
 
@@ -228,6 +231,8 @@ def make_stream(
         If true, use ibverbs for acceleration
     affinity
         If non-negative, bind the sending thread to this CPU core
+    comp_vector
+        Completion vector for ibverbs
     """
     preamble = 72  # SPEAD header, 4 standard item pointers, 4 application-specific item pointers
     heap_size = heap_samples * sample_bits // BYTE_BITS
@@ -244,6 +249,7 @@ def make_stream(
         interface_address=interface_address,
         ibv=ibv,
         affinity=affinity,
+        comp_vector=comp_vector,
         memory_regions=[heap_set.data["payload"].data for heap_set in heap_sets],
     )
 
