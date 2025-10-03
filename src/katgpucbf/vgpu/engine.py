@@ -33,17 +33,17 @@ class VEngine(Engine):
         *,
         katcp_host: str,
         katcp_port: int,
-        input_pols: tuple[str, str],
-        output_pols: tuple[str, str],
+        recv_pols: tuple[str, str],
+        send_pols: tuple[str, str],
     ) -> None:
         super().__init__(katcp_host, katcp_port)
-        self.input_pols = input_pols
-        self.output_pols = output_pols
-        self._populate_sensors(self.sensors, output_pols)
+        self.recv_pols = recv_pols
+        self.send_pols = send_pols
+        self._populate_sensors(self.sensors, send_pols)
 
-    def _populate_sensors(self, sensors: aiokatcp.SensorSet, output_pols: tuple[str, str]) -> None:
+    def _populate_sensors(self, sensors: aiokatcp.SensorSet, send_pols: tuple[str, str]) -> None:
         """Define the sensors for the engine."""
-        for pol in self.output_pols:
+        for pol in self.send_pols:
             for channel in range(2):
                 sensors.add(
                     aiokatcp.Sensor(
