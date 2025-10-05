@@ -79,10 +79,9 @@ def comma_split[T](
 ) -> Callable[[str], list[T]]:
     """Return a function to split a comma-delimited str into a list of type T.
 
-    This function is used to parse lists of CPU core numbers, which come from
-    the command-line as comma-separated strings, but are obviously more useful
-    as a list of ints. It's generic enough that it could process lists of other
-    types as well though if necessary.
+    This function is used to parse lists parameters which come from the
+    command-line as comma-separated strings, but are obviously more useful as a
+    list.
 
     Parameters
     ----------
@@ -105,8 +104,19 @@ def comma_split[T](
         if count is not None and n == 1 and allow_single:
             parts = parts * count
         elif count is not None and n != count:
-            raise ValueError(f"Expected {count} comma-separated fields, received {n}")
-        return [base_type(part) for part in parts]
+            raise argparse.ArgumentTypeError(f"Expected {count} comma-separated fields, received {n}")
+        # Mirror argparse's logic for wrapping TypeError and ValueError, so
+        # that the error reflects the list element that is invalid.
+        out = []
+        for part in parts:
+            try:
+                part_value = base_type(part)
+            except (TypeError, ValueError) as exc:
+                base_name = getattr(base_type, "__name__", repr(base_type))
+                raise argparse.ArgumentTypeError(f"invalid {base_name} value: {part!r}") from exc
+            else:
+                out.append(part_value)
+        return out
 
     return func
 

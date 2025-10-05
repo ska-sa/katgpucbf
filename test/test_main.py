@@ -35,16 +35,16 @@ class TestCommaSplit:
 
     def test_bad_value(self) -> None:
         """Test with a value that isn't valid for the element type."""
-        with pytest.raises(ValueError, match="invalid literal for int"):
+        with pytest.raises(argparse.ArgumentTypeError, match="invalid int value: 'hello'"):
             assert comma_split(int)("3,hello")
 
     def test_fixed_count(self) -> None:
         """Test with a value for `count`."""
         splitter = comma_split(int, 2)
         assert splitter("3,5") == [3, 5]
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
+        with pytest.raises(argparse.ArgumentTypeError, match="Expected 2 comma-separated fields, received 3"):
             splitter("3,5,7")
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 1"):
+        with pytest.raises(argparse.ArgumentTypeError, match="Expected 2 comma-separated fields, received 1"):
             splitter("3")
 
     def test_allow_single(self) -> None:
@@ -52,7 +52,7 @@ class TestCommaSplit:
         splitter = comma_split(int, 2, allow_single=True)
         assert splitter("3,5") == [3, 5]
         assert splitter("3") == [3, 3]
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
+        with pytest.raises(argparse.ArgumentTypeError, match="Expected 2 comma-separated fields, received 3"):
             splitter("3,5,7")
 
 
