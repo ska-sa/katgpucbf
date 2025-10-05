@@ -16,6 +16,8 @@
 
 """Unit tests for argument parsing."""
 
+import argparse
+
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
@@ -88,12 +90,12 @@ class TestParseNarrowband:
     )
     def test_missing_key(self, missing: str, value: str) -> None:
         """Test without one of the required keys."""
-        with pytest.raises(ValueError, match=f"--narrowband: {missing} is missing"):
+        with pytest.raises(argparse.ArgumentTypeError, match=f"{missing} is missing"):
             parse_narrowband(value)
 
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
-        with pytest.raises(ValueError, match="--narrowband: channels specified twice"):
+        with pytest.raises(argparse.ArgumentTypeError, match="channels specified twice"):
             parse_narrowband("name=foo,channels=8,channels=9,centre_frequency=400e6,decimation=8,dst=239.1.2.3+1:7148")
 
 

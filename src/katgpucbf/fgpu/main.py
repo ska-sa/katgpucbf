@@ -111,7 +111,7 @@ def _parse_stream[OD: _OutputDict](value: str, kws: OD, field_callback: Callable
     in `value`. It handles the common fields directly, and type-specific fields
     are handled by a provided field callback. The callback is invoked with
     `kws`, the key and the value. If it does not recognise the key, it should
-    raise ValueError.
+    raise :exc:`ValueError`.
     """
     for part in value.split(","):
         match part.split("=", 1):
@@ -153,7 +153,7 @@ def parse_wideband(value: str) -> WidebandOutput:
     """
 
     def field_callback(kws: _WidebandOutputDict, key: str, data: str) -> None:
-        raise ValueError(f"unknown key {key}")
+        raise ValueError(f"unknown key {key!r}")
 
     try:
         kws: _WidebandOutputDict = {}
@@ -168,7 +168,7 @@ def parse_wideband(value: str) -> WidebandOutput:
         }
         return WidebandOutput(**kws)
     except ValueError as exc:
-        raise ValueError(f"--wideband: {exc}") from exc
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def parse_narrowband(value: str) -> NarrowbandOutput:
@@ -222,7 +222,7 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
             # isn't going to be in **kws.
             return NarrowbandOutputDiscard(**kws)  # type: ignore[misc]
     except ValueError as exc:
-        raise ValueError(f"--narrowband: {exc}") from exc
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:

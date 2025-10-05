@@ -156,7 +156,7 @@ def parse_beam(value: str) -> BOutput:
             raise ValueError("pol is missing")
         return BOutput(**kws)
     except ValueError as exc:
-        raise ValueError(f"--beam: {exc}") from exc
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def parse_corrprod(value: str) -> XOutput:
@@ -185,7 +185,7 @@ def parse_corrprod(value: str) -> XOutput:
             raise ValueError("heap_accumulation_threshold is missing")
         return XOutput(**kws)
     except ValueError as exc:
-        raise ValueError(f"--corrprod: {exc}") from exc
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
