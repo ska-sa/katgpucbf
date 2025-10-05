@@ -27,6 +27,8 @@ import os
 import signal
 import time
 from collections.abc import Awaitable, Callable, MutableMapping
+from dataclasses import dataclass
+from typing import Any
 
 import aiokatcp
 import katsdpservices
@@ -279,6 +281,76 @@ def add_send_arguments(
             metavar="VECTOR",
             help="Completion vector for transmission, or -1 for polling [%(default)s]",
         )
+
+
+class SubParser:
+    """Parser for a single command-line argument that has suboptions.
+
+    The sub-options use key=value syntax, separated by commas. This is
+    not as complete as a full argparse parser, but supports some basics:
+
+    - required arguments
+    - defaults
+    - types
+
+    It does not currently support actions (such as ``store_true``).
+    Specifying a keyword more than once results in an error.
+
+    It is callable, so that an instance can be passed directly as the
+    `type` argument of :meth:`argparse.ArgumentParser.add_argument`.
+    """
+
+    @dataclass
+    class _Argument:
+        type: Callable[[str], Any]
+        required: bool
+        default: Any
+
+    def __init__(self) -> None:
+        self._arguments: dict[str, SubParser._Argument] = {}
+
+    def add_argument(
+        self,
+        name: str,
+        *,
+        type: Callable[[str], Any] = str,
+        required: bool = False,
+        default: Any = None,
+    ) -> None:
+        """Add an argument."""
+        if name in self._arguments:
+            raise ValueError(f"argument {name} already exists")
+        self._arguments[name] = self._Argument(
+            type,
+            required,
+            default,
+        )
+
+    def __call__(self, value: str) -> argparse.Namespace:
+        """Parse the argument."""
+        ans = argparse.Namespace()
+        for part in value.split(","):
+            match part.split("=", 1):
+                case [key, data]:
+                    arg = self._arguments.get(key)
+                    if arg is None:
+                        raise argparse.ArgumentTypeError(f"unknown key {key}")
+                    elif key in ans:
+                        raise argparse.ArgumentTypeError(f"{key} already specified")
+                    try:
+                        setattr(ans, key, arg.type(data))
+                    except (TypeError, ValueError) as exc:
+                        type_name = getattr(arg.type, "__name__", str(arg.type))
+                        raise argparse.ArgumentTypeError(f"{key}: invalid {type_name} value: {data!r}") from exc
+                case _:
+                    raise argparse.ArgumentTypeError("missing = in {part!r}")
+        for key, arg in self._arguments.items():
+            if key not in ans:
+                if arg.required:
+                    raise argparse.ArgumentTypeError(f"{key} is missing")
+                else:
+                    setattr(ans, key, arg.default)
+        return ans
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:

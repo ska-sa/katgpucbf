@@ -16,6 +16,8 @@
 
 """Unit tests for argument parsing."""
 
+import argparse
+
 import pytest
 from katsdptelstate.endpoint import Endpoint
 
@@ -55,22 +57,22 @@ class TestParseBeam:
     )
     def test_missing_key(self, missing: str, value: str) -> None:
         """Test without one of the required keys."""
-        with pytest.raises(ValueError, match=f"--beam: {missing} is missing"):
+        with pytest.raises(argparse.ArgumentTypeError, match=f"{missing} is missing"):
             parse_beam(value)
 
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
-        with pytest.raises(ValueError, match="--beam: name already specified"):
+        with pytest.raises(argparse.ArgumentTypeError, match="name already specified"):
             parse_beam("name=foo,name=bar,dst=239.1.2.3:7148,pol=0")
 
     def test_invalid_key(self) -> None:
         """Test with an unknown key/value pair."""
-        with pytest.raises(ValueError, match="--beam: unknown key fizz"):
+        with pytest.raises(argparse.ArgumentTypeError, match="unknown key fizz"):
             parse_beam("fizz=buzz,name=foo,dst=239.1.2.3:7148,pol=0")
 
     def test_bad_pol(self) -> None:
         """Test with a polarisation value that isn't 0 or 1."""
-        with pytest.raises(ValueError, match="--beam: pol must be either 0 or 1"):
+        with pytest.raises(argparse.ArgumentTypeError, match="pol must be either 0 or 1"):
             parse_beam("name=foo,dst=239.1.2.3:7148,pol=2")
 
 
@@ -95,15 +97,15 @@ class TestParseCorrprod:
     )
     def test_missing_key(self, missing: str, value: str) -> None:
         """Test without one of the required keys."""
-        with pytest.raises(ValueError, match=f"--corrprod: {missing} is missing"):
+        with pytest.raises(argparse.ArgumentTypeError, match=f"{missing} is missing"):
             parse_corrprod(value)
 
     def test_duplicate_key(self) -> None:
         """Test with a key specified twice."""
-        with pytest.raises(ValueError, match="--corrprod: name already specified"):
+        with pytest.raises(argparse.ArgumentTypeError, match="name already specified"):
             parse_corrprod("name=foo,name=bar,heap_accumulation_threshold=52,dst=239.2.3.4:7148")
 
     def test_invalid_key(self) -> None:
         """Test with an unknown key/value pair."""
-        with pytest.raises(ValueError, match="--corrprod: unknown key fizz"):
+        with pytest.raises(argparse.ArgumentTypeError, match="unknown key fizz"):
             parse_corrprod("fizz=buzz,name=foo,heap_accumulation_threshold=52,dst=239.2.3.4:7148")
