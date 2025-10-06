@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "aiokatcp>=1.9.0",
     "dask",
+    "katcbf-vlbi-resample>=0.2",
     "katsdpservices[aiomonitor]",
     "katsdpsigproc>=1.9.0",
     "katsdptelstate",
