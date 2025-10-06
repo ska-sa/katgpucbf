@@ -38,6 +38,7 @@ import spead2.recv
 import vkgdr.pycuda
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext
+from numpy.typing import NDArray
 
 from .. import (
     COMPLEX,
@@ -1259,7 +1260,7 @@ class XBEngine(Engine):
         for _ in range(DEFAULT_N_IN_ITEMS):
             # TODO: NGC-1106 update buffer_device dtype once 4-bit mode is supported
             buffer_device = accel.DeviceArray(context, recv_data_shape, dtype=np.int8)
-            present = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
+            present: NDArray[np.uint8] = np.zeros(shape=(self.heaps_per_fengine_per_chunk, n_ants), dtype=np.uint8)
             in_item = InQueueItem(buffer_device, present)
             self._in_free_queue.put_nowait(in_item)
 

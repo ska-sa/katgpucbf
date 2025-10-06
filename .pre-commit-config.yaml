@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: check-merge-conflict
       - id: check-shebang-scripts-are-executable
@@ -11,14 +11,14 @@ repos:
       - id: no-commit-to-branch # without arguments, master/main will be protected.
       - id: trailing-whitespace
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.5
+    rev: v0.13.1
     hooks:
       - id: ruff-format
         types_or: [python, pyi]  # Prevent formatting notebooks
       - id: ruff-check
         types_or: [python, pyi]
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v1.17.0'
+    rev: 'v1.18.2'
     hooks:
       - id: mypy
         # Passing filenames to mypy can do odd things. See
@@ -34,27 +34,26 @@ repos:
             'aioconsole==0.8.1',
             'aiokatcp==2.2.0',
             'aiomonitor==0.7.1',
-            'asyncssh==2.19.0',
-            'dask==2025.3.0',
+            'asyncssh==2.21.0',
+            'dask==2025.9.1',
             'katcbf-vlbi-resample==0.2',
             'katsdpsigproc==1.10.0',
-            'katsdptelstate==0.14',
-            'matplotlib==3.10.0',
-            'numpy==2.0.2',
-            'pandas-stubs==2.2.3.241126',
-            'prometheus-client==0.21.1',
-            'pyparsing==3.2.1',
-            'pytest==8.3.4',
-            'redis==5.2.1',  # Indirect dependency of katsdptelstate
+            'katsdptelstate==1.0.0',
+            'matplotlib==3.10.6',
+            'numpy==2.3.3',
+            'pandas-stubs==2.3.2.250827',
+            'prometheus-client==0.23.1',
+            'pyparsing==3.2.5',
+            'pytest==8.4.2',
+            'redis==6.4.0',  # Indirect dependency of katsdptelstate
             'spead2==4.4.0',
-            'types-decorator==5.1.1',
-            'types-docutils==0.21.0.20241128',
-            'types-setuptools==75.8.0.20250110',  # Indirect dependency
-            'types-six==1.17.0.20241205',
-            'typing-extensions==4.12.2',
+            'types-decorator==5.2.0.20250324',
+            'types-docutils==0.21.0.20250809',
+            'types-six==1.17.0.20250515',
+            'typing-extensions==4.15.0',
         ]
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.8.6
+    rev: 0.8.20
     hooks:
       - id: pip-compile
         name: pip-compile requirements.txt

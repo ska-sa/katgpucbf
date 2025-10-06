@@ -181,7 +181,7 @@ class Benchmark(ABC):
 
     async def calibrate(self, low: float, high: float, step: float, repeat: int) -> None:
         """Run multiple trials on all the possible rates."""
-        rates = np.arange(low, high + 0.01 * step, step)
+        rates = np.arange(low, high + 0.01 * step, step).tolist()
         successes = [0] * len(rates)
         for trial in range(repeat):
             for j, adc_sample_rate in enumerate(rates):
@@ -245,7 +245,7 @@ class Benchmark(ABC):
         noise = np.clip(noise, NOISE, 1 - NOISE)
 
         result = await noisy_search(
-            list(rates),
+            rates.tolist(),
             noise,
             TOLERANCE,
             compare,
