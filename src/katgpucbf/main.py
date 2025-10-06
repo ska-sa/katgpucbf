@@ -49,7 +49,8 @@ def parse_enum[E: enum.Enum](name: str, value: str, cls: type[E]) -> E:
     try:
         return table[value]
     except KeyError:
-        raise ValueError(f"Invalid {name} value {value} (valid values are {list(table.keys())})") from None
+        valid = ", ".join(repr(key) for key in table.keys())
+        raise argparse.ArgumentTypeError(f"invalid {name} value: {value} (valid values are {valid})") from None
 
 
 def parse_dither(value: str) -> utils.DitherType:
