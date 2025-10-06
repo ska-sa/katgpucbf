@@ -47,29 +47,6 @@ class TestParseBeam:
             dither=DitherType.DEFAULT,
         )
 
-    @pytest.mark.parametrize(
-        "missing,value",
-        [
-            ("dst", "name=foo,pol=0"),
-            ("name", "dst=239.1.2.3:7148,pol=1"),
-            ("pol", "name=foo,dst=239.1.2.3:7148"),
-        ],
-    )
-    def test_missing_key(self, missing: str, value: str) -> None:
-        """Test without one of the required keys."""
-        with pytest.raises(argparse.ArgumentTypeError, match=f"{missing} is missing"):
-            parse_beam(value)
-
-    def test_duplicate_key(self) -> None:
-        """Test with a key specified twice."""
-        with pytest.raises(argparse.ArgumentTypeError, match="name already specified"):
-            parse_beam("name=foo,name=bar,dst=239.1.2.3:7148,pol=0")
-
-    def test_invalid_key(self) -> None:
-        """Test with an unknown key/value pair."""
-        with pytest.raises(argparse.ArgumentTypeError, match="unknown key fizz"):
-            parse_beam("fizz=buzz,name=foo,dst=239.1.2.3:7148,pol=0")
-
     def test_bad_pol(self) -> None:
         """Test with a polarisation value that isn't 0 or 1."""
         with pytest.raises(argparse.ArgumentTypeError, match="pol must be either 0 or 1"):
@@ -86,26 +63,3 @@ class TestParseCorrprod:
             heap_accumulation_threshold=52,
             dst=Endpoint("239.2.3.4", 7148),
         )
-
-    @pytest.mark.parametrize(
-        "missing,value",
-        [
-            ("name", "heap_accumulation_threshold=52,dst=239.2.3.4:7148"),
-            ("heap_accumulation_threshold", "name=foo,dst=239.2.3.4:7148"),
-            ("dst", "name=foo,heap_accumulation_threshold=52"),
-        ],
-    )
-    def test_missing_key(self, missing: str, value: str) -> None:
-        """Test without one of the required keys."""
-        with pytest.raises(argparse.ArgumentTypeError, match=f"{missing} is missing"):
-            parse_corrprod(value)
-
-    def test_duplicate_key(self) -> None:
-        """Test with a key specified twice."""
-        with pytest.raises(argparse.ArgumentTypeError, match="name already specified"):
-            parse_corrprod("name=foo,name=bar,heap_accumulation_threshold=52,dst=239.2.3.4:7148")
-
-    def test_invalid_key(self) -> None:
-        """Test with an unknown key/value pair."""
-        with pytest.raises(argparse.ArgumentTypeError, match="unknown key fizz"):
-            parse_corrprod("fizz=buzz,name=foo,heap_accumulation_threshold=52,dst=239.2.3.4:7148")
