@@ -30,7 +30,8 @@ from numpy.typing import ArrayLike, NDArray
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
-from katgpucbf.fgpu.recv import Chunk, Layout, make_sensors
+from katgpucbf.fgpu.recv import Layout, make_sensors
+from katgpucbf.recv import Chunk
 from katgpucbf.spead import (
     ADC_SAMPLES_ID,
     DIGITISER_ID_ID,
@@ -38,6 +39,7 @@ from katgpucbf.spead import (
     DIGITISER_STATUS_SATURATION_COUNT_SHIFT,
     DIGITISER_STATUS_SATURATION_FLAG_BIT,
     FLAVOUR,
+    IMMEDIATE_FORMAT,
     TIMESTAMP_ID,
 )
 from katgpucbf.utils import TimeConverter
@@ -57,10 +59,10 @@ def layout(request) -> Layout:
 
 
 class TestLayout:
-    """Test :class:`.Layout`."""
+    """Test :class:`~katgpucbf.fgpu.recv.Layout`."""
 
     def test_properties(self, layout: Layout) -> None:
-        """Test the properties of :class:`.Layout`."""
+        """Test the properties of :class:`~katgpucbf.fgpu.recv.Layout`."""
         assert layout.heap_bytes == 5120
         assert layout.chunk_bytes == 81920
         assert layout.chunk_heaps == 16
@@ -82,14 +84,17 @@ def data_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
 
 
 @pytest.fixture
-def free_ringbuffer(layout) -> spead2.recv.asyncio.ChunkRingbuffer:
+def free_ringbuffer(layout) -> spead2.recv.ChunkRingbuffer:
     """Create asynchronous free chunk ringbuffer, to be used by the receive streams."""
-    return spead2.recv.asyncio.ChunkRingbuffer(4)
+    return spead2.recv.ChunkRingbuffer(4)
 
 
 @pytest.fixture
 def stream_group(
-    layout, data_ringbuffer, free_ringbuffer, queue
+    layout: Layout,
+    data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    free_ringbuffer: spead2.recv.ChunkRingbuffer,
+    queue: spead2.InprocQueue,
 ) -> Generator[spead2.recv.ChunkStreamRingGroup, None, None]:
     """Create a receive stream group.
 
@@ -147,7 +152,6 @@ def gen_heaps(
     assert present is None or present.shape == data_arr.shape[:2]
     assert saturated is None or saturated.shape == data_arr.shape[:2]
     timestamp = first_timestamp
-    imm_format = [("u", FLAVOUR.heap_address_bits)]
     for i in range(data_arr.shape[1]):
         for pol in range(N_POLS):
             row = data_arr[pol, i]
@@ -159,16 +163,16 @@ def gen_heaps(
                 else:
                     status = 0
                 heap = spead2.send.Heap(FLAVOUR)
-                heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=imm_format, value=timestamp))
-                heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=imm_format, value=pol))
-                heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=imm_format, value=status))
+                heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=timestamp))
+                heap.add_item(spead2.Item(DIGITISER_ID_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=pol))
+                heap.add_item(spead2.Item(DIGITISER_STATUS_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=status))
                 heap.add_item(spead2.Item(ADC_SAMPLES_ID, "", "", shape=row.shape, dtype=row.dtype, value=row))
                 yield heap
         timestamp += layout.heap_samples
 
 
-class TestStream:
-    """Test the stream built by :func:`katgpucbf.recv.make_stream`."""
+class TestStreamGroup:
+    """Test the stream group built by :func:`katgpucbf.fgpu.recv.make_stream_group`."""
 
     @pytest.mark.parametrize("reorder", [True, False])
     @pytest.mark.parametrize("timestamps", ["good", "bad", pytest.param("mask", marks=[pytest.mark.mask_timestamp])])
