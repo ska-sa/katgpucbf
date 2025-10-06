@@ -9,11 +9,12 @@ Submodules
 
    katgpucbf.vgpu.engine
    katgpucbf.vgpu.main
+   katgpucbf.vgpu.recv
 
 Module contents
 ---------------
 
 .. automodule:: katgpucbf.vgpu
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
