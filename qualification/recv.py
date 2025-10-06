@@ -426,7 +426,7 @@ def _create_receive_stream_group(
     chunk_place: Callable,  # Actual type comes from ctypes.CFUNCTYPE, but it doesn't have a static name
     chunk_factory: Callable[[spead2.recv.ChunkRingPair], katgpucbf.recv.Chunk],
 ) -> spead2.recv.ChunkStreamRingGroup:
-    """Create a stream group to receive data from an engine.
+    """Create and start a stream group to receive data from an engine.
 
     Parameters
     ----------

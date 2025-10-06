@@ -26,7 +26,7 @@ import numpy as np
 import pytest
 import spead2.recv.asyncio
 from aiokatcp import DeviceStatus
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
@@ -278,7 +278,7 @@ class TestStream:
         chunk = chunks[0]
         assert isinstance(chunk, Chunk)
         assert chunk.chunk_id == expected_chunk_id
-        expected = np.ones(chunk.present.size, np.uint8)
+        expected: NDArray[np.uint8] = np.ones(chunk.present.size, np.uint8)
         expected[missing] = 0
         # heap list interleaves the polarisations, so use it as the fastest-varying axis
         expected = expected.reshape(chunk.present.shape, order="F")
