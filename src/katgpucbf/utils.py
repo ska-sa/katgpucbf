@@ -18,23 +18,15 @@
 
 import asyncio
 import enum
-import gc
-import ipaddress
 import logging
 import math
-import signal
-import time
 import weakref
 from collections import Counter
-from collections.abc import Callable
 
 import aiokatcp
 import numpy as np
-import prometheus_client
-from katsdptelstate.endpoint import endpoint_list_parser
 
-from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME
-from .spead import DEFAULT_PORT
+from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME, __version__
 
 # Sensor status threshold. These are mostly thumb-sucks.
 TIME_ESTERROR_WARN = 1e-3
@@ -56,114 +48,6 @@ class DitherType(enum.Enum):
     NONE = 0  # Don't change this value: we rely on it being falsey
     UNIFORM = 1
     DEFAULT = 1  # Alias used to determine default when none is specified
-
-
-def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
-    """Arrange for clean shutdown on SIGINT (Ctrl-C) or SIGTERM."""
-    signums = [signal.SIGINT, signal.SIGTERM]
-
-    def handler():
-        # Remove the handlers so that if it fails to shut down, the next
-        # attempt will try harder.
-        logger.info("Received signal, shutting down")
-        for signum in signums:
-            loop.remove_signal_handler(signum)
-        server.halt()
-
-    loop = asyncio.get_running_loop()
-    for signum in signums:
-        loop.add_signal_handler(signum, handler)
-
-
-def add_gc_stats() -> None:
-    """Add Prometheus metrics for garbage collection timing.
-
-    It is only safe to call this once.
-    """
-    gc_time = prometheus_client.Histogram(
-        "python_gc_time_seconds",
-        "Time spent in garbage collection",
-        buckets=[0.0002, 0.0005, 0.001, 0.002, 0.005, 0.010, 0.020, 0.050, 0.100],
-        labelnames=["generation"],
-    )
-    # Make all the metrics exist, before any GC calls happen
-    for generation in range(3):
-        gc_time.labels(str(generation))
-    start_time = 0.0
-
-    def callback(phase: str, info: dict) -> None:
-        nonlocal start_time
-        if phase == "start":
-            start_time = time.monotonic()
-        else:
-            started = start_time  # Copy as early as possible, before any more GC can happen
-            elapsed = time.monotonic() - started
-            gc_time.labels(str(info["generation"])).observe(elapsed)
-
-    gc.callbacks.append(callback)
-
-
-def parse_enum[E: enum.Enum](name: str, value: str, cls: type[E]) -> E:
-    """Parse a command-line argument into an enum type."""
-    table = {member.name.lower(): member for member in cls}
-    try:
-        return table[value]
-    except KeyError:
-        raise ValueError(f"Invalid {name} value {value} (valid values are {list(table.keys())})") from None
-
-
-def parse_dither(value: str) -> DitherType:
-    """Parse a string into a dither type."""
-    # Note: this allows only the non-aliases, so excludes DEFAULT
-    return parse_enum("dither", value, DitherType)
-
-
-def parse_source(value: str) -> list[tuple[str, int]] | str:
-    """Parse a string into a list of IP endpoints."""
-    try:
-        endpoints = endpoint_list_parser(DEFAULT_PORT)(value)
-        for endpoint in endpoints:
-            ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
-        return [(ep.host, ep.port) for ep in endpoints]
-    except ValueError:
-        return value
-
-
-def comma_split[T](
-    base_type: Callable[[str], T], count: int | None = None, allow_single=False
-) -> Callable[[str], list[T]]:
-    """Return a function to split a comma-delimited str into a list of type T.
-
-    This function is used to parse lists of CPU core numbers, which come from
-    the command-line as comma-separated strings, but are obviously more useful
-    as a list of ints. It's generic enough that it could process lists of other
-    types as well though if necessary.
-
-    Parameters
-    ----------
-    base_type
-        The base type of thing you expect in the list, e.g. `int`, `float`.
-    count
-        How many of them you expect to be in the list. `None` means the list
-        could be any length.
-    allow_single
-        If true (defaults to false), allow a single value to be used when
-        `count` is greater than 1. In this case, it will be repeated `count`
-        times.
-    """
-
-    def func(value: str) -> list[T]:
-        parts = value.split(",")
-        if parts == [""]:
-            parts = []
-        n = len(parts)
-        if count is not None and n == 1 and allow_single:
-            parts = parts * count
-        elif count is not None and n != count:
-            raise ValueError(f"Expected {count} comma-separated fields, received {n}")
-        return [base_type(part) for part in parts]
-
-    return func
 
 
 # We have to use *args/**kwargs because the default for status_func is a
@@ -438,3 +322,53 @@ def gaussian_dtype(bits: int) -> np.dtype:
         return np.dtype("V1")
     else:
         return np.dtype([("real", f"int{bits}"), ("imag", f"int{bits}")])
+
+
+class Engine(aiokatcp.DeviceServer):
+    """Common base for engines (katcp device servers)."""
+
+    BUILD_STATE = __version__
+
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__(host, port)
+        # Tasks that we don't need to wait for on shutdown
+        self._no_wait_tasks: weakref.WeakSet[asyncio.Task] = weakref.WeakSet()
+
+        self.sensors.add(make_steady_state_timestamp_sensor())
+        self.sensors.add(DeviceStatusSensor(self.sensors))
+
+        time_sync_task = add_time_sync_sensors(self.sensors)
+        self.add_service_task(time_sync_task, wait_on_stop=False)
+
+    def add_service_task(self, task: asyncio.Task, *, wait_on_stop: bool = False) -> None:
+        """Register an asynchronous task that runs as part of the server.
+
+        This extends :meth:`aiokatcp.DeviceServer.add_service_task` with
+        the `wait_on_stop` parameter. If true, stopping the server will wait
+        for the task to complete rather than cancelling it, unless one of the
+        service tasks raised an exception (in which case waiting may hang
+        because things are not shutting down cleanly).
+        """
+        super().add_service_task(task)
+        if not wait_on_stop:
+            self._no_wait_tasks.add(task)
+
+    def update_steady_state_timestamp(self, timestamp: int) -> None:
+        """Update ``steady-state-timestamp`` sensor to at least `timestamp`."""
+        sensor = self.sensors["steady-state-timestamp"]
+        sensor.value = max(sensor.value, timestamp)
+
+    async def on_stop(self) -> None:
+        """Cancel tasks registered with :meth:`add_cancel_task` on shutdown."""
+        await super().on_stop()
+        # When service tasks finish gracefully (or are cancelled) they are
+        # removed from service_tasks, so only tasks with exceptions are in
+        # service_tasks. If there is an exception, we don't risk hanging
+        # by waiting for a task that may not complete due to something else
+        # crashing.
+        if not any(task.done() for task in self.service_tasks):
+            # We have to copy the list because it will mutate as we
+            # complete tasks.
+            for task in list(self.service_tasks):
+                if task not in self._no_wait_tasks:
+                    await task

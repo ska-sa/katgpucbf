@@ -26,7 +26,7 @@ import pytest
 
 from katgpucbf import DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
 from katgpucbf.dsim.send import HeapSet, Sender
-from katgpucbf.dsim.server import DeviceServer
+from katgpucbf.dsim.server import DEngine
 from katgpucbf.dsim.signal import parse_signals
 from katgpucbf.send import DescriptorSender
 from katgpucbf.spead import DIGITISER_STATUS_SATURATION_COUNT_SHIFT, DIGITISER_STATUS_SATURATION_FLAG_BIT
@@ -37,11 +37,11 @@ from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
 @pytest.fixture
 async def katcp_server(
     sender: Sender, heap_sets: list[HeapSet], descriptor_sender: DescriptorSender
-) -> AsyncGenerator[DeviceServer, None]:
-    """A :class:`~katgpucbf.dsim.server.DeviceServer`."""
+) -> AsyncGenerator[DEngine, None]:
+    """A :class:`.DEngine`."""
     signals_str = "cw(0.2, 123); cw(0.3, 456);"
     dither_seed = 42
-    server = DeviceServer(
+    server = DEngine(
         sender=sender,
         descriptor_sender=descriptor_sender,
         heap_sets=heap_sets,
@@ -58,7 +58,7 @@ async def katcp_server(
 
 
 @pytest.fixture
-async def katcp_client(katcp_server: DeviceServer) -> AsyncGenerator[aiokatcp.Client, None]:
+async def katcp_client(katcp_server: DEngine) -> AsyncGenerator[aiokatcp.Client, None]:
     """A katcp client connection to :func:`katcp_server`."""
     host, port = katcp_server.sockets[0].getsockname()[:2]
     async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
@@ -68,7 +68,7 @@ async def katcp_client(katcp_server: DeviceServer) -> AsyncGenerator[aiokatcp.Cl
     await client.wait_closed()
 
 
-async def test_sensors(katcp_server: DeviceServer, katcp_client: aiokatcp.Client) -> None:
+async def test_sensors(katcp_server: DEngine, katcp_client: aiokatcp.Client) -> None:
     """Test the initial sensor values."""
     assert await katcp_client.sensor_value("signals-orig", str) == "cw(0.2, 123); cw(0.3, 456);"
     assert await katcp_client.sensor_value("signals", str) == "cw(0.2, 123); cw(0.3, 456);"
@@ -80,7 +80,7 @@ async def test_sensors(katcp_server: DeviceServer, katcp_client: aiokatcp.Client
 
 @pytest.mark.parametrize("period", [8192, None])
 async def test_signals(
-    katcp_server: DeviceServer,
+    katcp_server: DEngine,
     katcp_client: aiokatcp.Client,
     sender: Sender,
     heap_sets: Sequence[HeapSet],
@@ -122,7 +122,7 @@ async def test_signals(
 
 
 async def test_signals_zero(
-    katcp_server: DeviceServer,
+    katcp_server: DEngine,
     katcp_client: aiokatcp.Client,
     sender: Sender,
     heap_sets: Sequence[HeapSet],
@@ -145,20 +145,20 @@ async def test_signals_zero(
     ],
 )
 async def test_signals_unparsable(
-    katcp_server: DeviceServer, katcp_client: aiokatcp.Client, mocker, spec: str, match: str
+    katcp_server: DEngine, katcp_client: aiokatcp.Client, mocker, spec: str, match: str
 ) -> None:
     """Test that ``?signals`` with an invalid signal specification fails gracefully."""
     with pytest.raises(aiokatcp.FailReply, match=re.escape(match)):
         await katcp_client.request("signals", spec)
 
 
-async def test_signals_wrong_length(katcp_server: DeviceServer, katcp_client: aiokatcp.Client, mocker) -> None:
+async def test_signals_wrong_length(katcp_server: DEngine, katcp_client: aiokatcp.Client, mocker) -> None:
     """Test that ``?signals`` fails gracefully when given the wrong number of signals."""
     with pytest.raises(aiokatcp.FailReply, match="expected 2 signals, received 1"):
         await katcp_client.request("signals", "cw(0, 0);")
 
 
-async def test_time(katcp_server: DeviceServer, katcp_client: aiokatcp.Client, mocker) -> None:
+async def test_time(katcp_server: DEngine, katcp_client: aiokatcp.Client, mocker) -> None:
     """Test ?time request."""
     mocker.patch("time.time", return_value=1234567890.0)
     reply, _ = await katcp_client.request("time")

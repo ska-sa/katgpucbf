@@ -34,7 +34,8 @@ from katgpucbf.fgpu.output import (
     WidebandOutput,
     WindowFunction,
 )
-from katgpucbf.utils import DitherType, parse_dither
+from katgpucbf.main import parse_dither
+from katgpucbf.utils import DitherType
 
 
 def main():

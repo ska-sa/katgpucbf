@@ -21,23 +21,23 @@ Simulates the packet structure of MeerKAT digitisers.
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import math
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import MutableMapping, Sequence
 
-import katsdpservices
 import numpy as np
-import prometheus_async
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, SPEAD_DESCRIPTOR_INTERVAL_S
+from .. import BYTE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
+from ..main import add_common_arguments, add_send_arguments, engine_main
 from ..send import DescriptorSender
-from ..utils import TimeConverter, add_gc_stats, add_signal_handlers
+from ..utils import TimeConverter
 from . import descriptors, send, signal
-from .server import DeviceServer
+from .server import DEngine
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +55,10 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "The specification must produce either a single signal, or one per output stream. [%(default)s]",
     )
     parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
-    parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
     parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")
     parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
     parser.add_argument("--first-id", type=int, default=0, help="Digitiser ID for first stream [%(default)s]")
-    parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
-    parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
-    parser.add_argument("--affinity", type=int, default=-1, help="Core affinity for the sending thread [not bound]")
+    add_send_arguments(parser, prefix="")
     parser.add_argument(
         "--main-affinity", type=int, default=-1, help="Core affinity for the main Python thread [not bound]"
     )
@@ -72,23 +69,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--max-period", type=int, help="Maximum supported period for pre-computed signals [same as --period]"
     )
     parser.add_argument("--dither-seed", type=int, help="Fixed seed for reproducible dithering [random]")
-    parser.add_argument(
-        "--katcp-host",
-        type=str,
-        default=DEFAULT_KATCP_HOST,
-        help="Hostname or IP on which to listen for KATCP C&M connections [all interfaces]",
-    )
-    parser.add_argument(
-        "--katcp-port",
-        type=int,
-        default=DEFAULT_KATCP_PORT,
-        help="Network port on which to listen for KATCP C&M connections [%(default)s]",
-    )
-    parser.add_argument(
-        "--prometheus-port",
-        type=int,
-        help="Network port on which to serve Prometheus metrics [none]",
-    )
+    add_common_arguments(parser)
     parser.add_argument(
         "dest",
         nargs="+",
@@ -152,17 +133,19 @@ def first_timestamp(time_converter: TimeConverter, now: float, align: int) -> in
     return samples
 
 
-async def _async_main(tg: asyncio.TaskGroup) -> None:
-    """Real implementation of :func:`async_main`.
+async def start_engine(
+    args: argparse.Namespace,
+    tg: asyncio.TaskGroup,
+    exit_stack: contextlib.AsyncExitStack,
+    locals_: MutableMapping[str, object],
+) -> DEngine:
+    """Start the device server.
 
-    This is split into a separate function to avoid having to indent the whole
-    thing inside the `tg` context manager.
+    See Also
+    --------
+    katgpucbf.main.engine_main
     """
-    args = parse_args()
     heap_size = args.heap_samples * args.sample_bits // BYTE_BITS
-
-    if args.prometheus_port is not None:
-        await prometheus_async.aio.web.start_http_server(port=args.prometheus_port)
 
     timestamps = np.zeros(args.max_period // args.heap_samples, dtype=">u8")
     # One being currently sent, one spare, and one reserved for zeros
@@ -182,13 +165,13 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
             endpoints.append((ep.host, ep.port))
 
     config = descriptors.create_config()
-    interface_address = katsdpservices.get_interface_address(args.interface)
     descriptor_stream = send.make_stream_base(
         endpoints=endpoints,
         config=config,
         ttl=args.ttl,
-        interface_address=interface_address,
+        interface_address=args.interface,
         ibv=args.ibv,
+        comp_vector=args.comp_vector,
     )
     descriptor_stream.set_cnt_sequence(1, 2)
 
@@ -220,15 +203,16 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
         sample_bits=args.sample_bits,
         max_heaps=heap_sets[0].data["heaps"].size,
         ttl=args.ttl,
-        interface_address=interface_address,
+        interface_address=args.interface,
         ibv=args.ibv,
         affinity=args.affinity,
+        comp_vector=args.comp_vector,
     )
     # Set spead stream to have heap id in even numbers for dsim data.
     stream.set_cnt_sequence(2, 2)
     sender = send.Sender(stream, heap_sets[0], args.heap_samples)
 
-    server = DeviceServer(
+    server = DEngine(
         sender=sender,
         descriptor_sender=descriptor_sender,
         heap_sets=heap_sets,
@@ -240,7 +224,7 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
     )
     await server.set_signals(args.signals, args.signals_orig, args.period)
 
-    # Only set this affinity after constructing DeviceServer, which creates
+    # Only set this affinity after constructing DEngine, which creates
     # a separate process for the signal service that shouldn't inherit this.
     if args.main_affinity >= 0:
         os.sched_setaffinity(0, [args.main_affinity])
@@ -250,12 +234,10 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
     server.sensors["sync-time"].value = args.sync_time
     await server.start()
 
-    add_signal_handlers(server)
-    add_gc_stats()
-
     time_converter = TimeConverter(args.sync_time, args.adc_sample_rate)
     timestamp = first_timestamp(time_converter, time.time(), args.max_period)
     start_time = time_converter.adc_to_unix(timestamp)
+    locals_.update(locals())
 
     logger.info("First timestamp will be %#x", timestamp)
     # Sleep until start_time. Python doesn't seem to have an interface
@@ -265,20 +247,13 @@ async def _async_main(tg: asyncio.TaskGroup) -> None:
     await asyncio.sleep(max(0, start_time - time.time()))
     logger.info("Starting transmission")
     tg.create_task(sender.run(timestamp, time_converter))
-    tg.create_task(server.join())
+    return server
     # The caller will exit the scope of tg, thus waiting for everything to finish
-
-
-async def async_main() -> None:
-    """Asynchronous main entry point."""
-    async with asyncio.TaskGroup() as tg:
-        await _async_main(tg)
 
 
 def main() -> None:
     """Run main program."""
-    katsdpservices.setup_logging()
-    asyncio.run(async_main())
+    engine_main(parse_args(), start_engine)
 
 
 if __name__ == "__main__":
