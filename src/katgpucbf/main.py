@@ -343,6 +343,8 @@ class SubParser:
                     except (TypeError, ValueError) as exc:
                         type_name = getattr(arg.type, "__name__", str(arg.type))
                         raise argparse.ArgumentTypeError(f"{key}: invalid {type_name} value: {data!r}") from exc
+                    except argparse.ArgumentTypeError as exc:
+                        raise argparse.ArgumentTypeError(f"{key}: {exc}") from exc
                 case _:
                     raise argparse.ArgumentTypeError(f"missing = in {part!r}")
         for key, arg in self._arguments.items():
