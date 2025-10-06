@@ -130,7 +130,7 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
 
 
 class TestStream:
-    """Test the stream built by :func:`katgpucbf.recv.make_stream`."""
+    """Test the stream built by :func:`katgpucbf.xbgpu.recv.make_stream`."""
 
     @pytest.fixture
     async def sensors(self) -> SensorSet:
