@@ -37,5 +37,5 @@ Module contents
 
 .. automodule:: katgpucbf
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:

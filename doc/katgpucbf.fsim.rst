@@ -14,5 +14,5 @@ Module contents
 
 .. automodule:: katgpucbf.fsim
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
