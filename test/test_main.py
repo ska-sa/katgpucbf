@@ -72,7 +72,7 @@ class TestParseDither:
         """Test with invalid inputs."""
         with pytest.raises(
             argparse.ArgumentTypeError,
-            match=rf"invalid dither value: {input} \(valid values are 'none', 'uniform'\)",
+            match=rf"invalid dither value: {input!r} \(valid values are 'none', 'uniform'\)",
         ):
             parse_dither(input)
 
