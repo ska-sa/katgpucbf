@@ -31,7 +31,7 @@ from numpy.typing import ArrayLike
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
-from katgpucbf.xbgpu.recv import Chunk, Layout, make_sensors, recv_chunks
+from katgpucbf.xbgpu.recv import Chunk, Layout, iter_chunks, make_sensors
 
 from .. import PromDiff
 
@@ -215,7 +215,7 @@ class TestStream:
 
             queue.stop()  # Flushes out the receive stream
             seen = 0
-            async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
+            async for chunk in iter_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 assert isinstance(chunk, Chunk)
                 with chunk:
                     assert chunk.chunk_id == expected_chunk_id
@@ -306,9 +306,9 @@ class TestStream:
             # NOTE: We have to use a 'manual' counter as there is a jump in
             # received Chunk IDs - due to the deletions earlier.
             seen = 0
-            async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
+            async for chunk in iter_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 with chunk:
-                    # recv_chunks should filter out the phantom chunks created by
+                    # iter_chunks should filter out the phantom chunks created by
                     # spead2.
                     assert np.any(chunk.present)
                     received_chunk_ids.append(chunk.chunk_id)
