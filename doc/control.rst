@@ -265,6 +265,15 @@ xbgpu
     These have the same semantics as the equivalent katsdpcontroller
     requests.
 
+vgpu
+^^^^
+:samp:`?capture-start`, :samp:`?capture-stop`
+    Enable or disable transmission of output data. In the initial state
+    transmission is disabled.
+
+:samp:`?vlbi-delay {delay}`
+    This has the same semantics as the equivalent katsdpcontroller request.
+
 Shutting down the correlator
 ----------------------------
 

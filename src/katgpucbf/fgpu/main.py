@@ -26,13 +26,12 @@ import asyncio
 import contextlib
 import logging
 import math
-from collections.abc import Callable, MutableMapping, Sequence
-from typing import TypedDict
+from collections.abc import MutableMapping, Sequence
 
 import katsdpsigproc.accel as accel
 import vkgdr
 from katsdpsigproc.abc import AbstractContext
-from katsdptelstate.endpoint import Endpoint, endpoint_list_parser
+from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import (
     DEFAULT_JONES_PER_BATCH,
@@ -40,6 +39,7 @@ from .. import (
     DIG_SAMPLE_BITS,
 )
 from ..main import (
+    SubParser,
     add_common_arguments,
     add_recv_arguments,
     add_send_arguments,
@@ -64,80 +64,20 @@ DEFAULT_DDC_TAPS_RATIO = 16
 DEFAULT_WEIGHT_PASS = 0.005
 
 
-class _OutputDict(TypedDict, total=False):
-    """Configuration options for an output stream.
-
-    Unlike :class:`WidebandOutput` or :class:`NarrowbandOutput`, all the fields
-    are optional, so that it can be built up incrementally. They must all be
-    filled in before using it to construct an :class:`Output`.
-    """
-
-    name: str
-    channels: int
-    jones_per_batch: int
-    dst: list[Endpoint]
-    taps: int
-    w_cutoff: float
-    window_function: WindowFunction
-    dither: DitherType
+def _parse_window_function(value: str) -> WindowFunction:
+    """Parse a :class:`.WindowFunction` from a command-line argument."""
+    return parse_enum("window_function", value, WindowFunction)
 
 
-class _WidebandOutputDict(_OutputDict, total=False):
-    """Configuration options for a wideband output.
-
-    See :class:`_OutputDict` for further information.
-    """
-
-    pass
-
-
-class _NarrowbandOutputDict(_OutputDict, total=False):
-    """Configuration options for a narrowband output.
-
-    See :class:`_OutputDict` for further information.
-    """
-
-    centre_frequency: float
-    decimation: int
-    ddc_taps: int
-    weight_pass: float
-    pass_bandwidth: float
-
-
-def _parse_stream[OD: _OutputDict](value: str, kws: OD, field_callback: Callable[[OD, str, str], None]) -> None:
-    """Parse a wideband or narrowband stream description.
-
-    This populates `kws` (which should initially be empty) from key=value pairs
-    in `value`. It handles the common fields directly, and type-specific fields
-    are handled by a provided field callback. The callback is invoked with
-    `kws`, the key and the value. If it does not recognise the key, it should
-    raise ValueError.
-    """
-    for part in value.split(","):
-        match part.split("=", 1):
-            case [key, data]:
-                match key:
-                    case _ if key in kws:
-                        raise ValueError(f"{key} specified twice")
-                    case "name":
-                        kws[key] = data
-                    case "channels" | "taps" | "jones_per_batch":
-                        kws[key] = int(data)
-                    case "w_cutoff":
-                        kws[key] = float(data)
-                    case "window_function":
-                        kws[key] = parse_enum("window_function", data, WindowFunction)
-                    case "dst":
-                        kws[key] = endpoint_list_parser(DEFAULT_PORT)(data)
-                    case "dither":
-                        kws[key] = parse_dither(data)
-                    case _:
-                        field_callback(kws, key, data)
-            case _:
-                raise ValueError(f"missing '=' in {part}")
-    for key in ["name", "channels", "dst"]:
-        if key not in kws:
-            raise ValueError(f"{key} is missing")
+def _add_stream_args(parser: SubParser) -> None:
+    parser.add_argument("name", type=str, required=True)
+    parser.add_argument("channels", type=int, required=True)
+    parser.add_argument("jones_per_batch", type=int, default=DEFAULT_JONES_PER_BATCH)
+    parser.add_argument("dst", type=endpoint_list_parser(DEFAULT_PORT), required=True)
+    parser.add_argument("taps", type=int, default=DEFAULT_TAPS)
+    parser.add_argument("w_cutoff", type=float, default=DEFAULT_W_CUTOFF)
+    parser.add_argument("window_function", type=_parse_window_function, default=WindowFunction.DEFAULT)
+    parser.add_argument("dither", type=parse_dither, default=DitherType.DEFAULT)
 
 
 def parse_wideband(value: str) -> WidebandOutput:
@@ -151,24 +91,10 @@ def parse_wideband(value: str) -> WidebandOutput:
     - channels
     - dst
     """
-
-    def field_callback(kws: _WidebandOutputDict, key: str, data: str) -> None:
-        raise ValueError(f"unknown key {key}")
-
-    try:
-        kws: _WidebandOutputDict = {}
-        _parse_stream(value, kws, field_callback)
-        kws = {
-            "taps": DEFAULT_TAPS,
-            "w_cutoff": DEFAULT_W_CUTOFF,
-            "window_function": WindowFunction.DEFAULT,
-            "jones_per_batch": DEFAULT_JONES_PER_BATCH,
-            "dither": DitherType.DEFAULT,
-            **kws,
-        }
-        return WidebandOutput(**kws)
-    except ValueError as exc:
-        raise ValueError(f"--wideband: {exc}") from exc
+    parser = SubParser()
+    _add_stream_args(parser)
+    args = parser(value)
+    return WidebandOutput(**vars(args))
 
 
 def parse_narrowband(value: str) -> NarrowbandOutput:
@@ -184,45 +110,23 @@ def parse_narrowband(value: str) -> NarrowbandOutput:
     - decimation
     - dst
     """
-
-    def field_callback(kws: _NarrowbandOutputDict, key: str, data: str) -> None:
-        match key:
-            case "centre_frequency" | "weight_pass" | "pass_bandwidth":
-                kws[key] = float(data)
-            case "decimation" | "ddc_taps":
-                kws[key] = int(data)
-            case _:
-                raise ValueError(f"unknown key {key}")
-
-    try:
-        kws: _NarrowbandOutputDict = {}
-        _parse_stream(value, kws, field_callback)
-        for key in ["centre_frequency", "decimation"]:
-            if key not in kws:
-                raise ValueError(f"{key} is missing")
-        # Note that using **kws at the end means these are only defaults which
-        # can be overridden by the user.
-        default_taps = DEFAULT_DDC_TAPS_RATIO * kws["decimation"]
-        if "pass_bandwidth" in kws:
-            default_taps *= 2  # sampling = 2 * decimation in this case
-        kws = {
-            "taps": DEFAULT_TAPS,
-            "w_cutoff": DEFAULT_W_CUTOFF,
-            "window_function": WindowFunction.DEFAULT,
-            "jones_per_batch": DEFAULT_JONES_PER_BATCH,
-            "weight_pass": DEFAULT_WEIGHT_PASS,
-            "ddc_taps": default_taps,
-            "dither": DitherType.DEFAULT,
-            **kws,
-        }
-        if "pass_bandwidth" in kws:
-            return NarrowbandOutputNoDiscard(**kws)
-        else:
-            # mypy isn't smart enough to realise that "pass_bandwidth"
-            # isn't going to be in **kws.
-            return NarrowbandOutputDiscard(**kws)  # type: ignore[misc]
-    except ValueError as exc:
-        raise ValueError(f"--narrowband: {exc}") from exc
+    parser = SubParser()
+    _add_stream_args(parser)
+    parser.add_argument("centre_frequency", type=float, required=True)
+    parser.add_argument("decimation", type=int, required=True)
+    parser.add_argument("ddc_taps", type=int)  # Default is computed later
+    parser.add_argument("weight_pass", type=float, default=DEFAULT_WEIGHT_PASS)
+    parser.add_argument("pass_bandwidth", type=float)
+    args = parser(value)
+    if args.ddc_taps is None:
+        args.ddc_taps = DEFAULT_DDC_TAPS_RATIO * args.decimation
+        if args.pass_bandwidth is not None:
+            args.ddc_taps *= 2  # sampling = 2 * decimation in this case
+    if args.pass_bandwidth is not None:
+        return NarrowbandOutputNoDiscard(**vars(args))
+    else:
+        del args.pass_bandwidth
+        return NarrowbandOutputDiscard(**vars(args))
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:

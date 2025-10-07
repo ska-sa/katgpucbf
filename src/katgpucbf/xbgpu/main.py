@@ -34,13 +34,12 @@ import asyncio
 import contextlib
 import logging
 import os
-from collections.abc import Callable, MutableMapping, Sequence
-from typing import TypedDict
+from collections.abc import MutableMapping, Sequence
 
 import katsdpsigproc.accel
 import vkgdr
 from katsdpsigproc.abc import AbstractContext
-from katsdptelstate.endpoint import Endpoint, endpoint_parser
+from katsdptelstate.endpoint import endpoint_parser
 
 from katgpucbf.xbgpu.engine import XBEngine
 
@@ -49,6 +48,7 @@ from .. import (
     DEFAULT_PACKET_PAYLOAD_BYTES,
 )
 from ..main import (
+    SubParser,
     add_common_arguments,
     add_recv_arguments,
     add_send_arguments,
@@ -66,63 +66,16 @@ from .output import BOutput, XOutput
 logger = logging.getLogger(__name__)
 
 
-class _OutputDict(TypedDict, total=False):
-    """Configuration options for an output stream.
-
-    Unlike :class:`BOutput` or :class:`XOutput`, all the fields are optional,
-    so that it can be built up incrementally. They must all be filled in
-    before using it to construct an :class:`Output`.
-    """
-
-    name: str
-    dst: Endpoint
+def _add_stream_args(parser: SubParser) -> None:
+    parser.add_argument("name", type=str, required=True)
+    parser.add_argument("dst", type=endpoint_parser(DEFAULT_PORT), required=True)
 
 
-class _BOutputDict(_OutputDict, total=False):
-    """Configuration options for a beam output.
-
-    See :class:`_OutputDict` for further information.
-    """
-
-    pol: int
-    dither: DitherType
-
-
-class _XOutputDict(_OutputDict, total=False):
-    """Configuration options for a baseline-correlation output.
-
-    See :class:`_OutputDict` for further information.
-    """
-
-    heap_accumulation_threshold: int
-
-
-def _parse_stream[OD: _OutputDict](value: str, kws: OD, field_callback: Callable[[OD, str, str], None]) -> None:
-    """Parse a correlation-product or beam stream description.
-
-    This populates `kws` (which should initially be empty) from key=value pairs
-    in `value`. It handles the common fields directly, and type-specific fields
-    are handled by a provided field callback. The callback is invoked with
-    `kws`, the key and the value. If it does not recognise the key, it should
-    raise ValueError.
-    """
-    for part in value.split(","):
-        match part.split("=", 1):
-            case [key, data]:
-                match key:
-                    case _ if key in kws:
-                        raise ValueError(f"{key} already specified")
-                    case "name":
-                        kws[key] = data
-                    case "dst":
-                        kws[key] = endpoint_parser(DEFAULT_PORT)(data)
-                    case _:
-                        field_callback(kws, key, data)
-            case _:
-                raise ValueError(f"missing '=' in {part}")
-    for key in ["name", "dst"]:
-        if key not in kws:
-            raise ValueError(f"{key} is missing")
+def _parse_pol(value: str) -> int:
+    pol = int(value)
+    if pol not in {0, 1}:
+        raise argparse.ArgumentTypeError("pol must be either 0 or 1")
+    return pol
 
 
 def parse_beam(value: str) -> BOutput:
@@ -136,27 +89,12 @@ def parse_beam(value: str) -> BOutput:
     - dst
     - pol
     """
-
-    def _field_callback(kws: _BOutputDict, key: str, data: str) -> None:
-        match key:
-            case "pol":
-                kws[key] = int(data)
-                if kws[key] not in {0, 1}:
-                    raise ValueError("pol must be either 0 or 1")
-            case "dither":
-                kws[key] = parse_dither(data)
-            case _:
-                raise ValueError(f"unknown key {key}")
-
-    try:
-        kws: _BOutputDict = {}
-        _parse_stream(value, kws, _field_callback)
-        kws.setdefault("dither", DitherType.DEFAULT)
-        if "pol" not in kws:
-            raise ValueError("pol is missing")
-        return BOutput(**kws)
-    except ValueError as exc:
-        raise ValueError(f"--beam: {exc}") from exc
+    parser = SubParser()
+    _add_stream_args(parser)
+    parser.add_argument("pol", type=_parse_pol, required=True)
+    parser.add_argument("dither", type=parse_dither, default=DitherType.DEFAULT)
+    args = parser(value)
+    return BOutput(**vars(args))
 
 
 def parse_corrprod(value: str) -> XOutput:
@@ -170,22 +108,11 @@ def parse_corrprod(value: str) -> XOutput:
     - dst
     - heap_accumulation_threshold
     """
-
-    def _field_callback(kws: _XOutputDict, key: str, data: str) -> None:
-        match key:
-            case "heap_accumulation_threshold":
-                kws[key] = int(data)
-            case _:
-                raise ValueError(f"unknown key {key}")
-
-    try:
-        kws: _XOutputDict = {}
-        _parse_stream(value, kws, _field_callback)
-        if "heap_accumulation_threshold" not in kws:
-            raise ValueError("heap_accumulation_threshold is missing")
-        return XOutput(**kws)
-    except ValueError as exc:
-        raise ValueError(f"--corrprod: {exc}") from exc
+    parser = SubParser()
+    _add_stream_args(parser)
+    parser.add_argument("heap_accumulation_threshold", type=int, required=True)
+    args = parser(value)
+    return XOutput(**vars(args))
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
