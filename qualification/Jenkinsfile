@@ -82,8 +82,13 @@ pipeline {
       steps {
         // Workaround for https://github.com/JelteF/PyLaTeX/issues/391
         // See NGC-1657
-        sh 'echo "setuptools<78" > constrain-setuptools.txt'
-        sh 'PIP_CONSTRAINT="constrain-setuptools.txt qualification/requirements.txt" pip install pylatex'
+        sh 'pip install uv==0.8.24'
+        // Extract the pinned versions of pylatex and its dependencies
+        sh 'echo "pylatex" | uv pip compile - -c qualification/requirements.txt -o constrain-setuptools.txt'
+        // Pin setuptools to a version that is known to work (it still warns)
+        sh 'echo "setuptools<78" >> constrain-setuptools.txt'
+        // Using PIP_CONSTRAINT pins the version used for the build environment too
+        sh 'PIP_CONSTRAINT="constrain-setuptools.txt" pip install pylatex'
         sh 'pip install -r qualification/requirements.txt'
         sh 'pip install --no-deps ".[qualification]" && pip check'
       }
