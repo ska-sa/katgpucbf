@@ -174,3 +174,6 @@ class TestStatsCollector:
         assert weak() is None, "Group was not garbage collected"
 
         assert registry.get_sample_value("test_input_incomplete_heaps_total", labels) == 7
+
+
+# iter_chunks is not tested here, as it is covered by per-engine tests.

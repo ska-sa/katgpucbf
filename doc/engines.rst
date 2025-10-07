@@ -21,11 +21,16 @@ Glossary
 This section serves (hopefully) to clarify some potentially confusing terms used
 within the source code.
 
+Batch
+    In the context of the networking code, a collection of heaps that share a
+    timestamp.
+
 Chunk
     An array of data and associated metadata, including a timestamp. Chunks
     are the granularity at which data is managed within an engine (e.g., for
     transfer between CPU and GPU). To amortise per-chunk costs, chunks
-    typically contain many SPEAD heaps.
+    typically contain many SPEAD heaps. A chunk consists of one or more
+    batches (see above) that are sequential in time.
 
 Command Queue
     Channel for submitting work to a GPU. See

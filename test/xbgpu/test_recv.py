@@ -17,7 +17,6 @@
 """Unit tests for :mod:`katgpucbf.xbgpu.recv`."""
 
 import itertools
-import logging
 import random
 from collections.abc import Generator, Iterator
 from unittest.mock import ANY
@@ -43,7 +42,7 @@ def layout() -> Layout:
         n_ants=4,
         n_channels_per_substream=1024 // 4,
         n_spectra_per_heap=32,
-        timestamp_step=2 * 1024 * 32,
+        heap_timestamp_step=2 * 1024 * 32,
         sample_bits=8,
         heaps_per_fengine_per_chunk=10,
     )
@@ -55,6 +54,8 @@ class TestLayout:
     def test_properties(self, layout: Layout) -> None:
         """Test the properties of :class:`.Layout`."""
         assert layout.heap_bytes == 32768
+        assert layout.chunk_batches == 10
+        assert layout.batch_heaps == 4
         assert layout.chunk_heaps == 4 * 10
         assert layout.chunk_bytes == 1310720
 
@@ -91,6 +92,13 @@ def stream(layout, queue) -> Generator[spead2.recv.ChunkRingStream, None, None]:
 
 
 @pytest.fixture
+def data_ringbuffer(stream: spead2.recv.ChunkRingStream) -> spead2.recv.asyncio.ChunkRingbuffer:
+    """Ringbuffer that receives data from :func:`stream`."""
+    assert isinstance(stream.data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
+    return stream.data_ringbuffer
+
+
+@pytest.fixture
 def send_stream(queue) -> "spead2.send.asyncio.AsyncStream":
     """Create a stream that feeds into :func:`stream`."""
     config = spead2.send.StreamConfig(max_packet_size=9000)
@@ -124,7 +132,7 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
     # the `--heaps-per-fengine-per-chunk` parser argument in main.py.
     for batch_id, batch in enumerate(data_arr):
         for feng_id, feng_data in enumerate(batch):
-            timestamp = first_timestamp + batch_id * layout.timestamp_step
+            timestamp = first_timestamp + batch_id * layout.heap_timestamp_step
             heap = gen_heap(timestamp, feng_id, 0, feng_data)
             yield heap
 
@@ -145,6 +153,7 @@ class TestStream:
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream: spead2.recv.ChunkRingStream,
+        data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         queue: spead2.InprocQueue,
         reorder: bool,
         timestamps: str,
@@ -171,7 +180,7 @@ class TestStream:
         rng = np.random.default_rng(seed=1)
         data = rng.integers(-127, 127, size=5 * layout.chunk_bytes, dtype=np.int8)
         expected_chunk_id = 123
-        first_timestamp = expected_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+        first_timestamp = expected_chunk_id * layout.chunk_timestamp_step
 
         heaps: Iterator[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp)
         if reorder:
@@ -209,13 +218,15 @@ class TestStream:
 
             # Finally a heap from the distant past
             heap = gen_heap(
-                first_timestamp - 8 * layout.timestamp_step, 0, 0, np.zeros((layout.heap_bytes,), dtype=np.int8)
+                first_timestamp - 8 * layout.heap_timestamp_step, 0, 0, np.zeros((layout.heap_bytes,), dtype=np.int8)
             )
             await send_stream.async_send_heap(heap)
 
             queue.stop()  # Flushes out the receive stream
             seen = 0
-            async for chunk in iter_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
+            async for chunk in iter_chunks(
+                data_ringbuffer, layout=layout, sensors=sensors, time_converter=time_converter
+            ):
                 assert isinstance(chunk, Chunk)
                 with chunk:
                     assert chunk.chunk_id == expected_chunk_id
@@ -227,9 +238,11 @@ class TestStream:
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
 
+        expected_heaps = seen * layout.chunk_heaps
         assert prom_diff.diff("input_chunks_total") == seen
-        assert prom_diff.diff("input_heaps_total") == seen * layout.chunk_heaps
+        assert prom_diff.diff("input_heaps_total") == expected_heaps
         assert prom_diff.diff("input_bytes_total") == layout.chunk_bytes * seen
+        assert prom_diff.diff("input_samples_total") == expected_heaps * layout.heap_sample_count
         assert prom_diff.diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
         assert prom_diff.diff("input_bad_feng_id_heaps_total") == 1
         assert prom_diff.diff("input_metadata_heaps_total") == 1
@@ -240,10 +253,10 @@ class TestStream:
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
         stream: spead2.recv.ChunkRingStream,
+        data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         queue: spead2.InprocQueue,
         sensors: SensorSet,
         time_converter: TimeConverter,
-        caplog,
     ) -> None:
         """Test that the receiver handles missing heaps and Chunks.
 
@@ -259,7 +272,7 @@ class TestStream:
         heaps_to_send = []
 
         for i in range(n_chunks_to_send):
-            timestamp = (start_chunk_id + i) * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+            timestamp = (start_chunk_id + i) * layout.chunk_timestamp_step
             heaps_to_send += list(gen_heaps(layout, data, timestamp))
 
         expected_chunk_presence_flat = np.ones(
@@ -295,10 +308,7 @@ class TestStream:
             shape=(n_chunks_to_send - n_chunks_to_delete, layout.chunk_heaps), dtype=np.uint8
         )
         received_chunk_ids = []
-        with (
-            caplog.at_level(logging.WARNING, logger="katgpucbf.xbgpu.recv"),
-            PromDiff(namespace=METRIC_NAMESPACE) as prom_diff,
-        ):
+        with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             # Manually register the receiving stream with the StatsCollector,
             # as we haven't used the `recv.make_stream` utility.
             recv.stats_collector.add_stream(stream)
@@ -306,7 +316,9 @@ class TestStream:
             # NOTE: We have to use a 'manual' counter as there is a jump in
             # received Chunk IDs - due to the deletions earlier.
             seen = 0
-            async for chunk in iter_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
+            async for chunk in iter_chunks(
+                data_ringbuffer, layout=layout, sensors=sensors, time_converter=time_converter
+            ):
                 with chunk:
                     # iter_chunks should filter out the phantom chunks created by
                     # spead2.
@@ -316,14 +328,6 @@ class TestStream:
                     seen += 1
 
         absolute_missing_chunk_id = start_chunk_id + missing_chunk_ids[0] + n_chunks_to_delete
-        assert caplog.record_tuples == [
-            (
-                "katgpucbf.xbgpu.recv",
-                logging.WARNING,
-                f"Receiver missed {n_chunks_to_delete} chunks. Expected ID: {start_chunk_id + missing_chunk_ids[0]}, "
-                f"received ID: {absolute_missing_chunk_id}.",
-            )
-        ]
 
         # Have to expand this list as the `range` generator doesn't support item deletion
         expected_chunk_ids = [i for i in range(start_chunk_id, start_chunk_id + n_chunks_to_send)]
@@ -342,7 +346,7 @@ class TestStream:
         # Check sensors
         sensor = sensors["rx.timestamp"]
         # sensor.value should be of the last chunk sent
-        absolute_present_timestamp = expected_chunk_ids[-1] * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
+        absolute_present_timestamp = expected_chunk_ids[-1] * layout.chunk_timestamp_step
         expected_timestamp = time_converter.adc_to_unix(absolute_present_timestamp)
         assert sensor.reading == Reading(expected_timestamp, Sensor.Status.NOMINAL, absolute_present_timestamp)
         sensor = sensors["rx.unixtime"]
@@ -350,9 +354,7 @@ class TestStream:
         assert sensor.reading == Reading(expected_timestamp, Sensor.Status.NOMINAL, expected_timestamp)
         sensor = sensors["rx.missing-unixtime"]
         # sensor.value should be of the last chunk to go missing
-        absolute_missing_timestamp = (
-            absolute_missing_chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
-        )
+        absolute_missing_timestamp = absolute_missing_chunk_id * layout.chunk_timestamp_step
         expected_timestamp = time_converter.adc_to_unix(absolute_missing_timestamp)
         assert sensor.reading == Reading(expected_timestamp, Sensor.Status.ERROR, expected_timestamp)
         ds_sensor = sensors["rx.device-status"]

@@ -17,23 +17,29 @@
 """Shared utilities for receiving SPEAD data."""
 
 import ctypes
+import dataclasses
+import logging
 import time
 import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import Any, ClassVar, Self
 
+import aiokatcp
 import numba.core.ccallback
 import numpy as np
 import scipy
 import spead2.recv
 import spead2.recv.asyncio
 from numba import types
-from prometheus_client import REGISTRY, CollectorRegistry, Metric
+from prometheus_client import REGISTRY, CollectorRegistry, Counter, Metric
 from prometheus_client.core import CounterMetricFamily
 from prometheus_client.registry import Collector
 
+from .utils import TimeConverter
+
+logger = logging.getLogger(__name__)
 user_data_type = types.Record.make_c_struct(
     [
         ("stats_base", types.uintp),  # Index for first custom statistic
@@ -273,14 +279,40 @@ class BaseLayout(ABC):
 
     @property
     @abstractmethod
+    def chunk_batches(self) -> int:
+        """Number of batches per chunk."""
+        ...
+
+    @property
+    @abstractmethod
+    def batch_heaps(self) -> int:
+        """Number of heaps per chunk, on the axes other than time."""
+        ...
+
+    @property
+    @abstractmethod
+    def heap_sample_count(self) -> int:
+        """Number of samples per heap.
+
+        The meaning of samples is up to the concrete subclass. It is used
+        only for statistics.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def chunk_timestamp_step(self) -> int:
+        """Expected increase in timestamp from one chunk to the next."""
+
+    @property
     def chunk_heaps(self) -> int:
         """Number of heaps per chunk."""
-        ...
+        return self.chunk_batches * self.batch_heaps
 
     @property
     def chunk_bytes(self) -> int:
         """Number of bytes per chunk."""
-        return self.heap_bytes * self.chunk_heaps
+        return self.heap_bytes * self.batch_heaps * self.chunk_batches
 
     @property
     @abstractmethod
@@ -464,3 +496,155 @@ def add_reader(
                 buffer_size=buffer_size,
                 interface_address=interface or "",
             )
+
+
+@dataclass
+class Counters:
+    """Prometheus counters for received data.
+
+    Each module should define a single global instance.
+    """
+
+    heaps: Counter
+    chunks: Counter
+    samples: Counter
+    bytes: Counter
+    missing_heaps: Counter
+    clipped_samples: Counter | None = None
+
+    #: Counters that should be instanced by :meth:`labels`
+    PER_POL_COUNTERS: ClassVar = ["heaps", "samples", "bytes", "missing_heaps", "clipped_samples"]
+
+    def labels(self, *labelvalues, **labelkwargs) -> Self:
+        """Apply labels to counters listed in PER_POL_COUNTERS."""
+        replace = {}
+        for name in self.PER_POL_COUNTERS:
+            counter = getattr(self, name)
+            if isinstance(counter, Counter):
+                replace[name] = counter.labels(*labelvalues, **labelkwargs)
+        return dataclasses.replace(self, **replace)
+
+
+async def iter_chunks(
+    ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
+    layout: BaseLayout,
+    sensors: aiokatcp.SensorSet,
+    time_converter: TimeConverter,
+    pols: Sequence[tuple[str, str]] | None,
+    counters: Counters,
+    stats_collector: StatsCollector,
+) -> AsyncGenerator[Chunk, None]:
+    """Iterate over the chunks and update sensors.
+
+    It also populates the chunk timestamp.
+
+    If `counters` has a :attr:`~Counters.clipped_samples` counter, the
+    chunks must have an `extra` field containing saturation counts, which
+    will be used to populate that counter.
+
+    Parameters
+    ----------
+    ringbuffer
+        Source of chunks.
+    layout
+        Structure of the streams.
+    sensors
+        Sensor set containing at least the sensors created by
+        :func:`make_sensors`.
+    time_converter
+        Converter to turn data timestamps into sensor timestamps.
+    pols
+        List of polarisation labels, or ``None`` if the sensors are not
+        separated by polarisation. If polarisations are separated, this
+        must be the first axis in :attr:`Chunk.data` and :attr:`Chunk.present`.
+        Each element is tuple of the Prometheus label and the katcp sensor
+        prefix.
+    counters
+        Prometheus counters
+    stats_collector
+        Statistics collector. This must already be associated with the stream
+        or stream group, but this function will ensure it is updated at the
+        end of the stream.
+    """
+    lost = 0
+    first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
+    # These duplicate the Prometheus counters, because prometheus_client
+    # doesn't provide an efficient way to get the current value
+    # (REGISTRY.get_sample_value is documented as being intended only for unit
+    # tests).
+    n_pols = len(pols) if pols is not None else 1
+    n_heaps = [0] * n_pols
+    n_missing_heaps = [0] * n_pols
+
+    # `try`/`finally` block acting as a quick-and-dirty context manager,
+    # to ensure that we clean up nicely after ourselves if we are stopped.
+    try:
+        async for chunk in ringbuffer:
+            assert isinstance(chunk, Chunk)
+            # Inspect the chunk we have just received.
+            chunk.timestamp = chunk.chunk_id * layout.chunk_timestamp_step
+            good = np.sum(chunk.present)
+            if not good:
+                # Dummy chunk created by spead2
+                chunk.recycle()
+                continue
+            if first_timestamp == -1:
+                # TODO: use chunk.present to determine the actual first timestamp
+                first_timestamp = chunk.timestamp
+            lost += chunk.present.size - good
+            logger.debug(
+                "Received chunk: timestamp=%#x (%d/%d, lost %d)",
+                chunk.timestamp,
+                good,
+                chunk.present.size,
+                lost,
+            )
+            unix_time = time_converter.adc_to_unix(chunk.timestamp)
+            unix_time_katcp = aiokatcp.core.Timestamp(unix_time)
+
+            expected_chunks = (chunk.timestamp - first_timestamp) // layout.chunk_timestamp_step + 1
+            pol_expected_heaps = expected_chunks * layout.chunk_batches * layout.batch_heaps // n_pols
+            counters.chunks.inc()
+            # Zero out saturation count for heaps that were never received
+            # (otherwise the value is undefined memory).
+            if chunk.extra is not None:
+                chunk.extra[chunk.present == 0] = 0
+            for pol in range(n_pols):
+                # The cast is to force numpy ints to Python ints.
+                if pols is not None:
+                    pol_index: tuple[int, ...] = (pol,)
+                    pol_counters = counters.labels(pols[pol][0])
+                    pol_prefix = pols[pol][1] + "."
+                else:
+                    pol_index = ()
+                    pol_counters = counters
+                    pol_prefix = ""
+                buf_good = int(np.sum(chunk.present[pol_index]))
+                pol_counters.heaps.inc(buf_good)
+                pol_counters.samples.inc(buf_good * layout.heap_sample_count)
+                pol_counters.bytes.inc(buf_good * layout.heap_bytes)
+                if pol_counters.clipped_samples is not None and chunk.extra is not None:
+                    pol_counters.clipped_samples.inc(int(np.sum(chunk.extra[pol_index], dtype=np.uint64)))
+                # Determine how many heaps we expected to have seen by
+                # now, and subtract from it the number actually seen to
+                # determine the number missing. This accounts for both
+                # heaps lost within chunks and lost chunks.
+                n_heaps[pol] += buf_good
+                new_missing = pol_expected_heaps - n_heaps[pol]
+                if new_missing > n_missing_heaps[pol]:
+                    pol_counters.missing_heaps.inc(new_missing - n_missing_heaps[pol])
+                    n_missing_heaps[pol] = new_missing
+                    sensors[f"{pol_prefix}rx.missing-unixtime"].set_value(
+                        unix_time_katcp, timestamp=unix_time, status=aiokatcp.Sensor.Status.ERROR
+                    )
+            for pol in range(n_pols):
+                pol_prefix = pols[pol][1] + "." if pols is not None else ""
+                # Note: these must be set AFTER rx.missing-unixtime so that if
+                # the first chunk received is missing data, we don't have an
+                # intermediate state in which all the sensors are NOMINAL
+                # (which would cause rx.device-status to be NOMINAL).
+                sensors[f"{pol_prefix}rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
+                sensors[f"{pol_prefix}rx.unixtime"].set_value(unix_time_katcp, timestamp=unix_time)
+            yield chunk
+    finally:
+        stats_collector.update()  # Ensure final stats updates are captured
