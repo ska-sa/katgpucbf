@@ -365,7 +365,9 @@ def make_stream(
     stream_stats
         Stats to hook up to prometheus.
     user_data
-        Data to pass to the chunk placement callback
+        Data to pass to the chunk placement callback. It must have a record
+        type with a `stats_base` element, which will be populated with the
+        index of the first custom statistic.
     max_heap_extra
         Maximum non-payload data written by the place callback
     kwargs
@@ -427,7 +429,8 @@ def make_stream_group(
     user_data
         User data to pass to the chunk callback. It must have a field called
         `stats_base`, which will be filled in appropriately (modifying the
-        argument).
+        argument). The length must be the same as the length of `affinity`
+        (i.e., one element per stream).
     max_heap_extra
         Maximum non-payload data written by the place callback
     kwargs
@@ -438,12 +441,6 @@ def make_stream_group(
     for stat in stream_stats:
         stream_config.add_stat(stat)
 
-    chunk_stream_config = spead2.recv.ChunkStreamConfig(
-        items=spead_items,
-        max_chunks=max_active_chunks,
-        max_heap_extra=max_heap_extra,
-        place=layout.chunk_place(user_data),
-    )
     max_chunks = max_active_chunks
     # If there is more than one stream in the group, allow the group to have
     # one extra active chunk to reduce inter-thread communication.
@@ -452,12 +449,15 @@ def make_stream_group(
     group_config = spead2.recv.ChunkStreamGroupConfig(max_chunks=max_chunks, eviction_mode=EVICTION_MODE)
 
     group = spead2.recv.ChunkStreamRingGroup(group_config, data_ringbuffer, free_ringbuffer)
-    for core in affinity:
-        group.emplace_back(
-            spead2.ThreadPool(1, [] if core < 0 else [core]),
-            stream_config,
-            chunk_stream_config,
+    for core, stream_user_data in zip(affinity, user_data, strict=True):
+        thread_pool = spead2.ThreadPool(1, [] if core < 0 else [core])
+        chunk_stream_config = spead2.recv.ChunkStreamConfig(
+            items=spead_items,
+            max_chunks=max_active_chunks,
+            max_heap_extra=max_heap_extra,
+            place=layout.chunk_place(np.asarray(stream_user_data)),
         )
+        group.emplace_back(thread_pool, stream_config, chunk_stream_config)
     return group
 
 

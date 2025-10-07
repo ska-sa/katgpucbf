@@ -206,7 +206,7 @@ def make_stream_group(
     for pol in range(N_POLS):
         counters.labels(str(pol))
 
-    user_data = np.zeros(1, dtype=user_data_type.dtype)
+    user_data = np.zeros(len(recv_affinity), dtype=user_data_type.dtype)
     user_data["stride"] = stride
     group = base_recv.make_stream_group(
         layout=layout,
