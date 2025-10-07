@@ -256,7 +256,7 @@ def make_sensors(sensor_timeout: float) -> SensorSet:
     return sensors
 
 
-async def recv_chunks(
+async def iter_chunks(
     stream: spead2.recv.ChunkRingStream,
     layout: Layout,
     sensors: SensorSet,
