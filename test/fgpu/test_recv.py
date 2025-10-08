@@ -30,8 +30,8 @@ from numpy.typing import ArrayLike, NDArray
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
-from katgpucbf.fgpu.recv import Layout, make_sensors
-from katgpucbf.recv import Chunk
+from katgpucbf.fgpu.recv import Layout
+from katgpucbf.recv import Chunk, make_sensors
 from katgpucbf.spead import (
     ADC_SAMPLES_ID,
     DIGITISER_ID_ID,
@@ -299,7 +299,8 @@ class TestIterChunks:
     async def sensors(self) -> aiokatcp.SensorSet:
         """Receiver sensors."""
         # This is an async fixture because make_sensors requires a running event loop
-        return make_sensors(sensor_timeout=1e6)  # Large timeout so that it doesn't affect the test
+        # Large timeout so that it doesn't affect the test
+        return make_sensors(sensor_timeout=1e6, prefixes=[f"input{pol}." for pol in range(N_POLS)])
 
     async def test(  # noqa: D102
         self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter

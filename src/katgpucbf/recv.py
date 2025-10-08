@@ -37,7 +37,7 @@ from prometheus_client import REGISTRY, CollectorRegistry, Counter, Metric
 from prometheus_client.core import CounterMetricFamily
 from prometheus_client.registry import Collector
 
-from .utils import TimeConverter
+from .utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
 
 logger = logging.getLogger(__name__)
 user_data_type = types.Record.make_c_struct(
@@ -496,6 +496,58 @@ def add_reader(
                 buffer_size=buffer_size,
                 interface_address=interface or "",
             )
+
+
+def make_sensors(sensor_timeout: float, prefixes: Sequence[str] = ("",)) -> aiokatcp.SensorSet:
+    """Create the sensors needed to hold receiver statistics.
+
+    Parameters
+    ----------
+    sensor_timeout
+        Time (in seconds) without updates before sensors for received data go
+        into error and sensors for missing data become nominal.
+    prefixes
+        Prefixes to prepend to sensor names (e.g., for separate polarisations),
+        including the trailing dot if non-empty.
+    """
+    sensors = aiokatcp.SensorSet()
+    for prefix in prefixes:
+        timestamp_sensors: list[aiokatcp.Sensor] = [
+            make_rate_limited_sensor(
+                int,
+                f"{prefix}rx.timestamp",
+                "The timestamp (in samples) of the last chunk of data received",
+                default=-1,
+                initial_status=aiokatcp.Sensor.Status.ERROR,
+            ),
+            make_rate_limited_sensor(
+                aiokatcp.core.Timestamp,
+                f"{prefix}rx.unixtime",
+                "The timestamp (in UNIX time) of the last chunk of data received",
+                default=aiokatcp.core.Timestamp(-1.0),
+                initial_status=aiokatcp.Sensor.Status.ERROR,
+            ),
+        ]
+        for sensor in timestamp_sensors:
+            TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.ERROR)
+            sensors.add(sensor)
+
+        missing_sensors: list[aiokatcp.Sensor] = [
+            make_rate_limited_sensor(
+                aiokatcp.core.Timestamp,
+                f"{prefix}rx.missing-unixtime",
+                "The timestamp (in UNIX time) when missing data was last detected",
+                default=aiokatcp.core.Timestamp(-1.0),
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        ]
+        for sensor in missing_sensors:
+            TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.NOMINAL)
+            sensors.add(sensor)
+
+    sensors.add(DeviceStatusSensor(sensors, "rx.device-status", "Engine is receiving a good, clean data stream"))
+
+    return sensors
 
 
 @dataclass

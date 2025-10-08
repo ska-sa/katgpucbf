@@ -26,8 +26,7 @@ import numba
 import numpy as np
 import spead2.recv.asyncio
 import spead2.send.asyncio
-from aiokatcp import Sensor, SensorSet
-from aiokatcp.core import Timestamp
+from aiokatcp import SensorSet
 from numba import types
 from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
@@ -37,7 +36,7 @@ from .. import BYTE_BITS, COMPLEX, N_POLS
 from .. import recv as base_recv
 from ..recv import BaseLayout, Chunk, Counters, StatsCollector, user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
-from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
+from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
@@ -219,54 +218,6 @@ def make_stream(
     return stream
 
 
-def make_sensors(sensor_timeout: float) -> SensorSet:
-    """Create the sensors needed to hold receiver statistics.
-
-    Parameters
-    ----------
-    sensor_timeout
-        Time (in seconds) without updates before sensors for received data go
-        into error and sensors for missing data becoming nominal.
-    """
-    sensors = SensorSet()
-    timestamp_sensors: list[Sensor] = [
-        make_rate_limited_sensor(
-            int,
-            "rx.timestamp",
-            "The timestamp (in samples) of the last chunk of data received from an F-engine",
-            default=-1,
-            initial_status=Sensor.Status.ERROR,
-        ),
-        make_rate_limited_sensor(
-            Timestamp,
-            "rx.unixtime",
-            "The timestamp (in UNIX time) of the last chunk of data received from an F-engine",
-            default=Timestamp(-1.0),
-            initial_status=Sensor.Status.ERROR,
-        ),
-    ]
-    for sensor in timestamp_sensors:
-        TimeoutSensorStatusObserver(sensor, sensor_timeout, Sensor.Status.ERROR)
-        sensors.add(sensor)
-
-    missing_sensors: list[Sensor] = [
-        make_rate_limited_sensor(
-            Timestamp,
-            "rx.missing-unixtime",
-            "The timestamp (in UNIX time) when missing data was last detected",
-            default=Timestamp(-1.0),
-            initial_status=Sensor.Status.NOMINAL,
-        )
-    ]
-    for sensor in missing_sensors:
-        TimeoutSensorStatusObserver(sensor, sensor_timeout, Sensor.Status.NOMINAL)
-        sensors.add(sensor)
-
-    sensors.add(DeviceStatusSensor(sensors, "rx.device-status", "XB-engine is receiving a good, clean F-engine stream"))
-
-    return sensors
-
-
 def iter_chunks(
     ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     layout: Layout,
@@ -285,7 +236,7 @@ def iter_chunks(
         Structure of the stream.
     sensors
         Sensor set containing at least the sensors created by
-        :func:`make_sensors`.
+        :func:`.make_sensors`.
     time_converter
         Converter to turn data timestamps into sensor timestamps.
     """

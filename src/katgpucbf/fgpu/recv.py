@@ -35,7 +35,7 @@ from .. import BYTE_BITS, N_POLS
 from .. import recv as base_recv
 from ..recv import BaseLayout, Chunk, Counters, StatsCollector
 from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
-from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
+from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
@@ -225,55 +225,6 @@ def make_stream_group(
     return group
 
 
-def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
-    """Create the sensors needed to hold receiver statistics.
-
-    Parameters
-    ----------
-    sensor_timeout
-        Time (in seconds) without updates before sensors for received data go
-        into error and sensors for missing data become nominal.
-    """
-    sensors = aiokatcp.SensorSet()
-    for pol in range(N_POLS):
-        timestamp_sensors: list[aiokatcp.Sensor] = [
-            make_rate_limited_sensor(
-                int,
-                f"input{pol}.rx.timestamp",
-                "The timestamp (in samples) of the last chunk of data received from the digitiser",
-                default=-1,
-                initial_status=aiokatcp.Sensor.Status.ERROR,
-            ),
-            make_rate_limited_sensor(
-                aiokatcp.core.Timestamp,
-                f"input{pol}.rx.unixtime",
-                "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
-                default=aiokatcp.core.Timestamp(-1.0),
-                initial_status=aiokatcp.Sensor.Status.ERROR,
-            ),
-        ]
-        for sensor in timestamp_sensors:
-            TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.ERROR)
-            sensors.add(sensor)
-
-        missing_sensors: list[aiokatcp.Sensor] = [
-            make_rate_limited_sensor(
-                aiokatcp.core.Timestamp,
-                f"input{pol}.rx.missing-unixtime",
-                "The timestamp (in UNIX time) when missing data was last detected",
-                default=aiokatcp.core.Timestamp(-1.0),
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            )
-        ]
-        for sensor in missing_sensors:
-            TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.NOMINAL)
-            sensors.add(sensor)
-
-    sensors.add(DeviceStatusSensor(sensors, "rx.device-status", "F-engine is receiving a good, clean digitiser stream"))
-
-    return sensors
-
-
 def iter_chunks(
     ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     layout: Layout,
@@ -292,7 +243,7 @@ def iter_chunks(
         Structure of the streams.
     sensors
         Sensor set containing at least the sensors created by
-        :func:`make_sensors`.
+        :func:`.make_sensors`.
     time_converter
         Converter to turn data timestamps into sensor timestamps.
     """
