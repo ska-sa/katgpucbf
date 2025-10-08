@@ -17,7 +17,7 @@
 """Handle receiving tied-array-channelised-voltage data."""
 
 import functools
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
 
@@ -207,7 +207,7 @@ def make_stream_group(
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     recv_affinity: int,
-    pol_labels: tuple[str, str],
+    pol_labels: Sequence[str],
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a stream group for receiving dual-polarised beam data.
 
@@ -255,7 +255,7 @@ def iter_chunks(
     layout: Layout,
     sensors: aiokatcp.SensorSet,
     time_converter: TimeConverter,
-    pol_labels: tuple[str, str],
+    pol_labels: Sequence[str],
 ) -> AsyncGenerator[Chunk, None]:
     """Iterate over the chunks and update sensors.
 
