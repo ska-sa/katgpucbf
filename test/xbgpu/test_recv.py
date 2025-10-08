@@ -27,10 +27,11 @@ import spead2.recv.asyncio
 from aiokatcp import DeviceStatus, Reading, Sensor, SensorSet
 from numpy.typing import ArrayLike
 
+from katgpucbf.recv import make_sensors
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
-from katgpucbf.xbgpu.recv import Chunk, Layout, iter_chunks, make_sensors
+from katgpucbf.xbgpu.recv import Chunk, Layout, iter_chunks
 
 from .. import PromDiff
 

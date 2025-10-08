@@ -1273,7 +1273,7 @@ class XBEngine(Engine):
     def populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         # Dynamic sensors
-        for sensor in recv.make_sensors(recv_sensor_timeout).values():
+        for sensor in base_recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
 
     def free_in_item(self, item: InQueueItem) -> None:

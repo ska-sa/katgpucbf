@@ -1430,7 +1430,8 @@ class FEngine(Engine):
                 )
             )
 
-        for sensor in recv.make_sensors(recv_sensor_timeout).values():
+        prefixes = [f"input{pol}." for pol in range(N_POLS)]
+        for sensor in base_recv.make_sensors(recv_sensor_timeout, prefixes).values():
             sensors.add(sensor)
 
     def make_send_streams(
