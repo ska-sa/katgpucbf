@@ -215,16 +215,9 @@ class TestStream:
 
             queue.stop()  # Flushes out the receive stream
             seen = 0
-            empty_chunks = 0
             async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 assert isinstance(chunk, Chunk)
                 with chunk:
-                    if not np.any(chunk.present):
-                        # It's a chunk with no data. Currently spead2 may generate
-                        # these due to the way it allocates chunks to keep the window
-                        # full.
-                        empty_chunks += 1
-                        continue
                     assert chunk.chunk_id == expected_chunk_id
                     assert np.all(chunk.present)
                     np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
@@ -234,8 +227,8 @@ class TestStream:
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
 
-        assert prom_diff.diff("input_chunks_total") == seen + empty_chunks
-        assert prom_diff.diff("input_heaps_total") == (seen + empty_chunks) * layout.chunk_heaps
+        assert prom_diff.diff("input_chunks_total") == seen
+        assert prom_diff.diff("input_heaps_total") == seen * layout.chunk_heaps
         assert prom_diff.diff("input_bytes_total") == layout.chunk_bytes * seen
         assert prom_diff.diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
         assert prom_diff.diff("input_bad_feng_id_heaps_total") == 1
