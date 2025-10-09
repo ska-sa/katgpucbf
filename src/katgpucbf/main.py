@@ -158,6 +158,23 @@ def add_common_arguments(
         parser.add_argument("--version", action="version", version=__version__)
 
 
+def add_time_converter_arguments(parser: argparse.ArgumentParser, sync_time_required: bool = True) -> None:
+    """Add arguments necessary for constructing a TimeConverter."""
+    parser.add_argument(
+        "--adc-sample-rate",
+        type=float,
+        required=True,
+        metavar="HZ",
+        help="Digitiser sampling rate",
+    )
+    parser.add_argument(
+        "--sync-time",
+        type=float,
+        required=sync_time_required,
+        help="UNIX time at which digitisers were synced",
+    )
+
+
 def _multi_add_argument(multi: bool, parser: argparse.ArgumentParser, *args, **kwargs) -> None:
     """Add an argument to a parser in either singular to multi form.
 
