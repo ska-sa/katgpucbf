@@ -52,6 +52,7 @@ from ..main import (
     add_common_arguments,
     add_recv_arguments,
     add_send_arguments,
+    add_time_converter_arguments,
     engine_main,
     parse_dither,
     parse_source_ipv4,
@@ -136,12 +137,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "name, dst, heap_accumulation_threshold.",
     )
     add_common_arguments(parser)
-    parser.add_argument(
-        "--adc-sample-rate",
-        type=float,
-        required=True,
-        help="Digitiser sample rate (Hz). If this value is set lower than the actual rate, the pipeline will stall.",
-    )
+    add_time_converter_arguments(parser)
     parser.add_argument(
         "--bandwidth",
         type=float,
@@ -212,12 +208,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=2**29,
         help="Maximum time (in ADC ticks) that packets can be delayed relative to others "
         "and still be accepted. [%(default)s]",
-    )
-    parser.add_argument(
-        "--sync-time",
-        type=float,
-        required=True,
-        help="UNIX time at which digitisers were synced.",
     )
     add_recv_arguments(parser, multi=False)
     add_send_arguments(parser, multi=False)

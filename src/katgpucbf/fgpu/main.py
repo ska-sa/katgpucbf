@@ -43,6 +43,7 @@ from ..main import (
     add_common_arguments,
     add_recv_arguments,
     add_send_arguments,
+    add_time_converter_arguments,
     engine_main,
     parse_dither,
     parse_enum,
@@ -188,13 +189,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="BYTES",
         help="Size of network send buffer [1MiB]",
     )
-    parser.add_argument(
-        "--adc-sample-rate",
-        type=float,
-        required=True,
-        metavar="HZ",
-        help="Digitiser sampling rate, used to determine transmission rate and calculate delays",
-    )
+    add_time_converter_arguments(parser)
     parser.add_argument(
         "--send-rate-factor",
         type=float,
@@ -260,12 +255,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Number of bits per output sample real component [%(default)s]",
     )
     parser.add_argument("--gain", type=float, default=1.0, help="Initial eq gains [%(default)s]")
-    parser.add_argument(
-        "--sync-time",
-        type=float,
-        required=True,
-        help="UNIX time at which digitisers were synced.",
-    )
     parser.add_argument(
         "--mask-timestamp",
         action="store_true",

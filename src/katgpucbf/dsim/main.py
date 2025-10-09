@@ -33,7 +33,7 @@ import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import BYTE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
-from ..main import add_common_arguments, add_send_arguments, engine_main
+from ..main import add_common_arguments, add_send_arguments, add_time_converter_arguments, engine_main
 from ..send import DescriptorSender
 from ..utils import TimeConverter
 from . import descriptors, send, signal
@@ -45,16 +45,13 @@ logger = logging.getLogger(__name__)
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser(prog="dsim")
-    parser.add_argument(
-        "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
-    )
+    add_time_converter_arguments(parser, sync_time_required=False)
     parser.add_argument(
         "--signals",
         default="cw(1.0, 232101234.0);",
         help="Specification for the signals to generate (see the usage guide). "
         "The specification must produce either a single signal, or one per output stream. [%(default)s]",
     )
-    parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
     parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")
     parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
     parser.add_argument("--first-id", type=int, default=0, help="Digitiser ID for first stream [%(default)s]")
