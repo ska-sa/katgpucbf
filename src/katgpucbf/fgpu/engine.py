@@ -1364,7 +1364,6 @@ class FEngine(Engine):
     def _init_recv(self, recv_affinity: list[int], monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
         recv_chunks = 4
-        ringbuffer_capacity = recv_chunks * N_POLS
 
         context = self._upload_queue.context
         for _ in range(self._in_free_queue.maxsize):
@@ -1373,7 +1372,7 @@ class FEngine(Engine):
             )
 
         data_ringbuffer = ChunkRingbuffer(
-            ringbuffer_capacity, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
+            recv_chunks, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
         )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
         if self.use_vkgdr:
