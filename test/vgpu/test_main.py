@@ -29,8 +29,8 @@ REQUIRED_ARGS = ["1.1.1.1", "2.2.2.2", "3.3.3.3"]
 class CustomArgumentParser(argparse.ArgumentParser):
     """Override ArgumentParser behaviour to make it more suitable for tests.
 
-    All arguments become optional (but note that main.parse_args is not
-    guaranteed to handle this correctly). Errors become exceptions.
+    All non-positional arguments become optional (but note that main.parse_args
+    is not guaranteed to handle this correctly). Errors become exceptions.
     """
 
     def add_argument(self, *args, **kwargs):  # noqa: D102
