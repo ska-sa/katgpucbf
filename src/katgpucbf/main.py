@@ -82,7 +82,7 @@ def comma_split[T](
 ) -> Callable[[str], list[T]]:
     """Return a function to split a comma-delimited str into a list of type T.
 
-    This function is used to parse lists parameters which come from the
+    This function is used to parse lists of parameters which come from the
     command-line as comma-separated strings, but are obviously more useful as a
     list.
 
