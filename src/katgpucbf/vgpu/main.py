@@ -19,34 +19,92 @@
 import argparse
 import asyncio
 import contextlib
+import re
 from collections.abc import MutableMapping, Sequence
 
 import aiokatcp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from ..main import add_common_arguments, add_recv_arguments, add_send_arguments, engine_main
+from ..main import add_common_arguments, add_recv_arguments, add_send_arguments, comma_split, engine_main
 from ..spead import DEFAULT_PORT
 from .engine import VEngine
 
 VTP_DEFAULT_PORT = 52030
+_ARGUMENT_PARSER = argparse.ArgumentParser  # Modified by unit tests
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments."""
-    parser = argparse.ArgumentParser(prog="vgpu")
+    parser = _ARGUMENT_PARSER(prog="vgpu")
     add_common_arguments(parser)
     add_recv_arguments(parser)
     add_send_arguments(parser, ibverbs=False)
+    parser.add_argument("--recv-channels", type=int, metavar="CHANNELS", required=True, help="Number of input channels")
+    parser.add_argument("--recv-bandwidth", type=float, metavar="HZ", required=True, help="Input bandwidth")
+    parser.add_argument(
+        "--recv-pols",
+        type=comma_split(str, 2),
+        metavar="[+-]P,[+-]P",
+        required=True,
+        help="Input polarisations (±x, ±y, ±L or ±R)",
+    )
+    parser.add_argument("--send-bandwidth", type=float, metavar="HZ", required=True, help="Output bandwidth")
+    parser.add_argument(
+        "--send-pols",
+        type=comma_split(str, 2),
+        metavar="P,P",
+        required=True,
+        help="Output polarisations (x, y, L or R)",
+    )
+    parser.add_argument(
+        "--send-samples-per-frame",
+        type=int,
+        metavar="SAMPLES",
+        default=20000,
+        help="Samples per VDIF frame [%(default)s]",
+    )
+    parser.add_argument("--send-station", type=str, metavar="ID", required=True, help="VDIF Station ID")
+    parser.add_argument("--fir-taps", type=int, required=True, metavar="TAPS", help="Number of taps in rational filter")
+    parser.add_argument(
+        "--hilbert-taps", type=int, default=201, metavar="TAPS", help="Number of taps in Hilbert filter [%(default)s]"
+    )
+    parser.add_argument(
+        "--passband",
+        type=float,
+        default=0.9,
+        metavar="FRACTION",
+        help="Fraction of band to retain in passband filter [%(default)s]",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.969,
+        metavar="SIGMA",
+        help="Threshold (in σ) between quantisation levels [%(default)s]",
+    )
     parser.add_argument("src", type=endpoint_list_parser(DEFAULT_PORT), nargs=2, help="Source endpoints")
     parser.add_argument("dst", type=endpoint_list_parser(VTP_DEFAULT_PORT), help="Destination endpoints")
 
     args = parser.parse_args(arglist)
+    for pol in args.recv_pols:
+        if not re.fullmatch(r"^[-+]?[xyLR]", pol):
+            parser.error(f"{pol!r} is not a valid --recv-pol value")
+    if set(pol[-1] for pol in args.recv_pols) not in [{"x", "y"}, {"L", "R"}]:
+        parser.error("--recv-pol is not an orthogonal polarisation basis")
+    for pol in args.send_pols:
+        if pol not in ["x", "y", "L", "R"]:
+            parser.error(f"{pol!r} is not a valid --send-pol value")
     return args
 
 
 def make_engine(args: argparse.Namespace) -> VEngine:
     """Create the :class:`.VEngine`."""
-    return VEngine(args.katcp_host, args.katcp_port)
+    return VEngine(
+        katcp_host=args.katcp_host,
+        katcp_port=args.katcp_port,
+        recv_pols=tuple(args.recv_pols),
+        send_pols=tuple(args.send_pols),
+    )
 
 
 async def start_engine(

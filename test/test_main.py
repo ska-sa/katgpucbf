@@ -17,10 +17,11 @@
 """Tests for :mod:`katcbfgpu.main`."""
 
 import argparse
+from typing import NoReturn
 
 import pytest
 
-from katgpucbf.main import _multi_add_argument, comma_split, parse_dither
+from katgpucbf.main import SubParser, _multi_add_argument, comma_split, parse_dither
 from katgpucbf.utils import DitherType
 
 
@@ -35,16 +36,16 @@ class TestCommaSplit:
 
     def test_bad_value(self) -> None:
         """Test with a value that isn't valid for the element type."""
-        with pytest.raises(ValueError, match="invalid literal for int"):
+        with pytest.raises(argparse.ArgumentTypeError, match="invalid int value: 'hello'"):
             assert comma_split(int)("3,hello")
 
     def test_fixed_count(self) -> None:
         """Test with a value for `count`."""
         splitter = comma_split(int, 2)
         assert splitter("3,5") == [3, 5]
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
+        with pytest.raises(argparse.ArgumentTypeError, match="Expected 2 comma-separated fields, received 3"):
             splitter("3,5,7")
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 1"):
+        with pytest.raises(argparse.ArgumentTypeError, match="Expected 2 comma-separated fields, received 1"):
             splitter("3")
 
     def test_allow_single(self) -> None:
@@ -52,7 +53,7 @@ class TestCommaSplit:
         splitter = comma_split(int, 2, allow_single=True)
         assert splitter("3,5") == [3, 5]
         assert splitter("3") == [3, 3]
-        with pytest.raises(ValueError, match="Expected 2 comma-separated fields, received 3"):
+        with pytest.raises(argparse.ArgumentTypeError, match="Expected 2 comma-separated fields, received 3"):
             splitter("3,5,7")
 
 
@@ -71,10 +72,98 @@ class TestParseDither:
     def test_invalid(self, input: str) -> None:
         """Test with invalid inputs."""
         with pytest.raises(
-            ValueError,
-            match=rf"Invalid dither value {input} \(valid values are \['none', 'uniform'\]\)",
+            argparse.ArgumentTypeError,
+            match=rf"invalid dither value: {input!r} \(valid values are 'none', 'uniform'\)",
         ):
             parse_dither(input)
+
+
+def _error(message: str) -> NoReturn:
+    raise RuntimeError(message)
+
+
+class TestSubParser:
+    """Test :class:`.SubParser`."""
+
+    @pytest.fixture
+    def sub_parser(self) -> SubParser:
+        """Generate a subparser with different sorts of arguments."""
+        sub = SubParser()
+        sub.add_argument("required", type=int, required=True)
+        sub.add_argument("nodefault", type=str)
+        sub.add_argument("default", type=float, default=3.5)
+        sub.add_argument("dither", type=parse_dither, default=DitherType.DEFAULT)
+        return sub
+
+    @pytest.fixture
+    def parser(self, sub_parser: SubParser) -> argparse.ArgumentParser:
+        """Generate a parser that has :meth:`subparser` as an argument type.
+
+        The :meth:`~argparse.ArgumentParser.error` method is mocked out to
+        raise :exc:`RuntimeError`.
+        """
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--test", type=sub_parser, required=True)
+        parser.error = _error  # type: ignore[method-assign]
+        return parser
+
+    def test_maximal(self, parser: argparse.ArgumentParser) -> None:
+        """Test with values provided for all arguments."""
+        args = parser.parse_args(["--test=required=3,nodefault=hello,default=2.5,dither=uniform"])
+        assert args.test == argparse.Namespace(
+            required=3,
+            nodefault="hello",
+            default=2.5,
+            dither=DitherType.UNIFORM,
+        )
+
+    def test_minimal(self, parser: argparse.ArgumentParser) -> None:
+        """Test with minimal arguments."""
+        args = parser.parse_args(["--test=required=3"])
+        assert args.test == argparse.Namespace(
+            required=3,
+            nodefault=None,
+            default=3.5,
+            dither=DitherType.DEFAULT,
+        )
+
+    def test_missing_required(self, parser: argparse.ArgumentParser) -> None:
+        """Test with a required argument not specified."""
+        with pytest.raises(RuntimeError, match="argument --test: required is missing"):
+            parser.parse_args(["--test=nodefault=hello"])
+
+    def test_duplicate(self, parser: argparse.ArgumentParser) -> None:
+        """Test with an argument specified twice."""
+        with pytest.raises(RuntimeError, match="argument --test: required already specified"):
+            parser.parse_args(["--test=required=1,required=2"])
+
+    def test_value_error(self, parser: argparse.ArgumentParser) -> None:
+        """Test with a value that is not valid for the type (raising :exc:`ValueError`)."""
+        with pytest.raises(RuntimeError, match="argument --test: required: invalid int value: 'hello'"):
+            parser.parse_args(["--test=required=hello"])
+
+    def test_argument_type_error(self, parser: argparse.ArgumentParser) -> None:
+        """Test with a value that is not valid for the type (raising :exc:`ArgumentTypeError`)."""
+        with pytest.raises(
+            RuntimeError,
+            match=r"argument --test: dither: invalid dither value: 'foo' \(valid values are 'none', 'uniform'\)",
+        ):
+            parser.parse_args(["--test=required=0,dither=foo"])
+
+    def test_unknown_key(self, parser: argparse.ArgumentParser) -> None:
+        """Test error when an unknown key is provided."""
+        with pytest.raises(RuntimeError, match="argument --test: unknown key foo"):
+            parser.parse_args(["--test=required=0,foo=1"])
+
+    def test_missing_equals(self, parser: argparse.ArgumentParser) -> None:
+        """Test error when a section is missing the equals sign."""
+        with pytest.raises(RuntimeError, match="argument --test: missing = in 'foo'"):
+            parser.parse_args(["--test=required=0,foo"])
+
+    def test_add_duplicate(self, sub_parser: SubParser) -> None:
+        """Test adding an argument to the parser again."""
+        with pytest.raises(ValueError, match="required already exists"):
+            sub_parser.add_argument("required", type=int)
 
 
 class TestMultiAddArguments:

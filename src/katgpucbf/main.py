@@ -27,6 +27,8 @@ import os
 import signal
 import time
 from collections.abc import Awaitable, Callable, MutableMapping
+from dataclasses import dataclass
+from typing import Any
 
 import aiokatcp
 import katsdpservices
@@ -47,7 +49,8 @@ def parse_enum[E: enum.Enum](name: str, value: str, cls: type[E]) -> E:
     try:
         return table[value]
     except KeyError:
-        raise ValueError(f"Invalid {name} value {value} (valid values are {list(table.keys())})") from None
+        valid = ", ".join(repr(key) for key in table.keys())
+        raise argparse.ArgumentTypeError(f"invalid {name} value: {value!r} (valid values are {valid})") from None
 
 
 def parse_dither(value: str) -> utils.DitherType:
@@ -79,10 +82,9 @@ def comma_split[T](
 ) -> Callable[[str], list[T]]:
     """Return a function to split a comma-delimited str into a list of type T.
 
-    This function is used to parse lists of CPU core numbers, which come from
-    the command-line as comma-separated strings, but are obviously more useful
-    as a list of ints. It's generic enough that it could process lists of other
-    types as well though if necessary.
+    This function is used to parse lists of parameters which come from the
+    command-line as comma-separated strings, but are obviously more useful as a
+    list.
 
     Parameters
     ----------
@@ -105,8 +107,19 @@ def comma_split[T](
         if count is not None and n == 1 and allow_single:
             parts = parts * count
         elif count is not None and n != count:
-            raise ValueError(f"Expected {count} comma-separated fields, received {n}")
-        return [base_type(part) for part in parts]
+            raise argparse.ArgumentTypeError(f"Expected {count} comma-separated fields, received {n}")
+        # Mirror argparse's logic for wrapping TypeError and ValueError, so
+        # that the error reflects the list element that is invalid.
+        out = []
+        for part in parts:
+            try:
+                part_value = base_type(part)
+            except (TypeError, ValueError) as exc:
+                base_name = getattr(base_type, "__name__", repr(base_type))
+                raise argparse.ArgumentTypeError(f"invalid {base_name} value: {part!r}") from exc
+            else:
+                out.append(part_value)
+        return out
 
     return func
 
@@ -269,6 +282,78 @@ def add_send_arguments(
             metavar="VECTOR",
             help="Completion vector for transmission, or -1 for polling [%(default)s]",
         )
+
+
+class SubParser:
+    """Parser for a single command-line argument that has suboptions.
+
+    The sub-options use key=value syntax, separated by commas. This is
+    not as complete as a full argparse parser, but supports some basics:
+
+    - required arguments
+    - defaults
+    - types
+
+    It does not currently support actions (such as ``store_true``).
+    Specifying a keyword more than once results in an error.
+
+    It is callable, so that an instance can be passed directly as the
+    `type` argument of :meth:`argparse.ArgumentParser.add_argument`.
+    """
+
+    @dataclass
+    class _Argument:
+        type: Callable[[str], Any]
+        required: bool
+        default: Any
+
+    def __init__(self) -> None:
+        self._arguments: dict[str, SubParser._Argument] = {}
+
+    def add_argument(
+        self,
+        name: str,
+        *,
+        type: Callable[[str], Any] = str,
+        required: bool = False,
+        default: Any = None,
+    ) -> None:
+        """Add an argument."""
+        if name in self._arguments:
+            raise ValueError(f"argument {name} already exists")
+        self._arguments[name] = self._Argument(
+            type,
+            required,
+            default,
+        )
+
+    def __call__(self, value: str) -> argparse.Namespace:
+        """Parse the argument."""
+        ans = argparse.Namespace()
+        for part in value.split(","):
+            match part.split("=", 1):
+                case [key, data]:
+                    arg = self._arguments.get(key)
+                    if arg is None:
+                        raise argparse.ArgumentTypeError(f"unknown key {key}")
+                    elif key in ans:
+                        raise argparse.ArgumentTypeError(f"{key} already specified")
+                    try:
+                        setattr(ans, key, arg.type(data))
+                    except (TypeError, ValueError) as exc:
+                        type_name = getattr(arg.type, "__name__", str(arg.type))
+                        raise argparse.ArgumentTypeError(f"{key}: invalid {type_name} value: {data!r}") from exc
+                    except argparse.ArgumentTypeError as exc:
+                        raise argparse.ArgumentTypeError(f"{key}: {exc}") from exc
+                case _:
+                    raise argparse.ArgumentTypeError(f"missing = in {part!r}")
+        for key, arg in self._arguments.items():
+            if key not in ans:
+                if arg.required:
+                    raise argparse.ArgumentTypeError(f"{key} is missing")
+                else:
+                    setattr(ans, key, arg.default)
+        return ans
 
 
 def add_signal_handlers(server: aiokatcp.DeviceServer) -> None:
