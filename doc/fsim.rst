@@ -15,7 +15,7 @@ The minimum command to run fsim is:
 
 .. code-block:: sh
 
-    fsim --interface <interface_name> <multicast_address>[+y]:<port>
+    fsim --interface <interface_name> --adc-sample-rate <rate> <multicast_address>[+y]:<port>
 
 where
 
