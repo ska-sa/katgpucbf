@@ -41,13 +41,12 @@ from .. import (
     COMPLEX,
     DEFAULT_JONES_PER_BATCH,
     DEFAULT_PACKET_PAYLOAD_BYTES,
-    DEFAULT_TTL,
     N_POLS,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     spead,
 )
 from ..fgpu.send import PREAMBLE_SIZE, make_descriptor_heap, make_item_group
-from ..main import add_common_arguments, add_gc_stats, comma_split
+from ..main import add_common_arguments, add_gc_stats, add_send_arguments, add_time_converter_arguments
 from ..send import DescriptorSender
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
@@ -66,11 +65,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser(prog="fsim")
 
-    parser.add_argument(
-        "--adc-sample-rate", type=float, default=1712e6, help="Digitiser sampling rate (Hz) [%(default)s]"
-    )
-    parser.add_argument("--sync-time", type=float, help="Sync time in UNIX epoch seconds (must be in the past)")
-    parser.add_argument("--interface", default="lo", help="Network interface on which to send packets [%(default)s]")
+    add_time_converter_arguments(parser, sync_time_required=False)
     parser.add_argument(
         "--array-size", type=int, default=80, help="Number of antennas in the simulated array [%(default)s]"
     )
@@ -89,17 +84,13 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_JONES_PER_BATCH,
         help="Number of antenna-channelised-voltage Jones vectors in each F-engine batch [%(default)s]",
     )
-    parser.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="IP TTL for multicast [%(default)s]")
-    parser.add_argument("--ibv", action="store_true", help="Use ibverbs for acceleration")
+    add_send_arguments(parser, prefix="")
     parser.add_argument(
         "--send-packet-payload",
         type=int,
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
-    )
-    parser.add_argument(
-        "--affinity", type=comma_split(int), default=[-1], help="Core affinity for the sending thread [not bound]"
     )
     parser.add_argument(
         "--main-affinity", type=int, default=-1, help="Core affinity for the main Python thread [not bound]"
@@ -216,20 +207,18 @@ def make_stream(args: argparse.Namespace, idx: int, data: np.ndarray) -> "spead2
         rate=rate,
         max_heaps=QUEUE_DEPTH * args.array_size + 1,  # + 1 for descriptor heaps
     )
-    interface_address = katsdpservices.get_interface_address(args.interface)
-    affinity = args.affinity[idx % len(args.affinity)]
-    thread_pool = spead2.ThreadPool(1, [] if affinity < 0 else [affinity])
+    thread_pool = spead2.ThreadPool(1, [] if args.affinity < 0 else [args.affinity])
     endpoints = [(args.dest[idx].host, args.dest[idx].port)]
     if args.ibv:
         udp_ibv_config = spead2.send.UdpIbvConfig(
             endpoints=endpoints,
-            interface_address=interface_address,
+            interface_address=args.interface,
             ttl=args.ttl,
             memory_regions=[data],
         )
         return spead2.send.asyncio.UdpIbvStream(thread_pool, config, udp_ibv_config)
     else:
-        return spead2.send.asyncio.UdpStream(thread_pool, endpoints, config, args.ttl, interface_address)
+        return spead2.send.asyncio.UdpStream(thread_pool, endpoints, config, args.ttl, args.interface)
 
 
 class Sender:
