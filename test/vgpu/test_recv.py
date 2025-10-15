@@ -16,7 +16,7 @@
 
 """Unit tests for :mod:`katgpucbf.vgpu.recv`."""
 
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from unittest import mock
 
 import numpy as np
@@ -133,6 +133,16 @@ def make_heap(timestamp: int, frequency: int, beam_ants: int, data: np.ndarray) 
     return heap
 
 
+def mask_present(
+    data: np.ndarray[tuple[int, int, int, int, int], np.dtype[np.int8]],
+    present: np.ndarray[tuple[int, int, int], np.dtype[np.uint8]],
+) -> None:
+    """Zero out elements of `data` corresponding to zero elements of `present`."""
+    # Split the channel axis into substreams so that the leading dimensions match.
+    view = data.reshape((*present.shape, -1, *data.shape[-2:]))
+    view[~present.astype(bool)] = 0
+
+
 def gen_heaps(
     layout: Layout,
     data: np.ndarray[tuple[int, int, int, int, int], np.dtype[np.int8]],
@@ -180,8 +190,9 @@ class TestStreamGroup:
         """
         monkeypatch.setattr("katgpucbf.vgpu.recv.MAX_CHUNKS", 10)
 
-    # TODO: test with reordering, bad timestamps, bad frequencies
-    async def test_basic(
+    @pytest.mark.parametrize("missing", [pytest.param(False, id="nomissing"), pytest.param(True, id="missing")])
+    @pytest.mark.parametrize("reorder", [pytest.param(False, id="noreorder"), pytest.param(True, id="reorder")])
+    async def test_recv(
         self,
         layout: Layout,
         send_stream: "spead2.send.asyncio.AsyncStream",
@@ -190,8 +201,20 @@ class TestStreamGroup:
         data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
         time_converter: TimeConverter,
         sensors: SensorSet,
+        reorder: bool,
+        missing: bool,
     ) -> None:
-        """Send heaps and check that they arrive."""
+        """Send heaps and check that they arrive and that metrics are correct.
+
+        There are two parametrisations:
+
+        missing
+            If true, do not send any heaps from batches 4:10 (covering the
+            tail of one chunk, the whole of the next, and the start of the
+            third) plus one more heap.
+        reorder
+            If true, shuffle the heaps randomly before sending them.
+        """
         n_batches = 25
         rng = np.random.default_rng(seed=1)
         data = rng.integers(
@@ -199,7 +222,15 @@ class TestStreamGroup:
         )
         first_chunk_id = 123
         first_timestamp = first_chunk_id * layout.chunk_timestamp_step
-        heaps: Iterable[spead2.send.HeapReference] = gen_heaps(layout, data, first_timestamp)
+        heaps = list(gen_heaps(layout, data, first_timestamp))
+        if missing:
+            # Remove a contiguous range of heaps. This is not the most thorough
+            # test, but katgpucbf.recv.iter_chunks already gets cover from fgpu
+            # and xbgpu tests.
+            del heaps[4 * layout.batch_heaps : 10 * layout.batch_heaps + 1]
+        if reorder:
+            # Ignore is needed due to https://github.com/numpy/numpy/issues/29974
+            rng.shuffle(heaps)  # type: ignore
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             # Heap with no payload - representing any sort of metadata heap such as descriptors
@@ -211,36 +242,60 @@ class TestStreamGroup:
 
             start_batch = 0
             expected_timestamp = first_timestamp
+            i = 0
             async for chunk in iter_chunks(data_ringbuffer, layout, sensors, time_converter, POL_LABELS):
                 with chunk:
+                    if missing and i == 2:
+                        # Previous chunk is entirely missing
+                        start_batch += layout.n_batches_per_chunk
+                        expected_timestamp += layout.chunk_timestamp_step
                     n_chunk_batches = min(layout.n_batches_per_chunk, n_batches - start_batch)
                     expected_present = np.zeros_like(chunk.present)
                     expected_present[:, :n_chunk_batches] = 1
-                    expected_data = data[:, start_batch : start_batch + n_chunk_batches]
+                    expected_data = np.zeros_like(chunk.data)
+                    expected_data[:, :n_chunk_batches] = data[:, start_batch : start_batch + n_chunk_batches]
+                    if missing:
+                        match i:
+                            case 1:
+                                expected_present[:, 1:] = 0
+                            case 2:
+                                expected_present[:, :1] = 0
+                                expected_present[0, 1, 0] = 0
                     np.testing.assert_equal(chunk.present, expected_present)
-                    np.testing.assert_equal(chunk.data[:, :n_chunk_batches], expected_data)
+                    # Mask out missing data from the comparison
+                    mask_present(chunk.data, expected_present)
+                    mask_present(expected_data, expected_present)
+                    np.testing.assert_equal(chunk.data, expected_data)
                     start_batch += n_chunk_batches
                     expected_timestamp += layout.chunk_timestamp_step
-                    if start_batch == n_batches == 0:
+                    if start_batch == n_batches:
                         break  # Received all the heaps we expected to
+                i += 1
 
         assert prom_diff.diff("input_metadata_heaps_total") == 1
         assert prom_diff.diff("input_incomplete_heaps_total") == 0
         assert prom_diff.diff("input_too_old_heaps_total") == 0
         assert prom_diff.diff("input_bad_timestamp_heaps_total") == 0
         assert prom_diff.diff("input_bad_frequency_heaps_total") == 0
-        expected_chunks = n_batches // layout.n_batches_per_chunk + 1
+        total_chunks = n_batches // layout.n_batches_per_chunk + 1
+        expected_chunks = total_chunks
+        if missing:
+            expected_chunks -= 1  # One whole chunk is missing
         assert prom_diff.diff("input_chunks_total") == expected_chunks
         for pol in POL_LABELS:
             expected_heaps = n_batches * layout.n_pol_substreams
+            if missing:
+                expected_heaps -= 6 * layout.n_pol_substreams
+                if pol == "x":
+                    expected_heaps -= 1
             assert prom_diff.diff("input_heaps_total", {"pol": pol}) == expected_heaps
             assert prom_diff.diff("input_bytes_total", {"pol": pol}) == expected_heaps * layout.heap_bytes
             assert prom_diff.diff("input_samples_total", {"pol": pol}) == expected_heaps * layout.heap_sample_count
             # The stream doesn't fill the last chunk
-            expected_missing_heaps = expected_chunks * layout.chunk_heaps // N_POLS - expected_heaps
+            expected_missing_heaps = total_chunks * layout.chunk_heaps // N_POLS - expected_heaps
             assert prom_diff.diff("input_missing_heaps_total", {"pol": pol}) == expected_missing_heaps
 
-        last_chunk_id = first_chunk_id + expected_chunks - 1
+        last_chunk_id = first_chunk_id + total_chunks - 1
         last_chunk_timestamp = last_chunk_id * layout.chunk_timestamp_step
         last_chunk_timestamp_unix = time_converter.adc_to_unix(last_chunk_timestamp)
         for pol in POL_LABELS:
