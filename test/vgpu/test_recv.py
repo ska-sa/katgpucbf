@@ -44,7 +44,7 @@ def layout() -> Layout:
         sample_bits=8,
         n_channels=32768,
         n_channels_per_substream=1024,
-        n_batches_per_chunk=3,
+        chunk_batches=3,
         n_spectra_per_heap=32,
         heap_timestamp_step=2**24,
     )
@@ -60,7 +60,7 @@ class TestLayout:
         assert layout.chunk_batches == 3
         assert layout.batch_heaps == 64
         assert layout.chunk_timestamp_step == 3 * 2**24
-        assert layout.heap_sample_count == 32768
+        assert layout.heap_samples == 32768
         assert layout.chunk_heaps == 192
         assert layout.chunk_bytes == 192 * 65536
 
@@ -100,11 +100,9 @@ def stream_group(
     """
     stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, -1, POL_LABELS)
     for _ in range(free_ringbuffer.maxsize):
-        data = np.empty(
-            (N_POLS, layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8
-        )
+        data = np.empty((N_POLS, layout.chunk_batches, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8)
         # Use np.ones to make sure the bits get zeroed out
-        present = np.ones((N_POLS, layout.n_batches_per_chunk, layout.n_pol_substreams), np.uint8)
+        present = np.ones((N_POLS, layout.chunk_batches, layout.n_pol_substreams), np.uint8)
         chunk = Chunk(data=data, present=present, sink=stream_group)
         chunk.recycle()
     for stream, queue in zip(stream_group, queues, strict=True):
@@ -214,7 +212,7 @@ class TestStreamGroup:
             expected_timestamp = first_timestamp
             async for chunk in iter_chunks(data_ringbuffer, layout, sensors, time_converter, POL_LABELS):
                 with chunk:
-                    n_chunk_batches = min(layout.n_batches_per_chunk, n_batches - start_batch)
+                    n_chunk_batches = min(layout.chunk_batches, n_batches - start_batch)
                     expected_present = np.zeros_like(chunk.present)
                     expected_present[:, :n_chunk_batches] = 1
                     expected_data = data[:, start_batch : start_batch + n_chunk_batches]
@@ -230,13 +228,13 @@ class TestStreamGroup:
         assert prom_diff.diff("input_too_old_heaps_total") == 0
         assert prom_diff.diff("input_bad_timestamp_heaps_total") == 0
         assert prom_diff.diff("input_bad_frequency_heaps_total") == 0
-        expected_chunks = n_batches // layout.n_batches_per_chunk + 1
+        expected_chunks = n_batches // layout.chunk_batches + 1
         assert prom_diff.diff("input_chunks_total") == expected_chunks
         for pol in POL_LABELS:
             expected_heaps = n_batches * layout.n_pol_substreams
             assert prom_diff.diff("input_heaps_total", {"pol": pol}) == expected_heaps
             assert prom_diff.diff("input_bytes_total", {"pol": pol}) == expected_heaps * layout.heap_bytes
-            assert prom_diff.diff("input_samples_total", {"pol": pol}) == expected_heaps * layout.heap_sample_count
+            assert prom_diff.diff("input_samples_total", {"pol": pol}) == expected_heaps * layout.heap_samples
             # The stream doesn't fill the last chunk
             expected_missing_heaps = expected_chunks * layout.chunk_heaps // N_POLS - expected_heaps
             assert prom_diff.diff("input_missing_heaps_total", {"pol": pol}) == expected_missing_heaps

@@ -224,8 +224,8 @@ class TestFEngine:
         """
 
         def _dig_rms_dbfs_window_samples(self: Pipeline) -> int:
-            chunk_samples = self.spectra * self.output.spectra_samples
-            window_samples = dig_rms_dbfs_window_chunks * chunk_samples
+            chunk_timestamp_step = self.spectra * self.output.spectra_samples
+            window_samples = dig_rms_dbfs_window_chunks * chunk_timestamp_step
             dig_rms_dbfs_window_samples.append(window_samples)
             return window_samples
 
@@ -426,7 +426,7 @@ class TestFEngine:
         spectra_per_heap = output.spectra_per_heap
         n_samples = dig_data.shape[1]
         assert dig_data.shape[0] == N_POLS
-        assert n_samples % recv_layout.chunk_samples == 0, "samples must be a whole number of chunks"
+        assert n_samples % recv_layout.chunk_timestamp_step == 0, "samples must be a whole number of chunks"
         saturation_value = 2 ** (recv_layout.sample_bits - 1) - 1
         saturated = np.abs(dig_data) >= saturation_value
         saturated = np.sum(saturated.reshape(N_POLS, -1, recv_layout.heap_samples), axis=-1, dtype=np.uint16)
@@ -576,8 +576,8 @@ class TestFEngine:
         # change in the delay at SYNC_TIME.
         recv_layout = engine_server.recv_layout
         heap_samples = output.spectra_samples * output.spectra_per_heap
-        first_timestamp = roundup(recv_layout.chunk_samples, heap_samples)
-        n_samples = 20 * recv_layout.chunk_samples
+        first_timestamp = roundup(recv_layout.chunk_timestamp_step, heap_samples)
+        n_samples = 20 * recv_layout.chunk_timestamp_step
         tone_timestamps = np.arange(n_samples) + first_timestamp
         dig_data = self._make_tone(tone_timestamps, tones[0], 0) + self._make_tone(tone_timestamps, tones[1], 1)
         dig_data[:, 1::2] *= -1  # Down-convert to baseband
@@ -649,7 +649,7 @@ class TestFEngine:
         # Add some extra data to align to an input heap, and to fill out the
         # last output chunk.
         output_chunk_samples = engine_server.chunk_jones * 2 * output.decimation
-        padded_size = roundup(dig_data.shape[1] + output_chunk_samples, engine_server.recv_layout.chunk_samples)
+        padded_size = roundup(dig_data.shape[1] + output_chunk_samples, engine_server.recv_layout.chunk_timestamp_step)
         n_pad = padded_size - dig_data.shape[1]
         padding = np.zeros((2, n_pad), dig_data.dtype)
         dig_data = np.concatenate([dig_data, padding], axis=1)
@@ -723,7 +723,7 @@ class TestFEngine:
             for channel in tone_channels
         ]
         recv_layout = engine_server.recv_layout
-        n_samples = 32 * recv_layout.chunk_samples
+        n_samples = 32 * recv_layout.chunk_timestamp_step
 
         # Should be high enough to cause multiple coarse delay changes per chunk
         delay_rate = np.array([1e-5, 1.2e-5])
@@ -733,7 +733,9 @@ class TestFEngine:
         coeffs = [f"0.0,{dr}:0.0,{pr}" for dr, pr in zip(delay_rate, phase_rate, strict=True)]
         await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
 
-        first_timestamp = roundup(100 * recv_layout.chunk_samples, output.spectra_samples * output.spectra_per_heap)
+        first_timestamp = roundup(
+            100 * recv_layout.chunk_timestamp_step, output.spectra_samples * output.spectra_per_heap
+        )
         end_delay = round(min(delay_rate) * n_samples)
         expected_spectra = (n_samples + end_delay - output.window) // output.spectra_samples
         tone_timestamps = np.arange(n_samples) + first_timestamp
@@ -805,7 +807,7 @@ class TestFEngine:
             frac_channel=frac_channel(output, tone_channel), magnitude=110, delay=extra_delay_samples, phase=extra_phase
         )
         recv_layout = engine_server.recv_layout
-        n_samples = 10 * recv_layout.chunk_samples
+        n_samples = 10 * recv_layout.chunk_timestamp_step
         dig_data = self._make_tone(np.arange(n_samples), tone, 0)
 
         # Load some delay models for the future (the last one beyond the end of the data)
@@ -879,8 +881,8 @@ class TestFEngine:
         # Don't send the first chunk, to avoid complications with the step
         # change in the delay at SYNC_TIME.
         heap_samples = output.spectra_samples * output.spectra_per_heap
-        first_timestamp = roundup(recv_layout.chunk_samples, heap_samples)
-        n_samples = 20 * recv_layout.chunk_samples
+        first_timestamp = roundup(recv_layout.chunk_timestamp_step, heap_samples)
+        n_samples = 20 * recv_layout.chunk_timestamp_step
         tone_timestamps = np.arange(n_samples) + first_timestamp
 
         rng = np.random.default_rng(123)
@@ -966,14 +968,14 @@ class TestFEngine:
         sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         spectra_per_heap = output.spectra_per_heap
-        chunk_samples = engine_server.recv_layout.chunk_samples
-        n_samples = 16 * chunk_samples
+        chunk_timestamp_step = engine_server.recv_layout.chunk_timestamp_step
+        n_samples = 16 * chunk_timestamp_step
         # Half-open ranges of input heaps that are missing
         missing_ranges = [
             (8, 10),
             (15, 16),
             (117, 133),
-            (6 * chunk_samples // PACKET_SAMPLES, 8 * chunk_samples // PACKET_SAMPLES),
+            (6 * chunk_timestamp_step // PACKET_SAMPLES, 8 * chunk_timestamp_step // PACKET_SAMPLES),
         ]
         rng = np.random.default_rng(seed=1)
         dig_data = np.tile(rng.integers(-255, 255, size=(2, n_samples // 2), dtype=np.int16), 2)
@@ -1181,7 +1183,7 @@ class TestFEngine:
             await engine_client.request("gain", output.name, pol, default_gain * 2)
 
         recv_layout = engine_server.recv_layout
-        n_samples = 20 * recv_layout.chunk_samples
+        n_samples = 20 * recv_layout.chunk_timestamp_step
         dig_data = self._make_tone(np.arange(n_samples), tone, tone_pol)
         with PromDiff(namespace=METRIC_NAMESPACE, labels={"stream": output.name}) as prom_diff:
             _, timestamps = await self._send_data(

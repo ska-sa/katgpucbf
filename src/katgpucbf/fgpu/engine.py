@@ -995,9 +995,9 @@ class Pipeline:
 
         The unit tests mock out this function to replace the value.
         """
-        chunk_samples = self.spectra * self.output.spectra_samples
-        window_chunks = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / chunk_samples))
-        return window_chunks * chunk_samples
+        chunk_timestamp_step = self.spectra * self.output.spectra_samples
+        window_chunks = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / chunk_timestamp_step))
+        return window_chunks * chunk_timestamp_step
 
     def _update_dig_power_sensors(
         self,
@@ -1342,9 +1342,9 @@ class FEngine(Engine):
 
         extra_samples = max_delay_diff + max(output.window for output in outputs)
         extra_samples = accel.roundup(extra_samples, BYTE_BITS)
-        if extra_samples > self.recv_layout.chunk_samples:
+        if extra_samples > self.recv_layout.chunk_timestamp_step:
             raise RuntimeError(f"chunk_samples is too small; it must be at least {extra_samples}")
-        self.n_samples = self.recv_layout.chunk_samples + extra_samples
+        self.n_samples = self.recv_layout.chunk_timestamp_step + extra_samples
 
         self._in_free_queue: asyncio.Queue[InQueueItem] = monitor.make_queue("in_free_queue", self.n_in)
         self._init_recv(recv_affinity, monitor)
@@ -1571,7 +1571,7 @@ class FEngine(Engine):
             if not self.use_vkgdr:
                 in_item.enqueue_wait_for_events(self._upload_queue)
             in_item.reset(chunk.timestamp)
-            in_item.n_samples = layout.chunk_samples
+            in_item.n_samples = layout.chunk_timestamp_step
 
             transfer_events = []
             # Copy the present flags (synchronously).
@@ -1583,7 +1583,7 @@ class FEngine(Engine):
                 sensor = self.sensors[f"input{pol}.dig-clip-cnt"]
                 sensor.set_value(
                     sensor.value + int(np.sum(chunk.extra[pol], dtype=np.uint64)),
-                    timestamp=self.time_converter.adc_to_unix(chunk.timestamp + layout.chunk_samples),
+                    timestamp=self.time_converter.adc_to_unix(chunk.timestamp + layout.chunk_timestamp_step),
                 )
             if self.use_vkgdr:
                 assert in_item.samples is None

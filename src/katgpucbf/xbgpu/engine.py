@@ -698,7 +698,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             input_sample_bits=engine.sample_bits,
         )
         self.correlation = correlation_template.instantiate(
-            self._proc_command_queue, n_batches=engine.recv_layout.heaps_per_fengine_per_chunk
+            self._proc_command_queue, n_batches=engine.recv_layout.chunk_batches
         )
 
         allocator = accel.DeviceAllocator(context=context)
@@ -1215,7 +1215,7 @@ class XBEngine(Engine):
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=self.sample_bits,
             heap_timestamp_step=self.recv_heap_timestamp_step,
-            heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
+            chunk_batches=self.heaps_per_fengine_per_chunk,
         )
         self.receiver_stream = recv.make_stream(
             layout=self.recv_layout,

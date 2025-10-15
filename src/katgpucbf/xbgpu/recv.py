@@ -34,7 +34,7 @@ from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
 from .. import recv as base_recv
-from ..recv import BaseLayout, Chunk, Counters, StatsCollector, user_data_type
+from ..recv import Chunk, Counters, LayoutMixin, StatsCollector, user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
@@ -75,7 +75,7 @@ class _Statistic(IntEnum):
 
 
 @dataclass(frozen=True)
-class Layout(BaseLayout):
+class Layout(LayoutMixin):
     """Parameters controlling the sizes of heaps and chunks.
 
     Parameters
@@ -95,7 +95,7 @@ class Layout(BaseLayout):
         configurable to allow for greater flexibility during testing.
     sample_bits
         The number of bits per sample. Only 8 bits is supported at the moment.
-    heaps_per_fengine_per_chunk
+    chunk_batches
         Each chunk out of the SPEAD2 receiver will contain multiple heaps from
         each antenna. This parameter specifies the number of heaps per antenna
         that each chunk will contain.
@@ -106,7 +106,7 @@ class Layout(BaseLayout):
     n_spectra_per_heap: int
     heap_timestamp_step: int
     sample_bits: int
-    heaps_per_fengine_per_chunk: int
+    chunk_batches: int
 
     @property
     def heap_bytes(self):  # noqa: D102
@@ -115,26 +115,22 @@ class Layout(BaseLayout):
         )
 
     @property
-    def chunk_batches(self) -> int:  # noqa: D102
-        return self.heaps_per_fengine_per_chunk
-
-    @property
     def batch_heaps(self) -> int:  # noqa: D102
         return self.n_ants
 
     @property
-    def heap_sample_count(self) -> int:  # noqa: D102
+    def heap_samples(self) -> int:  # noqa: D102
         return self.n_channels_per_substream * self.n_spectra_per_heap
 
     @property
     def chunk_timestamp_step(self) -> int:  # noqa: D102
-        return self.heap_timestamp_step * self.heaps_per_fengine_per_chunk
+        return self.heap_timestamp_step * self.chunk_batches
 
     @functools.cached_property
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         n_ants = self.n_ants
         heap_timestamp_step = self.heap_timestamp_step
-        heaps_per_fengine_per_chunk = self.heaps_per_fengine_per_chunk
+        chunk_batches = self.chunk_batches
         heap_bytes = self.heap_bytes
         n_statistics = len(_Statistic)
 
@@ -168,9 +164,9 @@ class Layout(BaseLayout):
             # Compute position of this heap on the time axis, starting from
             # timestamp 0
             heap_time_abs = timestamp // heap_timestamp_step
-            data[0].chunk_id = heap_time_abs // heaps_per_fengine_per_chunk
+            data[0].chunk_id = heap_time_abs // chunk_batches
             # Position of this heap on the time axis, from the start of the chunk
-            heap_time = heap_time_abs % heaps_per_fengine_per_chunk
+            heap_time = heap_time_abs % chunk_batches
             data[0].heap_index = heap_time * n_ants + fengine_id
             data[0].heap_offset = data[0].heap_index * heap_bytes
 

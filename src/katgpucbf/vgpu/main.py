@@ -166,7 +166,7 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         n_channels_per_substream=args.recv_channels_per_substream,
         n_spectra_per_heap=args.recv_jones_per_batch // args.recv_channels,
         n_samples_between_spectra=args.recv_samples_between_spectra,
-        n_batches_per_chunk=args.recv_batches_per_chunk,
+        chunk_batches=args.recv_batches_per_chunk,
         sample_bits=args.recv_sample_bits,
         srcs=args.src,
         recv_interface=args.recv_interface,

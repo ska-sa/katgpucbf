@@ -33,7 +33,7 @@ from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, N_POLS
 from .. import recv as base_recv
-from ..recv import BaseLayout, Chunk, Counters, StatsCollector
+from ..recv import Chunk, Counters, LayoutMixin, StatsCollector
 from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
@@ -88,12 +88,12 @@ class _Statistic(IntEnum):
 
 
 @dataclass(frozen=True)
-class Layout(BaseLayout):
+class Layout(LayoutMixin):
     """Parameters controlling the sizes of heaps and chunks."""
 
     sample_bits: int
     heap_samples: int
-    chunk_samples: int  #: Samples in time i.e. per polarisation
+    chunk_timestamp_step: int
     mask_timestamp: bool
 
     @property
@@ -102,7 +102,7 @@ class Layout(BaseLayout):
 
     @property
     def chunk_batches(self) -> int:  # noqa: D102
-        return self.chunk_samples // self.heap_samples
+        return self.chunk_timestamp_step // self.heap_samples
 
     @property
     def batch_heaps(self) -> int:  # noqa: D102
@@ -114,17 +114,9 @@ class Layout(BaseLayout):
         return ~np.uint64(self.heap_samples - 1 if self.mask_timestamp else 0)
 
     @property
-    def heap_sample_count(self) -> int:  # noqa: D102
-        return self.heap_samples
-
-    @property
-    def chunk_timestamp_step(self) -> int:  # noqa: D102
-        return self.chunk_samples
-
-    @property
     def pol_chunk_bytes(self) -> int:
         """Number of bytes for the data in one polarisation of a chunk."""
-        return self.chunk_samples * self.sample_bits // BYTE_BITS
+        return self.chunk_timestamp_step * self.sample_bits // BYTE_BITS
 
     @functools.cached_property
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
@@ -132,7 +124,7 @@ class Layout(BaseLayout):
         heap_samples = self.heap_samples
         heap_bytes = self.heap_bytes
         chunk_batches = self.chunk_batches
-        chunk_samples = self.chunk_samples
+        chunk_timestamp_step = self.chunk_timestamp_step
         timestamp_mask = self.timestamp_mask
         n_statistics = len(_Statistic)
 
@@ -163,7 +155,7 @@ class Layout(BaseLayout):
             if timestamp % heap_samples != 0:
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
-            data[0].chunk_id = timestamp // chunk_samples
+            data[0].chunk_id = timestamp // chunk_timestamp_step
             heap_index = timestamp // heap_samples % chunk_batches
             data[0].heap_index = heap_index + pol * chunk_batches
             data[0].heap_offset = heap_index * heap_bytes + pol * user_data.stride

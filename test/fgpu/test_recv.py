@@ -55,7 +55,7 @@ def layout(request) -> Layout:
     timestamp masking.
     """
     mask_timestamp = request.node.get_closest_marker("mask_timestamp") is not None
-    return Layout(sample_bits=10, heap_samples=4096, chunk_samples=65536, mask_timestamp=mask_timestamp)
+    return Layout(sample_bits=10, heap_samples=4096, chunk_timestamp_step=65536, mask_timestamp=mask_timestamp)
 
 
 class TestLayout:
@@ -212,7 +212,7 @@ class TestStreamGroup:
         rng = np.random.default_rng(seed=1)
         data = rng.integers(0, 255, size=(N_POLS, 5 * layout.pol_chunk_bytes), dtype=np.uint8)
         expected_chunk_id = 123
-        first_timestamp = expected_chunk_id * layout.chunk_samples
+        first_timestamp = expected_chunk_id * layout.chunk_timestamp_step
         if timestamps == "mask":
             first_timestamp += 1234  # Invalid bits that will be masked off
         heaps: Iterable[spead2.send.Heap] = gen_heaps(layout, data, first_timestamp)
@@ -267,7 +267,7 @@ class TestStreamGroup:
         rng = np.random.default_rng(seed=1)
         data = rng.integers(0, 255, size=(N_POLS, layout.pol_chunk_bytes), dtype=np.uint8)
         expected_chunk_id = 123
-        first_timestamp = expected_chunk_id * layout.chunk_samples
+        first_timestamp = expected_chunk_id * layout.chunk_timestamp_step
         heaps = list(gen_heaps(layout, data, first_timestamp))
         # Create some gaps in the heaps
         missing = [0, 10, 15]
@@ -375,20 +375,20 @@ class TestIterChunks:
 
         # Check sensors
         for pol in range(N_POLS):
-            expected_timestamp = time_converter.adc_to_unix(21 * layout.chunk_samples)
+            expected_timestamp = time_converter.adc_to_unix(21 * layout.chunk_timestamp_step)
             sensor = sensors[f"input{pol}.rx.timestamp"]
             assert sensor.reading == aiokatcp.Reading(
-                expected_timestamp, aiokatcp.Sensor.Status.NOMINAL, 21 * layout.chunk_samples
+                expected_timestamp, aiokatcp.Sensor.Status.NOMINAL, 21 * layout.chunk_timestamp_step
             )
             sensor = sensors[f"input{pol}.rx.unixtime"]
             assert sensor.reading == aiokatcp.Reading(
                 expected_timestamp, aiokatcp.Sensor.Status.NOMINAL, expected_timestamp
             )
         sensor = sensors["input0.rx.missing-unixtime"]
-        expected_timestamp = time_converter.adc_to_unix(20 * layout.chunk_samples)
+        expected_timestamp = time_converter.adc_to_unix(20 * layout.chunk_timestamp_step)
         assert sensor.reading == aiokatcp.Reading(expected_timestamp, aiokatcp.Sensor.Status.ERROR, expected_timestamp)
         sensor = sensors["input1.rx.missing-unixtime"]
-        expected_timestamp = time_converter.adc_to_unix(21 * layout.chunk_samples)
+        expected_timestamp = time_converter.adc_to_unix(21 * layout.chunk_timestamp_step)
         assert sensor.reading == aiokatcp.Reading(expected_timestamp, aiokatcp.Sensor.Status.ERROR, expected_timestamp)
         ds_sensor = sensors["rx.device-status"]
         assert ds_sensor.reading == aiokatcp.Reading(ANY, aiokatcp.Sensor.Status.WARN, DeviceStatus.DEGRADED)

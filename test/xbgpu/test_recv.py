@@ -45,7 +45,7 @@ def layout() -> Layout:
         n_spectra_per_heap=32,
         heap_timestamp_step=2 * 1024 * 32,
         sample_bits=8,
-        heaps_per_fengine_per_chunk=10,
+        chunk_batches=10,
     )
 
 
@@ -243,7 +243,7 @@ class TestStream:
         assert prom_diff.diff("input_chunks_total") == seen
         assert prom_diff.diff("input_heaps_total") == expected_heaps
         assert prom_diff.diff("input_bytes_total") == layout.chunk_bytes * seen
-        assert prom_diff.diff("input_samples_total") == expected_heaps * layout.heap_sample_count
+        assert prom_diff.diff("input_samples_total") == expected_heaps * layout.heap_samples
         assert prom_diff.diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
         assert prom_diff.diff("input_bad_feng_id_heaps_total") == 1
         assert prom_diff.diff("input_metadata_heaps_total") == 1

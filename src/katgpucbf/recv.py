@@ -24,7 +24,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Protocol, Self
 
 import aiokatcp
 import numba.core.ccallback
@@ -268,7 +268,7 @@ class StatsCollector(Collector):
             yield metric
 
 
-class BaseLayout(ABC):
+class BaseLayout(Protocol):
     """Abstract base class for chunk layouts to derive from."""
 
     @property
@@ -291,7 +291,7 @@ class BaseLayout(ABC):
 
     @property
     @abstractmethod
-    def heap_sample_count(self) -> int:
+    def heap_samples(self) -> int:
         """Number of samples per heap.
 
         The meaning of samples is up to the concrete subclass. It is used
@@ -303,20 +303,19 @@ class BaseLayout(ABC):
     @abstractmethod
     def chunk_timestamp_step(self) -> int:
         """Expected increase in timestamp from one chunk to the next."""
-
-    @property
-    def chunk_heaps(self) -> int:
-        """Number of heaps per chunk."""
-        return self.chunk_batches * self.batch_heaps
-
-    @property
-    def chunk_bytes(self) -> int:
-        """Number of bytes per chunk."""
-        return self.heap_bytes * self.batch_heaps * self.chunk_batches
+        ...
 
     @property
     @abstractmethod
-    def _chunk_place(self) -> numba.core.ccallback.CFunc: ...
+    def chunk_heaps(self) -> int:
+        """Number of heaps per chunk."""
+        ...
+
+    @property
+    @abstractmethod
+    def chunk_bytes(self) -> int:
+        """Number of bytes per chunk."""
+        ...
 
     def chunk_place(self, user_data: np.ndarray) -> scipy.LowLevelCallable:
         """Generate low-level code for placing heaps in chunks.
@@ -326,6 +325,29 @@ class BaseLayout(ABC):
         user_data
             Data to pass to the placement callback
         """
+        ...
+
+
+class LayoutMixin(ABC):
+    """Provide default implementations for some :class:`BaseLayout` properties.
+
+    Subclasses should inherit from this class but *not* inherit from
+    :class:`BaseLayout`.
+    """
+
+    @property
+    @abstractmethod
+    def _chunk_place(self) -> numba.core.ccallback.CFunc: ...
+
+    @property
+    def chunk_heaps(self: BaseLayout) -> int:  # noqa: D102
+        return self.chunk_batches * self.batch_heaps
+
+    @property
+    def chunk_bytes(self: BaseLayout) -> int:  # noqa: D102
+        return self.heap_bytes * self.batch_heaps * self.chunk_batches
+
+    def chunk_place(self, user_data: np.ndarray) -> scipy.LowLevelCallable:  # noqa: D102
         return scipy.LowLevelCallable(
             self._chunk_place.ctypes,
             user_data=user_data.ctypes.data_as(ctypes.c_void_p),
@@ -673,7 +695,7 @@ async def iter_chunks(
                     pol_prefix = ""
                 buf_good = int(np.sum(chunk.present[pol_index]))
                 pol_counters.heaps.inc(buf_good)
-                pol_counters.samples.inc(buf_good * layout.heap_sample_count)
+                pol_counters.samples.inc(buf_good * layout.heap_samples)
                 pol_counters.bytes.inc(buf_good * layout.heap_bytes)
                 if pol_counters.clipped_samples is not None and chunk.extra is not None:
                     pol_counters.clipped_samples.inc(int(np.sum(chunk.extra[pol_index], dtype=np.uint64)))

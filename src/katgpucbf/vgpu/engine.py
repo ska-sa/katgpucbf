@@ -51,7 +51,7 @@ class VEngine(Engine):
         n_channels_per_substream: int,
         n_spectra_per_heap: int,
         n_samples_between_spectra: int,
-        n_batches_per_chunk: int,
+        chunk_batches: int,
         sample_bits: int,
         srcs: list[list[tuple[str, int]]],
         recv_interface: str | None,
@@ -76,7 +76,7 @@ class VEngine(Engine):
             n_channels=n_channels,
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
-            n_batches_per_chunk=n_batches_per_chunk,
+            chunk_batches=chunk_batches,
             heap_timestamp_step=n_samples_between_spectra * n_spectra_per_heap,
         )
         self.recv_time_converter = TimeConverter(sync_time, adc_sample_rate)
@@ -141,11 +141,11 @@ class VEngine(Engine):
         for _ in range(recv_chunks):
             chunk = recv.Chunk(
                 present=np.empty(
-                    (N_POLS, layout.n_batches_per_chunk, layout.n_pol_substreams),
+                    (N_POLS, layout.chunk_batches, layout.n_pol_substreams),
                     np.uint8,
                 ),
                 data=cupyx.empty_pinned(
-                    (N_POLS, layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX),
+                    (N_POLS, layout.chunk_batches, layout.n_channels, layout.n_spectra_per_heap, COMPLEX),
                     dtype,
                 ),
                 sink=self._recv_group,

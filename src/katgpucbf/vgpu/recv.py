@@ -32,7 +32,7 @@ from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
 from .. import recv as base_recv
-from ..recv import BaseLayout, Chunk, Counters, StatsCollector
+from ..recv import Chunk, Counters, LayoutMixin, StatsCollector
 from ..spead import BEAM_ANTS_ID, FREQUENCY_ID, TIMESTAMP_ID
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
@@ -87,7 +87,7 @@ class _Statistic(IntEnum):
 
 
 @dataclass(frozen=True)
-class Layout(BaseLayout):
+class Layout(LayoutMixin):
     """Parameters controlling the sizes of heaps and chunks.
 
     Parameters
@@ -100,8 +100,8 @@ class Layout(BaseLayout):
         The number of frequency channels in each beam substream.
     n_spectra_per_heap
         The number of samples on the time axis in each heap.
-    n_batches_per_chunk
-        Number of heaps per chunk on the time axis.
+    chunk_batches
+        Number of batches per chunk.
     heap_timestamp_step
         Increase in timestamp between successive heaps. Timestamps
         must also be a multiple of this value.
@@ -111,7 +111,7 @@ class Layout(BaseLayout):
     n_channels: int
     n_channels_per_substream: int
     n_spectra_per_heap: int
-    n_batches_per_chunk: int
+    chunk_batches: int
     heap_timestamp_step: int
 
     def __post_init__(self) -> None:
@@ -134,19 +134,15 @@ class Layout(BaseLayout):
         return self.n_channels // self.n_channels_per_substream
 
     @property
-    def chunk_batches(self) -> int:  # noqa: D102
-        return self.n_batches_per_chunk
-
-    @property
     def batch_heaps(self) -> int:  # noqa: D102
         return self.n_pol_substreams * N_POLS
 
     @property
     def chunk_timestamp_step(self) -> int:  # noqa: D102
-        return self.heap_timestamp_step * self.n_batches_per_chunk
+        return self.heap_timestamp_step * self.chunk_batches
 
     @property
-    def heap_sample_count(self) -> int:  # noqa: D102
+    def heap_samples(self) -> int:  # noqa: D102
         return self.n_spectra_per_heap * self.n_channels_per_substream
 
     @functools.cached_property
@@ -155,9 +151,9 @@ class Layout(BaseLayout):
         heap_timestamp_step = self.heap_timestamp_step
         n_channels = self.n_channels
         n_channels_per_substream = self.n_channels_per_substream
-        n_batches_per_chunk = self.n_batches_per_chunk
+        chunk_batches = self.chunk_batches
         n_pol_substreams = self.n_pol_substreams
-        n_heaps_per_pol = n_batches_per_chunk * n_pol_substreams
+        n_heaps_per_pol = chunk_batches * n_pol_substreams
         n_statistics = len(_Statistic)
 
         @numba.cfunc(
@@ -191,9 +187,9 @@ class Layout(BaseLayout):
                 return
             # Heap index on the time axis, from timestamp 0
             heap_time_abs = timestamp // heap_timestamp_step
-            data[0].chunk_id = heap_time_abs // n_batches_per_chunk
+            data[0].chunk_id = heap_time_abs // chunk_batches
             # Position of this heap on the time axis, from the start of the chunk
-            heap_time = heap_time_abs % n_batches_per_chunk
+            heap_time = heap_time_abs % chunk_batches
             # Position of this heap on the frequency axis
             heap_freq = frequency // n_channels_per_substream
             data[0].heap_index = pol * n_heaps_per_pol + heap_time * n_pol_substreams + heap_freq
