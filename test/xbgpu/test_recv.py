@@ -31,7 +31,7 @@ from numpy.typing import ArrayLike
 from katgpucbf.spead import FENG_ID_ID, FENG_RAW_ID, FLAVOUR, FREQUENCY_ID, IMMEDIATE_FORMAT, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 from katgpucbf.xbgpu import METRIC_NAMESPACE, recv
-from katgpucbf.xbgpu.recv import Chunk, Layout, make_sensors, recv_chunks
+from katgpucbf.xbgpu.recv import Chunk, Layout, iter_chunks, make_sensors
 
 from .. import PromDiff
 
@@ -130,7 +130,7 @@ def gen_heaps(layout: Layout, data: ArrayLike, first_timestamp: int) -> Generato
 
 
 class TestStream:
-    """Test the stream built by :func:`katgpucbf.recv.make_stream`."""
+    """Test the stream built by :func:`katgpucbf.xbgpu.recv.make_stream`."""
 
     @pytest.fixture
     async def sensors(self) -> SensorSet:
@@ -215,16 +215,9 @@ class TestStream:
 
             queue.stop()  # Flushes out the receive stream
             seen = 0
-            empty_chunks = 0
-            async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
+            async for chunk in iter_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 assert isinstance(chunk, Chunk)
                 with chunk:
-                    if not np.any(chunk.present):
-                        # It's a chunk with no data. Currently spead2 may generate
-                        # these due to the way it allocates chunks to keep the window
-                        # full.
-                        empty_chunks += 1
-                        continue
                     assert chunk.chunk_id == expected_chunk_id
                     assert np.all(chunk.present)
                     np.testing.assert_array_equal(chunk.data, data[: layout.chunk_bytes])
@@ -234,8 +227,8 @@ class TestStream:
         assert seen == 5
         expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
 
-        assert prom_diff.diff("input_chunks_total") == seen + empty_chunks
-        assert prom_diff.diff("input_heaps_total") == (seen + empty_chunks) * layout.chunk_heaps
+        assert prom_diff.diff("input_chunks_total") == seen
+        assert prom_diff.diff("input_heaps_total") == seen * layout.chunk_heaps
         assert prom_diff.diff("input_bytes_total") == layout.chunk_bytes * seen
         assert prom_diff.diff("input_bad_timestamp_heaps_total") == expected_bad_timestamps
         assert prom_diff.diff("input_bad_feng_id_heaps_total") == 1
@@ -313,9 +306,9 @@ class TestStream:
             # NOTE: We have to use a 'manual' counter as there is a jump in
             # received Chunk IDs - due to the deletions earlier.
             seen = 0
-            async for chunk in recv_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
+            async for chunk in iter_chunks(stream, layout=layout, sensors=sensors, time_converter=time_converter):
                 with chunk:
-                    # recv_chunks should filter out the phantom chunks created by
+                    # iter_chunks should filter out the phantom chunks created by
                     # spead2.
                     assert np.any(chunk.present)
                     received_chunk_ids.append(chunk.chunk_id)

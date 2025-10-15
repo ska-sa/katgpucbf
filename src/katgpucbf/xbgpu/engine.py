@@ -1308,7 +1308,7 @@ class XBEngine(Engine):
 
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
-        async for chunk in recv.recv_chunks(
+        async for chunk in recv.iter_chunks(
             self.receiver_stream,
             self.recv_layout,
             self.sensors,
