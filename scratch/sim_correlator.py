@@ -228,7 +228,7 @@ def generate_tied_array_channelised_voltage(args: argparse.Namespace, outputs: d
 def generate_tied_array_resampled_voltage(args: argparse.Namespace, outputs: dict) -> None:
     """Populate configuration for tied-array-resampled-voltage streams."""
     outputs["tied-array-resampled-voltage"] = {
-        "type": "gpucbf.tied-array-resampled-voltage",
+        "type": "gpucbf.tied_array_resampled_voltage",
         "src_streams": [
             f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"
             for i in range(args.narrowband_beams)
@@ -259,7 +259,7 @@ def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
 def generate_config(args: argparse.Namespace) -> dict:
     """Produce the configuration dict from the parsed command-line arguments."""
     config: dict = {
-        "version": "4.6",
+        "version": "4.7",
         "config": {"mirror_sensors": False},
         "inputs": {},
         "outputs": {},
