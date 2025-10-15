@@ -123,6 +123,16 @@ def send_stream(queues: list[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncS
     return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
 
 
+def make_heap(timestamp: int, frequency: int, beam_ants: int, data: np.ndarray) -> spead2.send.Heap:
+    """Build a heap with the standard items for tied-array-channelised-voltage."""
+    heap = spead2.send.Heap(FLAVOUR)
+    heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=timestamp))
+    heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=frequency))
+    heap.add_item(spead2.Item(BEAM_ANTS_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=beam_ants))
+    heap.add_item(spead2.Item(BF_RAW_ID, "", "", shape=data.shape, dtype=data.dtype, value=data))
+    return heap
+
+
 def gen_heaps(
     layout: Layout,
     data: np.ndarray[tuple[int, int, int, int, int], np.dtype[np.int8]],
@@ -141,22 +151,11 @@ def gen_heaps(
             ch1 = (s + 1) * layout.n_channels_per_substream
             for p in range(N_POLS):
                 heap_data = data[p, t, ch0:ch1]
-                heap = spead2.send.Heap(FLAVOUR)
-                heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=timestamp))
-                heap.add_item(
-                    spead2.Item(
-                        FREQUENCY_ID,
-                        "",
-                        "",
-                        shape=(),
-                        format=IMMEDIATE_FORMAT,
-                        value=s * layout.n_channels_per_substream,
-                    )
-                )
-                # Value of beam_ants is arbitrary for now.
-                heap.add_item(spead2.Item(BEAM_ANTS_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=1))
-                heap.add_item(
-                    spead2.Item(BF_RAW_ID, "", "", shape=heap_data.shape, dtype=heap_data.dtype, value=heap_data)
+                heap = make_heap(
+                    timestamp=timestamp,
+                    frequency=s * layout.n_channels_per_substream,
+                    beam_ants=1,  # Value doesn't matter for now
+                    data=heap_data,
                 )
                 yield spead2.send.HeapReference(heap, substream_index=p)
         timestamp += layout.heap_timestamp_step
@@ -295,13 +294,8 @@ class TestStreamGroup:
             Expected value for ``input_bad_frequency_heaps`` counter
         """
         heap_data = np.zeros((layout.n_channels_per_substream, layout.n_spectra_per_heap, COMPLEX), np.int8)
-        heap = spead2.send.Heap(FLAVOUR)
-        heap.add_item(spead2.Item(TIMESTAMP_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=timestamp))
-        heap.add_item(spead2.Item(FREQUENCY_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=frequency))
         # Value of beam_ants is arbitrary for now.
-        heap.add_item(spead2.Item(BEAM_ANTS_ID, "", "", shape=(), format=IMMEDIATE_FORMAT, value=1))
-        heap.add_item(spead2.Item(BF_RAW_ID, "", "", shape=heap_data.shape, dtype=heap_data.dtype, value=heap_data))
-
+        heap = make_heap(timestamp, frequency, 1, heap_data)
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             await send_stream.async_send_heap(heap, substream_index=0)
             for queue in queues:
