@@ -51,13 +51,13 @@ class TestParsePols:
 
     def test_ok_no_prefixes(self) -> None:
         """Test success case when --recv-pol has no ± prefixes."""
-        args = parse_args(["--recv-pol=x,y", "--send-pol=y,x"] + REQUIRED_ARGS)
+        args = parse_args(["--recv-pols=x,y", "--send-pols=y,x"] + REQUIRED_ARGS)
         assert args.recv_pols == ["x", "y"]
         assert args.send_pols == ["y", "x"]
 
     def test_ok_prefixes(self) -> None:
         """Test success case when --recv-pol has ± prefixes."""
-        args = parse_args(["--recv-pol=+x,-y", "--send-pol=y,x"] + REQUIRED_ARGS)
+        args = parse_args(["--recv-pols=+x,-y", "--send-pols=y,x"] + REQUIRED_ARGS)
         assert args.recv_pols == ["+x", "-y"]
         assert args.send_pols == ["y", "x"]
 
@@ -65,26 +65,26 @@ class TestParsePols:
     def test_recv_invalid_pol(self, pol: str) -> None:
         """Test error when --recv-pol has a component that is not a recognised polarisation."""
         with pytest.raises(RuntimeError, match=f"'{pol}' is not a valid --recv-pol value"):
-            parse_args([f"--recv-pol=x,{pol}", "--send-pol=y,x"] + REQUIRED_ARGS)
+            parse_args([f"--recv-pols=x,{pol}", "--send-pols=y,x"] + REQUIRED_ARGS)
 
     @pytest.mark.parametrize("pol", ["z", "X", "l", "-", "-x"])
     def test_send_invalid_letter(self, pol: str) -> None:
         """Test error when --send-pol has letter that is not a recognised polarisation."""
         with pytest.raises(RuntimeError, match=f"'{pol}' is not a valid --send-pol value"):
-            parse_args(["--recv-pol=x,y", f"--send-pol={pol},x"] + REQUIRED_ARGS)
+            parse_args(["--recv-pols=x,y", f"--send-pols={pol},x"] + REQUIRED_ARGS)
 
     @pytest.mark.parametrize("arg", ["x,x", "+x,-x", "x,L", "R,y", "R,R"])
     def test_recv_non_orthogonal(self, arg: str) -> None:
         """Test error when --recv-pol is given a non-orthogonal basis."""
         with pytest.raises(RuntimeError, match="--recv-pol is not an orthogonal polarisation basis"):
-            parse_args([f"--recv-pol={arg}", "--send-pol=x,y"] + REQUIRED_ARGS)
+            parse_args([f"--recv-pols={arg}", "--send-pols=x,y"] + REQUIRED_ARGS)
 
     def test_recv_bad_count(self) -> None:
         """Test error when --recv-pol is given the wrong number of elements."""
         with pytest.raises(RuntimeError, match="argument --recv-pols: Expected 2 comma-separated fields, received 3"):
-            parse_args(["--recv-pol=x,y,L", "--send-pol=x,y"] + REQUIRED_ARGS)
+            parse_args(["--recv-pols=x,y,L", "--send-pols=x,y"] + REQUIRED_ARGS)
 
     def test_send_bad_count(self) -> None:
         """Test error when --recv-pol is given the wrong number of elements."""
         with pytest.raises(RuntimeError, match="argument --send-pols: Expected 2 comma-separated fields, received 1"):
-            parse_args(["--recv-pol=x,y", "--send-pol=x"] + REQUIRED_ARGS)
+            parse_args(["--recv-pols=x,y", "--send-pols=x"] + REQUIRED_ARGS)
