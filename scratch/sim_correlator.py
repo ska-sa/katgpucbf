@@ -28,12 +28,15 @@ import asyncio
 import contextlib
 import ipaddress
 import json
+import re
 import sys
 from collections.abc import Sequence
+from fractions import Fraction
 
 import aiokatcp
 
 import katgpucbf.configure_tools
+from katgpucbf.main import comma_split
 from katgpucbf.meerkat import BANDS
 
 
@@ -55,8 +58,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-i", "--int-time", type=float, default=0.5, help="Integration time in seconds [%(default)s]")
     parser.add_argument(
         "--last-stage",
-        choices=["d", "f", "xb", "ingest"],
-        default="xb",
+        choices=["d", "f", "xb", "v", "ingest"],
+        default="v",
         help="Do not run any stages past the given one [%(default)s]",
     )
     parser.add_argument(
@@ -81,6 +84,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--narrowband-beams", type=int, default=0, help="Number of dual-polarisation narrowband beams [%(default)s]"
     )
+    parser.add_argument("--vlbi", action="store_true", help="Enable VLBI mode [no]")
+    parser.add_argument(
+        "--vlbi-recv-pols",
+        type=comma_split(str, 2),
+        metavar="[+-]P,[+-]P",
+        required=True,
+        help="Input polarisations for VLBI (±x, ±y, ±L or ±R)",
+    )
+    parser.add_argument(
+        "--vlbi-send-station-id", type=str, default="me", help="VDIF Station ID for VLBI output [%(default)s]"
+    )
+
     katgpucbf.configure_tools.add_arguments(parser)
     parser.add_argument(
         "-w", "--write", action="store_true", help="Write to file (give filename instead of the controller)"
@@ -98,6 +113,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--sync-time is required when specifying --digitiser-address")
     if args.input_labels is None:
         args.input_labels = [f"m{800 + i}{pol}" for i in range(args.antennas) for pol in ["v", "h"]]
+    if args.vlbi and args.narrowband_beams == 0:
+        args.narrowband_beams = 1
+    # TODO: Move the recv-pols error-checking to a helper function
+    for pol in args.vlbi_recv_pols:
+        if not re.fullmatch(r"^[-+]?[xyLR]", pol):
+            parser.error(f"{pol!r} is not a valid --vlbi-recv-pol value")
+    if set(pol[-1] for pol in args.vlbi_recv_pols) not in [{"x", "y"}, {"L", "R"}]:
+        parser.error("--vlbi-recv-pol is not an orthogonal polarisation basis")
     return args
 
 
@@ -149,7 +172,7 @@ def generate_antenna_channelised_voltage(args: argparse.Namespace, outputs: dict
         "input_labels": args.input_labels,
         "n_chans": args.channels,
     }
-    if args.narrowband:
+    if args.narrowband or args.vlbi:
         outputs["narrow0-antenna-channelised-voltage"] = {
             **outputs["antenna-channelised-voltage"],  # Copy from wideband
             "n_chans": args.narrowband_channels,
@@ -158,6 +181,15 @@ def generate_antenna_channelised_voltage(args: argparse.Namespace, outputs: dict
                 "centre_frequency": args.narrowband_centre_frequency,
             },
         }
+        if args.vlbi:
+            bandwidth_ratio = Fraction(107, 64)  # Fixed ratio for VLBI mode
+            bandwidth = Fraction(args.adc_sample_rate) / Fraction(2) / Fraction(args.narrowband_decimation)
+            pass_bandwidth = Fraction(bandwidth) / Fraction(bandwidth_ratio)
+            # The JSON encodeer doesn't like the Fraction type, so convert to float
+            # TODO: Clarify decimal point accuracy requirement
+            outputs["narrow0-antenna-channelised-voltage"]["narrowband"]["vlbi"] = {
+                "pass_bandwidth": float(pass_bandwidth)
+            }
 
 
 def generate_baseline_correlation_products(args: argparse.Namespace, outputs: dict) -> None:
@@ -167,7 +199,7 @@ def generate_baseline_correlation_products(args: argparse.Namespace, outputs: di
         "src_streams": ["antenna-channelised-voltage"],
         "int_time": args.int_time,
     }
-    if args.narrowband:
+    if args.narrowband or args.vlbi:
         outputs["narrow0-baseline-correlation-products"] = {
             **outputs["baseline-correlation-products"],  # Copy from wideband
             "src_streams": ["narrow0-antenna-channelised-voltage"],
@@ -183,7 +215,7 @@ def generate_tied_array_channelised_voltage(args: argparse.Namespace, outputs: d
                 "src_streams": ["antenna-channelised-voltage"],
                 "src_pol": pol_idx,
             }
-    if args.narrowband:
+    if args.narrowband or args.vlbi:
         for i in range(args.narrowband_beams):
             for pol_idx, pol_name in enumerate("xy"):
                 outputs[f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"] = {
@@ -191,6 +223,21 @@ def generate_tied_array_channelised_voltage(args: argparse.Namespace, outputs: d
                     "src_streams": ["narrow0-antenna-channelised-voltage"],
                     "src_pol": pol_idx,
                 }
+
+
+def generate_tied_array_resampled_voltage(args: argparse.Namespace, outputs: dict) -> None:
+    """Populate configuration for tied-array-resampled-voltage streams."""
+    outputs["tied-array-resampled-voltage"] = {
+        "type": "gpucbf.tied-array-resampled-voltage",
+        "src_streams": [
+            f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"
+            for i in range(args.narrowband_beams)
+            for pol_name in "xy"
+        ],
+        "n_chans": 2,
+        "pols": args.vlbi_recv_pols,
+        "station_id": args.vlbi_send_station_id,
+    }
 
 
 def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
@@ -230,6 +277,10 @@ def generate_config(args: argparse.Namespace) -> dict:
     generate_baseline_correlation_products(args, config["outputs"])
     generate_tied_array_channelised_voltage(args, config["outputs"])
     if args.last_stage == "xb":
+        return config
+
+    generate_tied_array_resampled_voltage(args, config["outputs"])
+    if args.last_stage == "v":
         return config
 
     generate_sdp(args, config["outputs"])
