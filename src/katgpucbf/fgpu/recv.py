@@ -33,9 +33,9 @@ from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, N_POLS
 from .. import recv as base_recv
-from ..recv import BaseLayout, Chunk, StatsCollector
+from ..recv import BaseLayout, Chunk, Counters, StatsCollector
 from ..spead import DIGITISER_ID_ID, DIGITISER_STATUS_ID, DIGITISER_STATUS_SATURATION_COUNT_SHIFT, TIMESTAMP_ID
-from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
+from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
 #: Number of partial chunks to allow at a time. Using 1 would reject any out-of-order
@@ -45,25 +45,18 @@ MAX_CHUNKS = 2
 
 logger = logging.getLogger(__name__)
 
-heaps_counter = Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE)
-chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
-samples_counter = Counter("input_samples", "number of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE)
-bytes_counter = Counter(
-    "input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE
+counters = Counters(
+    heaps=Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE),
+    chunks=Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE),
+    samples=Counter("input_samples", "number of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE),
+    bytes=Counter("input_bytes", "number of bytes of digitiser samples received", ["pol"], namespace=METRIC_NAMESPACE),
+    missing_heaps=Counter(
+        "input_missing_heaps", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
+    ),
+    clipped_samples=Counter(
+        "input_clipped_samples", "number of ADC samples that clipped", ["pol"], namespace=METRIC_NAMESPACE
+    ),
 )
-missing_heaps_counter = Counter(
-    "input_missing_heaps", "number of heaps dropped on the input", ["pol"], namespace=METRIC_NAMESPACE
-)
-dig_clip_counter = Counter(
-    "input_clipped_samples", "number of ADC samples that clipped", ["pol"], namespace=METRIC_NAMESPACE
-)
-_PER_POL_COUNTERS = [
-    heaps_counter,
-    samples_counter,
-    bytes_counter,
-    missing_heaps_counter,
-    dig_clip_counter,
-]
 
 stats_collector = StatsCollector(
     {
@@ -100,30 +93,45 @@ class Layout(BaseLayout):
 
     sample_bits: int
     heap_samples: int
-    chunk_samples: int
+    chunk_samples: int  #: Samples in time i.e. per polarisation
     mask_timestamp: bool
 
     @property
-    def heap_bytes(self) -> int:
-        """Number of payload bytes per heap."""
+    def heap_bytes(self) -> int:  # noqa: D102
         return self.heap_samples * self.sample_bits // BYTE_BITS
 
     @property
-    def chunk_heaps(self) -> int:
-        """Number of heaps per chunk, on time axis."""
+    def chunk_batches(self) -> int:  # noqa: D102
         return self.chunk_samples // self.heap_samples
+
+    @property
+    def batch_heaps(self) -> int:  # noqa: D102
+        return N_POLS
 
     @property
     def timestamp_mask(self) -> np.uint64:
         """Mask to AND with incoming timestamps."""
         return ~np.uint64(self.heap_samples - 1 if self.mask_timestamp else 0)
 
+    @property
+    def heap_sample_count(self) -> int:  # noqa: D102
+        return self.heap_samples
+
+    @property
+    def chunk_timestamp_step(self) -> int:  # noqa: D102
+        return self.chunk_samples
+
+    @property
+    def pol_chunk_bytes(self) -> int:
+        """Number of bytes for the data in one polarisation of a chunk."""
+        return self.chunk_samples * self.sample_bits // BYTE_BITS
+
     @functools.cached_property
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         """Low-level code for placing heaps in chunks."""
         heap_samples = self.heap_samples
         heap_bytes = self.heap_bytes
-        chunk_heaps = self.chunk_heaps
+        chunk_batches = self.chunk_batches
         chunk_samples = self.chunk_samples
         timestamp_mask = self.timestamp_mask
         n_statistics = len(_Statistic)
@@ -156,8 +164,8 @@ class Layout(BaseLayout):
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
             data[0].chunk_id = timestamp // chunk_samples
-            heap_index = timestamp // heap_samples % chunk_heaps
-            data[0].heap_index = heap_index + pol * chunk_heaps
+            heap_index = timestamp // heap_samples % chunk_batches
+            data[0].heap_index = heap_index + pol * chunk_batches
             data[0].heap_offset = heap_index * heap_bytes + pol * user_data.stride
 
             extra = numba.carray(intp_to_voidptr(data[0].extra), 1, dtype=np.uint16)
@@ -196,10 +204,9 @@ def make_stream_group(
     """
     # Reference counters to make the labels exist before the first scrape
     for pol in range(N_POLS):
-        for counter in _PER_POL_COUNTERS:
-            counter.labels(pol)
+        counters.labels(str(pol))
 
-    user_data = np.zeros(1, dtype=user_data_type.dtype)
+    user_data = np.zeros(len(recv_affinity), dtype=user_data_type.dtype)
     user_data["stride"] = stride
     group = base_recv.make_stream_group(
         layout=layout,
@@ -218,56 +225,7 @@ def make_stream_group(
     return group
 
 
-def make_sensors(sensor_timeout: float) -> aiokatcp.SensorSet:
-    """Create the sensors needed to hold receiver statistics.
-
-    Parameters
-    ----------
-    sensor_timeout
-        Time (in seconds) without updates before sensors for received data go
-        into error and sensors for missing data become nominal.
-    """
-    sensors = aiokatcp.SensorSet()
-    for pol in range(N_POLS):
-        timestamp_sensors: list[aiokatcp.Sensor] = [
-            make_rate_limited_sensor(
-                int,
-                f"input{pol}.rx.timestamp",
-                "The timestamp (in samples) of the last chunk of data received from the digitiser",
-                default=-1,
-                initial_status=aiokatcp.Sensor.Status.ERROR,
-            ),
-            make_rate_limited_sensor(
-                aiokatcp.core.Timestamp,
-                f"input{pol}.rx.unixtime",
-                "The timestamp (in UNIX time) of the last chunk of data received from the digitiser",
-                default=aiokatcp.core.Timestamp(-1.0),
-                initial_status=aiokatcp.Sensor.Status.ERROR,
-            ),
-        ]
-        for sensor in timestamp_sensors:
-            TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.ERROR)
-            sensors.add(sensor)
-
-        missing_sensors: list[aiokatcp.Sensor] = [
-            make_rate_limited_sensor(
-                aiokatcp.core.Timestamp,
-                f"input{pol}.rx.missing-unixtime",
-                "The timestamp (in UNIX time) when missing data was last detected",
-                default=aiokatcp.core.Timestamp(-1.0),
-                initial_status=aiokatcp.Sensor.Status.NOMINAL,
-            )
-        ]
-        for sensor in missing_sensors:
-            TimeoutSensorStatusObserver(sensor, sensor_timeout, aiokatcp.Sensor.Status.NOMINAL)
-            sensors.add(sensor)
-
-    sensors.add(DeviceStatusSensor(sensors, "rx.device-status", "F-engine is receiving a good, clean digitiser stream"))
-
-    return sensors
-
-
-async def iter_chunks(
+def iter_chunks(
     ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     layout: Layout,
     sensors: aiokatcp.SensorSet,
@@ -285,80 +243,19 @@ async def iter_chunks(
         Structure of the streams.
     sensors
         Sensor set containing at least the sensors created by
-        :func:`make_sensors`.
+        :func:`.make_sensors`.
     time_converter
         Converter to turn data timestamps into sensor timestamps.
     """
-    lost = 0
-    first_timestamp = -1  # Updated to the actual first timestamp on the first chunk
-    # These duplicate the Prometheus counters, because prometheus_client
-    # doesn't provide an efficient way to get the current value
-    # (REGISTRY.get_sample_value is documented as being intended only for unit
-    # tests).
-    n_heaps = [0] * N_POLS
-    n_missing_heaps = [0] * N_POLS
-
-    # `try`/`finally` block acting as a quick-and-dirty context manager,
-    # to ensure that we clean up nicely after ourselves if we are stopped.
-    try:
-        async for chunk in ringbuffer:
-            assert isinstance(chunk, Chunk)
-            # Inspect the chunk we have just received.
-            chunk.timestamp = chunk.chunk_id * layout.chunk_samples
-            good = np.sum(chunk.present)
-            if not good:
-                # Dummy chunk created by spead2
-                chunk.recycle()
-                continue
-            if first_timestamp == -1:
-                # TODO: use chunk.present to determine the actual first timestamp
-                first_timestamp = chunk.timestamp
-            lost += chunk.present.size - good
-            logger.debug(
-                "Received chunk: timestamp=%#x (%d/%d, lost %d)",
-                chunk.timestamp,
-                good,
-                chunk.present.size,
-                lost,
-            )
-            unix_time = time_converter.adc_to_unix(chunk.timestamp)
-            unix_time_katcp = aiokatcp.core.Timestamp(unix_time)
-
-            pol_expected_heaps = (chunk.timestamp - first_timestamp + layout.chunk_samples) // layout.heap_samples
-            chunks_counter.inc()
-            # Zero out saturation count for heaps that were never received
-            # (otherwise the value is undefined memory).
-            assert chunk.extra is not None
-            chunk.extra[chunk.present == 0] = 0
-            for pol in range(N_POLS):
-                # The cast is to force numpy ints to Python ints.
-                buf_good = int(np.sum(chunk.present[pol]))
-                heaps_counter.labels(pol).inc(buf_good)
-                samples_counter.labels(pol).inc(buf_good * layout.heap_samples)
-                bytes_counter.labels(pol).inc(buf_good * layout.heap_bytes)
-                dig_clip_counter.labels(pol).inc(int(np.sum(chunk.extra[pol], dtype=np.uint64)))
-                # Determine how many heaps we expected to have seen by
-                # now, and subtract from it the number actually seen to
-                # determine the number missing. This accounts for both
-                # heaps lost within chunks and lost chunks.
-                n_heaps[pol] += buf_good
-                new_missing = pol_expected_heaps - n_heaps[pol]
-                if new_missing > n_missing_heaps[pol]:
-                    missing_heaps_counter.labels(pol).inc(new_missing - n_missing_heaps[pol])
-                    n_missing_heaps[pol] = new_missing
-                    sensors[f"input{pol}.rx.missing-unixtime"].set_value(
-                        unix_time_katcp, timestamp=unix_time, status=aiokatcp.Sensor.Status.ERROR
-                    )
-            for pol in range(N_POLS):
-                # Note: these must be set AFTER rx.missing-unixtime so that if
-                # the first chunk received is missing data, we don't have an
-                # intermediate state in which all the sensors are NOMINAL
-                # (which would cause rx.device-status to be NOMINAL).
-                sensors[f"input{pol}.rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
-                sensors[f"input{pol}.rx.unixtime"].set_value(unix_time_katcp, timestamp=unix_time)
-            yield chunk
-    finally:
-        stats_collector.update()  # Ensure final stats updates are captured
+    return base_recv.iter_chunks(
+        ringbuffer,
+        layout,
+        sensors,
+        time_converter,
+        [(str(i), f"input{i}") for i in range(N_POLS)],
+        counters,
+        stats_collector,
+    )
 
 
 __all__ = ["Chunk", "Layout", "iter_chunks"]
