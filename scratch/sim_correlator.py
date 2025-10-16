@@ -30,10 +30,12 @@ import ipaddress
 import json
 import sys
 from collections.abc import Sequence
+from fractions import Fraction
 
 import aiokatcp
 
 import katgpucbf.configure_tools
+from katgpucbf.main import comma_split
 from katgpucbf.meerkat import BANDS
 
 
@@ -55,8 +57,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-i", "--int-time", type=float, default=0.5, help="Integration time in seconds [%(default)s]")
     parser.add_argument(
         "--last-stage",
-        choices=["d", "f", "xb", "ingest"],
-        default="xb",
+        choices=["d", "f", "xb", "v", "ingest"],
+        default="v",
         help="Do not run any stages past the given one [%(default)s]",
     )
     parser.add_argument(
@@ -81,6 +83,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--narrowband-beams", type=int, default=0, help="Number of dual-polarisation narrowband beams [%(default)s]"
     )
+    parser.add_argument("--vlbi", action="store_true", help="Enable VLBI mode [no]")
+    parser.add_argument(
+        "--vlbi-pols",
+        type=str,
+        choices=["x,y", "R,L"],
+        metavar="P,P",
+        default="x,y",
+        help='Output polarisations ("x,y" or "R,L")',
+    )
+    parser.add_argument(
+        "--vlbi-station-id", type=str, default="me", help="VDIF Station ID for VLBI output [%(default)s]"
+    )
+
     katgpucbf.configure_tools.add_arguments(parser)
     parser.add_argument(
         "-w", "--write", action="store_true", help="Write to file (give filename instead of the controller)"
@@ -98,6 +113,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("--sync-time is required when specifying --digitiser-address")
     if args.input_labels is None:
         args.input_labels = [f"m{800 + i}{pol}" for i in range(args.antennas) for pol in ["v", "h"]]
+    if args.vlbi:
+        args.narrowband = True
+    if args.vlbi and args.narrowband_beams == 0:
+        args.narrowband_beams = 1
+    args.vlbi_pols = comma_split(str, 2)(args.vlbi_pols)
     return args
 
 
@@ -158,6 +178,18 @@ def generate_antenna_channelised_voltage(args: argparse.Namespace, outputs: dict
                 "centre_frequency": args.narrowband_centre_frequency,
             },
         }
+        if args.vlbi:
+            bandwidth_ratio = Fraction(107, 64)  # Fixed ratio for VLBI mode
+            bandwidth = Fraction(args.adc_sample_rate) / Fraction(2) / Fraction(args.narrowband_decimation)
+            pass_bandwidth = Fraction(bandwidth) / Fraction(bandwidth_ratio)
+            pass_bandwidth_float = float(pass_bandwidth)
+            if pass_bandwidth_float != pass_bandwidth:
+                raise RuntimeError(
+                    "pass_bandwidth could not be computed precisely. Note that --vlbi is only supported for L-band."
+                )
+            outputs["narrow0-antenna-channelised-voltage"]["narrowband"]["vlbi"] = {
+                "pass_bandwidth": pass_bandwidth_float
+            }
 
 
 def generate_baseline_correlation_products(args: argparse.Namespace, outputs: dict) -> None:
@@ -193,6 +225,21 @@ def generate_tied_array_channelised_voltage(args: argparse.Namespace, outputs: d
                 }
 
 
+def generate_tied_array_resampled_voltage(args: argparse.Namespace, outputs: dict) -> None:
+    """Populate configuration for tied-array-resampled-voltage streams."""
+    outputs["tied-array-resampled-voltage"] = {
+        "type": "gpucbf.tied_array_resampled_voltage",
+        "src_streams": [
+            f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"
+            for i in range(args.narrowband_beams)
+            for pol_name in "xy"
+        ],
+        "n_chans": 2,
+        "pols": args.vlbi_pols,
+        "station_id": args.vlbi_station_id,
+    }
+
+
 def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
     outputs["sdp_l0"] = {
         "type": "sdp.vis",
@@ -212,7 +259,7 @@ def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
 def generate_config(args: argparse.Namespace) -> dict:
     """Produce the configuration dict from the parsed command-line arguments."""
     config: dict = {
-        "version": "4.6",
+        "version": "4.7",
         "config": {"mirror_sensors": False},
         "inputs": {},
         "outputs": {},
@@ -230,6 +277,10 @@ def generate_config(args: argparse.Namespace) -> dict:
     generate_baseline_correlation_products(args, config["outputs"])
     generate_tied_array_channelised_voltage(args, config["outputs"])
     if args.last_stage == "xb":
+        return config
+
+    generate_tied_array_resampled_voltage(args, config["outputs"])
+    if args.last_stage == "v":
         return config
 
     generate_sdp(args, config["outputs"])
