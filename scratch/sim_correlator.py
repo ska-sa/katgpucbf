@@ -89,8 +89,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=str,
         choices=["x,y", "R,L"],
         metavar="P,P",
-        required=True,
-        help=r"Output polarisations (\"x,y\" or \"R,L\")",
+        default="x,y",
+        help='Output polarisations ("x,y" or "R,L")',
     )
     parser.add_argument(
         "--vlbi-station-id", type=str, default="me", help="VDIF Station ID for VLBI output [%(default)s]"
@@ -118,9 +118,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if args.vlbi and args.narrowband_beams == 0:
         args.narrowband_beams = 1
     args.vlbi_pols = comma_split(str, 2)(args.vlbi_pols)
-    for pol in args.vlbi_pols:
-        if pol not in ["x", "y", "L", "R"]:
-            parser.error(f"{pol!r} is not a valid --vlbi-pol value")
     return args
 
 
@@ -188,7 +185,7 @@ def generate_antenna_channelised_voltage(args: argparse.Namespace, outputs: dict
             pass_bandwidth_float = float(pass_bandwidth)
             if pass_bandwidth_float != pass_bandwidth:
                 raise RuntimeError(
-                    "pass_bandwidth could not be computed precisely. Note that --vlbi is only supported for L-band"
+                    "pass_bandwidth could not be computed precisely. Note that --vlbi is only supported for L-band."
                 )
             outputs["narrow0-antenna-channelised-voltage"]["narrowband"]["vlbi"] = {
                 "pass_bandwidth": pass_bandwidth_float
