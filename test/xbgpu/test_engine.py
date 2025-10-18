@@ -1680,3 +1680,18 @@ class TestEngine:
         # populated for the 'real' (first) index.
         for corrprod_output in corrprod_outputs:
             np.testing.assert_equal(corrprod_results[corrprod_output.name][..., 0] != 0, True)
+
+    @DEFAULT_PARAMETERS
+    async def test_initial_steering_sensors(
+        self,
+        client: aiokatcp.Client,
+        beam_outputs: list[BOutput],
+        n_ants: int,
+    ) -> None:
+        """Test that dynamic BPipeline sensors have correct initial state."""
+        for beam in beam_outputs:
+            assert (await client.sensor_value(f"{beam.name}.weight", str)) == "[" + ", ".join(["1.0"] * n_ants) + "]"
+            assert (await client.sensor_value(f"{beam.name}.quantiser-gain", float)) == 1.0
+            expected_delay = "(0" + ", 0.0, 0.0" * n_ants + ")"
+            assert (await client.sensor_value(f"{beam.name}.delay", str)) == expected_delay
+            assert (await client.sensor_value(f"{beam.name}.beng-clip-cnt", int)) == 0

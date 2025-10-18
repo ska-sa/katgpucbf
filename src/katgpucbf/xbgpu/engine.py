@@ -465,7 +465,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
                     # Cast to list first to add comma delimiter
-                    default=str(list(self._weights[i])),
+                    default=str(self._weights[i].tolist()),
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
                 )
             )
