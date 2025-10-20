@@ -1214,7 +1214,7 @@ class XBEngine(Engine):
             n_channels_per_substream=n_channels_per_substream,
             n_spectra_per_heap=n_spectra_per_heap,
             sample_bits=self.sample_bits,
-            timestamp_step=self.recv_heap_timestamp_step,
+            heap_timestamp_step=self.recv_heap_timestamp_step,
             heaps_per_fengine_per_chunk=self.heaps_per_fengine_per_chunk,
         )
         self.receiver_stream = recv.make_stream(
@@ -1273,7 +1273,7 @@ class XBEngine(Engine):
     def populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an XBEngine."""
         # Dynamic sensors
-        for sensor in recv.make_sensors(recv_sensor_timeout).values():
+        for sensor in base_recv.make_sensors(recv_sensor_timeout).values():
             sensors.add(sensor)
 
     def free_in_item(self, item: InQueueItem) -> None:
@@ -1308,8 +1308,9 @@ class XBEngine(Engine):
 
         The above steps are performed in a loop until there are no more chunks to assembled.
         """
+        assert isinstance(self.receiver_stream.data_ringbuffer, ChunkRingbuffer)
         async for chunk in recv.iter_chunks(
-            self.receiver_stream,
+            self.receiver_stream.data_ringbuffer,
             self.recv_layout,
             self.sensors,
             self.time_converter,

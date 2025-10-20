@@ -1380,7 +1380,7 @@ class FEngine(Engine):
             array_bytes = self.n_samples * self.recv_layout.sample_bits // BYTE_BITS
             stride = _padded_input_size(array_bytes)
         else:
-            stride = self.recv_layout.chunk_bytes
+            stride = self.recv_layout.pol_chunk_bytes
         self._recv_group = recv.make_stream_group(
             self.recv_layout, data_ringbuffer, free_ringbuffer, recv_affinity, stride
         )
@@ -1402,8 +1402,8 @@ class FEngine(Engine):
             chunk = recv.Chunk(
                 data=buf,
                 device=device_array,
-                present=np.zeros((N_POLS, self.recv_layout.chunk_heaps), np.uint8),
-                extra=np.zeros((N_POLS, self.recv_layout.chunk_heaps), np.uint16),
+                present=np.zeros((N_POLS, self.recv_layout.chunk_batches), np.uint8),
+                extra=np.zeros((N_POLS, self.recv_layout.chunk_batches), np.uint16),
                 sink=self._recv_group,
             )
             chunk.recycle()  # Make available to the stream
@@ -1430,7 +1430,8 @@ class FEngine(Engine):
                 )
             )
 
-        for sensor in recv.make_sensors(recv_sensor_timeout).values():
+        prefixes = [f"input{pol}." for pol in range(N_POLS)]
+        for sensor in base_recv.make_sensors(recv_sensor_timeout, prefixes).values():
             sensors.add(sensor)
 
     def make_send_streams(
@@ -1509,6 +1510,7 @@ class FEngine(Engine):
         `prev_item` then the tail of `prev_item` is instead marked as absent.
         This can happen if we lose a whole input chunk from the digitiser.
         """
+        # Note: all quantities refer to a single polarisation
         chunk_heaps = prev_item.n_samples // self.recv_layout.heap_samples
         copy_heaps = prev_item.present.shape[1] - chunk_heaps
         if in_item is not None and prev_item.end_timestamp == in_item.timestamp:
@@ -1591,7 +1593,7 @@ class FEngine(Engine):
                 # Copy the chunk to the right place on the GPU.
                 assert in_item.samples is not None
                 in_item.samples.set_region(
-                    self._upload_queue, chunk.data, np.s_[:, : layout.chunk_bytes], np.s_[:], blocking=False
+                    self._upload_queue, chunk.data, np.s_[:, : layout.pol_chunk_bytes], np.s_[:], blocking=False
                 )
                 # Put events on the queue so that run_processing() knows when to
                 # start.

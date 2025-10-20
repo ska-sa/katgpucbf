@@ -30,8 +30,8 @@ from numpy.typing import ArrayLike, NDArray
 
 from katgpucbf import N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE, recv
-from katgpucbf.fgpu.recv import Layout, make_sensors
-from katgpucbf.recv import Chunk
+from katgpucbf.fgpu.recv import Layout
+from katgpucbf.recv import Chunk, make_sensors
 from katgpucbf.spead import (
     ADC_SAMPLES_ID,
     DIGITISER_ID_ID,
@@ -64,8 +64,11 @@ class TestLayout:
     def test_properties(self, layout: Layout) -> None:
         """Test the properties of :class:`~katgpucbf.fgpu.recv.Layout`."""
         assert layout.heap_bytes == 5120
-        assert layout.chunk_bytes == 81920
-        assert layout.chunk_heaps == 16
+        assert layout.pol_chunk_bytes == 81920
+        assert layout.chunk_bytes == 163840
+        assert layout.chunk_batches == 16
+        assert layout.batch_heaps == N_POLS
+        assert layout.chunk_heaps == 32
         assert layout.timestamp_mask == 2**64 - 1
         masked = dataclasses.replace(layout, mask_timestamp=True)
         assert masked.timestamp_mask == 2**64 - 4096
@@ -101,12 +104,12 @@ def stream_group(
     They are connected to the :func:`queue` fixture for input and
     :func:`data_ringbuffer` for output.
     """
-    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, [-1], layout.chunk_bytes)
+    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, [-1], layout.pol_chunk_bytes)
     for _ in range(free_ringbuffer.maxsize):
-        data = np.empty((N_POLS, layout.chunk_bytes), np.uint8)
+        data = np.empty((N_POLS, layout.pol_chunk_bytes), np.uint8)
         # Use np.ones to make sure the bits get zeroed out
-        present = np.ones((N_POLS, layout.chunk_heaps), np.uint8)
-        extra = np.zeros((N_POLS, layout.chunk_heaps), np.uint16)
+        present = np.ones((N_POLS, layout.chunk_batches), np.uint8)
+        extra = np.zeros((N_POLS, layout.chunk_batches), np.uint16)
         chunk = Chunk(data=data, present=present, extra=extra, sink=stream_group)
         chunk.recycle()
     stream_group[0].add_inproc_reader(queue)
@@ -207,7 +210,7 @@ class TestStreamGroup:
                 Like "good" but all timestamps have some garbage in the low-order bits.
         """
         rng = np.random.default_rng(seed=1)
-        data = rng.integers(0, 255, size=(N_POLS, 5 * layout.chunk_bytes), dtype=np.uint8)
+        data = rng.integers(0, 255, size=(N_POLS, 5 * layout.pol_chunk_bytes), dtype=np.uint8)
         expected_chunk_id = 123
         first_timestamp = expected_chunk_id * layout.chunk_samples
         if timestamps == "mask":
@@ -243,12 +246,12 @@ class TestStreamGroup:
                     continue
                 assert chunk.chunk_id == expected_chunk_id
                 assert np.all(chunk.present)
-                np.testing.assert_array_equal(chunk.data, data[:, : layout.chunk_bytes])
-                data = data[:, layout.chunk_bytes :]  # Throw away the samples we've checked
+                np.testing.assert_array_equal(chunk.data, data[:, : layout.pol_chunk_bytes])
+                data = data[:, layout.pol_chunk_bytes :]  # Throw away the samples we've checked
                 seen += 1
                 expected_chunk_id += 1
         assert seen == 5
-        expected_bad_timestamps = N_POLS * seen * layout.chunk_heaps if timestamps == "bad" else 0
+        expected_bad_timestamps = seen * layout.chunk_heaps if timestamps == "bad" else 0
         assert stream_group[0].stats["katgpucbf.metadata_heaps"] == 1
         assert stream_group[0].stats["katgpucbf.bad_timestamp_heaps"] == expected_bad_timestamps
 
@@ -262,7 +265,7 @@ class TestStreamGroup:
     ) -> None:
         """Test that the chunk placement sets heap indices correctly."""
         rng = np.random.default_rng(seed=1)
-        data = rng.integers(0, 255, size=(N_POLS, layout.chunk_bytes), dtype=np.uint8)
+        data = rng.integers(0, 255, size=(N_POLS, layout.pol_chunk_bytes), dtype=np.uint8)
         expected_chunk_id = 123
         first_timestamp = expected_chunk_id * layout.chunk_samples
         heaps = list(gen_heaps(layout, data, first_timestamp))
@@ -296,7 +299,8 @@ class TestIterChunks:
     async def sensors(self) -> aiokatcp.SensorSet:
         """Receiver sensors."""
         # This is an async fixture because make_sensors requires a running event loop
-        return make_sensors(sensor_timeout=1e6)  # Large timeout so that it doesn't affect the test
+        # Large timeout so that it doesn't affect the test
+        return make_sensors(sensor_timeout=1e6, prefixes=[f"input{pol}." for pol in range(N_POLS)])
 
     async def test(  # noqa: D102
         self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter
@@ -322,9 +326,9 @@ class TestIterChunks:
         expected_clip: dict[tuple[int, int], int] = {}  # Maps (chunk_id, pol) to total clip count
 
         def add_chunk(chunk_id: int, missing: tuple[int, int] = (0, 0)) -> None:
-            data = rng.integers(0, 255, size=(N_POLS, layout.chunk_bytes), dtype=np.uint8)
-            present = np.ones((N_POLS, layout.chunk_heaps), np.uint8)
-            extra = rng.integers(0, layout.heap_samples - 1, size=(N_POLS, layout.chunk_heaps), dtype=np.uint16)
+            data = rng.integers(0, 255, size=(N_POLS, layout.pol_chunk_bytes), dtype=np.uint8)
+            present = np.ones((N_POLS, layout.chunk_batches), np.uint8)
+            extra = rng.integers(0, layout.heap_samples - 1, size=(N_POLS, layout.chunk_batches), dtype=np.uint16)
             for pol, miss in enumerate(missing):
                 present[pol, :miss] = 0  # Mark some leading heaps as missing
                 expected_clip[chunk_id, pol] = int(np.sum(extra[pol, missing[pol] :], dtype=np.int64))
@@ -333,12 +337,12 @@ class TestIterChunks:
 
         for i in range(10):
             # Throw in some empty chunks, to match what spead2 does
-            add_chunk(i, missing=(layout.chunk_heaps,) * N_POLS)
+            add_chunk(i, missing=(layout.chunk_batches,) * N_POLS)
         add_chunk(10, (0, 1))
-        add_chunk(11, (layout.chunk_heaps, 0))
+        add_chunk(11, (layout.chunk_batches, 0))
         add_chunk(12, (3, 5))
         add_chunk(20, (0, 0))
-        add_chunk(21, (0, layout.chunk_heaps))
+        add_chunk(21, (0, layout.chunk_batches))
         ringbuffer.stop()
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:

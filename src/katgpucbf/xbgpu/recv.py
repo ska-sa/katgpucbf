@@ -26,27 +26,27 @@ import numba
 import numpy as np
 import spead2.recv.asyncio
 import spead2.send.asyncio
-from aiokatcp import Sensor, SensorSet
-from aiokatcp.core import Timestamp
+from aiokatcp import SensorSet
 from numba import types
 from prometheus_client import Counter
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 from .. import BYTE_BITS, COMPLEX, N_POLS
-from ..recv import BaseLayout, Chunk, StatsCollector, user_data_type
-from ..recv import make_stream as make_base_stream
+from .. import recv as base_recv
+from ..recv import BaseLayout, Chunk, Counters, StatsCollector, user_data_type
 from ..spead import FENG_ID_ID, TIMESTAMP_ID
-from ..utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
+from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
-heaps_counter = Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE)
-chunks_counter = Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE)
-bytes_counter = Counter("input_bytes", "number of bytes of input data received", namespace=METRIC_NAMESPACE)
-missing_heaps_counter = Counter(
-    "input_missing_heaps", "number of heaps dropped on the input", namespace=METRIC_NAMESPACE
+counters = Counters(
+    heaps=Counter("input_heaps", "number of heaps received", namespace=METRIC_NAMESPACE),
+    chunks=Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE),
+    bytes=Counter("input_bytes", "number of bytes of input data received", namespace=METRIC_NAMESPACE),
+    missing_heaps=Counter("input_missing_heaps", "number of heaps dropped on the input", namespace=METRIC_NAMESPACE),
+    samples=Counter("input_samples", "number of complex samples received", namespace=METRIC_NAMESPACE),
 )
 
 stats_collector = StatsCollector(
@@ -86,7 +86,7 @@ class Layout(BaseLayout):
         The number of frequency channels contained in the stream.
     n_spectra_per_heap
         The number of time samples received per frequency channel.
-    timestamp_step
+    heap_timestamp_step
         Each heap contains a timestamp. The timestamp between consecutive heaps
         changes depending on the FFT size and the number of time samples per
         channel. This parameter defines the difference in timestamp values
@@ -104,26 +104,36 @@ class Layout(BaseLayout):
     n_ants: int
     n_channels_per_substream: int
     n_spectra_per_heap: int
-    timestamp_step: int
+    heap_timestamp_step: int
     sample_bits: int
     heaps_per_fengine_per_chunk: int
 
     @property
-    def heap_bytes(self):
-        """Calculate number of bytes in a heap based on layout parameters."""
+    def heap_bytes(self):  # noqa: D102
         return (
             self.n_channels_per_substream * self.n_spectra_per_heap * N_POLS * COMPLEX * self.sample_bits // BYTE_BITS
         )
 
     @property
-    def chunk_heaps(self) -> int:
-        """Number of heaps per chunk."""
-        return self.heaps_per_fengine_per_chunk * self.n_ants
+    def chunk_batches(self) -> int:  # noqa: D102
+        return self.heaps_per_fengine_per_chunk
+
+    @property
+    def batch_heaps(self) -> int:  # noqa: D102
+        return self.n_ants
+
+    @property
+    def heap_sample_count(self) -> int:  # noqa: D102
+        return self.n_channels_per_substream * self.n_spectra_per_heap
+
+    @property
+    def chunk_timestamp_step(self) -> int:  # noqa: D102
+        return self.heap_timestamp_step * self.heaps_per_fengine_per_chunk
 
     @functools.cached_property
     def _chunk_place(self) -> numba.core.ccallback.CFunc:
         n_ants = self.n_ants
-        timestamp_step = self.timestamp_step
+        heap_timestamp_step = self.heap_timestamp_step
         heaps_per_fengine_per_chunk = self.heaps_per_fengine_per_chunk
         heap_bytes = self.heap_bytes
         n_statistics = len(_Statistic)
@@ -147,7 +157,7 @@ class Layout(BaseLayout):
                 # It's something unexpected - possibly descriptors. Ignore it.
                 batch_stats[user_data[0].stats_base + _Statistic.METADATA_HEAPS] += 1
                 return
-            if timestamp % timestamp_step != 0:
+            if timestamp % heap_timestamp_step != 0:
                 # Invalid timestamp
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return
@@ -157,7 +167,7 @@ class Layout(BaseLayout):
                 return
             # Compute position of this heap on the time axis, starting from
             # timestamp 0
-            heap_time_abs = timestamp // timestamp_step
+            heap_time_abs = timestamp // heap_timestamp_step
             data[0].chunk_id = heap_time_abs // heaps_per_fengine_per_chunk
             # Position of this heap on the time axis, from the start of the chunk
             heap_time = heap_time_abs % heaps_per_fengine_per_chunk
@@ -192,7 +202,7 @@ def make_stream(
         Maximum number of chunks under construction.
     """
     user_data = np.zeros(1, dtype=user_data_type.dtype)
-    stream = make_base_stream(
+    stream = base_recv.make_stream(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FENG_ID_ID, spead2.HEAP_LENGTH_ID],
         max_active_chunks=max_active_chunks,
@@ -208,56 +218,8 @@ def make_stream(
     return stream
 
 
-def make_sensors(sensor_timeout: float) -> SensorSet:
-    """Create the sensors needed to hold receiver statistics.
-
-    Parameters
-    ----------
-    sensor_timeout
-        Time (in seconds) without updates before sensors for received data go
-        into error and sensors for missing data becoming nominal.
-    """
-    sensors = SensorSet()
-    timestamp_sensors: list[Sensor] = [
-        make_rate_limited_sensor(
-            int,
-            "rx.timestamp",
-            "The timestamp (in samples) of the last chunk of data received from an F-engine",
-            default=-1,
-            initial_status=Sensor.Status.ERROR,
-        ),
-        make_rate_limited_sensor(
-            Timestamp,
-            "rx.unixtime",
-            "The timestamp (in UNIX time) of the last chunk of data received from an F-engine",
-            default=Timestamp(-1.0),
-            initial_status=Sensor.Status.ERROR,
-        ),
-    ]
-    for sensor in timestamp_sensors:
-        TimeoutSensorStatusObserver(sensor, sensor_timeout, Sensor.Status.ERROR)
-        sensors.add(sensor)
-
-    missing_sensors: list[Sensor] = [
-        make_rate_limited_sensor(
-            Timestamp,
-            "rx.missing-unixtime",
-            "The timestamp (in UNIX time) when missing data was last detected",
-            default=Timestamp(-1.0),
-            initial_status=Sensor.Status.NOMINAL,
-        )
-    ]
-    for sensor in missing_sensors:
-        TimeoutSensorStatusObserver(sensor, sensor_timeout, Sensor.Status.NOMINAL)
-        sensors.add(sensor)
-
-    sensors.add(DeviceStatusSensor(sensors, "rx.device-status", "XB-engine is receiving a good, clean F-engine stream"))
-
-    return sensors
-
-
-async def iter_chunks(
-    stream: spead2.recv.ChunkRingStream,
+def iter_chunks(
+    ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     layout: Layout,
     sensors: SensorSet,
     time_converter: TimeConverter,
@@ -268,71 +230,22 @@ async def iter_chunks(
 
     Parameters
     ----------
-    stream
-        Stream object handling reception of F-engine data.
+    ringbuffer
+        Source of chunks.
     layout
         Structure of the stream.
     sensors
         Sensor set containing at least the sensors created by
-        :func:`make_sensors`.
+        :func:`.make_sensors`.
     time_converter
         Converter to turn data timestamps into sensor timestamps.
     """
-    ringbuffer = stream.data_ringbuffer
-    prev_chunk_id = -1
-    valid_chunk_received = False
-    assert isinstance(ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
-    async for chunk in ringbuffer:
-        assert isinstance(chunk, Chunk)
-
-        # Compute metrics
-        expected_heaps = len(chunk.present)
-        received_heaps = int(np.sum(chunk.present))
-        dropped_heaps = expected_heaps - received_heaps
-
-        if received_heaps == 0:
-            # It's not impossible for there to be a completely empty chunk
-            # during normal operation (caused by spead2's windowing
-            # algorithm). Return the chunk to the stream since we are not
-            # going to yield it.
-            chunk.recycle()
-            continue
-        elif not valid_chunk_received:
-            # Need to check which is the first "proper" Chunk
-            valid_chunk_received = True
-            prev_chunk_id = chunk.chunk_id - 1
-
-        # TODO: Perhaps make this 'chunk timestamp step' a property of the Layout?
-        chunk.timestamp = chunk.chunk_id * layout.timestamp_step * layout.heaps_per_fengine_per_chunk
-        unix_time = time_converter.adc_to_unix(chunk.timestamp)
-        unix_time_katcp = Timestamp(unix_time)
-
-        # Check if we've missed any chunks
-        expected_chunk_id = prev_chunk_id + 1
-        if chunk.chunk_id != expected_chunk_id:
-            missed_chunks = chunk.chunk_id - expected_chunk_id
-            logger.warning(
-                "Receiver missed %d chunks. Expected ID: %d, received ID: %d.",
-                missed_chunks,
-                expected_chunk_id,
-                chunk.chunk_id,
-            )
-            dropped_heaps += missed_chunks * expected_heaps
-
-        # Note: set rx.missing-unixtime first, so that if the first chunk is
-        # incomplete then we don't pass through a state where all the sensors
-        # are NOMINAL (which would cause rx.device-status to be NOMINAL).
-        if dropped_heaps > 0:
-            sensors["rx.missing-unixtime"].set_value(unix_time_katcp, Sensor.Status.ERROR, timestamp=unix_time)
-        sensors["rx.timestamp"].set_value(chunk.timestamp, timestamp=unix_time)
-        sensors["rx.unixtime"].set_value(unix_time_katcp, timestamp=unix_time)
-
-        # Increment Prometheus counters
-        missing_heaps_counter.inc(dropped_heaps)
-        heaps_counter.inc(received_heaps)
-        chunks_counter.inc(1)
-        bytes_counter.inc(chunk.data.nbytes * received_heaps // expected_heaps)
-        prev_chunk_id = chunk.chunk_id
-
-        yield chunk
-    stats_collector.update()  # Ensure final stats updates are captured
+    return base_recv.iter_chunks(
+        ringbuffer,
+        layout,
+        sensors,
+        time_converter,
+        None,
+        counters,
+        stats_collector,
+    )
