@@ -635,7 +635,9 @@ async def iter_chunks(
             assert isinstance(chunk, Chunk)
             # Inspect the chunk we have just received.
             chunk.timestamp = chunk.chunk_id * layout.chunk_timestamp_step
-            good = np.sum(chunk.present)
+            # Cast to int isn't strictly necessary, but keeps all the accounting
+            # in Python types instead of a hodge-podge of native and numpy types.
+            good = int(np.sum(chunk.present))
             if not good:
                 # Dummy chunk created by spead2
                 chunk.recycle()
