@@ -227,17 +227,18 @@ def generate_tied_array_channelised_voltage(args: argparse.Namespace, outputs: d
 
 def generate_tied_array_resampled_voltage(args: argparse.Namespace, outputs: dict) -> None:
     """Populate configuration for tied-array-resampled-voltage streams."""
-    outputs["tied-array-resampled-voltage"] = {
-        "type": "gpucbf.tied_array_resampled_voltage",
-        "src_streams": [
-            f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"
-            for i in range(args.narrowband_beams)
-            for pol_name in "xy"
-        ],
-        "n_chans": 2,
-        "pols": args.vlbi_pols,
-        "station_id": args.vlbi_station_id,
-    }
+    if args.vlbi:
+        outputs["tied-array-resampled-voltage"] = {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": [
+                f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"
+                for i in range(args.narrowband_beams)
+                for pol_name in "xy"
+            ],
+            "n_chans": 2,
+            "pols": args.vlbi_pols,
+            "station_id": args.vlbi_station_id,
+        }
 
 
 def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
