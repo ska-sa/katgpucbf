@@ -22,5 +22,5 @@ Module contents
 
 .. automodule:: katgpucbf.xbgpu
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:

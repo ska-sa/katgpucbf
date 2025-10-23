@@ -34,20 +34,46 @@ class CustomArgumentParser(argparse.ArgumentParser):
     """
 
     def add_argument(self, *args, **kwargs):  # noqa: D102
-        kwargs.pop("required", None)
+        if kwargs.get("required", False):
+            kwargs.pop("required")
+            if kwargs.get("type", str) is int:
+                # This satisfies any checks in parse_args for one parameter to
+                # divide evenly into another.
+                kwargs["default"] = 1
+            elif args[0].endswith("-pols"):
+                kwargs["default"] = "x,y"
         return super().add_argument(*args, **kwargs)
 
     def error(self, message: str) -> NoReturn:  # noqa: D102
         raise RuntimeError(message)
 
 
+@pytest.fixture(autouse=True)
+def patch_argument_parser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace :class:`argparse.ArgumentParser` with our custom subclass."""
+    monkeypatch.setattr("katgpucbf.vgpu.main._ARGUMENT_PARSER", CustomArgumentParser)
+
+
+class TestDivisibility:
+    """Test error handling for arguments not dividing other arguments."""
+
+    def test_recv_channels_per_substream(self) -> None:
+        """Test recv_channels_per_substream not dividing recv_channels."""
+        with pytest.raises(
+            RuntimeError, match=r"--recv-channels \(4\) must be a multiple of --recv-channels-per-substream \(3\)"
+        ):
+            parse_args(["--recv-channels-per-substream=3", "--recv-channels=4"] + REQUIRED_ARGS)
+
+    def test_recv_jones_per_batch(self) -> None:
+        """Test recv_channels not dividing recv_jones_per_batch."""
+        with pytest.raises(
+            RuntimeError, match=r"--recv-jones-per-batch \(4\) must be a multiple of --recv-channels \(3\)"
+        ):
+            parse_args(["--recv-channels=3", "--recv-jones-per-batch=4"] + REQUIRED_ARGS)
+
+
 class TestParsePols:
     """Test error handling in the parsing of polarisation arguments."""
-
-    @pytest.fixture(autouse=True)
-    def patch_argument_parser(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Replace :class:`argparse.ArgumentParser` with our custom subclass."""
-        monkeypatch.setattr("katgpucbf.vgpu.main._ARGUMENT_PARSER", CustomArgumentParser)
 
     def test_ok_no_prefixes(self) -> None:
         """Test success case when --recv-pol has no ± prefixes."""

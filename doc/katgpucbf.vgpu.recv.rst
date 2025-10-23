@@ -1,7 +1,7 @@
-katgpucbf.fgpu.send module
+katgpucbf.vgpu.recv module
 ==========================
 
-.. automodule:: katgpucbf.fgpu.send
+.. automodule:: katgpucbf.vgpu.recv
    :members:
    :show-inheritance:
    :undoc-members:

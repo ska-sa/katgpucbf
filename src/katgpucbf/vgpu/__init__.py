@@ -19,3 +19,4 @@
 from typing import Final
 
 METRIC_NAMESPACE: Final = "vgpu"
+N_SIDEBANDS: Final = 2
