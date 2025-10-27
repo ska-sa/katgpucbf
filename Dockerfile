@@ -160,7 +160,7 @@ RUN wget https://raw.githubusercontent.com/ska-sa/katsdpdockerbase/master/docker
 # The above builds everything. Now install it into a lighter-weight runtime
 # image, without all the stuff needed for the build itself.
 FROM base
-LABEL maintainer="MeerKAT CBF team <cbf@sarao.ac.za>"
+LABEL maintainer="MeerKAT Extension CBF team <gpucbf@sarao.ac.za>"
 
 # curl is needed for running under katsdpcontroller
 # numactl allows CPU and memory affinity to be controlled.
