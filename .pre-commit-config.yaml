@@ -11,7 +11,7 @@ repos:
       - id: no-commit-to-branch # without arguments, master/main will be protected.
       - id: trailing-whitespace
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.13.1
+    rev: v0.14.2
     hooks:
       - id: ruff-format
         types_or: [python, pyi]  # Prevent formatting notebooks
@@ -53,7 +53,7 @@ repos:
             'typing-extensions==4.15.0',
         ]
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.8.20
+    rev: 0.9.5
     hooks:
       - id: pip-compile
         name: pip-compile requirements.txt
