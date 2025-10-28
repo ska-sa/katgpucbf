@@ -127,7 +127,7 @@ The module contains the following boiler-plate files:
 - ``pyproject.toml`` is a standard file included with many Python projects. It
   is used to store some configuration for pre-commit (as described above), some
   configuration options for :mod:`pytest`, and other configuration as described
-  :external+pip:doc:`here <reference/build-system/pyproject-toml>`.
+  :external+setuptools:doc:`here <userguide/quickstart>`.
 
 .. _uv pip compile: https://docs.astral.sh/uv/pip/compile/
 
