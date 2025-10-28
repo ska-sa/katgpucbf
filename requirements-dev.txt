@@ -48,10 +48,6 @@ async-timeout==5.0.1
     # via
     #   -c requirements.txt
     #   aiokatcp
-atomicwrites==1.4.1
-    # via
-    #   -c requirements.txt
-    #   katcbf-vlbi-resample
 attrs==25.3.0
     # via
     #   -c requirements.txt
@@ -113,10 +109,6 @@ fsspec==2025.9.0
     # via
     #   -c requirements.txt
     #   dask
-h5py==3.14.0
-    # via
-    #   -c requirements.txt
-    #   katcbf-vlbi-resample
 hiredis==3.2.1
     # via
     #   -c requirements.txt
@@ -147,7 +139,7 @@ jinja2==3.1.6
     #   -c requirements.txt
     #   aiomonitor
     #   sphinx
-katcbf-vlbi-resample==0.2
+katcbf-vlbi-resample==0.3
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
@@ -167,7 +159,6 @@ katsdptelstate==1.0.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
-    #   katcbf-vlbi-resample
 latexcodec==3.0.1
     # via pybtex
 llvmlite==0.45.0
@@ -183,10 +174,6 @@ mako==1.3.10
     #   -c requirements.txt
     #   katsdpsigproc
     #   pycuda
-markdown-it-py==4.0.0
-    # via
-    #   -c requirements.txt
-    #   rich
 markupsafe==3.0.2
     # via
     #   -c requirements.txt
@@ -194,10 +181,6 @@ markupsafe==3.0.2
     #   mako
 matplotlib-inline==0.1.7
     # via ipython
-mdurl==0.1.2
-    # via
-    #   -c requirements.txt
-    #   markdown-it-py
 msgpack==1.1.1
     # via
     #   -c requirements.txt
@@ -223,7 +206,6 @@ numpy==2.3.3
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
     #   astropy
-    #   h5py
     #   katcbf-vlbi-resample
     #   katsdpsigproc
     #   katsdptelstate
@@ -258,7 +240,6 @@ pexpect==4.9.0
 platformdirs==4.4.0
     # via
     #   -c requirements.txt
-    #   katcbf-vlbi-resample
     #   pycuda
     #   pytools
     #   virtualenv
@@ -311,11 +292,9 @@ pygelf==0.4.3
     #   katsdpservices
 pygments==2.19.2
     # via
-    #   -c requirements.txt
     #   ipython
     #   ipython-pygments-lexers
     #   pytest
-    #   rich
     #   sphinx
 pyparsing==3.2.5
     # via
@@ -343,10 +322,6 @@ python-dateutil==2.9.0.post0
     # via
     #   -c requirements.txt
     #   pandas
-python-lzf==0.2.6
-    # via
-    #   -c requirements.txt
-    #   katsdptelstate
 pytools==2025.2.4
     # via
     #   -c requirements.txt
@@ -362,21 +337,12 @@ pyyaml==6.0.2
     #   dask
     #   pre-commit
     #   pybtex
-rdbtools==0.1.15
-    # via
-    #   -c requirements.txt
-    #   katsdptelstate
 redis==6.4.0
     # via
     #   -c requirements.txt
     #   katsdptelstate
-    #   rdbtools
 requests==2.32.5
     # via sphinx
-rich==14.1.0
-    # via
-    #   -c requirements.txt
-    #   katcbf-vlbi-resample
 roman-numerals-py==3.1.0
     # via sphinx
 scipy==1.16.2
@@ -385,10 +351,6 @@ scipy==1.16.2
     #   katgpucbf (pyproject.toml)
     #   katcbf-vlbi-resample
     #   katsdpsigproc
-setuptools==80.9.0
-    # via
-    #   -c requirements.txt
-    #   katsdptelstate
 siphash24==1.8
     # via
     #   -c requirements.txt
