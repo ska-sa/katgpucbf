@@ -11,7 +11,7 @@ description = "GPU-accelerated correlator for the MeerKAT Extension"
 readme = "README.md"
 license = "BSD-3-Clause"
 authors = [
-    {name = "SARAO DSP team", email = "cbf@sarao.ac.za"},
+    {name = "MeerKAT Extension CBF team", email = "gpucbf@sarao.ac.za"},
 ]
 classifiers = [
     "Programming Language :: Python",
