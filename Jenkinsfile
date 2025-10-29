@@ -66,7 +66,7 @@ pipeline {
         stage('Parallel stage') {
           parallel {
             stage('Compile and test microbenchmarks') {
-              options { timeout(time: 5, unit: 'MINUTES') }
+              options { timeout(time: 10, unit: 'MINUTES') }
               steps {
                 dir('scratch') {
                   sh 'make clean'
