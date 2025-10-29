@@ -61,7 +61,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--recv-jones-per-batch",
         type=int,
         default=DEFAULT_JONES_PER_BATCH,
-        help="Number of tied-antenna-channelised-voltage Jones vectors in each batch. [%(default)s]",
+        help="Number of tied-array-channelised-voltage Jones vectors in each batch. [%(default)s]",
     )
     parser.add_argument(
         "--recv-samples-between-spectra",

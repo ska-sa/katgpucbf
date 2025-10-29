@@ -150,7 +150,7 @@ class VEngine(Engine):
                 ),
                 sink=self._recv_group,
             )
-            chunk.recycle()  # Adds to free_ringbuffer
+            chunk.recycle()  # Make available to the stream
 
     async def _run_receive(self) -> None:
         """Receive data from the tied-array-channelised-voltage streams."""
