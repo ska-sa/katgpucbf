@@ -262,6 +262,7 @@ class TestStreamGroup:
                                 expected_present[:, :1] = 0
                                 expected_present[0, 1, 0] = 0
                     np.testing.assert_equal(chunk.present, expected_present)
+                    assert chunk.timestamp == expected_timestamp
                     # Mask out missing data from the comparison
                     mask_present(chunk.data, expected_present)
                     mask_present(expected_data, expected_present)
