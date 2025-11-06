@@ -61,6 +61,7 @@ class VEngine(Engine):
         recv_buffer: int,
         recv_pols: tuple[str, str],
         send_pols: tuple[str, str],
+        power_int_time: int,
         monitor: Monitor,
     ) -> None:
         super().__init__(katcp_host, katcp_port)
