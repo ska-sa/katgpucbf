@@ -4,14 +4,13 @@ There are two main scenarios involved in starting up and interacting with
 katgpucbf and its constituent engines:
 
 #. the instantiation and running of a complete end-to-end correlator, and
-#. the invocation of individual engines (dsim, fgpu, xbgpu) for more
+#. the invocation of individual engines (dsim, fgpu, xbgpu, vgpu) for more
    fine-grained testing and debugging.
 
 The first requires a mechanism to orchestrate the simultaneous spin-up of a
-correlator's required components - that is, some combination of dsim(s),
-F-Engine(s) and XB-Engine(s). For this purpose, katgpucbf utilises the
-infrastructure provided by `katsdpcontroller`_ — discussed in the following
-section.
+correlator's required components — that is, some combination of engines. For
+this purpose, katgpucbf utilises the infrastructure provided by
+`katsdpcontroller`_ — discussed in the following section.
 
 Regarding the testing and debugging of individual engines, more detailed
 explanations of their inner workings are discussed in their respective, more
@@ -90,7 +89,7 @@ you will require a running master controller in accordance with
 :ref:`katsdpcontroller-discussion`. The script itself provides an array of
 options for you to start your correlator; running ``./sim_correlator.py --help``
 gives a brief explanation of the arguments required. Below is an example of a
-full command to run a 4k, 4-antenna, L-band correlator::
+full command to run a 4096-channel, 4-antenna, L-band correlator::
 
     scratch/sim_correlator.py -a 4 -c 4096 -i 0.5 --band l \
         --name my_test_correlator lab-mc.sdp.kat.ac.za
@@ -105,14 +104,14 @@ launches them accordingly across the pool of processing nodes available.
 Individual engine startup
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 The arguments required for individual engine invocation can be seen by
-running one of ``{dsim, fgpu, xbgpu} --help`` in an appropriately-configured
+running one of ``{dsim, fgpu, xbgpu, vgpu} --help`` in an appropriately-configured
 terminal environment. There are a few mandatory ones, and ultimately stitching
 the entire incantation together by hand can become tiresome. For this reason,
 the scripts under ``scratch/{fgpu, xbgpu}`` have been shipped with the module.
 
-The scripts for standalone engine usage are prepopulated with typical
+The scripts for standalone engine usage are pre-populated with typical
 configuration values for your convenience, and are usually named
-:program:`run-{dsim, fgpu, xbgpu}.sh`. It is important to note that the F- and
+:program:`run-{dsim, fsim, fgpu, xbgpu}.sh`. It is important to note that the F- and
 XB-Engines can run in a standalone manner, but will require some form of
 stimulus to truly exercise the engine. For example, ``fgpu`` requires a
 corresponding ``dsim`` to produce data for ingest. Similarly, ``xbgpu``
@@ -133,7 +132,7 @@ nothing until explicitly asked to.
 
 .. _CUDA: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars
 
-To test a 4k, 4-antenna XB-Engine processing L-band data, use the following
+To test a 4096-channel, 4-antenna XB-Engine processing L-band data, use the following
 commands in separate terminals on two separate servers. This will launch a
 single :ref:`feng-packet-sim` on ``host1`` and a single :program:`xbgpu`
 instance on ``host2``::
@@ -173,7 +172,7 @@ the :program:`xbgpu` instance.
 Pinning thread affinities
 """""""""""""""""""""""""
 .. todo:: ``NGC-730``
-  Update ``run-{dsim, fpgu, xbgpu}.sh`` scripts to standardise over usage
+  Update ``run-{dsim, fsim, fpgu, xbgpu}.sh`` scripts to standardise over usage
   of either ``numactl`` or ``taskset``.
 
 :external+spead2:doc:`spead2's performance tuning discussion <perf>` outlines
@@ -281,7 +280,7 @@ End-to-end correlator shutdown
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 A user can issue a ``?product-deconfigure`` request to the correlator's
 product controller by connecting to its ``<host>:<port>``. This request
-triggers the stop procedure of all engines and dsims running in the target
+triggers the stop procedure of all engines running in the target
 correlator. More specifically:
 
 * the product controller instructs the orchestration software to stop the
@@ -289,13 +288,13 @@ correlator. More specifically:
 * which is received by the engines as a ``SIGTERM``,
 * finally triggering a ``halt`` in the engines for a graceful shutdown.
 
-The shutdown procedures are broadly similar between the dsim, fgpu and xbgpu.
+The shutdown procedures are broadly similar between the engines.
 Ultimately they all:
 
 * finish calculations on data currently in their pipelines,
 * stop the transmission of their SPEAD descriptors, and
-* in the case of ``fgpu`` and ``xbgpu``, stop their ``spead2`` receivers, which
-  allows for a more natural ending of internal processing operations.
+* in the case of engines that receive data, stop their ``spead2`` receivers,
+  which allows for a more natural ending of internal processing operations.
 
 Individual engine shutdown
 ^^^^^^^^^^^^^^^^^^^^^^^^^^

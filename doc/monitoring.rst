@@ -37,7 +37,7 @@ configuration (number of channels, accumulation length and so on) are provided
 by the product controller rather than this module.
 
 ``steady-state-timestamp``
-    This sensor is provided by both ``dsim`` and ``fgpu``. It can be used to
+    This sensor is provided by ``dsim``, ``fgpu`` and ``xbgpu``. It can be used to
     synchronise katcp requests with the data. After issuing a katcp request
     that will alter the data stream (such as ``?signals``, ``?gain`` or
     ``?delay``), query the sensor. It will contain an ADC timestamp. Any data
@@ -49,9 +49,9 @@ by the product controller rather than this module.
     even if that load time has not yet been reached.
 
     It should also be noted that the sensor value from a ``dsim`` does not
-    take into account any delays applied by F engines. One should add the
+    take into account any delays applied by F-engines. One should add the
     delay of the corresponding F engine (or an upper bound on it) to obtain a
-    safe timestamp for post-F engine data streams.
+    safe timestamp for post–F-engine data streams.
 
 ``signals``, ``period`` and ``dither-seed`` (dsim)
     To reproduce the output of the dsim exactly, it is necessary to save all
