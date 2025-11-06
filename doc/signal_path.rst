@@ -4,7 +4,8 @@ Signal path overview
 This section gives a logical overview of the signal path. The actual
 implementation is mathematically equivalent (when ignoring floating-point
 rounding errors), but it splits, combines, and reorders steps for efficiency;
-refer to the :doc:`fgpu.design` and :doc:`xbgpu.design` sections for details.
+refer to the :doc:`fgpu.design`, :doc:`xbgpu.design` and :doc:`vgpu.design`
+sections for details.
 
 Edges in diagrams are annotated to indicate the data type. The following types
 are used:
@@ -326,3 +327,34 @@ during quantisation (which saturates).
      \draw[->, dotted] (gain) to[lbl, edge label=f32] (mult);
      \draw[->, dotted] (delay) to[lbl, near start, edge label'=f32] (mult);
    \end{scope}
+
+VLBI Resampling
+---------------
+The VLBI resampler (V-Engine) performs the following functions:
+
+1. Channelised beamformer data is converted back to the time domain using a
+   Discrete Fourier Transform (DFT). To obtain reasonable results, the
+   channeliser must be configured to use a DFT, which can be done by passing
+   ``taps=1,w_cutoff=0.0,window_function=rect`` when configuring the stream.
+
+2. A bandpass filter is used to reduce the bandwidth. The input must have
+   already been mixed to place the desired centre frequency at DC. The
+   narrowband mode of fgpu will do this.
+
+3. If necessary, a Jones matrix is applied to alter the polarisation basis.
+   This does not implement parallactic angle correction, but it can for
+   example convert linear to circular polarisation.
+
+4. The signal is separated into real sideband signals corresponding to the
+   positive and negative frequencies of the complex signal. At this point
+   there are four real signals: lower and upper sideband, for each
+   polarisation. The remaining processing treats these four signals
+   independently.
+
+5. The signal power level is normalised. Samples are chunked into fixed-length
+   intervals (e.g., 1 second), and the power of each interval is scaled so
+   that the voltages have a standard deviation of 1.0.
+
+6. The signals are quantised and encoded into VDIF frames.
+
+.. todo:: Add a diagram here

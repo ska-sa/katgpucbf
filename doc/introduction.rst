@@ -49,19 +49,20 @@ nodes. This eliminates the need to design costly custom backplanes.
 .. _CASPER: https://casper.berkeley.edu/
 
 
+This package
+------------
 
-This module
------------
-
-This module (``katgpucbf``) provides a software implementation of the DSP
+This package (``katgpucbf``) provides a software implementation of the DSP
 engines of a radio astronomy correlator described above.
 
-The module contains several executable entry-points. The main functionality is
-implemented in :program:`fgpu` and :program:`xbgpu` which execute (respectively)
-an F- or an XB-engine. The F-engine implements the channelisation component of
+The package contains several executable entry-points. The main functionality is
+implemented in :program:`fgpu`, :program:`xbgpu` which execute (respectively)
+an F-, XB-, or V-engine. The F-engine implements the channelisation component of
 the correlator's operation, while the XB-engine calculates the correlation
-products (X) and beamformer output (B). The beamformer component is not
-currently implemented, but is planned for a future release.
+products (X) and beamformer output (B). The V-engine is a tool to resample
+beamformer output and encode it in a `VDIF`_ format that makes a beam suitable
+for use as a station in Very Long Baseline Interferometry (VLBI). The V-engine
+is still being developed and is not yet functional.
 
 Additionally, packet simulators are provided for testing purposes. A :ref:`dsim`
 can be used to test either an F-engine or an entire correlator. An
@@ -81,6 +82,8 @@ which are not used by the core programs.
 Some additional scripts (:file:`scratch/`) which the developers have found to be
 useful are included, but user discretion is advised as these aren't subject to
 very much quality control, and will need to be adapted to your environment.
+
+.. _VDIF: https://vlbi.org/vlbi-standards/vdif/
 
 
 Controller
