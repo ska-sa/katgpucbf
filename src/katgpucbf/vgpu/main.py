@@ -123,6 +123,13 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="SIGMA",
         help="Threshold (in σ) between quantisation levels [%(default)s]",
     )
+    parser.add_argument(
+        "--power-int-time",
+        type=int,
+        default=1,
+        metavar="SECONDS",
+        help="Time (in seconds) over which to normalise power [%(default)s]",
+    )
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
     parser.add_argument("src", type=parse_source_ipv4, nargs=2, help="Source endpoints")
     parser.add_argument("dst", type=endpoint_list_parser(VTP_DEFAULT_PORT), help="Destination endpoints")
@@ -176,6 +183,7 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         recv_buffer=args.recv_buffer,
         recv_pols=tuple(args.recv_pols),
         send_pols=tuple(args.send_pols),
+        power_int_time=args.power_int_time,
         monitor=monitor,
     )
 
