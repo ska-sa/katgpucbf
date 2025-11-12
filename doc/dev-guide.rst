@@ -44,7 +44,7 @@ And you are ready to start developing with :mod:`katgpucbf`!
 
   I don't recommend using the  :program:`dev-setup.sh` for anything other than
   initial setup. If you run it again, the requirements will be re-installed, and
-  the module will be re-installed in editable mode. It's unlikely that any of
+  the package will be re-installed in editable mode. It's unlikely that any of
   this will be harmful in any way, but it will use up a few minutes. You
   probably won't want to do that every time.
 
@@ -108,7 +108,7 @@ pinned in requirements.txt.
 Boiler-plate files
 ------------------
 
-The module contains the following boiler-plate files:
+The package contains the following boiler-plate files:
 
 - ``Dockerfile`` for generating repeatable container images which are capable of
   running this package.

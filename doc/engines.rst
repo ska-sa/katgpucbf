@@ -132,8 +132,8 @@ The general operation of the DSP engines is illustrated in the diagram below:
    \end{scope}
 
 The F-engine and V-engine each use two input streams to align two incoming
-polarisations, but in the XB-engine there is only one as the polarisations are
-already interleaved in the incoming packets.
+polarisations. The XB-engine only uses one input stream as the polarisations
+are already interleaved in the incoming packets.
 
 There might not always be multiple processing pipelines. When they exist, they
 are to support multiple outputs generated from the same input, such as wide-

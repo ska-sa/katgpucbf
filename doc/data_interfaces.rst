@@ -76,7 +76,7 @@ depending on the nature of the stream.
 SPEAD items have both human-readable names and numeric IDs; special *descriptor*
 items indicate the mapping from name to ID. While katgpucbf sends descriptors
 to allow for decoding, it does not rely on them when receiving. Instead,
-relies on hard-coded IDs, which can be found in :mod:`katgpucbf.spead`.
+it relies on hard-coded IDs, which can be found in :mod:`katgpucbf.spead`.
 
 F-Engine Data Formats
 ---------------------
@@ -186,14 +186,14 @@ V-Engine Data Formats
 
 Input
 ^^^^^
-The V-Engine receives tied array channelised voltage data from the XB-Engine,
+The V-Engine receives tied-array channelised voltage data from the XB-Engine,
 in the format discussed above. It consumes data from two such streams,
 corresponding to two polarisations.
 
 Output
 ^^^^^^
 Unlike the other engines, the V-engine does not output SPEAD. Instead it
-outputs `VDIF`_ frames in UDP, with each frame preceded by a sequence number
+outputs `VDIF`_ frames over UDP, with each frame preceded by a sequence number
 as per `VTP`_.
 
 .. _VDIF: https://vlbi.org/vlbi-standards/vdif/
