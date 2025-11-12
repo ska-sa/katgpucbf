@@ -75,6 +75,7 @@ intersphinx_mapping = {
     "aiokatcp": ("https://aiokatcp.readthedocs.io/en/latest/", None),
     "black": ("https://black.readthedocs.io/en/stable/", None),
     "coverage": ("https://coverage.readthedocs.io/en/latest/", None),
+    "katcbf-vlbi-resample": ("https://katcbf-vlbi-resample.readthedocs.io/en/latest/", None),
     "katpoint": ("https://katpoint.readthedocs.io/en/latest", None),
     "katsdpsigproc": ("https://katsdpsigproc.readthedocs.io/en/latest", None),
     "katsdptelstate": ("https://katsdptelstate.readthedocs.io/en/latest", None),

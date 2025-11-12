@@ -131,8 +131,9 @@ The general operation of the DSP engines is illustrated in the diagram below:
    \draw[queue] (group) -- (upload);
    \end{scope}
 
-The F-engine uses two input streams and aligns two incoming polarisations, but
-in the XB-engine there is only one.
+The F-engine and V-engine each use two input streams to align two incoming
+polarisations. The XB-engine only uses one input stream as the polarisations
+are already interleaved in the incoming packets.
 
 There might not always be multiple processing pipelines. When they exist, they
 are to support multiple outputs generated from the same input, such as wide-
@@ -160,7 +161,7 @@ means Python code is only run per-chunk.
 
 Queues
 ^^^^^^
-Both engines consist of several components which run independently of each
+Engines consist of several components which run independently of each
 other — either via threads (spead2's C++ code) or Python's asyncio framework. The
 general pattern is that adjacent components are connected by a pair of queues:
 one carrying full buffers of data forward, and one returning free buffers. This
@@ -176,6 +177,10 @@ for returning free buffers. Since a buffer can only be placed on the free queue
 once it has been processed by all the pipelines, a reference count is held with
 the buffer to track how many usages it has. This should not be confused with
 the Python interpreter's reference count, although the purpose is similar.
+
+The V-engine has a different design. See the
+:external+katcbf-vlbi-resample:doc:`katcbf-vlbi-resample design docs <design>`
+for more information.
 
 Transfers and events
 ^^^^^^^^^^^^^^^^^^^^

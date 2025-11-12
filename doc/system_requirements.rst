@@ -27,7 +27,8 @@ significantly reduce performance.
 BIOS settings
 -------------
 See the system tuning guidance in the :external+spead2:doc:`spead2
-documentation <perf>`. In particular, we've found that when running multiple
+documentation <perf>` and in [Merry2023]_.
+In particular, we've found that when running multiple
 F-engines per host on an AMD Epyc (Milan) system, we get best performance with
 
 - NPS1 setting for NUMA per socket (NPS2 might work too, but NPS4 tends to

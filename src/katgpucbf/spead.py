@@ -21,16 +21,27 @@ from typing import Any
 import numpy as np
 import spead2
 
+#: SPEAD ID of ``digitiser_id`` item
 DIGITISER_ID_ID = 0x3101
+#: SPEAD ID of ``digitiser_status`` item
 DIGITISER_STATUS_ID = 0x3102
+#: SPEAD ID of ``feng_id`` item
 FENG_ID_ID = 0x4101
+#: SPEAD ID of ``feng_raw`` item
 FENG_RAW_ID = 0x4300
+#: SPEAD ID of ``frequency`` item (which is actually a channel number).
 FREQUENCY_ID = 0x4103
+#: SPEAD ID of ``adc_samples`` item (digitiser data)
 ADC_SAMPLES_ID = 0x3300  # Digitiser data
+#: SPEAD ID of ``xeng_raw`` item
 XENG_RAW_ID = 0x1800
+#: SPEAD ID of ``timestamp`` item (number of ADC samples since the sync epoch)
 TIMESTAMP_ID = 0x1600
+#: SPEAD ID of ``bf_raw`` item
 BF_RAW_ID = 0x5000
+#: SPEAD ID of ``beam_ants`` item
 BEAM_ANTS_ID = 0x5004
+#: Maximum packet size to send (only used for descriptors)
 MAX_PACKET_SIZE = 8872
 
 #: Bit position in digitiser_status SPEAD item for ADC saturation flag

@@ -70,11 +70,16 @@ changes across packets, in multiples of the packet size (which is configurable
 at runtime). This is used by the receiver to reassemble packets into a full heap.
 
 The values contained in the immediate items may change from heap to heap, or
-they may be static, with the data payload being the only changing thing,
+they may be static, with the data payload being the only thing changing,
 depending on the nature of the stream.
 
-F-Engine Data Format
---------------------
+SPEAD items have both human-readable names and numeric IDs; special *descriptor*
+items indicate the mapping from name to ID. While katgpucbf sends descriptors
+to allow for decoding, it does not rely on them when receiving. Instead,
+it relies on hard-coded IDs, which can be found in :mod:`katgpucbf.spead`.
+
+F-Engine Data Formats
+---------------------
 
 Input
 ^^^^^
@@ -84,14 +89,15 @@ is distributed over eight contiguous multicast addresses, to facilitate load-
 balancing on the network, but the receiver is flexible enough to accept input
 from more or fewer multicast addresses.
 
-The only immediate item in the digitiser's output heap used by the F-engine is
-the ``timestamp``.
+The only immediate items in the digitiser's output heap used by the F-engine
+are ``timestamp`` and ``digitiser_status``. The latter is used to obtain the
+number of saturated sampled in the heap.
 
 Output Packet Format
 ^^^^^^^^^^^^^^^^^^^^
 
 In addition to the fields described in SPEAD's :ref:`spead-packet-format`
-above, the F-Engine's have an output data format as follows - formally
+above, the F-Engine's have an output data format as follows — formally
 labelled elsewhere as **Channelised Voltage Data SPEAD packets**.
 These immediate items are specific to the F-Engine's output stream.
 
@@ -128,8 +134,8 @@ The F-engines in an array each transmit a subset of frequency channels to each
 X-engine, with each X-engine receiving from a single multicast group. F-engines
 therefore need to ensure that their heap IDs do not collide.
 
-X-Engine Data Format
----------------------
+XB-Engine Data Formats
+----------------------
 
 Input
 ^^^^^
@@ -137,11 +143,11 @@ The X-Engine receives antenna channelised data from the output of the F-engines,
 as discussed above. Each X-Engine receives data from each F-engine, but only
 from a subset of the channels.
 
-Output Packet Format
-^^^^^^^^^^^^^^^^^^^^
+X Output Packet Format
+^^^^^^^^^^^^^^^^^^^^^^
 
 In addition to the fields described in SPEAD's :ref:`spead-packet-format` above,
-the X-Engine's have an output data format as follows - formally labelled
+the X-Engine's have an output data format as follows — formally labelled
 elsewhere as **Baseline Correlation Products**. These immediate items are
 specific to the X-Engine's output stream.
 
@@ -174,3 +180,23 @@ Each X-engine sends data to its own multicast group. A receiver can combine data
 from several multicast groups to consume a wider spectrum, using the
 ``frequency`` item to place each heap. To facilitate this, X-engine output heap
 IDs are kept unique across all X-engines in an array.
+
+V-Engine Data Formats
+---------------------
+
+Input
+^^^^^
+The V-Engine receives tied-array channelised voltage data from the XB-Engine,
+in the format discussed above. It consumes data from two such streams,
+corresponding to two polarisations.
+
+Output
+^^^^^^
+Unlike the other engines, the V-engine does not output SPEAD. Instead it
+outputs `VDIF`_ frames over UDP, with each frame preceded by a sequence number
+as per `VTP`_.
+
+.. _VDIF: https://vlbi.org/vlbi-standards/vdif/
+.. _VTP: https://vlbi.org/wp-content/uploads/2019/03/2012.10.16_VTP_0.9.7.pdf
+
+Each polarisation and sideband is a separate VDIF thread.
