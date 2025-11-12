@@ -116,7 +116,6 @@ def main():
         else:
             output = WidebandOutput(**output_kwargs)
             narrowband_config = None
-            spectra_samples = 2 * args.channels
         template = ComputeTemplate(
             context,
             output.taps,
