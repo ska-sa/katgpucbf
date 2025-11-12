@@ -45,7 +45,7 @@ DIG_SAMPLE_BITS: Final = 10
 ENGINE_DITHER_SEED_BITS: Final = 64
 #: Minimum update period (in seconds) for katcp sensors where the underlying
 #: value may update extremely rapidly.
-MIN_SENSOR_UPDATE_PERIOD: Final = 1.0
+MIN_SENSOR_UPDATE_PERIOD: Final = 10.0
 
 GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
 RECV_TASK_NAME: Final[str] = "Receiver Loop"
