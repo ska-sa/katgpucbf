@@ -460,7 +460,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 )
             )
             sensors.add(
-                make_rate_limited_sensor(
+                aiokatcp.Sensor(
                     str,
                     f"{output.name}.weight",
                     "The summing weights applied to all the inputs of this beam",
