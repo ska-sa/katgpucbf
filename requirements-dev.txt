@@ -435,7 +435,7 @@ tzdata==2025.2
     #   pandas
 urllib3==2.5.0
     # via requests
-uv==0.9.6
+uv==0.9.8
     # via -r requirements-dev.in
 virtualenv==20.34.0
     # via pre-commit
