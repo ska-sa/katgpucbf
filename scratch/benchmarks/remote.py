@@ -21,6 +21,7 @@ import tomllib
 from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from typing import Self
 
 import asyncssh
 
@@ -35,7 +36,7 @@ class Server:
     username: str
     interfaces: list[str] = field(default_factory=list)
     gpus: list[str] = field(default_factory=lambda: ["0"])
-    cpus: list[int] = field(default_factory=list)
+    cpus: list[list[int]] = field(default_factory=list)
 
 
 def servers_from_toml(filename: str) -> dict[str, "Server"]:
@@ -56,12 +57,103 @@ def servers_from_toml(filename: str) -> dict[str, "Server"]:
     return servers
 
 
+class InsufficientCoresError(Exception):
+    pass
+
+
 @dataclass
 class ServerInfo:
     """Dynamic information discovered about a server."""
 
-    cpus: list[int]
+    #: CPU cores grouped by L3 Cache
+    cpus: list[list[int]]
     infiniband_devices: list[str]
+
+    @classmethod
+    async def factory(cls, conn: asyncssh.SSHClientConnection, override_cpus: list[list[int]] | None) -> Self:
+        if not override_cpus:
+            n_l3 = int((await conn.run("hwloc-calc -N L3Cache all")).stdout)  # type: ignore[arg-type]
+            cpus = []
+            for i in range(n_l3):
+                l3_cpus = (await conn.run(f"hwloc-calc --physical-output -I PU L3Cache:{i}")).stdout
+                assert isinstance(l3_cpus, str)
+                cpus.append([int(cpu) for cpu in l3_cpus.strip().split(",")])
+        else:
+            cpus = override_cpus
+        infiniband_devices_stdout = (await conn.run("find /dev/infiniband -type c -print0")).stdout
+        assert isinstance(infiniband_devices_stdout, str)
+        infiniband_devices = infiniband_devices_stdout.split("\0")
+        if infiniband_devices and infiniband_devices[-1] == "":
+            # split will also split on the \0 after the last entry, leaving an empty entry
+            infiniband_devices.pop()
+        return cls(cpus=cpus, infiniband_devices=infiniband_devices)
+
+    def _allocate_cores(
+        self, tasks: int, cores_per_task: int, l3_step: int, share: bool, split: bool
+    ) -> list[list[int]]:
+        """Make one attempt at :meth:`allocate_cores`.
+
+        Only one in every `l3_step` L3 caches is used. L3 caches can be shared
+        between tasks if `share` is true. If `split` is false, a task will not
+        share with a previous task if that would cause it to split across L3 caches.
+        """
+        cpus = self.cpus[::l3_step]
+        out = []
+        buf: list[int] = []  # Buffer of available cores from an L3 cache
+        for _ in range(tasks):
+            task: list[int] = []
+            while len(task) < cores_per_task:
+                need = cores_per_task - len(task)
+                if len(buf) < need:
+                    if not cpus:
+                        raise InsufficientCoresError(
+                            f"could not allocate {tasks} tasks with {cores_per_task} cores each"
+                        )
+                    if not buf or (not split and len(cpus[0]) >= need):
+                        buf = list(cpus[0])  # Copy it so we can safely delete from it
+                        del cpus[0]
+                # Note: Python allows need to be past the end of buf
+                task += buf[:need]
+                if share:
+                    del buf[:need]
+                else:
+                    buf = []
+            out.append(task)
+        return out
+
+    def allocate_cores(self, tasks: int, cores_per_task: int) -> list[list[int]]:
+        """Assign `cores_per_task` to each of `tasks` tasks.
+
+        This will:
+
+        - Keep all the cores for a task in the same L3 cache, if possible.
+        - Avoid sharing L3 caches between tasks, if possible.
+        - Try to spread load across the range of L3 caches, rather than just
+          using the low-numbered ones.
+
+        These goals are only fully met when the topology is homogeneous i.e.,
+        each L3 cache has the same number of cores.
+
+        Raises
+        ------
+        InsufficientCoresError
+            if the first goal cannot be met, or there are simply not enough cores.
+        """
+        # Try to avoid sharing L3 caches between tasks, and spread the caches out
+        # as far as possible.
+        for l3_step in range(len(self.cpus), 0, -1):
+            try:
+                return self._allocate_cores(tasks, cores_per_task, l3_step, False, False)
+            except InsufficientCoresError:
+                pass
+        # If that didn't work, allow sharing, but try to avoid splitting tasks
+        # across caches unnecessarily.
+        try:
+            return self._allocate_cores(tasks, cores_per_task, 1, False, True)
+        except InsufficientCoresError:
+            pass
+        # Last chance: pack things as tightly as possible
+        return self._allocate_cores(tasks, cores_per_task, 1, True, True)
 
 
 async def kill_process(process: asyncssh.SSHClientProcess) -> None:
@@ -137,18 +229,7 @@ async def run_tasks(
         conn = await stack.enter_async_context(
             asyncssh.connect(server.hostname, username=server.username, options=conn_options)
         )
-        if not server.cpus:
-            ncpus = int((await conn.run("nproc", check=True)).stdout)  # type: ignore[arg-type]
-            cpus = list(range(ncpus))
-        else:
-            cpus = list(server.cpus)
-        infiniband_devices_stdout = (await conn.run("find /dev/infiniband -type c -print0")).stdout
-        assert isinstance(infiniband_devices_stdout, str)
-        infiniband_devices = infiniband_devices_stdout.split("\0")
-        if infiniband_devices and infiniband_devices[-1] == "":
-            # split will also split on the \0 after the last entry, leaving an empty entry
-            infiniband_devices.pop()
-        server_info = ServerInfo(cpus=cpus, infiniband_devices=infiniband_devices)
+        server_info = await ServerInfo.factory(conn=conn, override_cpus=server.cpus)
         if pull:
             await conn.run(f"docker pull {image}", check=True)
         procs: list[asyncssh.SSHClientProcess] = []
