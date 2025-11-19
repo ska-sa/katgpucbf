@@ -68,7 +68,7 @@ def dsim_factory(
         addresses = f"239.102.{index}.64+7:7148 239.102.{index}.72+7:7148"
     command = (
         "docker run "
-        f"--name={name} --cap-add=SYS_NICE --net=host "
+        f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
         + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
         + f"--ulimit=memlock=-1 --rm {args.image} "
         f"taskset -c {my_cpus[0]} "
@@ -141,7 +141,7 @@ def fgpu_factory(
     wideband_arg = ",".join(f"{key}={value}" for key, value in wideband_kwargs.items())
     command = (
         "docker run "
-        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host "
+        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host --stop-timeout=2 "
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm "
         f" {' '.join(args.fgpu_docker_arg)} {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "

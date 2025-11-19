@@ -68,7 +68,7 @@ def fsim_factory(
     info = StreamInfo(args, adc_sample_rate)
     command = (
         "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
-        f"--name={name} --cap-add=SYS_NICE --net=host "
+        f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
         + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
         + f"--ulimit=memlock=-1 --rm {args.image} "
         f"schedrr taskset -c {my_cpus[1]} fsim "
