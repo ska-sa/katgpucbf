@@ -97,6 +97,7 @@ async def run_tasks(
     *,
     verbose: int,
     timeout: float = 20.0,
+    pull: bool = True,
 ) -> AsyncExitStack:
     """Run a set of `n` tasks remotely on a server.
 
@@ -128,6 +129,8 @@ async def run_tasks(
         stderr of the tasks
     timeout
         Time to wait for the ports to be open after starting the tasks
+    pull
+        Whether to pull the docker image
     """
     async with AsyncExitStack() as stack:
         conn_options = asyncssh.SSHClientConnectionOptions(keepalive_interval="15s")
@@ -146,7 +149,8 @@ async def run_tasks(
             # split will also split on the \0 after the last entry, leaving an empty entry
             infiniband_devices.pop()
         server_info = ServerInfo(cpus=cpus, infiniband_devices=infiniband_devices)
-        await conn.run(f"docker pull {image}", check=True)
+        if pull:
+            await conn.run(f"docker pull {image}", check=True)
         procs: list[asyncssh.SSHClientProcess] = []
         for i in range(n):
             command = factory(server, server_info, conn, i)

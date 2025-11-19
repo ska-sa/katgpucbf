@@ -224,6 +224,7 @@ class FgpuBenchmark(Benchmark):
             port_base=KATCP_PORT_BASE,
             verbose=self.args.verbose,
             timeout=self.args.init_time,
+            pull=self.args.pull,
         )
 
     async def run_consumers(
@@ -250,6 +251,7 @@ class FgpuBenchmark(Benchmark):
             port_base=KATCP_PORT_BASE,
             verbose=self.args.verbose,
             timeout=self.args.init_time,
+            pull=self.args.pull,
         )
 
 
@@ -311,6 +313,7 @@ async def main():
     parser.add_argument("--interval", type=float, default=20e6, help="Target confidence interval [%(default)s]")
     parser.add_argument("--max-comparisons", type=int, default=40, help="Maximum comparisons to make [%(default)s]")
     parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
+    parser.add_argument("--no-pull", dest="pull", action="store_false", help="Do not pull Docker image")
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--dsim-server", type=str, default="dsim", help="Server on which to run dsims [%(default)s]")
     parser.add_argument("--fgpu-server", type=str, default="fgpu", help="Server on which to run fgpu [%(default)s]")

@@ -186,6 +186,7 @@ class XbgpuBenchmark(Benchmark):
             port_base=None,
             verbose=self.args.verbose,
             timeout=self.args.init_time,
+            pull=self.args.pull,
         )
 
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
@@ -203,6 +204,7 @@ class XbgpuBenchmark(Benchmark):
             port_base=KATCP_PORT_BASE,
             verbose=self.args.verbose,
             timeout=self.args.init_time,
+            pull=self.args.pull,
         )
 
 
@@ -239,6 +241,7 @@ async def main():
         help="Jones vectors in each output batch [%(default)s]",
     )
     parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
+    parser.add_argument("--no-pull", dest="pull", action="store_false", help="Do not pull Docker image")
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--fsim-server", type=str, default="fsim", help="Server on which to run fsims [%(default)s]")
     parser.add_argument("--xbgpu-server", type=str, default="xbgpu", help="Server on which to run xbgpu [%(default)s]")
