@@ -49,9 +49,9 @@ def dsim_factory(
     args: argparse.Namespace,
 ) -> str:
     """Generate command to run dsim."""
-    # Use as many CPUs as we can to speed up startup. We need at least 2
-    # (main thread and network thread).
-    cores_per_task = 2
+    # Use as many CPUs as we can to speed up startup. We need at least 3
+    # (main thread, network thread and worker thread).
+    cores_per_task = 3
     while True:
         try:
             server_info.allocate_cores(n, cores_per_task + 1)
@@ -78,8 +78,9 @@ def dsim_factory(
         f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
         + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
         + f"--ulimit=memlock=-1 --rm {args.image} "
-        f"taskset -c {','.join(str(core) for core in cores[1:])} "
+        f"taskset -c {','.join(str(core) for core in cores[2:])} "
         f"dsim --affinity={cores[0]} "
+        f"--main-affinity={cores[1]} "
         "--ibv "
         f"--interface={interface} "
         f"--adc-sample-rate={adc_sample_rate} "
