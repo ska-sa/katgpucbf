@@ -220,4 +220,4 @@ been addressed.
 
 
 .. _Pull Request: https://docs.github.com/en/pull-requests
-.. _For the repository: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks
+.. _Fork the repository: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks
