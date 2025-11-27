@@ -1,8 +1,7 @@
 .. _dev-guide:
 
 Development Guide
-=======================
-
+=================
 Setting up a development environment
 ------------------------------------
 
@@ -142,8 +141,8 @@ The module contains the following boiler-plate files:
 
 .. _uv pip compile: https://docs.astral.sh/uv/pip/compile/
 
-Making the eventual contribution
---------------------------------
+Making a contribution
+---------------------
 
 Module documentation updates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -167,23 +166,26 @@ root :mod:`katgpucbf` directory.
 Raising the Pull Request
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-1. Ensure you have the latest ``katgpucbf/main`` in your local directory.
-2. Develop your feature, addition or fix(es) on a branch off ``main``.
-3. When you are ready for it to be reviewed, create a `Pull Request`_ against
-   ``katgpucbf/main`` and select at least one reviewer from the (recent)
-   `katgpucbf contributors`_. A good rule of thumb is to request a review from
-   the Team Lead, user @bmerry.
+For contributions from within the organisation, the steps are:
+
+1. Ensure you have the latest ``main`` in your local directory.
+2. Develop your contribution on a branch off ``main``.
+
+   a. Please prefix your branch name with the Jira ticket number. e.g. For
+      ticket NGC-1234, a suitable branch name would be
+      ``NGC-1234-task-description``.
+   b. Once you have created your branch, push it to this repository.
+
+3. Once your changes are ready for review, discuss with the team who will do
+   the review and assign it to them. If in doubt, assign it to the team lead.
 
    a. If GitHub's Pull Request page indicates there are merge conflicts ahead
       (*Can't automatically merge*), please resolve any merge conflicts before
       requesting a review from a developer.
-   b. We provide a template for the Pull Request description. Please fill in
+   b. A template is provided for the Pull Request description. Please fill in
       the template with as much detail as possible and complete the checklist
       items as indicated. You may prefix a checklist item with `(n/a)` if an
       item is not applicable to your PR.
-   c. If you are a developer within the organisation, please include the Jira
-      ticket number in the PR blurb, assign the ticket to your intended reviewer
-      and move the ticket to **Feedback Requested**.
 
 4. This repo is monitored by the organisation's in-house Jenkins. It does an
    end-to-end build when a Pull Request is created. Please address any issues
@@ -195,17 +197,21 @@ Raising the Pull Request
       PR back to *In Progress* and assign it back to you.
 
 6. Re-request a review of the Reviewers you've assigned to the PR and repeat
-   step 5 until there is conclusion on Approval.
-
-   a. Again, if you are in the organisation, please follow the process outlined
-      in **3c**.
-
+   steps 4 and 5 until there is conclusion on Approval.
 7. Once you have received approval to merge, click **Merge pull request** with
    its default setting of "Create a merge commit". Please delete your branch
    after merging.
 
-   a. Once more, if you are in the organisation you may now move your ticket
-      to **Done**.
+For contributors outside the organisation, the steps are:
+
+1. `Fork the repository`_ on GitHub to your own account.
+2. When you deem your changes ready for review, please ensure you run the unit
+   tests locally to ensure they pass, as our Jenkins does not run on forks.
+3. Create a `Pull Request`_ from your fork to the main repository - similar to
+   the internal process described above, but without the Jira ticket steps.
+4. Address any review comments as described in step 5 above.
+5. Once you have received approval to merge, please notify a team member to
+   perform the merge on your behalf.
 
 GitHub's Pull Request page and manner of reviewing may make it tough to trace
 comments (especially after content has changed). Please do not resolve comments
@@ -213,5 +219,5 @@ until you (and your reviewer(s)) are absolutely sure the original comment has
 been addressed.
 
 
-.. _Pull Request: https://github.com/ska-sa/katgpucbf/pulls
-.. _katgpucbf contributors: https://github.com/ska-sa/katgpucbf/graphs/contributors
+.. _Pull Request: https://docs.github.com/en/pull-requests
+.. _For the repository: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks
