@@ -176,8 +176,9 @@ For contributions from within the organisation, the steps are:
       ``NGC-1234-task-description``.
    b. Once you have created your branch, push it to this repository.
 
-3. Once your changes are ready for review, discuss with the team who will do
-   the review and assign it to them. If in doubt, assign it to the team lead.
+3. Once your changes are ready for review, create the `Pull Request`_. Discuss
+   with the team who will do the review and assign it to them. If in doubt,
+   assign it to the team lead.
 
    a. If GitHub's Pull Request page indicates there are merge conflicts ahead
       (*Can't automatically merge*), please resolve any merge conflicts before
