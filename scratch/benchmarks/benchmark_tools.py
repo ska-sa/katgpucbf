@@ -140,6 +140,10 @@ class Benchmark(ABC):
         """Perform a single trial on running engines."""
         async with aiohttp.client.ClientSession() as session:
             await asyncio.sleep(self.args.startup_time)  # Give a chance for startup losses
+            # We throw away these results, but it causes `session` to
+            # establish the HTTP connection, which helps minimise the latency
+            # when we first request the results for real.
+            await self.heap_counts(session)
             async with asyncio.TaskGroup() as tg:
                 # Start the sleep *before* entering heap_counts, so that time spent
                 # during heap_counts is considered part of the sleep time.
