@@ -172,7 +172,7 @@ Raising the Pull Request
 3. When you are ready for it to be reviewed, create a `Pull Request`_ against
    ``katgpucbf/main`` and select at least one reviewer from the (recent)
    `katgpucbf contributors`_. A good rule of thumb is to request a review from
-   the Team Lead, @bmerry.
+   the Team Lead, user @bmerry.
 
    a. If GitHub's Pull Request page indicates there are merge conflicts ahead
       (*Can't automatically merge*), please resolve any merge conflicts before
@@ -182,8 +182,8 @@ Raising the Pull Request
       items as indicated. You may prefix a checklist item with `(n/a)` if an
       item is not applicable to your PR.
    c. If you are a developer within the organisation, please include the Jira
-      ticket number PR blurb, assign the ticket to your intended reviewer and
-      move the ticket to **Feedback Requested**.
+      ticket number in the PR blurb, assign the ticket to your intended reviewer
+      and move the ticket to **Feedback Requested**.
 
 4. This repo is monitored by the organisation's in-house Jenkins. It does an
    end-to-end build when a Pull Request is created. Please address any issues
