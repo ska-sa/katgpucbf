@@ -176,10 +176,14 @@ Raising the Pull Request
 
    a. If GitHub's Pull Request page indicates there are merge conflicts ahead
       (*Can't automatically merge*), please resolve any merge conflicts before
-      requesting a review of a developer.
-   b. If you are a developer within the organisation, you should have access
-      to Jira. Please move your ticket to **Feedback Requested** and assign it
-      to your intended reviewer.
+      requesting a review from a developer.
+   b. We provide a template for the Pull Request description. Please fill in
+      the template with as much detail as possible and complete the checklist
+      items as indicated. You may prefix a checklist item with `(n/a)` if an
+      item is not applicable to your PR.
+   c. If you are a developer within the organisation, please include the Jira
+      ticket number PR blurb, assign the ticket to your intended reviewer and
+      move the ticket to **Feedback Requested**.
 
 4. This repo is monitored by the organisation's in-house Jenkins. It does an
    end-to-end build when a Pull Request is created. Please address any issues
@@ -194,7 +198,7 @@ Raising the Pull Request
    step 5 until there is conclusion on Approval.
 
    a. Again, if you are in the organisation, please follow the process outlined
-      in **3a**.
+      in **3c**.
 
 7. Once you have received approval to merge, click **Merge pull request** with
    its default setting of "Create a merge commit". Please delete your branch
