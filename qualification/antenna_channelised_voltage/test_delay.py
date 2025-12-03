@@ -598,8 +598,8 @@ async def test_group_delay(
     with respect to angular frequency :math:`\omega`. To estimate the
     derivative by finite differences, the dsim is configured with two sine
     waves (one in each polarisation) with a small difference in frequency. The
-    difference needs to be carefully selected. If it too small, the effect is
-    dominated by quantisation effects. However, the group delay can only be
+    difference needs to be carefully selected. If it is too small, the effect
+    is dominated by quantisation effects. However, the group delay can only be
     determined modulo the period of the beat frequency, and hence the
     frequencies cannot be too far apart.
 
