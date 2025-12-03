@@ -173,26 +173,33 @@ Raising the Pull Request
    ``katgpucbf/main`` and select at least one reviewer from the (recent) 
    `katgpucbf contributors`_. A good rule of thumb is to request a review from
    the Team Lead, @bmerry.
+   
    a. If GitHub's Pull Request page indicates there are merge conflicts ahead
       (*Can't automatically merge*), please resolve any merge conflicts before
       requesting a review of a developer.
    b. If you are a developer within the organisation, you should have access
       to Jira. Please move your ticket to **Feedback Requested** and assign it
       to your intended reviewer.
+
 4. This repo is monitored by the organisation's in-house Jenkins. It does an
    end-to-end build when a Pull Request is created. Please address any issues
    or failures reported by Jenkins and update your Reviewers accordingly.
 5. Once you have received a review, respond to any comments and apply any
    requested changes/fixes.
+
    a. Your intended reviewer should move the Jira ticket associated with this
       PR back to *In Progress* and assign it back to you.
+
 6. Re-request a review of the Reviewers you've assigned to the PR and repeat
    step 5 until there is conclusion on Approval.
+
    a. Again, if you are in the organisation, please follow the process outlined
       in **3a**.
+
 7. Once you have received approval to merge, click **Merge pull request** with
    its default setting of "Create a merge commit". Please delete your branch
    after merging.
+
    a. Once more, if you are in the organisation you may now move your ticket
       to **Done**.
 
