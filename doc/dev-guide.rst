@@ -1,6 +1,6 @@
-.. _dev-environment:
+.. _dev-guide:
 
-Development Environment
+Development Guide
 =======================
 
 Setting up a development environment
@@ -78,6 +78,17 @@ to monitor Python development.
 .. _isort: https://pycqa.github.io/isort/
 .. _ruff: https://docs.astral.sh/ruff/
 
+Pre-commit compliance
+^^^^^^^^^^^^^^^^^^^^^
+
+Contributors who prefer to develop without pre-commit enabled will be required
+to ensure that any submissions pass all the checks described here before they
+can be accepted and merged.
+
+No judgement, we know pre-commit can be annoying if you're not used to it.
+This is in place in order to keep the code-base consistent so we can focus
+on the work at hand - rather than maintaining code readability and appearance.
+
 Installation Prerequisites
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -131,19 +142,8 @@ The module contains the following boiler-plate files:
 
 .. _uv pip compile: https://docs.astral.sh/uv/pip/compile/
 
-Preparing to raise a Pull Request
----------------------------------
-
-Pre-commit compliance
-^^^^^^^^^^^^^^^^^^^^^
-
-Contributors who prefer to develop without pre-commit enabled will be required
-to ensure that any submissions pass all the checks described here before they
-can be accepted and merged.
-
-No judgement, we know pre-commit can be annoying if you're not used to it.
-This is in place in order to keep the code-base consistent so we can focus
-on the work at hand - rather than maintaining code readability and appearance.
+Making the eventual contribution
+--------------------------------
 
 Module documentation updates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -163,3 +163,45 @@ root :mod:`katgpucbf` directory.
 
     The above command will likely generate a :file:`modules.rst` file, which is
     not necessary to commit.
+
+Raising the Pull Request
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Ensure you have the latest ``katgpucbf/main`` in your local directory.
+2. Develop your feature, addition or fix(es) on a branch off ``main``.
+3. When you are ready for it to be reviewed, create a `Pull Request`_ against
+   ``katgpucbf/main`` and select at least one reviewer from the (recent) 
+   `katgpucbf contributors`_. A good rule of thumb is to request a review from
+   the Team Lead, @bmerry.
+   a. If GitHub's Pull Request page indicates there are merge conflicts ahead
+      (*Can't automatically merge*), please resolve any merge conflicts before
+      requesting a review of a developer.
+   b. If you are a developer within the organisation, you should have access
+      to Jira. Please move your ticket to **Feedback Requested** and assign it
+      to your intended reviewer.
+4. This repo is monitored by the organisation's in-house Jenkins. It does an
+   end-to-end build when a Pull Request is created. Please address any issues
+   or failures reported by Jenkins and update your Reviewers accordingly.
+5. Once you have received a review, respond to any comments and apply any
+   requested changes/fixes.
+   a. Your intended reviewer should move the Jira ticket associated with this
+      PR back to *In Progress* and assign it back to you.
+6. Re-request a review of the Reviewers you've assigned to the PR and repeat
+   step 5 until there is conclusion on Approval.
+   a. Again, if you are in the organisation, please follow the process outlined
+      in **3a**.
+7. Once you have received approval to merge, click **Merge pull request** with
+   its default setting of "Create a merge commit". Please delete your branch
+   after merging.
+   a. Once more, if you are in the organisation you may now move your ticket
+      to **Done**.
+
+GitHub's Pull Request page and manner of reviewing may make it tough to trace
+comments (especially after content has changed). Please do not resolve comments
+until you (and your reviewer(s)) are absolutely sure the original comment has
+been addressed.
+  
+
+.. _Pull Request: https://github.com/ska-sa/katgpucbf/pulls
+.. _katgpucbf contributors: https://github.com/ska-sa/katgpucbf/graphs/contributors
+
