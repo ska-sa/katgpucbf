@@ -170,10 +170,10 @@ Raising the Pull Request
 1. Ensure you have the latest ``katgpucbf/main`` in your local directory.
 2. Develop your feature, addition or fix(es) on a branch off ``main``.
 3. When you are ready for it to be reviewed, create a `Pull Request`_ against
-   ``katgpucbf/main`` and select at least one reviewer from the (recent) 
+   ``katgpucbf/main`` and select at least one reviewer from the (recent)
    `katgpucbf contributors`_. A good rule of thumb is to request a review from
    the Team Lead, @bmerry.
-   
+
    a. If GitHub's Pull Request page indicates there are merge conflicts ahead
       (*Can't automatically merge*), please resolve any merge conflicts before
       requesting a review of a developer.
@@ -207,8 +207,7 @@ GitHub's Pull Request page and manner of reviewing may make it tough to trace
 comments (especially after content has changed). Please do not resolve comments
 until you (and your reviewer(s)) are absolutely sure the original comment has
 been addressed.
-  
+
 
 .. _Pull Request: https://github.com/ska-sa/katgpucbf/pulls
 .. _katgpucbf contributors: https://github.com/ska-sa/katgpucbf/graphs/contributors
-
