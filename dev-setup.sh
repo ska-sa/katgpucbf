@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Copyright (c) 2020-2022, 2024 National Research Foundation (SARAO)
+# Copyright (c) 2020-2022, 2024, 2025 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -18,10 +18,10 @@
 
 set -e # So we can stop on a failure instead of bumbling along.
 
-echo "Creating a virtual env for katgpucbf development"
-python3.12 -m venv .venv --prompt katgpucbf
-echo "Activating the virtual env"
-source .venv/bin/activate
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo "VIRTUAL_ENV not set. Please create and activate a Python virtualenv first." 1>&2
+    exit 1
+fi
 
 pip install --upgrade pip # stops pip from complaining
 pip install -c requirements-dev.txt wheel # Makes the process a bit slicker.
@@ -37,6 +37,4 @@ make -C doc html
 echo "Setting up pre-commit"
 pre-commit install
 
-# Print a different message based on whether you've sourced the
-# file. Works on bash, may not on other shells.
-(return 0 2>/dev/null) && echo "Done." || echo "Don't forget to source the new virtual env before you start!"
+echo "Done"
