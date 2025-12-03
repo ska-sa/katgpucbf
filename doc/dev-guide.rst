@@ -12,31 +12,32 @@ First, clone the repo from Github.
 
   git clone git@github.com:ska-sa/katgpucbf.git
 
+Next, create and activate a Python `virtual environment`_ for your work. While
+you can use Python's built-in virtual environment support, we recommend
+`pyenv`_ and `pyenv-virtualenv`_, which make it easy to manage different
+virtual environments and even different Python versions for different
+projects.
+
+.. _virtual environment: https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/#create-and-use-virtual-environments
+.. _pyenv: https://github.com/pyenv/pyenv
+.. _pyenv-virtualenv: https://github.com/pyenv/pyenv-virtualenv
+
+
 A setup script (:program:`dev-setup.sh`) is included for your convenience to
 get going.
 
 .. code-block:: bash
 
   cd katgpucbf
-  source dev-setup.sh
+  ./dev-setup.sh
 
 The script will perform the following actions:
 
-  - Create a fresh Python virtual environment.
   - Install all the requirements for running, developing and building this
     documentation.
   - Install the :mod:`katgpucbf` package itself, in editable mode.
   - Build this documentation.
   - Install :program:`pre-commit` to help with keeping things tidy.
-
-Sourcing the script instead of executing it directly will keep your virtual
-environment active, so you can get going straight away. Next time you want to
-work, navigate into the :mod:`katgpucbf` directory and source the virtual
-environment directly:
-
-.. code-block:: bash
-
-  source .venv/bin/activate
 
 And you are ready to start developing with :mod:`katgpucbf`!
 
@@ -47,7 +48,6 @@ And you are ready to start developing with :mod:`katgpucbf`!
   the package will be re-installed in editable mode. It's unlikely that any of
   this will be harmful in any way, but it will use up a few minutes. You
   probably won't want to do that every time.
-
 
 Pre-commit
 ----------
