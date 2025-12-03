@@ -12,10 +12,11 @@ First, clone the repo from Github.
 
   git clone git@github.com:ska-sa/katgpucbf.git
 
-Create and activate a Python `virtual environment`_ for your work. While you
-can use Python's built-in virtual environment support, we recommend `pyenv`_
-and `pyenv-virtualenv`_ which make it easy to manage different virtual
-environments and even different Python versions for different projects.
+Next, create and activate a Python `virtual environment`_ for your work. While
+you can use Python's built-in virtual environment support, we recommend
+`pyenv`_ and `pyenv-virtualenv`_, which make it easy to manage different
+virtual environments and even different Python versions for different
+projects.
 
 .. _virtual environment: https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/#create-and-use-virtual-environments
 .. _pyenv: https://github.com/pyenv/pyenv
