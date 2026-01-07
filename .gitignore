@@ -3,7 +3,15 @@
 .coverage
 .env
 .venv
+/bin
 /build
 /htmlcov
+/lib
+/lib64
+/share
+/reports
+coverage.xml
+pyvenv.cfg
+uv.lock
 __pycache__
 report.json
