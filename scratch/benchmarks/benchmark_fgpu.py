@@ -31,7 +31,7 @@ import asyncssh
 from katgpucbf import N_POLS
 
 from benchmark_tools import DEFAULT_IMAGE, PROMETHEUS_PORT_BASE, Benchmark
-from remote import Server, ServerInfo, run_tasks, servers_from_toml
+from remote import InsufficientCoresError, Server, ServerInfo, run_tasks, servers_from_toml
 
 KATCP_PORT_BASE = 7140
 
@@ -43,16 +43,23 @@ def dsim_factory(
     index: int,
     *,
     adc_sample_rate: float,
+    n: int,
     single_pol: bool,
     sync_time: int,
     args: argparse.Namespace,
 ) -> str:
     """Generate command to run dsim."""
-    ncpus = len(server_info.cpus)
-    step = ncpus // args.n
-    if single_pol:
-        step //= 2
-    my_cpus = server_info.cpus[index * step : (index + 1) * step]
+    # Use as many CPUs as we can to speed up startup. We need at least 3
+    # (main thread, network thread and worker thread).
+    cores_per_task = 3
+    while True:
+        try:
+            server_info.allocate_cores(n, cores_per_task + 1)
+        except InsufficientCoresError:
+            break
+        else:
+            cores_per_task += 1
+    cores = server_info.allocate_cores(n, cores_per_task)[index]
     if args.n == 1 or not single_pol:
         interface = server.interfaces[index % len(server.interfaces)]
     else:
@@ -68,11 +75,12 @@ def dsim_factory(
         addresses = f"239.102.{index}.64+7:7148 239.102.{index}.72+7:7148"
     command = (
         "docker run "
-        f"--name={name} --cap-add=SYS_NICE --net=host "
+        f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
         + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
         + f"--ulimit=memlock=-1 --rm {args.image} "
-        f"taskset -c {my_cpus[0]} "
-        f"dsim --affinity={my_cpus[1]} "
+        f"taskset -c {','.join(str(core) for core in cores[2:])} "
+        f"dsim --affinity={cores[0]} "
+        f"--main-affinity={cores[1]} "
         "--ibv "
         f"--interface={interface} "
         f"--adc-sample-rate={adc_sample_rate} "
@@ -105,27 +113,18 @@ def fgpu_factory(
     # When we run > 4, we assume we have enough RAM (GPU and host) that we
     # don't need to scale buffers down to tiny amounts.
     scaling_n = min(n, 4)
-    step = len(server_info.cpus) // n
-    hstep = step // 2
-    qstep = step // 4
-    my_cpus = server_info.cpus[index * step : (index + 1) * step]
     recv_chunk_samples = 2**27 // scaling_n
     send_chunk_jones = recv_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
-        recv_affinity = f"0,1,{qstep},{qstep + 1}"
-        send_affinity = f"{2 * qstep}"
-        other_affinity = f"{3 * qstep}"
-    elif n == 2:
-        interface = server.interfaces[index % len(server.interfaces)]
-        recv_affinity = f"{my_cpus[0]},{my_cpus[hstep]}"
-        send_affinity = f"{my_cpus[qstep]}"
-        other_affinity = f"{my_cpus[hstep + qstep]}"
+        recv_cores = 4
     else:
         interface = server.interfaces[index % len(server.interfaces)]
-        recv_affinity = f"{my_cpus[0]}"
-        send_affinity = f"{my_cpus[hstep]}"
-        other_affinity = f"{my_cpus[hstep + 1]}"
+        recv_cores = 2
+    cores = server_info.allocate_cores(n, recv_cores + 2)[index]
+    recv_affinity = ",".join(str(core) for core in cores[:-2])
+    send_affinity = str(cores[-2])
+    other_affinity = str(cores[-1])
     gpu = server.gpus[index % len(server.gpus)]
 
     katcp_port = KATCP_PORT_BASE + index
@@ -141,7 +140,7 @@ def fgpu_factory(
     wideband_arg = ",".join(f"{key}={value}" for key, value in wideband_kwargs.items())
     command = (
         "docker run "
-        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host "
+        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host --stop-timeout=2 "
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm "
         f" {' '.join(args.fgpu_docker_arg)} {args.image} "
         f"schedrr taskset -c {other_affinity} fgpu "
@@ -212,6 +211,7 @@ class FgpuBenchmark(Benchmark):
         factory = functools.partial(
             dsim_factory,
             adc_sample_rate=adc_sample_rate,
+            n=n,
             single_pol=single_pol,
             sync_time=sync_time,
             args=self.args,
@@ -224,6 +224,7 @@ class FgpuBenchmark(Benchmark):
             port_base=KATCP_PORT_BASE,
             verbose=self.args.verbose,
             timeout=self.args.init_time,
+            pull=self.args.pull,
         )
 
     async def run_consumers(
@@ -250,6 +251,7 @@ class FgpuBenchmark(Benchmark):
             port_base=KATCP_PORT_BASE,
             verbose=self.args.verbose,
             timeout=self.args.init_time,
+            pull=self.args.pull,
         )
 
 
@@ -311,6 +313,7 @@ async def main():
     parser.add_argument("--interval", type=float, default=20e6, help="Target confidence interval [%(default)s]")
     parser.add_argument("--max-comparisons", type=int, default=40, help="Maximum comparisons to make [%(default)s]")
     parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
+    parser.add_argument("--no-pull", dest="pull", action="store_false", help="Do not pull Docker image")
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--dsim-server", type=str, default="dsim", help="Server on which to run dsims [%(default)s]")
     parser.add_argument("--fgpu-server", type=str, default="fgpu", help="Server on which to run fgpu [%(default)s]")

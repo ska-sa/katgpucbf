@@ -59,24 +59,22 @@ def fsim_factory(
     args: argparse.Namespace,
 ) -> str:
     """Generate command to run fsim."""
-    ncpus = len(server_info.cpus)
-    step = ncpus // args.n
-    my_cpus = server_info.cpus[index * step : (index + 1) * step]
+    cores = server_info.allocate_cores(args.n, 2)[index]
     interface = server.interfaces[index % len(server.interfaces)]
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fsim-{index}"
     info = StreamInfo(args, adc_sample_rate)
     command = (
         "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
-        f"--name={name} --cap-add=SYS_NICE --net=host "
+        f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
         + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
         + f"--ulimit=memlock=-1 --rm {args.image} "
-        f"schedrr taskset -c {my_cpus[1]} fsim "
+        f"schedrr taskset -c {cores[1]} fsim "
         "--ibv "
         f"--interface={interface} "
         f"--sync-time={sync_time} "
-        f"--affinity={my_cpus[0]} "
-        f"--main-affinity={my_cpus[1]} "
+        f"--affinity={cores[0]} "
+        f"--main-affinity={cores[1]} "
         f"--prometheus-port={prometheus_port} "
         f"--adc-sample-rate={adc_sample_rate} "
         f"--array-size={args.array_size} "
@@ -100,10 +98,7 @@ def xbgpu_factory(
     args: argparse.Namespace,
 ) -> str:
     """Generate command to run xbgpu."""
-    ncpus = len(server_info.cpus)
-    step = ncpus // args.n
-    # TODO: For non-power-of-two args.n, we should rather align to L3 caches
-    my_cpus = server_info.cpus[index * step : (index + 1) * step]
+    cores = server_info.allocate_cores(args.n, 2)[index]
     interface = server.interfaces[index % len(server.interfaces)]
     gpu = server.gpus[index % len(server.gpus)]
     katcp_port = KATCP_PORT_BASE + index
@@ -125,7 +120,7 @@ def xbgpu_factory(
         "--stop-timeout=2 "
         f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host "
         f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {args.image} "
-        f"schedrr taskset -c {my_cpus[1]} xbgpu "
+        f"schedrr taskset -c {cores[1]} xbgpu "
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
         f"--adc-sample-rate={adc_sample_rate} "
@@ -138,12 +133,12 @@ def xbgpu_factory(
         f"--sample-bits={SAMPLE_BITS} "
         f"--heaps-per-fengine-per-chunk={batches_per_chunk} "
         f"--sync-time={sync_time} "
-        f"--recv-affinity={my_cpus[0]} "
-        f"--recv-comp-vector={my_cpus[0]} "
+        f"--recv-affinity={cores[0]} "
+        f"--recv-comp-vector={cores[0]} "
         f"--recv-interface={interface} "
         f"--recv-ibv "
-        f"--send-affinity={my_cpus[1]} "
-        f"--send-comp-vector={my_cpus[1]} "
+        f"--send-affinity={cores[1]} "
+        f"--send-comp-vector={cores[1]} "
         f"--send-interface={interface} "
         f"--send-ibv "
         f"--send-enabled "
@@ -186,6 +181,7 @@ class XbgpuBenchmark(Benchmark):
             port_base=None,
             verbose=self.args.verbose,
             timeout=self.args.init_time,
+            pull=self.args.pull,
         )
 
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
@@ -203,6 +199,7 @@ class XbgpuBenchmark(Benchmark):
             port_base=KATCP_PORT_BASE,
             verbose=self.args.verbose,
             timeout=self.args.init_time,
+            pull=self.args.pull,
         )
 
 
@@ -239,6 +236,7 @@ async def main():
         help="Jones vectors in each output batch [%(default)s]",
     )
     parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
+    parser.add_argument("--no-pull", dest="pull", action="store_false", help="Do not pull Docker image")
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--fsim-server", type=str, default="fsim", help="Server on which to run fsims [%(default)s]")
     parser.add_argument("--xbgpu-server", type=str, default="xbgpu", help="Server on which to run xbgpu [%(default)s]")
