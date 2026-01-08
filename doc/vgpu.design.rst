@@ -25,7 +25,7 @@ the send side we want to send packets continuously at a steady rate rather
 than bursts with gaps between. On the receive side that happens naturally due
 to spead2's design, with a separate thread handling reception of packets and
 assembly into chunks. On the send side the overlap is created by the
-:class:`.AsNumpy` class, which proactively starts transferring chunks from
+:class:`~katcbf_vlbi_resample.cupy_bridge.AsNumpy` class, which proactively starts transferring chunks from
 upstream before they are requested.
 
 .. [#] There is no need to do so, because the data rates are quite low and so
