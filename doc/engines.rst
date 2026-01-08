@@ -292,11 +292,7 @@ The ``on_stop`` procedure is broadly similar between the dsim, fgpu and xbgpu.
 
 * The ``dsim`` simply stops its internal calculation and sending processes of
   data and descriptors respectively.
-* ``fgpu`` and ``xbgpu`` both stop their respective
+* ``fgpu``, ``xbgpu`` and ``vgpu`` stop their respective
   :external+spead2:doc:`spead2 receivers <recv-chunk>`, which allows for a more
-  natural ending of internal processing operations.
-
-  *  Each stage of processing passes a `None`-type on to the next stage,
-  *  Eventually resulting in the engine sending a
-     :external+spead2:doc:`SPEAD stop heap <py-protocol>` across its output
-     streams.
+  natural ending of internal processing operations. Each stage of processing
+  passes a `None`-type on to the next stage as it shuts down.
