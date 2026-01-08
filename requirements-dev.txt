@@ -8,7 +8,7 @@ aiohappyeyeballs==2.6.1
     # via
     #   -c requirements.txt
     #   aiohttp
-aiohttp==3.12.15
+aiohttp==3.13.3
     # via
     #   -c requirements.txt
     #   aiomonitor
@@ -98,7 +98,7 @@ execnet==2.1.1
     # via pytest-xdist
 executing==2.2.1
     # via stack-data
-filelock==3.19.1
+filelock==3.20.2
     # via virtualenv
 frozenlist==1.7.0
     # via
@@ -433,7 +433,7 @@ tzdata==2025.2
     # via
     #   -c requirements.txt
     #   pandas
-urllib3==2.5.0
+urllib3==2.6.2
     # via requests
 uv==0.9.8
     # via -r requirements-dev.in

@@ -4,7 +4,7 @@ aioconsole==0.8.1
     # via aiomonitor
 aiohappyeyeballs==2.6.1
     # via aiohttp
-aiohttp==3.12.15
+aiohttp==3.13.3
     # via
     #   aiomonitor
     #   prometheus-async
