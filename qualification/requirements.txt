@@ -312,7 +312,7 @@ pyparsing==3.2.5
     #   -c qualification/../requirements.txt
     #   katgpucbf (pyproject.toml)
     #   matplotlib
-pytest==8.4.2
+pytest==9.0.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   -r qualification/requirements.in
@@ -321,7 +321,7 @@ pytest==8.4.2
     #   pytest-check
     #   pytest-custom-exit-code
     #   pytest-reportlog
-pytest-asyncio==1.2.0
+pytest-asyncio==1.3.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (pyproject.toml)

@@ -5,5 +5,7 @@
 .venv
 /build
 /htmlcov
+/reports
 __pycache__
+coverage.xml
 report.json
