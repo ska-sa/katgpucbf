@@ -46,7 +46,7 @@ def mock_recv_streams(monkeypatch: pytest.MonkeyPatch, n_recv_streams: int) -> l
         interface: str | None,
         ibv: bool,
         comp_vector: int,
-        buffer: int,
+        buffer_size: int,
     ) -> None:
         """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
         queue = next(queue_iter)

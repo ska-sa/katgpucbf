@@ -284,7 +284,7 @@ def make_streams(
     ibv: bool,
     packet_payload: int,
     comp_vector: int,
-    buffer: int,
+    buffer_size: int,
     bandwidth: float,
     send_rate_factor: float,
     feng_id: int,
@@ -325,7 +325,7 @@ def make_streams(
                 ttl=ttl,
                 comp_vector=comp_vector,
                 memory_regions=memory_regions,
-                buffer_size=buffer // len(interfaces),
+                buffer_size=buffer_size // len(interfaces),
             )
             for interface in interfaces
         ]
@@ -338,7 +338,7 @@ def make_streams(
                 config,
                 ttl=ttl,
                 interface_address=interface,
-                buffer_size=buffer // len(interfaces),
+                buffer_size=buffer_size // len(interfaces),
             )
             for interface in interfaces
         ]

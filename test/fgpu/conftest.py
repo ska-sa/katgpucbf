@@ -59,7 +59,7 @@ def mock_recv_stream(monkeypatch: pytest.MonkeyPatch) -> spead2.InprocQueue:
         interface: str | None,
         ibv: bool,
         comp_vector: int,
-        buffer: int,
+        buffer_size: int,
     ) -> None:
         """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
         nonlocal have_reader

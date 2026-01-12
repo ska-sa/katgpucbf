@@ -402,7 +402,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 output_names=[output.name for output in outputs],
                 endpoints=[output.dst for output in outputs],
                 interface=engine.send_interface,
-                buffer=engine.send_buffer,
+                buffer_size=engine.send_buffer,
                 ttl=engine.send_ttl,
                 use_ibv=engine.send_ibv,
                 affinity=engine.send_affinity,
@@ -728,7 +728,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                 dest_ip=output.dst.host,
                 dest_port=output.dst.port,
                 interface_ip=engine.send_interface,
-                buffer=engine.send_buffer,
+                buffer_size=engine.send_buffer,
                 ttl=engine.send_ttl,
                 use_ibv=engine.send_ibv,
                 affinity=engine.send_affinity,
@@ -1499,7 +1499,7 @@ class XBEngine(Engine):
             interface=self._recv_interface,
             ibv=self._recv_ibv,
             comp_vector=self._recv_comp_vector,
-            buffer=self._recv_buffer,
+            buffer_size=self._recv_buffer,
         )
 
         self.add_service_task(

@@ -88,7 +88,7 @@ async def main() -> None:
 
     srcs = [(ep.host, ep.port) for ep in args.src]
     katgpucbf.recv.add_reader(
-        stream, src=srcs, interface=args.interface, ibv=args.ibv, comp_vector=12, buffer=32 * 1024 * 1024
+        stream, src=srcs, interface=args.interface, ibv=args.ibv, comp_vector=12, buffer_size=32 * 1024 * 1024
     )
     async for chunk in data_ringbuffer:  # type: ignore
         with chunk:

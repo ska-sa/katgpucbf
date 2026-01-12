@@ -128,7 +128,7 @@ def send_streams(
             ibv=False,
             packet_payload=8192,
             comp_vector=0,
-            buffer=65536,
+            buffer_size=65536,
             bandwidth=0.5 * ADC_SAMPLE_RATE,
             send_rate_factor=0.0,  # Just send as fast as possible
             feng_id=FENG_ID,

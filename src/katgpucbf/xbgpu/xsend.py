@@ -129,7 +129,7 @@ def make_stream(
     dest_ip: str,
     dest_port: int,
     interface_ip: str,
-    buffer: int,  # TODO: We already define a buffer array for ibv, would we be able to consolidate into one param?
+    buffer_size: int,  # TODO: We already define a buffer array for ibv, would we be able to consolidate into one param?
     ttl: int,
     use_ibv: bool,
     affinity: int,
@@ -160,7 +160,7 @@ def make_stream(
             stream_config,
             interface_address=interface_ip,
             ttl=ttl,
-            buffer_size=buffer,
+            buffer_size=buffer_size,
         )
 
     # Reference the labels causing them to be created in

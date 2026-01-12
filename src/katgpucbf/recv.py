@@ -468,7 +468,7 @@ def add_reader(
     interface: str | None,
     ibv: bool,
     comp_vector: int,
-    buffer: int,
+    buffer_size: int,
 ) -> None:
     """Connect a stream to an underlying transport.
 
@@ -483,12 +483,12 @@ def add_reader(
         ibv_config = spead2.recv.UdpIbvConfig(
             endpoints=src,
             interface_address=interface,
-            buffer_size=buffer,
+            buffer_size=buffer_size,
             comp_vector=comp_vector,
         )
         stream.add_udp_ibv_reader(ibv_config)
     else:
-        buffer_size = buffer // len(src)  # split it across the endpoints
+        buffer_size = buffer_size // len(src)  # split it across the endpoints
         for endpoint in src:
             stream.add_udp_reader(
                 endpoint[0],

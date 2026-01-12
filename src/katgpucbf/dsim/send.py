@@ -160,7 +160,7 @@ def make_stream_base(
     *,
     config: spead2.send.StreamConfig,
     endpoints: Iterable[tuple[str, int]],
-    buffer: int,
+    buffer_size: int,
     ttl: int,
     interface_address: str,
     ibv: bool = False,
@@ -187,7 +187,7 @@ def make_stream_base(
         return spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config)
     elif any(_is_multicast(endpoint[0]) for endpoint in endpoints_list):
         return spead2.send.asyncio.UdpStream(
-            thread_pool, endpoints_list, config, ttl=ttl, interface_address=interface_address, buffer_size=buffer
+            thread_pool, endpoints_list, config, ttl=ttl, interface_address=interface_address, buffer_size=buffer_size
         )
     else:
         return spead2.send.asyncio.UdpStream(thread_pool, endpoints_list, config)
@@ -247,7 +247,7 @@ def make_stream(
     return make_stream_base(
         config=config,
         endpoints=endpoints,
-        buffer=buffer_size,
+        buffer_size=buffer_size,
         ttl=ttl,
         interface_address=interface_address,
         ibv=ibv,

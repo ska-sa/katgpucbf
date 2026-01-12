@@ -175,7 +175,7 @@ class VEngine(Engine):
                 interface=self._recv_interface,
                 ibv=self._recv_ibv,
                 comp_vector=self._recv_comp_vector,
-                buffer=self._recv_buffer // len(self._recv_group),
+                buffer_size=self._recv_buffer // len(self._recv_group),
             )
 
         recv_task = asyncio.create_task(self._run_receive(), name=RECV_TASK_NAME)
