@@ -6,7 +6,7 @@ aiohappyeyeballs==2.6.1
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   aiohttp
-aiohttp==3.12.15
+aiohttp==3.13.3
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
