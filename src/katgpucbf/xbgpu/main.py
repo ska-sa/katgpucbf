@@ -288,6 +288,7 @@ def make_engine(
         recv_comp_vector=args.recv_comp_vector,
         recv_buffer=args.recv_buffer,
         send_interface=args.send_interface,
+        send_buffer=args.send_buffer,
         send_ttl=args.send_ttl,
         send_ibv=args.send_ibv,
         send_packet_payload=args.send_packet_payload,

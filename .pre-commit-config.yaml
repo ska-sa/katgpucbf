@@ -22,7 +22,7 @@ repos:
     hooks:
       - id: mypy
         # Passing filenames to mypy can do odd things. See
-        # https://github.com/pre-commit/mirrors-mypy/issues/33.
+        # https://github.com/pre-commit/mirrors-mypy/issues/33. <- dead link
         # mypy.ini determines the set of files that will actually be checked.
         pass_filenames: false
         # The pre-commit hook passes some options, but we set options in mypy.ini.

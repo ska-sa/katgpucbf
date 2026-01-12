@@ -165,6 +165,7 @@ async def start_engine(
     descriptor_stream = send.make_stream_base(
         endpoints=endpoints,
         config=config,
+        buffer=args.send_buffer,
         ttl=args.ttl,
         interface_address=args.interface,
         ibv=args.ibv,
@@ -199,6 +200,7 @@ async def start_engine(
         heap_samples=args.heap_samples,
         sample_bits=args.sample_bits,
         max_heaps=heap_sets[0].data["heaps"].size,
+        buffer_size=args.send_buffer,
         ttl=args.ttl,
         interface_address=args.interface,
         ibv=args.ibv,

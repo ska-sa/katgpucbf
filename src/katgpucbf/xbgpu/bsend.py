@@ -528,6 +528,7 @@ def make_stream(
     ttl: int,
     use_ibv: bool,
     affinity: int,
+    buffer: int,
     comp_vector: int,
     stream_config: spead2.send.StreamConfig,
     buffers: Sequence[np.ndarray],
@@ -560,6 +561,7 @@ def make_stream(
             stream_config,
             interface_address=interface,
             ttl=ttl,
+            buffer_size=buffer,
         )
     # Referencing the labels causes them to be created, in advance of data
     # actually being transmitted.

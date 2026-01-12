@@ -290,6 +290,13 @@ def add_send_arguments(
     parser.add_argument(
         f"--{prefix}ttl", type=int, default=DEFAULT_TTL, metavar="TTL", help="TTL for outgoing packets [%(default)s]"
     )
+    parser.add_argument(
+        "--send-buffer",
+        type=int,
+        default=1024 * 1024,
+        metavar="BYTES",
+        help="Size of network send buffer [1MiB]",
+    )
     if ibverbs:
         parser.add_argument(f"--{prefix}ibv", action="store_true", help="Use ibverbs for output [no]")
         parser.add_argument(
