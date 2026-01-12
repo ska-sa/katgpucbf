@@ -89,7 +89,7 @@ class ServerInfo:
         return cls(cpus=cpus, infiniband_devices=infiniband_devices)
 
     def _allocate_cores(
-        self, tasks: int, cores_per_task: int, l3_step: int, share: bool, split: bool
+        self, n_tasks: int, cores_per_task: int, l3_step: int, share: bool, split: bool
     ) -> list[list[int]]:
         """Make one attempt at :meth:`allocate_cores`.
 
@@ -100,14 +100,14 @@ class ServerInfo:
         cpus = self.cpus[::l3_step]
         out = []
         buf: list[int] = []  # Buffer of available cores from an L3 cache
-        for _ in range(tasks):
+        for _ in range(n_tasks):
             task: list[int] = []
             while len(task) < cores_per_task:
                 need = cores_per_task - len(task)
                 if len(buf) < need:
                     if not cpus:
                         raise InsufficientCoresError(
-                            f"could not allocate {tasks} tasks with {cores_per_task} cores each"
+                            f"could not allocate {n_tasks} tasks with {cores_per_task} cores each"
                         )
                     if not buf or (not split and len(cpus[0]) >= need):
                         buf = list(cpus[0])  # Copy it so we can safely delete from it
@@ -121,8 +121,8 @@ class ServerInfo:
             out.append(task)
         return out
 
-    def allocate_cores(self, tasks: int, cores_per_task: int) -> list[list[int]]:
-        """Assign `cores_per_task` to each of `tasks` tasks.
+    def allocate_cores(self, n_tasks: int, cores_per_task: int) -> list[list[int]]:
+        """Assign `cores_per_task` to each of `n_tasks` tasks.
 
         This will:
 
@@ -143,17 +143,17 @@ class ServerInfo:
         # as far as possible.
         for l3_step in range(len(self.cpus), 0, -1):
             try:
-                return self._allocate_cores(tasks, cores_per_task, l3_step, False, False)
+                return self._allocate_cores(n_tasks, cores_per_task, l3_step, False, False)
             except InsufficientCoresError:
                 pass
         # If that didn't work, allow sharing, but try to avoid splitting tasks
         # across caches unnecessarily.
         try:
-            return self._allocate_cores(tasks, cores_per_task, 1, False, True)
+            return self._allocate_cores(n_tasks, cores_per_task, 1, False, True)
         except InsufficientCoresError:
             pass
         # Last chance: pack things as tightly as possible
-        return self._allocate_cores(tasks, cores_per_task, 1, True, True)
+        return self._allocate_cores(n_tasks, cores_per_task, 1, True, True)
 
 
 async def kill_process(process: asyncssh.SSHClientProcess) -> None:
