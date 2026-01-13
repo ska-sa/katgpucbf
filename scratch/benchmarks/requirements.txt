@@ -18,9 +18,9 @@ aiosignal==1.4.0
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   aiohttp
-asyncssh==2.21.0
+asyncssh==2.22.0
     # via -r scratch/benchmarks/requirements.in
-attrs==25.3.0
+attrs==25.4.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
@@ -30,29 +30,29 @@ cffi==2.0.0
     # via
     #   -c scratch/benchmarks/../../requirements.txt
     #   cryptography
-cryptography==46.0.1
+cryptography==46.0.3
     # via asyncssh
-frozenlist==1.7.0
+frozenlist==1.8.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   aiohttp
     #   aiosignal
-idna==3.10
+idna==3.11
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   yarl
-multidict==6.6.4
+multidict==6.7.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   aiohttp
     #   yarl
-numpy==2.3.3
+numpy==2.3.5
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
@@ -68,22 +68,22 @@ packaging==25.0
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   statsmodels
-pandas==2.3.2
+pandas==2.3.3
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   -r scratch/benchmarks/requirements.in
     #   statsmodels
-patsy==1.0.1
+patsy==1.0.2
     # via statsmodels
-prometheus-client==0.23.1
+prometheus-client==0.24.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   -r scratch/benchmarks/requirements.in
-propcache==0.3.2
+propcache==0.4.1
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
@@ -106,7 +106,7 @@ pytz==2025.2
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   pandas
-scipy==1.16.2
+scipy==1.17.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
@@ -119,7 +119,7 @@ six==1.17.0
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   python-dateutil
-statsmodels==0.14.5
+statsmodels==0.14.6
     # via -r scratch/benchmarks/requirements.in
 typing-extensions==4.15.0
     # via
@@ -128,13 +128,13 @@ typing-extensions==4.15.0
     #   -c scratch/benchmarks/../../requirements.txt
     #   aiosignal
     #   asyncssh
-tzdata==2025.2
+tzdata==2025.3
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   pandas
-yarl==1.20.1
+yarl==1.22.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
     #   -c scratch/benchmarks/../../requirements-dev.txt
