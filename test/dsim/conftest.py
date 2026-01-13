@@ -70,7 +70,6 @@ def send_stream(
         return send.make_stream(
             endpoints=[("invalid", -1) for _ in inproc_queues],
             heap_sets=[],  # Only needed for UdpIbvStream, which we're not using
-            buffer_size=1024 * 1024,
             n_pols=N_POLS,
             adc_sample_rate=ADC_SAMPLE_RATE,
             heap_samples=DIG_HEAP_SAMPLES,
@@ -81,6 +80,7 @@ def send_stream(
             ibv=False,
             affinity=-1,
             comp_vector=0,
+            buffer_size=1024 * 1024,
         )
 
 
@@ -147,9 +147,9 @@ def descriptor_send_stream(
         return send.make_stream_base(
             endpoints=[("invalid", -1) for _ in descriptor_inproc_queues],
             config=config,
-            buffer_size=1024 * 1024,
             ttl=4,
             interface_address="",
+            buffer_size=1024 * 1024,
         )
 
 

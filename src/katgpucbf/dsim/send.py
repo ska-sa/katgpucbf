@@ -160,12 +160,12 @@ def make_stream_base(
     *,
     config: spead2.send.StreamConfig,
     endpoints: Iterable[tuple[str, int]],
-    buffer_size: int,
     ttl: int,
     interface_address: str,
     ibv: bool = False,
     affinity: int = -1,
     comp_vector: int = 0,
+    buffer_size: int,
     memory_regions: list | None = None,
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create a spead2 stream for sending.
@@ -197,7 +197,6 @@ def make_stream(
     *,
     endpoints: Iterable[tuple[str, int]],
     heap_sets: Iterable[HeapSet],
-    buffer_size: int,
     n_pols: int,
     adc_sample_rate: float,
     heap_samples: int,
@@ -208,6 +207,7 @@ def make_stream(
     ibv: bool,
     affinity: int,
     comp_vector: int,
+    buffer_size: int,
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create a spead2 stream for sending.
 
@@ -247,12 +247,12 @@ def make_stream(
     return make_stream_base(
         config=config,
         endpoints=endpoints,
-        buffer_size=buffer_size,
         ttl=ttl,
         interface_address=interface_address,
         ibv=ibv,
         affinity=affinity,
         comp_vector=comp_vector,
+        buffer_size=buffer_size,
         memory_regions=[heap_set.data["payload"].data for heap_set in heap_sets],
     )
 

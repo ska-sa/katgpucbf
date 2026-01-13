@@ -129,11 +129,11 @@ def make_stream(
     dest_ip: str,
     dest_port: int,
     interface_ip: str,
-    buffer_size: int,  # TODO: We already define a buffer array for ibv, would we be able to consolidate into one param?
     ttl: int,
     use_ibv: bool,
     affinity: int,
     comp_vector: int,
+    buffer_size: int,
     stream_config: spead2.send.StreamConfig,
     buffers: Sequence[np.ndarray],
 ) -> "spead2.send.asyncio.AsyncStream":
