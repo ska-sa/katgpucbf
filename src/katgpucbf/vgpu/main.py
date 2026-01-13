@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2025 National Research Foundation (SARAO)
+# Copyright (c) 2025-2026 National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -71,7 +71,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Timestamp increment between spectra",
     )
     parser.add_argument(
-        "--recv-batches-per-chunk", type=int, metavar="BATCHES", default=1, help="Number of batches per input chunk"
+        "--recv-batches-per-chunk", type=int, metavar="BATCHES", default=32, help="Number of batches per input chunk"
     )
     parser.add_argument(
         "--recv-sample-bits",
