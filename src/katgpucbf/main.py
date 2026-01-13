@@ -38,7 +38,16 @@ from katsdpservices import get_interface_address
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from . import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, __version__, spead, utils
+from . import (
+    DEFAULT_KATCP_HOST,
+    DEFAULT_KATCP_PORT,
+    DEFAULT_RECV_BUFFER_SIZE,
+    DEFAULT_SEND_BUFFER_SIZE,
+    DEFAULT_TTL,
+    __version__,
+    spead,
+    utils,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +258,7 @@ def add_recv_arguments(parser: argparse.ArgumentParser, *, multi: bool = False) 
     parser.add_argument(
         "--recv-buffer",
         type=int,
-        default=128 * 1024 * 1024,
+        default=DEFAULT_RECV_BUFFER_SIZE,
         metavar="BYTES",
         help="Size of network receive buffer [128MiB]",
     )
@@ -293,7 +302,7 @@ def add_send_arguments(
     parser.add_argument(
         "--send-buffer",
         type=int,
-        default=1024 * 1024,
+        default=DEFAULT_SEND_BUFFER_SIZE,
         metavar="BYTES",
         help="Size of network send buffer [1MiB]",
     )

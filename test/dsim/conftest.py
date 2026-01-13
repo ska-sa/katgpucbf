@@ -23,7 +23,15 @@ import pytest
 import spead2.recv.asyncio
 import spead2.send.asyncio
 
-from katgpucbf import BYTE_BITS, DEFAULT_TTL, DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S, spead
+from katgpucbf import (
+    BYTE_BITS,
+    DEFAULT_SEND_BUFFER_SIZE,
+    DEFAULT_TTL,
+    DIG_HEAP_SAMPLES,
+    DIG_SAMPLE_BITS,
+    SPEAD_DESCRIPTOR_INTERVAL_S,
+    spead,
+)
 from katgpucbf.dsim import descriptors, send
 from katgpucbf.send import DescriptorSender
 
@@ -80,7 +88,7 @@ def send_stream(
             ibv=False,
             affinity=-1,
             comp_vector=0,
-            buffer_size=1024 * 1024,
+            buffer_size=DEFAULT_SEND_BUFFER_SIZE,
         )
 
 
