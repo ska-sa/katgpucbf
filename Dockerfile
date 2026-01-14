@@ -134,6 +134,9 @@ FROM build-base AS build-py-requirements
 WORKDIR /tmp/katgpucbf
 RUN pip install -r requirements.txt
 
+# HACK DO NOT COMMIT. Install a branch of spead2
+RUN pip uninstall -y spead2 && pip install 'spead2@git+https://github.com/ska-sa/spead2@fix-too-old-heaps'
+
 #######################################################################
 
 FROM build-base AS build-py
@@ -176,7 +179,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
     ibverbs-providers \
     libcap2 \
     libcap2-bin \
-    netbase
+    netbase \
+    libpcap0.8
 
 ENV PATH=/venv/bin:$PATH KATSDPSIGPROC_TUNE_MATCH=nearest
 
