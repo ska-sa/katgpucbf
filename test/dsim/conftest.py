@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, 2024-2025, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, 2024-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,7 +23,15 @@ import pytest
 import spead2.recv.asyncio
 import spead2.send.asyncio
 
-from katgpucbf import BYTE_BITS, DEFAULT_TTL, DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S, spead
+from katgpucbf import (
+    BYTE_BITS,
+    DEFAULT_SEND_BUFFER_SIZE,
+    DEFAULT_TTL,
+    DIG_HEAP_SAMPLES,
+    DIG_SAMPLE_BITS,
+    SPEAD_DESCRIPTOR_INTERVAL_S,
+    spead,
+)
 from katgpucbf.dsim import descriptors, send
 from katgpucbf.send import DescriptorSender
 
@@ -80,6 +88,7 @@ def send_stream(
             ibv=False,
             affinity=-1,
             comp_vector=0,
+            buffer_size=DEFAULT_SEND_BUFFER_SIZE,
         )
 
 
@@ -148,6 +157,7 @@ def descriptor_send_stream(
             config=config,
             ttl=4,
             interface_address="",
+            buffer_size=1024 * 1024,
         )
 
 

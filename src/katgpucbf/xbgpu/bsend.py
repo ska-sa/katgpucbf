@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023-2025, National Research Foundation (SARAO)
+# Copyright (c) 2023-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -528,6 +528,7 @@ def make_stream(
     ttl: int,
     use_ibv: bool,
     affinity: int,
+    buffer_size: int,
     comp_vector: int,
     stream_config: spead2.send.StreamConfig,
     buffers: Sequence[np.ndarray],
@@ -560,6 +561,7 @@ def make_stream(
             stream_config,
             interface_address=interface,
             ttl=ttl,
+            buffer_size=buffer_size,
         )
     # Referencing the labels causes them to be created, in advance of data
     # actually being transmitted.

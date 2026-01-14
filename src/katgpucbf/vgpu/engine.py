@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2025, National Research Foundation (SARAO)
+# Copyright (c) 2025-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -175,7 +175,7 @@ class VEngine(Engine):
                 interface=self._recv_interface,
                 ibv=self._recv_ibv,
                 comp_vector=self._recv_comp_vector,
-                buffer=self._recv_buffer // len(self._recv_group),
+                buffer_size=self._recv_buffer // len(self._recv_group),
             )
 
         recv_task = asyncio.create_task(self._run_receive(), name=RECV_TASK_NAME)

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -1450,7 +1450,7 @@ class FEngine(Engine):
             ibv=self._send_ibv,
             packet_payload=self._send_packet_payload,
             comp_vector=self._send_comp_vector,
-            buffer=self._send_buffer,
+            buffer_size=self._send_buffer,
             bandwidth=self.adc_sample_rate * 0.5 / output.decimation,
             send_rate_factor=self._send_rate_factor,
             feng_id=self.feng_id,
@@ -1791,7 +1791,7 @@ class FEngine(Engine):
                     interface=next(recv_interface_iter),
                     ibv=self._recv_ibv,
                     comp_vector=next(recv_comp_vector_iter),
-                    buffer=self._recv_buffer // len(self._recv_group),
+                    buffer_size=self._recv_buffer // len(self._recv_group),
                 )
 
         recv_task = asyncio.create_task(

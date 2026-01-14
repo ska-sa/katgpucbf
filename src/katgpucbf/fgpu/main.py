@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -179,15 +179,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         metavar="BYTES",
         help="Size for output packets (voltage payload only) [%(default)s]",
-    )
-    # TODO (NGC-1758): add this argument to xbgpu/dsim so it can be
-    # incorporated into add_send_arguments.
-    parser.add_argument(
-        "--send-buffer",
-        type=int,
-        default=1024 * 1024,
-        metavar="BYTES",
-        help="Size of network send buffer [1MiB]",
     )
     add_time_converter_arguments(parser)
     parser.add_argument(

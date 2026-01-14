@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -406,6 +406,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 use_ibv=engine.send_ibv,
                 affinity=engine.send_affinity,
                 comp_vector=engine.send_comp_vector,
+                buffer_size=engine.send_buffer,
                 stream_config=stream_config,
                 buffers=buffers,
             ),
@@ -731,6 +732,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                 use_ibv=engine.send_ibv,
                 affinity=engine.send_affinity,
                 comp_vector=engine.send_comp_vector,
+                buffer_size=engine.send_buffer,
                 stream_config=stream_config,
                 buffers=buffers,
             ),
@@ -1132,6 +1134,7 @@ class XBEngine(Engine):
         recv_comp_vector: int,
         recv_buffer: int,
         send_interface: str,
+        send_buffer: int,
         send_ttl: int,
         send_ibv: bool,
         send_packet_payload: int,
@@ -1168,6 +1171,7 @@ class XBEngine(Engine):
         self._recv_comp_vector = recv_comp_vector
 
         self.send_interface = send_interface
+        self.send_buffer = send_buffer
         self.send_ttl = send_ttl
         self.send_ibv = send_ibv
         self.send_packet_payload = send_packet_payload
@@ -1495,7 +1499,7 @@ class XBEngine(Engine):
             interface=self._recv_interface,
             ibv=self._recv_ibv,
             comp_vector=self._recv_comp_vector,
-            buffer=self._recv_buffer,
+            buffer_size=self._recv_buffer,
         )
 
         self.add_service_task(

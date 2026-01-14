@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2025, National Research Foundation (SARAO)
+# Copyright (c) 2021-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -165,6 +165,7 @@ def make_stream_base(
     ibv: bool = False,
     affinity: int = -1,
     comp_vector: int = 0,
+    buffer_size: int,
     memory_regions: list | None = None,
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create a spead2 stream for sending.
@@ -186,7 +187,7 @@ def make_stream_base(
         return spead2.send.asyncio.UdpIbvStream(thread_pool, config, ibv_config)
     elif any(_is_multicast(endpoint[0]) for endpoint in endpoints_list):
         return spead2.send.asyncio.UdpStream(
-            thread_pool, endpoints_list, config, ttl=ttl, interface_address=interface_address
+            thread_pool, endpoints_list, config, ttl=ttl, interface_address=interface_address, buffer_size=buffer_size
         )
     else:
         return spead2.send.asyncio.UdpStream(thread_pool, endpoints_list, config)
@@ -206,6 +207,7 @@ def make_stream(
     ibv: bool,
     affinity: int,
     comp_vector: int,
+    buffer_size: int,
 ) -> "spead2.send.asyncio.AsyncStream":
     """Create a spead2 stream for sending.
 
@@ -250,6 +252,7 @@ def make_stream(
         ibv=ibv,
         affinity=affinity,
         comp_vector=comp_vector,
+        buffer_size=buffer_size,
         memory_regions=[heap_set.data["payload"].data for heap_set in heap_sets],
     )
 

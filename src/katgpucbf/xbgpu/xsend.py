@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2024, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -133,6 +133,7 @@ def make_stream(
     use_ibv: bool,
     affinity: int,
     comp_vector: int,
+    buffer_size: int,
     stream_config: spead2.send.StreamConfig,
     buffers: Sequence[np.ndarray],
 ) -> "spead2.send.asyncio.AsyncStream":
@@ -159,6 +160,7 @@ def make_stream(
             stream_config,
             interface_address=interface_ip,
             ttl=ttl,
+            buffer_size=buffer_size,
         )
 
     # Reference the labels causing them to be created in

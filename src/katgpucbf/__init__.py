@@ -37,6 +37,8 @@ SEND_RATE_FACTOR = 1.1
 #: is better to minimise the number of packets/second to process.
 DEFAULT_PACKET_PAYLOAD_BYTES: Final = 8192
 DEFAULT_TTL: Final = 4  #: Default TTL for spead multicast transmission
+DEFAULT_SEND_BUFFER_SIZE: Final = 2**20  # 1 MiB
+DEFAULT_RECV_BUFFER_SIZE: Final = 2**27  # 128 MiB
 DEFAULT_KATCP_HOST: Final = ""  # All interfaces
 DEFAULT_KATCP_PORT: Final = 7147
 DEFAULT_JONES_PER_BATCH: Final = 2**20

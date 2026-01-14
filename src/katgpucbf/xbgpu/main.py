@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -288,6 +288,7 @@ def make_engine(
         recv_comp_vector=args.recv_comp_vector,
         recv_buffer=args.recv_buffer,
         send_interface=args.send_interface,
+        send_buffer=args.send_buffer,
         send_ttl=args.send_ttl,
         send_ibv=args.send_ibv,
         send_packet_payload=args.send_packet_payload,

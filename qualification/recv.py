@@ -38,7 +38,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
-from katgpucbf import COMPLEX, DIG_SAMPLE_BITS
+from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DIG_SAMPLE_BITS
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
@@ -501,7 +501,7 @@ def _create_receive_stream_group(
             config = spead2.recv.UdpIbvConfig(
                 endpoints=endpoints,
                 interface_address=interface_address,
-                buffer_size=128 * 1024 * 1024,
+                buffer_size=DEFAULT_RECV_BUFFER_SIZE,
                 comp_vector=core,
             )
             stream.add_udp_ibv_reader(config)
