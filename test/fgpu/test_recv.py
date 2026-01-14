@@ -25,6 +25,7 @@ import aiokatcp
 import numpy as np
 import pytest
 import spead2.recv.asyncio
+import spead2.send.asyncio
 from aiokatcp import DeviceStatus
 from numpy.typing import ArrayLike, NDArray
 

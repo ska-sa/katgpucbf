@@ -11,14 +11,14 @@ repos:
       - id: no-commit-to-branch # without arguments, master/main will be protected.
       - id: trailing-whitespace
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.4
+    rev: v0.14.11
     hooks:
       - id: ruff-format
         types_or: [python, pyi]  # Prevent formatting notebooks
       - id: ruff-check
         types_or: [python, pyi]
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v1.18.2'
+    rev: 'v1.19.1'
     hooks:
       - id: mypy
         # Passing filenames to mypy can do odd things. See
@@ -31,29 +31,29 @@ repos:
         types: []
         types_or: [python, pyi]
         additional_dependencies: [
-            'aioconsole==0.8.1',
+            'aioconsole==0.8.2',
             'aiokatcp==2.2.0',
             'aiomonitor==0.7.1',
-            'asyncssh==2.21.0',
-            'dask==2025.9.1',
+            'asyncssh==2.22.0',
+            'dask==2025.12.0',
             'katcbf-vlbi-resample==0.3',
             'katsdpsigproc==1.10.0',
             'katsdptelstate==1.0.0',
-            'matplotlib==3.10.6',
-            'numpy==2.3.3',
-            'pandas-stubs==2.3.2.250827',
-            'prometheus-client==0.23.1',
-            'pyparsing==3.2.5',
+            'matplotlib==3.10.8',
+            'numpy==2.3.5',
+            'pandas-stubs==2.3.3.251219',
+            'prometheus-client==0.24.0',
+            'pyparsing==3.3.1',
             'pytest==9.0.2',
-            'redis==6.4.0',  # Indirect dependency of katsdptelstate
+            'redis==7.1.0',  # Indirect dependency of katsdptelstate
             'spead2==4.4.0',
-            'types-decorator==5.2.0.20250324',
+            'types-decorator==5.2.0.20251101',
             'types-docutils==0.21.0.20250809',
-            'types-six==1.17.0.20250515',
+            'types-six==1.17.0.20251009',
             'typing-extensions==4.15.0',
         ]
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.8
+    rev: 0.9.24
     hooks:
       - id: pip-compile
         name: pip-compile requirements.txt
