@@ -49,6 +49,7 @@ MAX_PASS_FRACTION = 0.7  # Maximum fraction of total narrowband bandwidth to use
 pdf_report_data_key = pytest.StashKey[dict]()
 _CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
 
+pytest_plugins = ["pytester"]
 
 # Storing ini options this way makes pytest.ini easier to validate up-front.
 IniOption = namedtuple("IniOption", ["name", "help", "type", "default"], defaults=[None])
@@ -114,6 +115,12 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     parser.addoption(
         "--image-override", action="append", required=True, metavar="NAME:IMAGE:TAG", help="Override a single image"
     )
+    parser.addoption(
+        "--dry-run-report",
+        default=False,
+        action="store_true",
+        help="Clear the pdf_report stash after each test completes",
+    )
     for option in ini_options:
         parser.addini(*option)
 
@@ -141,7 +148,11 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
     # Using this hook to collect configuration information, because it's run
     # once, after collection but before the actual tests. Couldn't really find a
     # better place, and I did look around quite a bit.
-    git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
+    try:
+        git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
+    except:  # noqa: E722 still testing for the exception
+        git_information = "unknown"
+
     logger.info("Git information: %s", git_information)
     custom_report_log(
         config,
@@ -233,9 +244,14 @@ def int_time() -> float:
 
 
 @pytest.fixture(autouse=True)
-def pdf_report(request, monkeypatch) -> Reporter:
+def pdf_report(request, monkeypatch, pytestconfig: pytest.Config) -> Generator[Reporter, None, None]:
     """Fixture for logging steps in a test."""
-    reporter = Reporter(request.node.stash[pdf_report_data_key], raw_data=request.config.getini("raw_data"))
+    if pytestconfig.getoption("dry_run_report"):
+        print(f"Dry run report for {request.node.name}")
+        data = []
+    else:
+        data = request.node.stash[pdf_report_data_key]
+    reporter = Reporter(data, raw_data=request.config.getini("raw_data"))
     orig_log_failure = pytest_check.check_log.log_failure
     orig_stack = inspect.stack
 
@@ -261,7 +277,9 @@ def pdf_report(request, monkeypatch) -> Reporter:
     # context_manager uses `from .check_log import log_failure` so we have to
     # patch it under that name.
     monkeypatch.setattr(pytest_check.context_manager, "log_failure", log_failure)
-    return reporter
+    yield reporter
+    if pytestconfig.getoption("dry_run_report"):
+        del reporter._data
 
 
 @pytest.fixture(scope="session")

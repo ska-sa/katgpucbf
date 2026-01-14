@@ -74,6 +74,7 @@ async def test_baseline_correlation_products(
             # Check that the baseline actually appears in the list.
             appears = i in loud_bls
             with check:
+                np.isin(i, loud_bls)
                 assert appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!"
             # Check that no unexpected baselines have signal.
             no_unexpected = all(
@@ -108,4 +109,5 @@ def is_signal_expected_in_baseline(expected_bl: tuple[str, str], loud_bl: tuple[
     bool
         Indication of whether signal is expected, i.e. whether the test can pass.
     """
+    # np.testing.assert_array_compare
     return loud_bl[0] in expected_bl and loud_bl[1] in expected_bl
