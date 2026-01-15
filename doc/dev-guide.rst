@@ -212,8 +212,7 @@ can be ignored.
    an interface. However, for trivial changes (such as typos in comments) the
    reviewer may do the merge.
 7. Once you have received approval to merge, click **Merge pull request** with
-   its default setting of "Create a merge commit". Github will automatically
-   delete your branch after you merge.
+   its default setting of "Create a merge commit".
 
 For contributors outside the organisation, the steps are:
 
