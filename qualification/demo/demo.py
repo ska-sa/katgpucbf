@@ -14,191 +14,104 @@
 # limitations under the License.
 ################################################################################
 
-"""Example tests helpful in developing the reporting framework."""
+"""Test cases of the qualification framework."""
 
-import json
-from pathlib import Path
+import asyncio
 
+import matplotlib.figure
+import numpy as np
 import pytest
+import pytest_asyncio
+from pytest_check import check
+
+from qualification.reporter import POTLocator, Reporter
 
 
-@pytest.fixture
-def pytestini_content() -> str:
-    """The pytest.ini content for the demo tests."""
-    return """
-        [pytest]
-        asyncio_default_fixture_loop_scope = function
-        tester = Test
-        master_controller_host = localhost
-        master_controller_port = 5001
-        prometheus_url = http://localhost:9090
-        product_name = test_cbf
-        interface = lo
-        interface_gbps = 90
-        use_ibv = false
-        cores =
-        default_antennas = 8
-        max_antennas = 8
-        wideband_channels = 1024
-        narrowband_channels = 32768
-        narrowband_decimation = 8
-        vlbi_decimation = 8
-        bands = l
-        beams = 4
-        raw_data = false
-        array_dir =
-        """
+@pytest_asyncio.fixture(scope="function")
+async def slow_fixture() -> int:
+    """Demonstrates the delay in the timestamp in the report."""
+    await asyncio.sleep(0.5)
+    return 1
 
 
-@pytest.fixture(scope="function")
-def setup_pytester(pytester: pytest.Pytester, pytestini_content: str) -> pytest.Pytester:
-    """Set up pytester with conftest, ini, and test files."""
-    # Reset report values by deleting the report file if it exists
-    report_file = pytester.path / "report.json"
-    if report_file.exists():
-        report_file.unlink()
+@pytest.mark.requirements("DEMO-000")
+@pytest.mark.asyncio
+async def test_passes(pdf_report: Reporter, slow_fixture) -> None:
+    r"""Pass the test.
 
-    qualification_conftest = Path(__file__).resolve().parent.parent / "conftest.py"
-    with open(qualification_conftest, encoding="utf-8") as f:
-        conftest_content = f.read()
-    # Replace relative imports with absolute imports for pytester
-    conftest_content = conftest_content.replace("from .cbf import", "from qualification.cbf import")
-    conftest_content = conftest_content.replace("from .recv import", "from qualification.recv import")
-    conftest_content = conftest_content.replace("from .reporter import", "from qualification.reporter import")
-    demo_test_content = open(Path(__file__).resolve().parent / "demotests.py", encoding="utf-8").read()
-    pytester.makeconftest(conftest_content)
-    pytester.makeini(pytestini_content)
-    pytester.makepyfile(demo_test_content)
-    return pytester
+    Here is some maths: :math:`e^{pi j} + 1 = 0`.
+
+    Verification method
+    -------------------
+    Don't actually test anything.
+    """
+    pdf_report.step("Do things")
+    pdf_report.detail("Thing implementation detail 1")
+    pdf_report.detail("Thing implementation detail 2")
 
 
-def test_slow_fixture_updates_timestamp(setup_pytester: pytest.Pytester) -> None:
-    """Test that the timestamp is updated when the slow fixture is used."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_passes")
-    print(result.stdout.str())
-    assert result.ret == 0
-    result.assert_outcomes(passed=1, failed=0, errors=0, skipped=0, xpassed=0, xfailed=0)
-    # read the report.json file and confirm test
-    assert result.duration > 0
-    assert len(result.errlines) == 0
+def test_assert_failure(pdf_report: Reporter) -> None:
+    """Always fail."""
+    pdf_report.step("Test something bad")
+    pdf_report.detail("Check that 1 = 2")
+    assert 1 == 2
 
 
-def test_failure(setup_pytester: pytest.Pytester) -> None:
-    """Test that the test failure is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_assert_failure")
-    result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
-    # read the report.json file and confirm test
-    assert result.duration > 0
-    assert "1 == 2" in result.outlines[-2]
+def test_figure_plot(pdf_report: Reporter) -> None:
+    """Plot a figure."""
+    fig = matplotlib.figure.Figure()
+    ax = fig.add_subplot()
+    ax.set_xlabel("X axis")
+    ax.set_ylabel("Y axis")
+    ax.set_title("Caption")
+    ax.xaxis.set_major_locator(POTLocator())
+    ax.plot(np.sin(np.arange(1024) * 2 * np.pi / 1024), label="sine wave")
+    ax.legend()
+
+    pdf_report.step("Show a figure")
+    pdf_report.figure(fig)
 
 
-def test_figure_creates_binary_figure_in_report(setup_pytester: pytest.Pytester) -> None:
-    """Test that the figure test is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_figure_plot")
-    result.assert_outcomes(passed=1, failed=0, errors=0, skipped=0, xpassed=0, xfailed=0)
-    assert result.duration > 0
-    assert len(result.errlines) == 0
-
-    # Read and parse the report.json file
-    report_file = setup_pytester.path / "report.json"
-    assert report_file.exists(), "report.json file should exist"
-
-    with open(report_file, encoding="utf-8") as f:
-        report_data = [json.loads(line) for line in f]
-
-    # Find test report entries and check for binary_figure data
-    found_binary_figure = False
-    for entry in report_data:
-        if entry.get("$report_type") == "TestReport":
-            # Check user_properties for pdf_report_data
-            user_props = entry.get("user_properties", [])
-            for prop_name, prop_value in user_props:
-                if prop_name == "pdf_report_data" and isinstance(prop_value, list):
-                    # Look through the data for binary_figure entries
-                    for msg in prop_value:
-                        if msg.get("$msg_type") == "step":
-                            items = msg.get("items", [])
-                            for item in items:
-                                if item.get("$msg_type") == "binary_figure":
-                                    assert "content" in item, "binary_figure should have content field"
-                                    assert "type" in item, "binary_figure should have type field"
-                                    assert item["type"] == "pdf", "binary_figure type should be pdf"
-                                    assert len(item["content"]) > 0, "binary_figure content should not be empty"
-                                    found_binary_figure = True
-
-    assert found_binary_figure, "binary_figure data should be present in the report"
+def three():
+    """Return 3, to demonstrate assertion rewriting with pytest-check."""
+    return 3
 
 
-def test_check_test_is_reported_correctly(setup_pytester: pytest.Pytester) -> None:
-    """Test that the check test is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_check_with_failures")
-    result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
-    assert result.duration > 0
-    assert len(result.errlines) == 0
-
-    # Read and parse the report.json file
-    report_file = setup_pytester.path / "report.json"
-    assert report_file.exists(), "report.json file should exist"
-
-    with open(report_file, encoding="utf-8") as f:
-        report_data = [json.loads(line) for line in f]
-
-    # Find test report entries and check for step details
-    found_bad_things_step = False
-    found_good_things_step = False
-    bad_things_failures = []
-
-    for entry in report_data:
-        if entry.get("$report_type") == "TestReport":
-            # Check user_properties for pdf_report_data
-            user_props = entry.get("user_properties", [])
-            for prop_name, prop_value in user_props:
-                if prop_name == "pdf_report_data" and isinstance(prop_value, list):
-                    # Look through the data for step entries
-                    for msg in prop_value:
-                        if msg.get("$msg_type") == "step":
-                            step_message = msg.get("message", "")
-                            items = msg.get("items", [])
-
-                            if step_message == "Expect some bad things":
-                                found_bad_things_step = True
-                                # Collect failure items from this step
-                                for item in items:
-                                    if item.get("$msg_type") == "failure":
-                                        bad_things_failures.append(item.get("message", ""))
-
-                            if step_message == "Expect some good things":
-                                found_good_things_step = True
-
-    print("aaaaaa")
-    print(result.outlines)
-    assert any("(1 * 3) == 2" in line for line in result.outlines), "'1 * 3 == 2' should be present in the report"
-    assert any("check with msg" in line for line in result.outlines), "'check with msg' should be present in the report"
-    assert found_bad_things_step, "Step 'Expect some bad things' should be present in the report"
-    assert len(bad_things_failures) > 0, "Step 'Expect some bad things' should have failure items"
-    assert found_good_things_step, "Step 'Expect some good things' should be present in the report"
+def test_check_with_failures(pdf_report: Reporter) -> None:
+    """Use ``check`` and observe failures."""
+    pdf_report.step("Expect some bad things")
+    x = 1
+    with check:
+        assert x * three() == 2
+    with check:
+        assert 3 == 4, "check with msg"
+    pdf_report.step("Expect some good things")
+    with check:
+        assert 1 == 1
 
 
-def test_marked_xfail_is_not_reported_as_failed(setup_pytester: pytest.Pytester) -> None:
-    """Test that the xfail test is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_xfail")
-    result.assert_outcomes(passed=0, failed=0, errors=0, skipped=0, xpassed=0, xfailed=1)
-    assert result.duration > 0
-    assert len(result.errlines) == 0
+@pytest.mark.xfail(reason="Waived")
+def test_xfail(pdf_report: Reporter) -> None:
+    """Do a test that's expected to fail."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that 1 == 2")
+    with check:
+        assert 1 == 2
 
 
-def test_failed_np_assertion_dumps_arrays(setup_pytester: pytest.Pytester) -> None:
-    """Test that the numpy fail test is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_numpy_fails")
-    result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
-    assert result.duration > 0
-    assert result.parseoutcomes()["failed"] == 1
+def test_numpy_fails(pdf_report: Reporter) -> None:
+    """Test saving of numpy arrays on test failure."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that arrays are equal")
+    arr1 = np.array([1, 2, 3])
+    arr2 = np.array([4, 5, 6])
+    np.testing.assert_equal(arr1, arr2)
 
 
-def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(setup_pytester: pytest.Pytester) -> None:
-    """Test that the numpy fail approx test is reported correctly."""
-    result = setup_pytester.runpytest(
-        "--image-override=::", "--report-log=report.json", "-k test_numpy_with_approx_fails"
-    )
-    result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
-    assert result.duration > 0
+def test_numpy_with_approx_fails(pdf_report: Reporter) -> None:
+    """Test saving of numpy arrays on test failure with pytest.approx."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that arrays are equal")
+    arr1 = np.array([1, 2, 3])
+    arr2 = np.array([4, 5, 6])
+    np.testing.assert_equal(arr1, pytest.approx(arr2))
