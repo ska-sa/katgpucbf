@@ -16,6 +16,7 @@
 
 """Example tests helpful in developing the reporting framework."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -98,6 +99,35 @@ def test_figure_creates_binary_figure_in_report(setup_pytester: pytest.Pytester)
     assert result.duration > 0
     assert len(result.errlines) == 0
 
+    # Read and parse the report.json file
+    report_file = setup_pytester.path / "report.json"
+    assert report_file.exists(), "report.json file should exist"
+
+    with open(report_file, encoding="utf-8") as f:
+        report_data = [json.loads(line) for line in f]
+
+    # Find test report entries and check for binary_figure data
+    found_binary_figure = False
+    for entry in report_data:
+        if entry.get("$report_type") == "TestReport":
+            # Check user_properties for pdf_report_data
+            user_props = entry.get("user_properties", [])
+            for prop_name, prop_value in user_props:
+                if prop_name == "pdf_report_data" and isinstance(prop_value, list):
+                    # Look through the data for binary_figure entries
+                    for msg in prop_value:
+                        if msg.get("$msg_type") == "step":
+                            items = msg.get("items", [])
+                            for item in items:
+                                if item.get("$msg_type") == "binary_figure":
+                                    assert "content" in item, "binary_figure should have content field"
+                                    assert "type" in item, "binary_figure should have type field"
+                                    assert item["type"] == "pdf", "binary_figure type should be pdf"
+                                    assert len(item["content"]) > 0, "binary_figure content should not be empty"
+                                    found_binary_figure = True
+
+    assert found_binary_figure, "binary_figure data should be present in the report"
+
 
 def test_check_test_is_reported_correctly(setup_pytester: pytest.Pytester) -> None:
     """Test that the check test is reported correctly."""
@@ -105,6 +135,48 @@ def test_check_test_is_reported_correctly(setup_pytester: pytest.Pytester) -> No
     result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
     assert result.duration > 0
     assert len(result.errlines) == 0
+
+    # Read and parse the report.json file
+    report_file = setup_pytester.path / "report.json"
+    assert report_file.exists(), "report.json file should exist"
+
+    with open(report_file, encoding="utf-8") as f:
+        report_data = [json.loads(line) for line in f]
+
+    # Find test report entries and check for step details
+    found_bad_things_step = False
+    found_good_things_step = False
+    bad_things_failures = []
+
+    for entry in report_data:
+        if entry.get("$report_type") == "TestReport":
+            # Check user_properties for pdf_report_data
+            user_props = entry.get("user_properties", [])
+            for prop_name, prop_value in user_props:
+                if prop_name == "pdf_report_data" and isinstance(prop_value, list):
+                    # Look through the data for step entries
+                    for msg in prop_value:
+                        if msg.get("$msg_type") == "step":
+                            step_message = msg.get("message", "")
+                            items = msg.get("items", [])
+
+                            if step_message == "Expect some bad things":
+                                found_bad_things_step = True
+                                # Collect failure items from this step
+                                for item in items:
+                                    if item.get("$msg_type") == "failure":
+                                        bad_things_failures.append(item.get("message", ""))
+
+                            if step_message == "Expect some good things":
+                                found_good_things_step = True
+
+    print("aaaaaa")
+    print(result.outlines)
+    assert any("(1 * 3) == 2" in line for line in result.outlines), "'1 * 3 == 2' should be present in the report"
+    assert any("check with msg" in line for line in result.outlines), "'check with msg' should be present in the report"
+    assert found_bad_things_step, "Step 'Expect some bad things' should be present in the report"
+    assert len(bad_things_failures) > 0, "Step 'Expect some bad things' should have failure items"
+    assert found_good_things_step, "Step 'Expect some good things' should be present in the report"
 
 
 def test_marked_xfail_is_not_reported_as_failed(setup_pytester: pytest.Pytester) -> None:
