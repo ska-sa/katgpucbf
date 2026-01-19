@@ -17,20 +17,81 @@
 """Engine class, which does all the actual processing."""
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from fractions import Fraction
 
 import aiokatcp
+import baseband
 import cupyx
+import katcbf_vlbi_resample.cupy_bridge
+import katcbf_vlbi_resample.mk
+import katcbf_vlbi_resample.parameters
+import katcbf_vlbi_resample.polarisation
+import katcbf_vlbi_resample.power
+import katcbf_vlbi_resample.resample
+import katcbf_vlbi_resample.stream
+import katcbf_vlbi_resample.vdif_writer
 import numpy as np
 import spead2.recv.asyncio
+import xarray as xr
+from astropy.time import Time
 
-from .. import COMPLEX, N_POLS, RECV_TASK_NAME
+from .. import COMPLEX, N_POLS
 from .. import recv as base_recv
 from ..monitor import Monitor
 from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..utils import Engine, TimeConverter
 from . import N_SIDEBANDS, recv
+
+
+class RecvStream:
+    """Wrap the incoming data stream into a :class:`.katcbf_vlbi_resample.stream.Stream`."""
+
+    def __init__(
+        self,
+        layout: recv.Layout,
+        time_converter: TimeConverter,
+        stream_group: spead2.recv.ChunkStreamRingGroup,
+        sensors: aiokatcp.SensorSet,
+        pol_labels: list[str],
+    ) -> None:
+        self._layout = layout
+        self._time_converter = time_converter
+        self._stream_group = stream_group
+        self._sensors = sensors
+        self._pol_labels = pol_labels
+        self._samples_between_spectra = layout.heap_timestamp_step // layout.n_spectra_per_heap
+        # Properties required by the Stream protocol
+        self.channels = layout.n_channels
+        self.is_cupy = False
+        self.time_base = Time(time_converter.sync_time, scale="utc", format="unix")
+        self.time_scale = Fraction(self._samples_between_spectra) / Fraction(time_converter.adc_sample_rate)
+
+    async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
+        for stream in self._stream_group:
+            stream.start()
+        data_ringbuffer = self._stream_group.data_ringbuffer
+        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
+        async for chunk in recv.iter_chunks(
+            data_ringbuffer, self._layout, self._sensors, self._time_converter, self._pol_labels
+        ):
+            with chunk:
+                # TODO: need to do something with the presence flags
+                # TODO: it will be cheaper to transfer data to the GPU then transpose.
+                # There are two time axes. Transpose to place them together, then flatten
+                # over them.
+                # (N_POLS, layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX),
+                data = chunk.data.transpose(0, 1, 3, 2, 4)
+                data = data.reshape(N_POLS, -1, self.channels, COMPLEX)
+                # Convert Gaussian integers to complex
+                data = np.require(data, np.float32, "C").view(np.complex64)[..., 0]
+                yield xr.DataArray(
+                    data,
+                    dims=("pol", "time", "channel"),
+                    coords={"pol": self._pol_labels},
+                    attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
+                )
 
 
 class VEngine(Engine):
@@ -61,6 +122,13 @@ class VEngine(Engine):
         recv_buffer: int,
         recv_pols: tuple[str, str],
         send_pols: tuple[str, str],
+        send_bandwidth: float,
+        n_samples_per_frame: int,
+        station: str,
+        fir_taps: int,
+        hilbert_taps: int,
+        passband: float,
+        threshold: float,
         power_int_time: int,
         monitor: Monitor,
     ) -> None:
@@ -83,6 +151,26 @@ class VEngine(Engine):
         self.recv_time_converter = TimeConverter(sync_time, adc_sample_rate)
 
         self.send_pols = send_pols
+        pol_spec = ",".join(recv_pols) + ":" + ",".join(send_pols)
+        self._pol_matrix = katcbf_vlbi_resample.polarisation.parse_spec(pol_spec)
+        self._input_parameters = katcbf_vlbi_resample.parameters.StreamParameters(
+            bandwidth=adc_sample_rate * n_channels / n_samples_between_spectra,
+            center_freq=0.0,  # TODO: remove as it is not needed (NGC-1865)
+        )
+        self._output_parameters = katcbf_vlbi_resample.parameters.StreamParameters(
+            bandwidth=send_bandwidth,
+            center_freq=0.0,
+        )
+        self._resample_parameters = katcbf_vlbi_resample.parameters.ResampleParameters(
+            fir_taps=fir_taps,
+            hilbert_taps=hilbert_taps,
+            passband=passband,
+        )
+        self._threads = [{"sideband": sideband, "pol": pol} for sideband in ["lsb", "usb"] for pol in self.send_pols]
+
+        self.threshold = threshold
+        self.n_samples_per_frame = n_samples_per_frame
+        self.station = station
 
         recv_sensor_timeout = max(
             RECV_SENSOR_TIMEOUT_MIN,
@@ -130,9 +218,7 @@ class VEngine(Engine):
     def _init_recv(self, recv_affinity: int, monitor: Monitor) -> None:
         """Initialise the receive side of the engine."""
         recv_chunks = 4  # TODO: may need tuning?
-        data_ringbuffer = ChunkRingbuffer(
-            recv_chunks, name="recv_data_ringbuffer", task_name="run_receive", monitor=monitor
-        )
+        data_ringbuffer = ChunkRingbuffer(recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=monitor)
         free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
         layout = self.recv_layout
         dtype = np.dtype(f"int{layout.sample_bits}")
@@ -153,18 +239,33 @@ class VEngine(Engine):
             )
             chunk.recycle()  # Make available to the stream
 
-    async def _run_receive(self) -> None:
-        """Receive data from the tied-array-channelised-voltage streams."""
-        for stream in self._recv_group:
-            stream.start()
-        data_ringbuffer = self._recv_group.data_ringbuffer
-        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
-        async for chunk in recv.iter_chunks(
-            data_ringbuffer, self.recv_layout, self.sensors, self.recv_time_converter, self.recv_pol_labels
-        ):
-            with chunk:
-                pass
-        # TODO
+    async def _run(self) -> None:
+        """Do all the primary work of the engine."""
+        it: katcbf_vlbi_resample.stream.Stream[xr.DataArray] = RecvStream(
+            self.recv_layout,
+            self.recv_time_converter,
+            self._recv_group,
+            self.sensors,
+            self.recv_pol_labels,
+        )
+        it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
+        it = katcbf_vlbi_resample.resample.IFFT(it)
+        it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(it, self._pol_matrix)
+        it = katcbf_vlbi_resample.resample.Resample(
+            self._input_parameters, self._output_parameters, self._resample_parameters, it
+        )
+        it = katcbf_vlbi_resample.mk.rechunk_seconds(it)  # TODO: move out of mk module (NGC-1863)
+        it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
+        # TODO: rig up a RecordPower subclass to write to the sensor
+        # it_rms = RecordPower(it_rms, threads=self._threads)
+        it = katcbf_vlbi_resample.power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / self.threshold)
+        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(it, samples_per_frame=self.n_samples_per_frame)
+        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
+        frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
+            it, self._threads, station=self.station, samples_per_frame=self.n_samples_per_frame
+        )
+        async for _ in frameset_it:
+            pass
 
     async def start(self) -> None:
         """Start the engine."""
@@ -178,8 +279,8 @@ class VEngine(Engine):
                 buffer_size=self._recv_buffer // len(self._recv_group),
             )
 
-        recv_task = asyncio.create_task(self._run_receive(), name=RECV_TASK_NAME)
-        self.add_service_task(recv_task, wait_on_stop=True)
+        run_task = asyncio.create_task(self._run(), name="run")
+        self.add_service_task(run_task, wait_on_stop=True)
         await super().start()
 
     async def on_stop(self) -> None:  # noqa: D102

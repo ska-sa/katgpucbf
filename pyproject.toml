@@ -21,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "aiokatcp>=1.9.0",
+    "astropy",
     "dask",
     "katcbf-vlbi-resample>=0.2",
     "katsdpservices[aiomonitor]",
