@@ -364,7 +364,7 @@ six==1.17.0
     #   python-dateutil
 snowballstemmer==3.0.1
     # via sphinx
-spead2==4.4.0
+spead2==4.4.1
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
