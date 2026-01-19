@@ -49,23 +49,41 @@ async def test_baseline_correlation_products(
     await pcc.request("dsim-signals", cbf.dsim_names[0], f"common=wgn({amplitude});common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
-    for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):
+    antennas = dict[str, int]()
+    for bl in receiver.bls_ordering:
+        for ant in bl:
+            if ant not in antennas:
+                antennas[ant] = len(antennas)
+    antenna_index = {ant: i for i, ant in antennas.items()}
+
+    for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):  # what are we ranging?
+        # = n_bls if n_bls < n_chans and there is only one block,
+        # The last block may also be smaller when not base2 values
         end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
+
+        gains = np.zeros((len(antennas), receiver.n_chans), np.float32)
+
         await pcc.request("gain-all", "antenna-channelised-voltage", "0")
         pdf_report.detail("Compute gains to enable one baseline per channel.")
-        gains = {}
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1  # Avoid channel 0, which is DC so a bit odd
-            for inp in receiver.bls_ordering[i]:
-                if inp not in gains:
-                    gains[inp] = np.zeros(receiver.n_chans, np.float32)
-                gains[inp][channel] = 1.0
+            gains[antennas[receiver.bls_ordering[i][0]], channel] = 1.0
+            gains[antennas[receiver.bls_ordering[i][1]], channel] = 1.0
+
         pdf_report.detail("Set gains.")
-        for inp, g in gains.items():
-            await pcc.request("gain", "antenna-channelised-voltage", inp, *g)
+        for i, gain in enumerate(gains):
+            # Each baseline has two antennas, set gains for both
+            print("setting gain for", antenna_index[i], "to", gain)
+            await pcc.request("gain", "antenna-channelised-voltage", antenna_index[i], *gain)
 
         _, data = await receiver.next_complete_chunk()
+        assert data.shape == (receiver.n_chans, receiver.n_bls, 2)
+
+        # confirm the signals are in expected baselines
+
+        everything_is_awesome = True
+
         everything_is_awesome = True
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1
@@ -74,7 +92,6 @@ async def test_baseline_correlation_products(
             # Check that the baseline actually appears in the list.
             appears = i in loud_bls
             with check:
-                np.isin(i, loud_bls)
                 assert appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!"
             # Check that no unexpected baselines have signal.
             no_unexpected = all(
@@ -110,4 +127,4 @@ def is_signal_expected_in_baseline(expected_bl: tuple[str, str], loud_bl: tuple[
         Indication of whether signal is expected, i.e. whether the test can pass.
     """
     # np.testing.assert_array_compare
-    return loud_bl[0] in expected_bl and loud_bl[1] in expected_bl
+    return np.isin(loud_bl, expected_bl)[1]

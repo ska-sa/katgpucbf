@@ -154,6 +154,7 @@ def test_check_test_is_reported_correctly(setup_pytester: pytest.Pytester) -> No
     found_good_things_step = False
     bad_things_failures = []
 
+    # TODO: Simplify and fix check plugin for pytester usage
     for entry in report_data:
         if entry.get("$report_type") == "TestReport":
             # Check user_properties for pdf_report_data
@@ -240,6 +241,7 @@ def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(setup_pytester: pyt
     )
 
     # Extract the path from the output
+    # TODO: move to function
     array_path = None
     for line in result.outlines:
         if "Arrays written to" in line:
