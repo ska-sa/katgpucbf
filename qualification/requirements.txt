@@ -40,6 +40,7 @@ astropy==7.2.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
+    #   katgpucbf (pyproject.toml)
     #   baseband
     #   katcbf-vlbi-resample
 astropy-iers-data==0.2026.1.12.0.42.13

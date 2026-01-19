@@ -81,7 +81,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         choices=[8],
         help="Number of bits in each real sample [%(default)s]",
     )
-    parser.add_argument("--recv-bandwidth", type=float, metavar="HZ", required=True, help="Input bandwidth")
+    # TODO: remove this redundant parameter once katsdpcontroller no longer passes it
+    # (NGC-1862).
+    parser.add_argument(
+        "--recv-bandwidth", dest="do_not_use", type=float, metavar="HZ", help="Input bandwidth (deprecated)"
+    )
     parser.add_argument(
         "--recv-pols",
         type=comma_split(str, 2),
@@ -183,6 +187,13 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         recv_buffer=args.recv_buffer,
         recv_pols=tuple(args.recv_pols),
         send_pols=tuple(args.send_pols),
+        send_bandwidth=args.send_bandwidth,
+        n_samples_per_frame=args.send_samples_per_frame,
+        station=args.send_station,
+        fir_taps=args.fir_taps,
+        hilbert_taps=args.hilbert_taps,
+        passband=args.passband,
+        threshold=args.threshold,
         power_int_time=args.power_int_time,
         monitor=monitor,
     )
