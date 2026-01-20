@@ -59,8 +59,11 @@ async def test_baseline_correlation_products(
 
     antenna_index: dict[int, str] = {i: ant for ant, i in antennas.items()}
     baseline_index_from_antennas = dict[tuple[str, str], int]()
+    print("receiver.bls_ordering:", receiver.bls_ordering)
     for i, bl in enumerate(receiver.bls_ordering):
         baseline_index_from_antennas[bl] = i
+
+    print("baseline_index_from_antennas:", baseline_index_from_antennas)
 
     for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):  # what are we ranging?
         # = n_bls if n_bls < n_chans and there is only one block,
@@ -90,10 +93,22 @@ async def test_baseline_correlation_products(
             print("autocorrelated baselines:", [(ant, ant) for ant in nonzero_antennas])
             expected_antenna_indexed_baselines.extend([(ant, ant) for ant in nonzero_antennas])
             for baseline_by_antenna_index in expected_antenna_indexed_baselines:
-                baseline_index = baseline_index_from_antennas[
-                    antenna_index[baseline_by_antenna_index[0]], antenna_index[baseline_by_antenna_index[1]]
-                ]
-                expected_loud_bls_channels[channel, baseline_index] = 1.0
+                antenna_tuple = antenna_index[baseline_by_antenna_index[0]], antenna_index[baseline_by_antenna_index[1]]
+                # we don't permutate all combinations, only antenna pairs on the same antenna are permutated completely
+                # ie: ('m800v', 'm800h') and ('m800h', 'm800v') but not ('m800h', 'm801h') and ('m801h', 'm800h')
+                if baseline_index_from_antennas.get(antenna_tuple) is None:
+                    # if the baseline is not in the dictionary, we need to check the reverse order
+                    if baseline_index_from_antennas.get(antenna_tuple[::-1]) is not None:
+                        # if the reverse order is in the dictionary, we can use it
+                        baseline_index = baseline_index_from_antennas[
+                            antenna_index[baseline_by_antenna_index[1]], antenna_index[baseline_by_antenna_index[0]]
+                        ]
+                        expected_loud_bls_channels[channel, baseline_index] = 1.0
+                else:
+                    baseline_index = baseline_index_from_antennas[
+                        antenna_index[baseline_by_antenna_index[0]], antenna_index[baseline_by_antenna_index[1]]
+                    ]
+                    expected_loud_bls_channels[channel, baseline_index] = 1.0
 
         pdf_report.detail("Set gains.")
         for i, channel_gains in enumerate(antenna_gains.tolist()):
