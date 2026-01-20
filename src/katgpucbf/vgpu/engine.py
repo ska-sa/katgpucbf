@@ -17,6 +17,7 @@
 """Engine class, which does all the actual processing."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Sequence
 from fractions import Fraction
 
@@ -24,10 +25,10 @@ import aiokatcp
 import baseband
 import cupyx
 import katcbf_vlbi_resample.cupy_bridge
-import katcbf_vlbi_resample.mk
 import katcbf_vlbi_resample.parameters
 import katcbf_vlbi_resample.polarisation
 import katcbf_vlbi_resample.power
+import katcbf_vlbi_resample.rechunk
 import katcbf_vlbi_resample.resample
 import katcbf_vlbi_resample.stream
 import katcbf_vlbi_resample.vdif_writer
@@ -44,6 +45,8 @@ from ..ringbuffer import ChunkRingbuffer
 from ..utils import Engine, TimeConverter
 from . import N_SIDEBANDS, recv
 
+logger = logging.getLogger(__name__)
+
 
 class RecvStream:
     """Wrap the incoming data stream into a :class:`.katcbf_vlbi_resample.stream.Stream`."""
@@ -54,7 +57,7 @@ class RecvStream:
         time_converter: TimeConverter,
         stream_group: spead2.recv.ChunkStreamRingGroup,
         sensors: aiokatcp.SensorSet,
-        pol_labels: list[str],
+        pol_labels: tuple[str, str],
     ) -> None:
         self._layout = layout
         self._time_converter = time_converter
@@ -74,7 +77,11 @@ class RecvStream:
         data_ringbuffer = self._stream_group.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         async for chunk in recv.iter_chunks(
-            data_ringbuffer, self._layout, self._sensors, self._time_converter, self._pol_labels
+            data_ringbuffer,
+            self._layout,
+            self._sensors,
+            self._time_converter,
+            [label[-1] for label in self._pol_labels],
         ):
             with chunk:
                 # TODO: need to do something with the presence flags
@@ -89,7 +96,7 @@ class RecvStream:
                 yield xr.DataArray(
                     data,
                     dims=("pol", "time", "channel"),
-                    coords={"pol": self._pol_labels},
+                    coords={"pol": list(self._pol_labels)},
                     attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
                 )
 
@@ -151,8 +158,9 @@ class VEngine(Engine):
         self.recv_time_converter = TimeConverter(sync_time, adc_sample_rate)
 
         self.send_pols = send_pols
-        pol_spec = ",".join(recv_pols) + ":" + ",".join(send_pols)
-        self._pol_matrix = katcbf_vlbi_resample.polarisation.parse_spec(pol_spec)
+        self._pol_matrix = katcbf_vlbi_resample.polarisation.from_linear(
+            send_pols
+        ) @ katcbf_vlbi_resample.polarisation.to_linear(recv_pols)
         self._input_parameters = katcbf_vlbi_resample.parameters.StreamParameters(
             bandwidth=adc_sample_rate * n_channels / n_samples_between_spectra,
             center_freq=0.0,  # TODO: remove as it is not needed (NGC-1865)
@@ -246,15 +254,15 @@ class VEngine(Engine):
             self.recv_time_converter,
             self._recv_group,
             self.sensors,
-            self.recv_pol_labels,
+            self.recv_pols,
         )
         it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
         it = katcbf_vlbi_resample.resample.IFFT(it)
-        it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(it, self._pol_matrix)
+        it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(it, self._pol_matrix, self.recv_pols, self.send_pols)
         it = katcbf_vlbi_resample.resample.Resample(
             self._input_parameters, self._output_parameters, self._resample_parameters, it
         )
-        it = katcbf_vlbi_resample.mk.rechunk_seconds(it)  # TODO: move out of mk module (NGC-1863)
+        it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
         it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
         # TODO: rig up a RecordPower subclass to write to the sensor
         # it_rms = RecordPower(it_rms, threads=self._threads)
@@ -264,8 +272,8 @@ class VEngine(Engine):
         frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
             it, self._threads, station=self.station, samples_per_frame=self.n_samples_per_frame
         )
-        async for _ in frameset_it:
-            pass
+        async for frameset in frameset_it:
+            logger.info("Received frameset: %s +%s", frameset["seconds"], frameset["frame_nr"])
 
     async def start(self) -> None:
         """Start the engine."""

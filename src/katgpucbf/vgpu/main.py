@@ -23,6 +23,7 @@ import re
 from collections.abc import MutableMapping, Sequence
 
 import aiokatcp
+import katcbf_vlbi_resample.polarisation
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import DEFAULT_JONES_PER_BATCH
@@ -71,7 +72,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Timestamp increment between spectra",
     )
     parser.add_argument(
-        "--recv-batches-per-chunk", type=int, metavar="BATCHES", default=32, help="Number of batches per input chunk"
+        "--recv-batches-per-chunk", type=int, metavar="BATCHES", default=8, help="Number of batches per input chunk"
     )
     parser.add_argument(
         "--recv-sample-bits",
@@ -151,12 +152,17 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         )
     for pol in args.recv_pols:
         if not re.fullmatch(r"^[-+]?[xyLR]", pol):
-            parser.error(f"{pol!r} is not a valid --recv-pol value")
+            parser.error(f"{pol!r} is not a valid --recv-pols value")
     if set(pol[-1] for pol in args.recv_pols) not in [{"x", "y"}, {"L", "R"}]:
-        parser.error("--recv-pol is not an orthogonal polarisation basis")
+        parser.error(f"argument: --recv-pols: polarisations {','.join(args.recv_pols)} do not form an orthogonal basis")
     for pol in args.send_pols:
         if pol not in ["x", "y", "L", "R"]:
-            parser.error(f"{pol!r} is not a valid --send-pol value")
+            parser.error(f"{pol!r} is not a valid --send-pols value")
+    try:
+        # Return value is discarded; called just for error checking
+        katcbf_vlbi_resample.polarisation.to_linear(args.send_pols)
+    except ValueError as exc:
+        parser.error(f"argument --send-pols: {exc}")
     return args
 
 
