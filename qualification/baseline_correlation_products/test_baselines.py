@@ -16,6 +16,8 @@
 
 """Baseline verification tests."""
 
+import itertools
+
 import numpy as np
 import pytest
 from pytest_check import check
@@ -47,84 +49,73 @@ async def test_baseline_correlation_products(
 
     amplitude = 0.2
     await pcc.request("dsim-signals", cbf.dsim_names[0], f"common=wgn({amplitude});common;common;")
-    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
+    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both poles.")
 
     antennas = dict[str, int]()
-    for bl in receiver.bls_ordering:
+    for _, bl in enumerate(receiver.bls_ordering):
         for ant in bl:
             if ant not in antennas:
                 antennas[ant] = len(antennas)
-    antenna_index = {ant: i for i, ant in antennas.items()}
+
+    antenna_index: dict[int, str] = {i: ant for ant, i in antennas.items()}
+    baseline_index_from_antennas = dict[tuple[str, str], int]()
+    for i, bl in enumerate(receiver.bls_ordering):
+        baseline_index_from_antennas[bl] = i
 
     for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):  # what are we ranging?
         # = n_bls if n_bls < n_chans and there is only one block,
-        # The last block may also be smaller when not base2 values
+        # The last block may also be smaller
         end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
 
-        gains = np.zeros((len(antennas), receiver.n_chans), np.float32)
+        antenna_gains = np.zeros((len(antennas), receiver.n_chans), np.float32)
 
+        # determine antenna gains.
         await pcc.request("gain-all", "antenna-channelised-voltage", "0")
         pdf_report.detail("Compute gains to enable one baseline per channel.")
+        expected_loud_bls_channels = np.zeros((receiver.n_chans, receiver.n_bls), np.float32)
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1  # Avoid channel 0, which is DC so a bit odd
-            gains[antennas[receiver.bls_ordering[i][0]], channel] = 1.0
-            gains[antennas[receiver.bls_ordering[i][1]], channel] = 1.0
+            antenna_gains[antennas[receiver.bls_ordering[i][0]], channel] = 1.0
+            antenna_gains[antennas[receiver.bls_ordering[i][1]], channel] = 1.0
+
+        # determine baseline matches
+        for channel in range(receiver.n_chans):
+            # for the nonzero antenna gains, set the expected loud baselines
+            assert antenna_gains[:, channel].shape == (len(antennas),)
+            nonzero_antennas = np.nonzero(antenna_gains[:, channel])[0]
+            # the baselines are all combinations of the nonzero antennas
+            expected_antenna_indexed_baselines = list(itertools.permutations(nonzero_antennas, 2))
+            print("expected_baseline_indexes:", expected_antenna_indexed_baselines)
+            print("autocorrelated baselines:", [(ant, ant) for ant in nonzero_antennas])
+            expected_antenna_indexed_baselines.extend([(ant, ant) for ant in nonzero_antennas])
+            for baseline_by_antenna_index in expected_antenna_indexed_baselines:
+                baseline_index = baseline_index_from_antennas[
+                    antenna_index[baseline_by_antenna_index[0]], antenna_index[baseline_by_antenna_index[1]]
+                ]
+                expected_loud_bls_channels[channel, baseline_index] = 1.0
 
         pdf_report.detail("Set gains.")
-        for i, gain in enumerate(gains):
-            # Each baseline has two antennas, set gains for both
-            print("setting gain for", antenna_index[i], "to", gain)
-            await pcc.request("gain", "antenna-channelised-voltage", antenna_index[i], *gain)
+        for i, channel_gains in enumerate(antenna_gains.tolist()):
+            await pcc.request("gain", "antenna-channelised-voltage", antenna_index[i], *channel_gains)
 
         _, data = await receiver.next_complete_chunk()
         assert data.shape == (receiver.n_chans, receiver.n_bls, 2)
 
-        # confirm the signals are in expected baselines
+        # confirm the signals are in baselines as expected
+        with check:
+            for i in range(1, receiver.n_chans):
+                # which baselines are loud on this channel?
+                loud_bln_index = np.nonzero(data[i, :, 0])
+                expected_loud_bls_index = np.nonzero(expected_loud_bls_channels[i, :])
 
-        everything_is_awesome = True
-
-        everything_is_awesome = True
-        for i in range(start_idx, end_idx):
-            channel = i - start_idx + 1
-            bl = receiver.bls_ordering[i]
-            loud_bls = np.nonzero(data[channel, :, 0])[0]
-            # Check that the baseline actually appears in the list.
-            appears = i in loud_bls
-            with check:
-                assert appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!"
-            # Check that no unexpected baselines have signal.
-            no_unexpected = all(
-                is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl]) for loud_bl in loud_bls
-            )
-            with check:
-                assert no_unexpected, "Signal found in unexpected baseline."
-            if not (appears and no_unexpected):
-                everything_is_awesome = False
-        pdf_report.detail(
-            "All baselines in this range correct." if everything_is_awesome else "Errors detected in this range."
-        )
-
-
-def is_signal_expected_in_baseline(expected_bl: tuple[str, str], loud_bl: tuple[str, str]) -> bool:
-    """Check whether signal is expected in the loud baseline, given which one had a test signal injected.
-
-    It isn't possible in the general case to get signal in only a single
-    baseline. There will be auto-correlations, and the conjugate correlations
-    which will show signal as well.
-
-    Parameters
-    ----------
-    expected_bl
-        A tuple of the form ("m801h", "m802v") indicating which baseline we are
-        checking.
-    loud_bl
-        A baseline where signal has been detected.
-
-    Returns
-    -------
-    bool
-        Indication of whether signal is expected, i.e. whether the test can pass.
-    """
-    # np.testing.assert_array_compare
-    return np.isin(loud_bl, expected_bl)[1]
+                print("channel:", i)
+                print("baselines on channel should be:", expected_loud_bls_channels[i, :])
+                print("baselines on channel are:", data[i, :, 0])
+                print("antenna gains on channel are:", antenna_gains[:, i])
+                np.testing.assert_array_equal(
+                    loud_bln_index,
+                    expected_loud_bls_index,
+                    err_msg="output nonzero values doesn't match the "
+                    + f"expected antenna gain configuration for channel {i}",
+                )

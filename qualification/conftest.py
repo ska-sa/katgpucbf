@@ -115,12 +115,6 @@ def pytest_addoption(parser, pluginmanager):  # noqa: D103
     parser.addoption(
         "--image-override", action="append", required=True, metavar="NAME:IMAGE:TAG", help="Override a single image"
     )
-    parser.addoption(
-        "--dry-run-report",
-        default=False,
-        action="store_true",
-        help="Clear the pdf_report stash after each test completes",
-    )
     for option in ini_options:
         parser.addini(*option)
 
@@ -150,7 +144,7 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
     # better place, and I did look around quite a bit.
     try:
         git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
-    except:  # noqa: E722 still testing for the exception
+    except Exception:
         git_information = "unknown"
 
     logger.info("Git information: %s", git_information)
@@ -243,15 +237,10 @@ def int_time() -> float:
     return 0.5
 
 
-@pytest.fixture(autouse=True)
-def pdf_report(request, monkeypatch, pytestconfig: pytest.Config) -> Generator[Reporter, None, None]:
+@pytest.fixture(autouse=True, scope="function")
+def pdf_report(request, monkeypatch) -> Reporter:
     """Fixture for logging steps in a test."""
-    if pytestconfig.getoption("dry_run_report"):
-        print(f"Dry run report for {request.node.name}")
-        data = []
-    else:
-        data = request.node.stash[pdf_report_data_key]
-    reporter = Reporter(data, raw_data=request.config.getini("raw_data"))
+    reporter = Reporter(request.node.stash[pdf_report_data_key], raw_data=request.config.getini("raw_data"))
     orig_log_failure = pytest_check.check_log.log_failure
     orig_stack = inspect.stack
 
@@ -277,9 +266,7 @@ def pdf_report(request, monkeypatch, pytestconfig: pytest.Config) -> Generator[R
     # context_manager uses `from .check_log import log_failure` so we have to
     # patch it under that name.
     monkeypatch.setattr(pytest_check.context_manager, "log_failure", log_failure)
-    yield reporter
-    if pytestconfig.getoption("dry_run_report"):
-        del reporter._data
+    return reporter
 
 
 @pytest.fixture(scope="session")
