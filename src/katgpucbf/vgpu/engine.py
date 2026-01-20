@@ -31,6 +31,7 @@ import katcbf_vlbi_resample.power
 import katcbf_vlbi_resample.rechunk
 import katcbf_vlbi_resample.resample
 import katcbf_vlbi_resample.stream
+import katcbf_vlbi_resample.utils
 import katcbf_vlbi_resample.vdif_writer
 import numpy as np
 import spead2.recv.asyncio
@@ -99,6 +100,25 @@ class RecvStream:
                     coords={"pol": list(self._pol_labels)},
                     attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
                 )
+
+
+class RecordPower(katcbf_vlbi_resample.power.RecordPower):
+    """Record power levels to sensors."""
+
+    def __init__(self, *args, sensors: aiokatcp.SensorSet, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.sensors = sensors
+
+    def record_rms(self, start: int, length: int, rms: xr.DataArray) -> None:  # noqa: D102
+        end = start + length
+        end_time = self.time_base + katcbf_vlbi_resample.utils.fraction_to_time_delta(end * self.time_scale)
+        end_time_unix = float(end_time.unix)
+        power = rms**2
+        for pol in power.coords["pol"].values:
+            for sideband in power.coords["sideband"].values:
+                channel = ["lsb", "usb"].index(sideband)
+                sensor = self.sensors[f"{pol}{channel}.mean-power"]
+                sensor.set_value(power.sel(pol=pol, sideband=sideband).item(), timestamp=end_time_unix)
 
 
 class VEngine(Engine):
@@ -264,8 +284,7 @@ class VEngine(Engine):
         )
         it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
         it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
-        # TODO: rig up a RecordPower subclass to write to the sensor
-        # it_rms = RecordPower(it_rms, threads=self._threads)
+        it_rms = RecordPower(it_rms, sensors=self.sensors)
         it = katcbf_vlbi_resample.power.NormalisePower(it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / self.threshold)
         it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(it, samples_per_frame=self.n_samples_per_frame)
         it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
