@@ -27,7 +27,7 @@ from ..reporter import POTLocator, Reporter
 from . import sample_tone_response_hdr
 
 
-def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> list[float]:
+def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> np.ndarray:
     """Measure Spurious Free Dynamic Range (SFDR) of the response at a given power level.
 
     Estimate the SFDR by measuring the power (dB) of the next strongest
@@ -44,15 +44,15 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> list[floa
 
     Returns
     -------
-    A list of differences computed from peak_value - next_peak_value.
+    A numpy array of computed values from peak_value - next_peak_value.
     """
-    sfdr_measurements = []
+    sfdr_measurements = np.empty(len(base_channel), np.float32)
 
-    for spectrum, channel in zip(hdr_data_db, base_channel, strict=True):
+    for i, (spectrum, channel) in enumerate(zip(hdr_data_db, base_channel, strict=True)):
         peak_value = spectrum[channel]
         next_peak_value = max(np.max(spectrum[:channel]), np.max(spectrum[channel + 1 :]))
         peak_diff = peak_value - next_peak_value
-        sfdr_measurements.append(peak_diff)
+        sfdr_measurements[i] = peak_diff
     return sfdr_measurements
 
 
@@ -106,10 +106,12 @@ async def test_channelisation_and_sfdr(
 
     # Check tone positions w.r.t. requested channels
     pdf_report.step("Check tone positions.")
-    for idx, sel_chan in enumerate(rel_freqs):
-        peak_chan = np.argmax(hdr_data[idx])
-        with check:
-            assert sel_chan == peak_chan
+    peak_channels = np.empty(len(rel_freqs), np.int32)
+    for idx, hdr in enumerate(hdr_data):
+        peak_channels[idx] = np.argmax(hdr)
+
+    with check:
+        np.testing.assert_array_equal(rel_freqs, peak_channels)
 
     # The maximum is to avoid errors when data is 0
     hdr_data_db = 10 * np.log10(np.maximum(hdr_data, 1e-100) / np.max(hdr_data))
@@ -117,12 +119,10 @@ async def test_channelisation_and_sfdr(
     # Measure SFDR per captured spectrum
     pdf_report.step("Check SFDR attenuation.")
     sfdr_measurements = measure_sfdr(hdr_data_db, rel_freqs)
-    # Figure out worst SFDR measurement
-    sfdr_min = np.min(sfdr_measurements)
 
     # Check that minimum SFDR measurement meets the requirement.
     with check:
-        assert sfdr_min >= required_sfdr_db
+        np.testing.assert_array_less(np.full_like(sfdr_measurements, required_sfdr_db), sfdr_measurements)
     sfdr_mean = np.mean(sfdr_measurements)
 
     pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(rel_freqs)} channels.")
@@ -131,7 +131,7 @@ async def test_channelisation_and_sfdr(
     pdf_report.step("Minimum SFDR measurement.")
 
     selected_plot_idx = np.argmin(sfdr_measurements)
-    pdf_report.detail(f"{sfdr_min:.3f}dB for channel {rel_freqs[selected_plot_idx]}.")
+    pdf_report.detail(f"{np.min(sfdr_measurements):.3f}dB for channel {rel_freqs[selected_plot_idx]}.")
 
     plot_channel = rel_freqs[selected_plot_idx]
     pdf_report.step(f"SFDR plot for base channel {plot_channel}.")
