@@ -101,7 +101,7 @@ async def test_gains(
         b = receiver.input_labels.index(bl[1])
         expected_gain = gains[a] * gains[b].conj()
         expected = orig[:, i] * expected_gain
-        rel_error = np.abs(data[:, i] - expected) / np.abs(expected)
+        rel_error = np.abs(data[:, i] - expected) / np.abs(expected)  # why devide by expected?
         max_rel_error = max(max_rel_error, np.max(rel_error[pass_channels]))
     pdf_report.detail(f"Maximum relative error: {max_rel_error}.")
     # 10^-0.05 ~= 0.9, so a relative error of <0.1 implies that the gain is
@@ -170,5 +170,5 @@ async def test_gains_capture_start(
     np.testing.assert_equal(data[cut:], 0)
     # It's random, so technically it's possible for any of the values to be
     # zero, but exceedingly unlikely.
-    assert np.min(data[:cut]) > 0
+    np.testing.assert_array_less(np.zeros_like(data[:cut]), data[:cut])
     pdf_report.detail("Output reflects effects of gains.")
