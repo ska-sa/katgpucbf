@@ -13,10 +13,13 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.11
     hooks:
-      - id: ruff-format
-        types_or: [python, pyi]  # Prevent formatting notebooks
       - id: ruff-check
         types_or: [python, pyi]
+        # Allow certain issues to be fixed automatically:
+        # I001: unsorted/unformatted imports (ala isort)
+        args: [--fix, --fixable=I001]
+      - id: ruff-format
+        types_or: [python, pyi]  # Prevent formatting notebooks
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: 'v1.19.1'
     hooks:
