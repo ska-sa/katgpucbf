@@ -370,7 +370,7 @@ six==1.17.0
     #   -c qualification/../requirements.txt
     #   katsdptelstate
     #   python-dateutil
-spead2==4.4.0
+spead2==4.4.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
