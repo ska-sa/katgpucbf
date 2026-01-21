@@ -83,6 +83,8 @@ class VEngine(Engine):
         self.recv_time_converter = TimeConverter(sync_time, adc_sample_rate)
 
         self.send_pols = send_pols
+        self.send_enabled = False
+        self.send_enabled_timestamp: int | None = None
 
         recv_sensor_timeout = max(
             RECV_SENSOR_TIMEOUT_MIN,
@@ -191,10 +193,13 @@ class VEngine(Engine):
         # TODO: will need to be rounded/quantised
         self.sensors["delay"].value = delay
 
-    async def request_capture_start(self, ctx: aiokatcp.RequestContext) -> None:
+    async def request_capture_start(self, ctx: aiokatcp.RequestContext, timestamp: int = 0) -> None:
         """Start capturing and emitting data."""
-        pass
+        # TODO: Will this need some kind of lock to prevent simultaneous start/stop?
+        # TODO: Temporary attributes to be moved inside an eventual e.g. VSend class
+        self.send_enabled = True
+        self.send_enabled_timestamp = timestamp
 
     async def request_capture_stop(self, ctx: aiokatcp.RequestContext) -> None:
         """Stop capturing and emitting data."""
-        pass
+        self.send_enabled = False
