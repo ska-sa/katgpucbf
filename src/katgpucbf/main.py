@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -38,7 +38,16 @@ from katsdpservices import get_interface_address
 from katsdpservices.aiomonitor import add_aiomonitor_arguments, start_aiomonitor
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from . import DEFAULT_KATCP_HOST, DEFAULT_KATCP_PORT, DEFAULT_TTL, __version__, spead, utils
+from . import (
+    DEFAULT_KATCP_HOST,
+    DEFAULT_KATCP_PORT,
+    DEFAULT_RECV_BUFFER_SIZE,
+    DEFAULT_SEND_BUFFER_SIZE,
+    DEFAULT_TTL,
+    __version__,
+    spead,
+    utils,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +258,7 @@ def add_recv_arguments(parser: argparse.ArgumentParser, *, multi: bool = False) 
     parser.add_argument(
         "--recv-buffer",
         type=int,
-        default=128 * 1024 * 1024,
+        default=DEFAULT_RECV_BUFFER_SIZE,
         metavar="BYTES",
         help="Size of network receive buffer [128MiB]",
     )
@@ -289,6 +298,13 @@ def add_send_arguments(
     )
     parser.add_argument(
         f"--{prefix}ttl", type=int, default=DEFAULT_TTL, metavar="TTL", help="TTL for outgoing packets [%(default)s]"
+    )
+    parser.add_argument(
+        "--send-buffer",
+        type=int,
+        default=DEFAULT_SEND_BUFFER_SIZE,
+        metavar="BYTES",
+        help="Size of network send buffer [1MiB]",
     )
     if ibverbs:
         parser.add_argument(f"--{prefix}ibv", action="store_true", help="Use ibverbs for output [no]")

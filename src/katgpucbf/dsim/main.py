@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2025, National Research Foundation (SARAO)
+# Copyright (c) 2021-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -169,6 +169,7 @@ async def start_engine(
         interface_address=args.interface,
         ibv=args.ibv,
         comp_vector=args.comp_vector,
+        buffer_size=args.send_buffer,
     )
     descriptor_stream.set_cnt_sequence(1, 2)
 
@@ -204,6 +205,7 @@ async def start_engine(
         ibv=args.ibv,
         affinity=args.affinity,
         comp_vector=args.comp_vector,
+        buffer_size=args.send_buffer,
     )
     # Set spead stream to have heap id in even numbers for dsim data.
     stream.set_cnt_sequence(2, 2)

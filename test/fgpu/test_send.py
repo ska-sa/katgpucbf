@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023-2025, National Research Foundation (SARAO)
+# Copyright (c) 2023-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -128,7 +128,7 @@ def send_streams(
             ibv=False,
             packet_payload=8192,
             comp_vector=0,
-            buffer=65536,
+            buffer_size=65536,
             bandwidth=0.5 * ADC_SAMPLE_RATE,
             send_rate_factor=0.0,  # Just send as fast as possible
             feng_id=FENG_ID,

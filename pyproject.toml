@@ -49,7 +49,7 @@ gpu = [
 ]
 
 doc = [
-    "sphinx",
+    "sphinx<9",  # Until https://github.com/sphinx-doc/sphinx/issues/14223 is fixed
     "sphinx-rtd-theme",
     "sphinxcontrib-bibtex",
     "sphinxcontrib-tikz",

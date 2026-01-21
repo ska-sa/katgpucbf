@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -46,7 +46,7 @@ def mock_recv_streams(monkeypatch: pytest.MonkeyPatch, n_recv_streams: int) -> l
         interface: str | None,
         ibv: bool,
         comp_vector: int,
-        buffer: int,
+        buffer_size: int,
     ) -> None:
         """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
         queue = next(queue_iter)
