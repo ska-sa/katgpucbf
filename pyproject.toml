@@ -57,12 +57,17 @@ doc = [
 ]
 
 test = [
+    "pytest-asyncio",
     "katsdpsigproc[CUDA]",
     "async-solipsism>=0.6",
-    "pytest>=8",
+    "pytest>=9",
     "pytest-asyncio>=0.24",
+    "pytest-check>=1.3,<2.2.3",  # Upper bound due to https://github.com/okken/pytest-check/issues/173
     "pytest-custom_exit_code",
     "pytest-mock",
+    "pytest-reportlog",
+    "matplotlib>=3.10.0",
+    "prometheus-api-client>=0.7.0"
 ]
 
 qualification = [

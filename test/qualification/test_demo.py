@@ -60,14 +60,16 @@ def setup_pytester(pytester: pytest.Pytester, pytestini_content: str) -> pytest.
     if report_file.exists():
         report_file.unlink()
 
-    qualification_conftest = Path(__file__).resolve().parent.parent / "conftest.py"
+    qualification_conftest = Path(__file__).resolve().parent.parent.parent
+    qualification_conftest = qualification_conftest / "qualification" / "conftest.py"
     with open(qualification_conftest, encoding="utf-8") as f:
         conftest_content = f.read()
     # Replace relative imports with absolute imports for pytester
     conftest_content = conftest_content.replace("from .cbf import", "from qualification.cbf import")
     conftest_content = conftest_content.replace("from .recv import", "from qualification.recv import")
     conftest_content = conftest_content.replace("from .reporter import", "from qualification.reporter import")
-    demo_test_content = open(Path(__file__).resolve().parent / "demo.py", encoding="utf-8").read()
+    proj_root_path = Path(__file__).resolve().parent.parent.parent
+    demo_test_content = open(proj_root_path / "qualification" / "demo" / "demo.py", encoding="utf-8").read()
     pytester.makeconftest(conftest_content)
     pytester.makeini(pytestini_content)
     pytester.makepyfile(demo_test_content)
@@ -76,6 +78,10 @@ def setup_pytester(pytester: pytest.Pytester, pytestini_content: str) -> pytest.
 
 def test_slow_fixture_updates_timestamp(setup_pytester: pytest.Pytester) -> None:
     """Test that the timestamp is updated when the slow fixture is used."""
+    print(
+        "checking for test collection",
+        setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_passes", "--collect-only"),
+    )
     result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_passes")
     print(result.stdout.str())
     assert result.ret == 0
@@ -236,10 +242,11 @@ def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(setup_pytester: pyt
     result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
     assert result.duration > 0
     assert result.parseoutcomes()["failed"] == 1
+    print("result.outlines", result.outlines)
     assert any("Arrays written to" in line for line in result.outlines), (
         "Arrays written to should be present in the report"
     )
-
+    print("MONKEYPATCHING ARRAY COMPARISON FIXTURE!")
     # Extract the path from the output
     # TODO: move to function
     array_path = None
