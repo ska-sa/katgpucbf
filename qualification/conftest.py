@@ -49,8 +49,6 @@ MAX_PASS_FRACTION = 0.7  # Maximum fraction of total narrowband bandwidth to use
 pdf_report_data_key = pytest.StashKey[dict]()
 _CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
 
-pytest_plugins = ["pytester"]
-
 # Storing ini options this way makes pytest.ini easier to validate up-front.
 IniOption = namedtuple("IniOption", ["name", "help", "type", "default"], defaults=[None])
 ini_options = [

@@ -42,6 +42,7 @@ combination is a candidate.
 """
 
 import itertools
+import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
@@ -76,7 +77,7 @@ def pytest_addoption(parser) -> None:
         "array_dir",
         help="Directory in which to save failed array comparisons",
         type="paths",
-        default=[Path("/tmp/testarr/arrays")],
+        default=[Path(tempfile.gettempdir())],
     )
 
 

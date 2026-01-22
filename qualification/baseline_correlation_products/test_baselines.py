@@ -174,6 +174,7 @@ async def test_baseline_correlation_products(
             loud_bln_index = np.nonzero(data[1:, :, 0])
             expected_loud_bls_index = np.nonzero(expected_loud_bls_channels[1:, :])
 
+            pdf_report.step("Compare output nonzero correlation values to expected antenna gain configuration.")
             np.testing.assert_array_equal(
                 loud_bln_index,
                 expected_loud_bls_index,

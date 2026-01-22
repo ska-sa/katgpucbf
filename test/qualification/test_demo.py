@@ -21,7 +21,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from pytest_check import check
 
 
 @pytest.fixture
@@ -78,12 +77,7 @@ def setup_pytester(pytester: pytest.Pytester, pytestini_content: str) -> pytest.
 
 def test_slow_fixture_updates_timestamp(setup_pytester: pytest.Pytester) -> None:
     """Test that the timestamp is updated when the slow fixture is used."""
-    print(
-        "checking for test collection",
-        setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_passes", "--collect-only"),
-    )
     result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_passes")
-    print(result.stdout.str())
     assert result.ret == 0
     result.assert_outcomes(passed=1, failed=0, errors=0, skipped=0, xpassed=0, xfailed=0)
     # read the report.json file and confirm test
@@ -140,10 +134,7 @@ def test_figure_creates_binary_figure_in_report(setup_pytester: pytest.Pytester)
 @pytest.mark.xfail(reason="Need to fix the check plugin for pytester usage")
 def test_check_test_is_reported_correctly(setup_pytester: pytest.Pytester) -> None:
     """Test that the check test is reported correctly."""
-    with check:
-        result = setup_pytester.runpytest(
-            "--image-override=::", "--report-log=report.json", "-k test_check_with_failures"
-        )
+    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_check_with_failures")
     result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
     assert result.duration > 0
     assert len(result.errlines) == 0
@@ -183,8 +174,6 @@ def test_check_test_is_reported_correctly(setup_pytester: pytest.Pytester) -> No
                             if step_message == "Expect some good things":
                                 found_good_things_step = True
 
-    print("aaaaaa")
-    print(result.outlines)
     assert any("(1 * 3) == 2" in line for line in result.outlines), "'1 * 3 == 2' should be present in the report"
     assert any("check with msg" in line for line in result.outlines), "'check with msg' should be present in the report"
     assert found_bad_things_step, "Step 'Expect some bad things' should be present in the report"
@@ -200,6 +189,23 @@ def test_marked_xfail_is_not_reported_as_failed(setup_pytester: pytest.Pytester)
     assert len(result.errlines) == 0
 
 
+def _extract_array_path_from_output(outlines: list[str], pytester_path: Path) -> Path | None:
+    """Extract the array path from pytest output lines that contain 'Arrays written to'."""
+    for line in outlines:
+        if "Arrays written to" in line:
+            # Extract the path after "Arrays written to "
+            prefix = "Arrays written to "
+            idx = line.find(prefix)
+            if idx != -1:
+                array_path_str = line[idx + len(prefix) :].strip()
+                # The path might be relative to pytester.path or absolute
+                array_path = Path(array_path_str)
+                if not array_path.is_absolute():
+                    array_path = pytester_path / array_path
+                return array_path
+    return None
+
+
 def test_failed_np_assertion_dumps_arrays(setup_pytester: pytest.Pytester) -> None:
     """Test that the numpy fail test is reported correctly."""
     result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_numpy_fails")
@@ -211,19 +217,7 @@ def test_failed_np_assertion_dumps_arrays(setup_pytester: pytest.Pytester) -> No
     )
 
     # Extract the path from the output
-    array_path = None
-    for line in result.outlines:
-        if "Arrays written to" in line:
-            # Extract the path after "Arrays written to "
-            prefix = "Arrays written to "
-            idx = line.find(prefix)
-            if idx != -1:
-                array_path_str = line[idx + len(prefix) :].strip()
-                # The path might be relative to pytester.path or absolute
-                array_path = Path(array_path_str)
-                if not array_path.is_absolute():
-                    array_path = setup_pytester.path / array_path
-                break
+    array_path = _extract_array_path_from_output(result.outlines, setup_pytester.path)
 
     assert array_path is not None, "Could not find array path in output"
     assert array_path.exists(), f"Array file should exist at {array_path}"
@@ -242,26 +236,11 @@ def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(setup_pytester: pyt
     result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
     assert result.duration > 0
     assert result.parseoutcomes()["failed"] == 1
-    print("result.outlines", result.outlines)
     assert any("Arrays written to" in line for line in result.outlines), (
         "Arrays written to should be present in the report"
     )
-    print("MONKEYPATCHING ARRAY COMPARISON FIXTURE!")
     # Extract the path from the output
-    # TODO: move to function
-    array_path = None
-    for line in result.outlines:
-        if "Arrays written to" in line:
-            # Extract the path after "Arrays written to "
-            prefix = "Arrays written to "
-            idx = line.find(prefix)
-            if idx != -1:
-                array_path_str = line[idx + len(prefix) :].strip()
-                # The path might be relative to pytester.path or absolute
-                array_path = Path(array_path_str)
-                if not array_path.is_absolute():
-                    array_path = setup_pytester.path / array_path
-                break
+    array_path = _extract_array_path_from_output(result.outlines, setup_pytester.path)
 
     assert array_path is not None, "Could not find array path in output"
     assert array_path.exists(), f"Array file should exist at {array_path}"
