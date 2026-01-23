@@ -130,6 +130,13 @@ pipeline {
                 sh 'pytest -n 4 -v -ra -m "not slow" --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
               }
             }
+            stage('Run pytest (qualification_tests)') {
+              when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
+              options { timeout(time: 30, unit: 'MINUTES') }
+              steps {
+                sh 'pytest -n 4 -v qualification_tests -ra -m "not slow" --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
+              }
+            }
             stage('Run pytest (full)') {
               when { anyOf { changeRequest target: 'main'; branch 'main' } }
               options { timeout(time: 60, unit: 'MINUTES') }

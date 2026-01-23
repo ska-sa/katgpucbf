@@ -74,18 +74,12 @@ cloudpickle==3.1.2
     # via
     #   -c requirements.txt
     #   dask
-contourpy==1.3.3
-    # via matplotlib
 coverage==7.13.1
     # via pytest-cov
-cycler==0.12.1
-    # via matplotlib
 dask==2025.12.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
-dateparser==1.2.2
-    # via prometheus-api-client
 decorator==5.2.1
     # via
     #   -c requirements.txt
@@ -106,8 +100,6 @@ executing==2.2.1
     # via stack-data
 filelock==3.20.3
     # via virtualenv
-fonttools==4.61.1
-    # via matplotlib
 frozenlist==1.8.0
     # via
     #   -c requirements.txt
@@ -167,8 +159,6 @@ katsdptelstate==1.0.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
-kiwisolver==1.4.9
-    # via matplotlib
 latexcodec==3.0.1
     # via pybtex
 llvmlite==0.46.0
@@ -189,8 +179,6 @@ markupsafe==3.0.3
     #   -c requirements.txt
     #   jinja2
     #   mako
-matplotlib==3.10.8
-    # via katgpucbf (pyproject.toml)
 matplotlib-inline==0.2.1
     # via ipython
 msgpack==1.1.2
@@ -218,11 +206,9 @@ numpy==2.3.5
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
     #   astropy
-    #   contourpy
     #   katcbf-vlbi-resample
     #   katsdpsigproc
     #   katsdptelstate
-    #   matplotlib
     #   numba
     #   pandas
     #   pyerfa
@@ -235,7 +221,6 @@ packaging==25.0
     #   astropy
     #   dask
     #   katcbf-vlbi-resample
-    #   matplotlib
     #   pytest
     #   sphinx
     #   xarray
@@ -252,8 +237,6 @@ partd==1.4.2
     #   dask
 pexpect==4.9.0
     # via ipython
-pillow==12.1.0
-    # via matplotlib
 platformdirs==4.5.1
     # via
     #   -c requirements.txt
@@ -266,8 +249,6 @@ pluggy==1.6.0
     #   pytest-cov
 pre-commit==4.5.1
     # via -r requirements-dev.in
-prometheus-api-client==0.7.0
-    # via katgpucbf (pyproject.toml)
 prometheus-async==25.1.0
     # via
     #   -c requirements.txt
@@ -319,20 +300,15 @@ pyparsing==3.3.1
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
-    #   matplotlib
 pytest==9.0.2
     # via
     #   katgpucbf (pyproject.toml)
     #   pytest-asyncio
-    #   pytest-check
     #   pytest-cov
     #   pytest-custom-exit-code
     #   pytest-mock
-    #   pytest-reportlog
     #   pytest-xdist
 pytest-asyncio==1.3.0
-    # via katgpucbf (pyproject.toml)
-pytest-check==2.2.2
     # via katgpucbf (pyproject.toml)
 pytest-cov==7.0.0
     # via -r requirements-dev.in
@@ -340,15 +316,11 @@ pytest-custom-exit-code==0.3.0
     # via katgpucbf (pyproject.toml)
 pytest-mock==3.15.1
     # via katgpucbf (pyproject.toml)
-pytest-reportlog==1.0.0
-    # via katgpucbf (pyproject.toml)
 pytest-xdist==3.8.0
     # via -r requirements-dev.in
 python-dateutil==2.9.0.post0
     # via
     #   -c requirements.txt
-    #   dateparser
-    #   matplotlib
     #   pandas
 pytools==2025.2.5
     # via
@@ -357,7 +329,6 @@ pytools==2025.2.5
 pytz==2025.2
     # via
     #   -c requirements.txt
-    #   dateparser
     #   pandas
 pyyaml==6.0.3
     # via
@@ -370,12 +341,8 @@ redis==7.1.0
     # via
     #   -c requirements.txt
     #   katsdptelstate
-regex==2026.1.15
-    # via dateparser
 requests==2.32.5
-    # via
-    #   prometheus-api-client
-    #   sphinx
+    # via sphinx
 roman-numerals==4.1.0
     # via roman-numerals-py
 roman-numerals-py==4.1.0
@@ -468,8 +435,6 @@ tzdata==2025.3
     # via
     #   -c requirements.txt
     #   pandas
-tzlocal==5.3.1
-    # via dateparser
 urllib3==2.6.3
     # via requests
 uv==0.9.24

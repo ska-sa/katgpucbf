@@ -17,6 +17,7 @@
 """Example tests helpful in developing the reporting framework."""
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -59,15 +60,13 @@ def setup_pytester(pytester: pytest.Pytester, pytestini_content: str) -> pytest.
     if report_file.exists():
         report_file.unlink()
 
-    qualification_conftest = Path(__file__).resolve().parent.parent.parent
-    qualification_conftest = qualification_conftest / "qualification" / "conftest.py"
+    proj_root_path = Path(__file__).resolve().parent.parent.parent.parent
+    qualification_conftest = proj_root_path / "qualification" / "conftest.py"
     with open(qualification_conftest, encoding="utf-8") as f:
         conftest_content = f.read()
     # Replace relative imports with absolute imports for pytester
-    conftest_content = conftest_content.replace("from .cbf import", "from qualification.cbf import")
-    conftest_content = conftest_content.replace("from .recv import", "from qualification.recv import")
-    conftest_content = conftest_content.replace("from .reporter import", "from qualification.reporter import")
-    proj_root_path = Path(__file__).resolve().parent.parent.parent
+    conftest_content = re.sub(r"from \.(\w+) import", r"from qualification.\1 import", conftest_content)
+
     demo_test_content = open(proj_root_path / "qualification" / "demo" / "demo.py", encoding="utf-8").read()
     pytester.makeconftest(conftest_content)
     pytester.makeini(pytestini_content)

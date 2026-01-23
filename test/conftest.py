@@ -42,11 +42,8 @@ combination is a candidate.
 """
 
 import itertools
-import tempfile
-from collections.abc import Iterator
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
-from pathlib import Path
 from typing import Any
 
 import katsdpsigproc.cuda
@@ -58,7 +55,6 @@ from katsdpsigproc.abc import AbstractDevice
 
 from katgpucbf.mapped_array import make_vkgdr
 from katgpucbf.utils import TimeConverter
-from qualification.numpy import build_numpy_function
 
 pytest_plugins = ["katsdpsigproc.pytest_plugin"]
 
@@ -72,12 +68,6 @@ def pytest_addoption(parser) -> None:
     """Register new command-line options."""
     group = parser.getgroup("combinations")
     group.addoption("--all-combinations", action="store_true", help="Test the full Cartesian product of parameters")
-    parser.addini(
-        "array_dir",
-        help="Directory in which to save failed array comparisons",
-        type="paths",
-        default=[Path(tempfile.gettempdir())],
-    )
 
 
 @dataclass
@@ -182,28 +172,6 @@ def mock_send_stream(
 
     monkeypatch.setattr("spead2.send.asyncio.UdpStream", constructor)
     return queues
-
-
-@pytest.fixture(scope="session")
-def _array_compare_counter() -> Iterator[int]:
-    """Counter used to give unique filenames to array dumps."""
-    return itertools.count(0)
-
-
-@pytest.fixture(autouse=True)
-def _array_compare(
-    monkeypatch: pytest.MonkeyPatch, pytestconfig: pytest.Config, _array_compare_counter: Iterator[int]
-) -> None:
-    """Patch numpy.testing to save failed array comparisons if enabled."""
-    paths = pytestconfig.getini("array_dir")
-    if not paths:
-        return  # Not enabled
-    path = paths[0]
-    path.mkdir(parents=True, exist_ok=True)
-    build_err_msg = build_numpy_function(path, _array_compare_counter)
-
-    # We have to patch in the private module since that's where it gets called.
-    monkeypatch.setattr("numpy.testing._private.utils.build_err_msg", build_err_msg)
 
 
 @pytest.fixture

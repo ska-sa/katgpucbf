@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# Configure pytest for qualification_tests
+testpaths = ["qualification_tests/test"]
+# Add parent directory to Python path so qualification package can be imported
+# The qualification package is located in ../qualification
+pythonpath = [".."]
+# Use prepend import mode to ensure qualification package is found
