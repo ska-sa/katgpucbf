@@ -61,7 +61,6 @@ from katgpucbf.utils import TimeConverter
 from qualification.numpy import build_numpy_function
 
 pytest_plugins = ["katsdpsigproc.pytest_plugin"]
-pytest_plugins = ["pytester"]
 
 
 def pytest_configure(config) -> None:
