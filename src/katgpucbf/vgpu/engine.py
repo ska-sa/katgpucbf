@@ -181,14 +181,7 @@ class VEngine(Engine):
         self._pol_matrix = katcbf_vlbi_resample.polarisation.from_linear(
             send_pols
         ) @ katcbf_vlbi_resample.polarisation.to_linear(recv_pols)
-        self._input_parameters = katcbf_vlbi_resample.parameters.StreamParameters(
-            bandwidth=adc_sample_rate * n_channels / n_samples_between_spectra,
-            center_freq=0.0,  # TODO: remove as it is not needed (NGC-1865)
-        )
-        self._output_parameters = katcbf_vlbi_resample.parameters.StreamParameters(
-            bandwidth=send_bandwidth,
-            center_freq=0.0,
-        )
+        self.send_bandwidth = send_bandwidth
         self._resample_parameters = katcbf_vlbi_resample.parameters.ResampleParameters(
             fir_taps=fir_taps,
             hilbert_taps=hilbert_taps,
@@ -279,9 +272,7 @@ class VEngine(Engine):
         it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
         it = katcbf_vlbi_resample.resample.IFFT(it)
         it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(it, self._pol_matrix, self.recv_pols, self.send_pols)
-        it = katcbf_vlbi_resample.resample.Resample(
-            self._input_parameters, self._output_parameters, self._resample_parameters, it
-        )
+        it = katcbf_vlbi_resample.resample.Resample(self.send_bandwidth, 0.0, self._resample_parameters, it)
         it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
         it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
         it_rms = RecordPower(it_rms, sensors=self.sensors)
