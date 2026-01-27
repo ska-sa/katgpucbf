@@ -18,14 +18,22 @@ import warnings
 from importlib.metadata import distribution
 
 # Allow docs to be built even if pycuda is not installed
-sys.modules["katsdpsigproc.cuda"] = unittest.mock.Mock()
+for module in [
+    "katsdpsigproc.cuda",
+    "cupy",
+    "cupyx",
+    "cupyx.scipy",
+    "cupyx.scipy.fft",
+    "cupyx.scipy.signal",
+]:
+    sys.modules[module] = unittest.mock.Mock()
 
 sys.path.insert(0, os.path.abspath("."))
 
 # -- Project information -----------------------------------------------------
 
 project = "katgpucbf"
-copyright = "2021-2025, National Research Foundation (SARAO)"
+copyright = "2021-2026, National Research Foundation (SARAO)"
 
 # Get the information from the installed package, no need to maintain it in
 # multiple places.
