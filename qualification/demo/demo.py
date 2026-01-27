@@ -29,7 +29,7 @@ from qualification.reporter import POTLocator, Reporter
 
 @pytest_asyncio.fixture(scope="function")
 async def slow_fixture() -> int:
-    """Some string here."""
+    """Sleep for 0.5 seconds."""
     await asyncio.sleep(0.5)
     return 1
 
