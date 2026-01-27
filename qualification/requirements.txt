@@ -143,7 +143,7 @@ jinja2==3.1.6
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiomonitor
-katcbf-vlbi-resample==0.3
+katcbf-vlbi-resample==0.4
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt

@@ -41,7 +41,7 @@ repos:
             'asyncssh==2.22.0',
             'baseband==4.3.0',
             'dask==2025.12.0',
-            'katcbf-vlbi-resample==0.3',
+            'katcbf-vlbi-resample==0.4',
             'katsdpsigproc==1.10.0',
             'katsdptelstate==1.0.0',
             'matplotlib==3.10.8',

@@ -23,7 +23,7 @@ dependencies = [
     "aiokatcp>=1.9.0",
     "astropy",
     "dask",
-    "katcbf-vlbi-resample>=0.2",
+    "katcbf-vlbi-resample>=0.4",
     "katsdpservices[aiomonitor]",
     "katsdpsigproc>=1.9.0",
     "katsdptelstate",
