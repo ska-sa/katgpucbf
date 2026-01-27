@@ -117,7 +117,7 @@ extend-ignore = ["D105", "D107"]  # docstrings for magic methods
 "scratch/**/*.py" = ["D"]  # Don't fuss with docstrings in scratch/
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
-property-decorators = ["pytest.fixture"]
+property-decorators = ["pytest.fixture", "pytest_asyncio.fixture"]
 [tool.ruff.lint.isort]
 known-local-folder = ["benchmark_tools", "noisy_search", "remote", "sighandler"]
 
