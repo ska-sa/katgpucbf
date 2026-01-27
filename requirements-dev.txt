@@ -140,7 +140,7 @@ jinja2==3.1.6
     #   -c requirements.txt
     #   aiomonitor
     #   sphinx
-katcbf-vlbi-resample==0.3
+katcbf-vlbi-resample==0.4
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)

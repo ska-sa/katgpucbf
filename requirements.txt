@@ -63,7 +63,7 @@ janus==2.0.0
     # via aiomonitor
 jinja2==3.1.6
     # via aiomonitor
-katcbf-vlbi-resample==0.3
+katcbf-vlbi-resample==0.4
     # via katgpucbf (pyproject.toml)
 katcp-codec==0.2.0
     # via aiokatcp
