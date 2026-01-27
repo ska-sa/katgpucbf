@@ -29,7 +29,7 @@ from qualification.reporter import POTLocator, Reporter
 
 @pytest_asyncio.fixture(scope="function")
 async def slow_fixture() -> int:
-    """Demonstrates the delay in the timestamp in the report."""
+    """Some string here."""
     await asyncio.sleep(0.5)
     return 1
 
