@@ -11,23 +11,55 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
+import importlib.abc
 import os
 import sys
 import unittest.mock
 import warnings
+from importlib.machinery import ModuleSpec
 from importlib.metadata import distribution
 
-# Allow docs to be built even if pycuda is not installed
-for module in [
-    "katsdpsigproc.cuda",
-    "cupy",
-    "cupyx",
-    "cupyx.scipy",
-    "cupyx.scipy.fft",
-    "cupyx.scipy.signal",
-]:
-    sys.modules[module] = unittest.mock.Mock()
 
+class DummyFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Finder that loads mock versions of modules.
+
+    Parameters
+    ----------
+    modules
+        Prefixes for modules to mock out. Any descendant modules are
+        also mocked out.
+    """
+
+    def __init__(self, modules: list[str]) -> None:
+        self._modules = modules
+
+    def find_spec(self, fullpath, path, target=None):  # noqa: D102
+        for module in self._modules:
+            if fullpath == module or fullpath.startswith(module + "."):
+                return ModuleSpec(fullpath, self)
+        return None  # We're not going to try to handle it
+
+    def create_module(self, spec):  # noqa: D102
+        return None  # Let the default import machinery handle it
+
+    def exec_module(self, module):
+        """Modify the module to return mock objects for undefined attributes."""
+
+        def _getattr(name):
+            # Don't mock magics like "__all__"
+            if name.startswith("__") and name.endswith("__"):
+                raise AttributeError(name)
+            attr = unittest.mock.MagicMock()
+            setattr(module, name, attr)  # Cache it for next time
+            return attr
+
+        # Make the module appear to be a package, in case the origin is.
+        module.__path__ = []
+        module.__getattr__ = _getattr
+
+
+# Allow docs to be built even if pycuda or CUDA are not installed
+sys.meta_path.insert(0, DummyFinder(["katsdpsigproc.cuda", "cupy", "cupyx"]))
 sys.path.insert(0, os.path.abspath("."))
 
 # -- Project information -----------------------------------------------------
