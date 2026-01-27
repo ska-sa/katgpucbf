@@ -337,6 +337,10 @@ async def start_engine(
 
 def main() -> None:
     """Run the XB-engine."""
+    logging.basicConfig(
+        level=os.environ.get("LOGLEVEL", "INFO").upper(),
+    )
+    logging.debug("Logging level set to %s", logging.getLevelName(logging.getLogger().level))
     engine_main(parse_args(), start_engine)
 
 

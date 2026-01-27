@@ -17,6 +17,7 @@
 """Launch and manage remote tasks over SSH."""
 
 import asyncio
+import logging
 import tomllib
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -26,6 +27,8 @@ from typing import Self
 import asyncssh
 
 VERBOSE_PASS_OUTPUT = 2  #: Verbosity level at which process output is passed through
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -262,4 +265,3 @@ async def run_tasks(
                     if tasks[1] in done:
                         raise RuntimeError("process shut down before becoming ready")
         return stack.pop_all()
-    raise AssertionError("should be unreachable")

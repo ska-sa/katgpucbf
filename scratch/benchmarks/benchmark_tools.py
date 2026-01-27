@@ -18,6 +18,7 @@
 
 import argparse
 import asyncio
+import logging
 import sys
 import time
 from abc import ABC, abstractmethod
@@ -40,6 +41,7 @@ TOLERANCE = 0.001  #: Complement of confidence interval probability
 VERBOSE_RESULTS = 1
 #: Starting port for Prometheus metrics
 PROMETHEUS_PORT_BASE = 7250
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -92,12 +94,14 @@ class Benchmark(ABC):
         consumer_server: Server,
         expected_heaps_scale: float,
         metric_prefix: str,
+        max_error_count: int = 3,
     ) -> None:
         self.args = args
         self.generator_server = generator_server
         self.consumer_server = consumer_server
         self.expected_heaps_scale = expected_heaps_scale
         self.metric_prefix = metric_prefix
+        self.max_error_count = max_error_count
 
     def verbose_results(self) -> bool:
         return self.args.verbose >= VERBOSE_RESULTS
@@ -133,10 +137,10 @@ class Benchmark(ABC):
         pass
 
     @abstractmethod
-    async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
+    async def run_consumers(self, signal_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
         pass
 
-    async def process(self, adc_sample_rate: float) -> Result:
+    async def process(self, signal_sample_rate: float) -> Result:
         """Perform a single trial on running engines."""
         async with aiohttp.client.ClientSession() as session:
             await asyncio.sleep(self.args.startup_time)  # Give a chance for startup losses
@@ -151,83 +155,93 @@ class Benchmark(ABC):
                 orig_heaps, orig_missing = await self.heap_counts(session)
             new_heaps, new_missing = await self.heap_counts(session)
 
-        expected_heaps = self.args.runtime * self.args.n * adc_sample_rate * self.expected_heaps_scale
+        expected_heaps = self.args.runtime * self.args.n * signal_sample_rate * self.expected_heaps_scale
         return Result(
             expected_heaps=expected_heaps,
             heaps=new_heaps - orig_heaps,
             missing_heaps=new_missing - orig_missing,
         )
 
-    async def trial(self, adc_sample_rate: float) -> Result:
+    async def trial(self, signal_sample_rate: float, sync_time: int) -> Result:
         """Perform a single trial."""
-        sync_time = int(time.time())
-        async with await self.run_producers(adc_sample_rate, sync_time):
-            async with await self.run_consumers(adc_sample_rate, sync_time):
-                return await self.process(adc_sample_rate)
-        raise AssertionError("should be unreachable")
+        async with await self.run_producers(signal_sample_rate, sync_time):
+            async with await self.run_consumers(signal_sample_rate, sync_time):
+                return await self.process(signal_sample_rate)
 
-    async def measure(self, adc_sample_rate: float) -> Result:
+    async def measure(self, signal_sample_rate: float) -> Result:
         """Perform a single trial, but repeat if no heaps were lost yet the wrong number were received.
 
         This also prints status information to stderr.
         """
+        error_count = 0
         while True:
             if self.verbose_results():
-                print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-            result = await self.trial(adc_sample_rate)
+                print(f"Testing {signal_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
+            result = await self.trial(signal_sample_rate, int(time.time()))
             if not result.good() and result.missing_heaps == 0:
-                if self.verbose_results():
-                    print(f"{result.message()}, re-running", file=sys.stderr)
+                logger.warning(f"{result.message()}")
+                error_count += 1
+                if error_count < self.max_error_count:
+                    logger.warning("Re-running")
+                else:
+                    logger.error(f"Failed to get heaps for {signal_sample_rate / 1e6} MHz after {error_count} attempts")
+                    raise RuntimeError(
+                        f"Failed to get heaps for {signal_sample_rate / 1e6} MHz after {error_count} attempts"
+                    )
             else:
                 if self.verbose_results():
-                    print(result.message(), file=sys.stderr)
+                    print(result.message() + "\n", file=sys.stderr)
                 return result
 
-    async def calibrate(self, low: float, high: float, step: float, repeat: int) -> None:
+    async def calibrate(self, low: float, high: float, step: float, repeat: int) -> str:
         """Run multiple trials on all the possible rates."""
         rates = np.arange(low, high + 0.01 * step, step).tolist()
         successes = [0] * len(rates)
+        errors = [0] * len(rates)
         for trial in range(repeat):
-            for j, adc_sample_rate in enumerate(rates):
+            for j, signal_sample_rate in enumerate(rates):
                 sync_time = int(time.time())
                 redo = True
                 while redo:
                     redo = False
                     if self.verbose_results():
-                        print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-                    async with await self.run_producers(adc_sample_rate, sync_time):
-                        async with await self.run_consumers(adc_sample_rate, sync_time):
-                            result = await self.process(adc_sample_rate)
+                        print(f"Testing {signal_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
+                    result = await self.trial(signal_sample_rate, sync_time)
                     if result.good():
                         successes[j] += 1
                     elif result.missing_heaps == 0:
-                        redo = True  # Unexpected number of heaps received
-                    if self.verbose_results():
-                        if redo:
-                            print(f"{result.message()}, rerunning", flush=True, file=sys.stderr)
+                        logger.warning(f"{result.message()}")
+                        errors[j] += 1
+                        if errors[j] < self.max_error_count:
+                            redo = True  # Unexpected number of heaps received
                         else:
-                            print(f"{result.message()}, {successes[j]}/{trial + 1} passed", flush=True, file=sys.stderr)
-        for success, adc_sample_rate in zip(successes, rates, strict=True):
-            print(adc_sample_rate, success, repeat)
-
-    async def oneshot(self, adc_sample_rate: float) -> None:
-        """Measure at a single rate."""
-        while True:
-            result = await self.trial(adc_sample_rate)
-            if not result.good() and result.missing_heaps == 0:
-                if self.verbose_results():
-                    print(f"{result.message()}, re-running", file=sys.stderr)
-            else:
-                print(result.message())
-                break
+                            error_detail = (
+                                f"Failed to get heaps for {signal_sample_rate / 1e6} MHz after {errors[j]} attempts."
+                            )
+                            if j != 0:
+                                error_detail += f" Last completed sample rate was {rates[j - 1] / 1e6} MHz"
+                                error_detail += f" with {successes[j - 1]} successes"
+                            raise RuntimeError(error_detail)
+                    if redo:
+                        logger.warning("Re-running")
+                    elif self.verbose_results():
+                        print(
+                            f"{result.message()}, {successes[j]}/{trial + 1} passed, {errors[j]} errors\n",
+                            flush=True,
+                            file=sys.stderr,
+                        )
+        output = ""
+        for success, signal_sample_rate, error in zip(successes, rates, errors, strict=True):
+            output += f"{signal_sample_rate} {success} {repeat} {error}\n"
+        return output
 
     async def search(
         self, low: float, high: float, step: float, interval: float, max_comparisons: int, slope: float
     ) -> tuple[float, float]:
         """Search for the critical rate."""
 
-        async def compare(adc_sample_rate: float) -> bool:
-            return not (await self.measure(adc_sample_rate)).good()
+        async def compare(signal_sample_rate: float) -> bool:
+            return not (await self.measure(signal_sample_rate)).good()
 
         # The additional 0.01 * args.step is to ensure high is included rather
         # than excluded if the range is a multiple of step.
