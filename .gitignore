@@ -9,6 +9,6 @@
 __pycache__
 coverage.xml
 report.json
+demo.json
 result.xml
-/qualification/arrays/
-/arrays/
+arrays
