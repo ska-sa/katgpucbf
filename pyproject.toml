@@ -78,8 +78,6 @@ qualification = [
     "pytest-reportlog",
 ]
 
-qualification_tests = []
-
 copy-mk = [
     "katportalclient",
 ]
@@ -123,6 +121,7 @@ known-local-folder = ["benchmark_tools", "noisy_search", "remote", "sighandler"]
 
 [tool.pytest.ini_options]
 testpaths = "test"
+pytester_example_dir = "test/pytest_plugins"
 addopts = "--cov-context=test --cov-report html --import-mode=prepend"
 markers = ["mask_timestamp", "use_vkgdr", "cmdline_args", "spectra_per_heap", "slow"]
 asyncio_mode = "auto"

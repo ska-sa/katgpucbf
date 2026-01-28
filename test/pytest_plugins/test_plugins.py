@@ -15,68 +15,48 @@
 ################################################################################
 
 """Example tests helpful in developing the reporting framework."""
+# TODO: split this into separate tests for each plugin
 
 import json
-import re
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 
-@pytest.fixture
-def pytestini_content() -> str:
-    """The pytest.ini content for the demo tests."""
-    return """
-        [pytest]
-        asyncio_default_fixture_loop_scope = function
-        tester = Test
-        master_controller_host = localhost
-        master_controller_port = 5001
-        prometheus_url = http://localhost:9090
-        product_name = test_cbf
-        interface = lo
-        interface_gbps = 90
-        use_ibv = false
-        cores =
-        default_antennas = 8
-        max_antennas = 8
-        wideband_channels = 1024
-        narrowband_channels = 32768
-        narrowband_decimation = 8
-        vlbi_decimation = 8
-        bands = l
-        beams = 4
-        raw_data = false
-        array_dir =
-        """
-
-
-@pytest.fixture(scope="function")
-def setup_pytester(pytester: pytest.Pytester, pytestini_content: str) -> pytest.Pytester:
+@pytest.fixture(autouse=True)
+def setup_pytester(pytester: pytest.Pytester) -> None:
     """Set up pytester with conftest, ini, and test files."""
     # Reset report values by deleting the report file if it exists
     report_file = pytester.path / "report.json"
     if report_file.exists():
         report_file.unlink()
 
-    proj_root_path = Path(__file__).resolve().parent.parent.parent.parent
-    qualification_conftest = proj_root_path / "qualification" / "conftest.py"
-    with open(qualification_conftest, encoding="utf-8") as f:
-        conftest_content = f.read()
-    # Replace relative imports with absolute imports for pytester
-    conftest_content = re.sub(r"from \.(\w+) import", r"from qualification.\1 import", conftest_content)
+    pytester.makeconftest(
+        """
+        pytest_plugins = [
+            "katgpucbf.pytest_plugins.numpy_dump",
+            "katgpucbf.pytest_plugins.reporter_plugin",
+        ]
+        """
+    )
+    # TODO: would be nice to just disable pytest_asyncio rather than
+    # have to configure it
+    pytester.makeini(
+        """
+        [pytest]
+        addopts = --report-log=report.json
+        asyncio_default_fixture_loop_scope = function
+        raw_data = false
+        array_dir = arrays
+        """
+    )
+    pytester.copy_example("demo.py")
 
-    demo_test_content = open(proj_root_path / "qualification" / "demo" / "demo.py", encoding="utf-8").read()
-    pytester.makeconftest(conftest_content)
-    pytester.makeini(pytestini_content)
-    pytester.makepyfile(demo_test_content)
-    return pytester
 
-
-def test_slow_fixture_updates_timestamp(setup_pytester: pytest.Pytester) -> None:
+def test_slow_fixture_updates_timestamp(pytester: pytest.Pytester) -> None:
     """Test that the timestamp is updated when the slow fixture is used."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_passes")
+    result = pytester.runpytest("demo.py::test_passes")
     assert result.ret == 0
     result.assert_outcomes(passed=1, failed=0, errors=0, skipped=0, xpassed=0, xfailed=0)
     # read the report.json file and confirm test
@@ -84,24 +64,24 @@ def test_slow_fixture_updates_timestamp(setup_pytester: pytest.Pytester) -> None
     assert len(result.errlines) == 0
 
 
-def test_failure(setup_pytester: pytest.Pytester) -> None:
+def test_failure(pytester: pytest.Pytester) -> None:
     """Test that the test failure is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_assert_failure")
+    result = pytester.runpytest("demo.py::test_assert_failure")
     result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
     # read the report.json file and confirm test
     assert result.duration > 0
     assert "1 == 2" in result.outlines[-2]
 
 
-def test_figure_creates_binary_figure_in_report(setup_pytester: pytest.Pytester) -> None:
+def test_figure_creates_binary_figure_in_report(pytester: pytest.Pytester) -> None:
     """Test that the figure test is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_figure_plot")
+    result = pytester.runpytest("demo.py::test_figure_plot")
     result.assert_outcomes(passed=1, failed=0, errors=0, skipped=0, xpassed=0, xfailed=0)
     assert result.duration > 0
     assert len(result.errlines) == 0
 
     # Read and parse the report.json file
-    report_file = setup_pytester.path / "report.json"
+    report_file = pytester.path / "report.json"
     assert report_file.exists(), "report.json file should exist"
 
     with open(report_file, encoding="utf-8") as f:
@@ -131,15 +111,15 @@ def test_figure_creates_binary_figure_in_report(setup_pytester: pytest.Pytester)
 
 
 @pytest.mark.xfail(reason="Need to fix the check plugin for pytester usage")
-def test_check_test_is_reported_correctly(setup_pytester: pytest.Pytester) -> None:
+def test_check_test_is_reported_correctly(pytester: pytest.Pytester) -> None:
     """Test that the check test is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_check_with_failures")
+    result = pytester.runpytest("demo.py::test_check_with_failures")
     result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
     assert result.duration > 0
     assert len(result.errlines) == 0
 
     # Read and parse the report.json file
-    report_file = setup_pytester.path / "report.json"
+    report_file = pytester.path / "report.json"
     assert report_file.exists(), "report.json file should exist"
 
     with open(report_file, encoding="utf-8") as f:
@@ -180,9 +160,9 @@ def test_check_test_is_reported_correctly(setup_pytester: pytest.Pytester) -> No
     assert found_good_things_step, "Step 'Expect some good things' should be present in the report"
 
 
-def test_marked_xfail_is_not_reported_as_failed(setup_pytester: pytest.Pytester) -> None:
+def test_marked_xfail_is_not_reported_as_failed(pytester: pytest.Pytester) -> None:
     """Test that the xfail test is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_xfail")
+    result = pytester.runpytest("demo.py::test_xfail")
     result.assert_outcomes(passed=0, failed=0, errors=0, skipped=0, xpassed=0, xfailed=1)
     assert result.duration > 0
     assert len(result.errlines) == 0
@@ -205,9 +185,9 @@ def _extract_array_path_from_output(outlines: list[str], pytester_path: Path) ->
     return None
 
 
-def test_failed_np_assertion_dumps_arrays(setup_pytester: pytest.Pytester) -> None:
+def test_failed_np_assertion_dumps_arrays(pytester: pytest.Pytester) -> None:
     """Test that the numpy fail test is reported correctly."""
-    result = setup_pytester.runpytest("--image-override=::", "--report-log=report.json", "-k test_numpy_fails")
+    result = pytester.runpytest("demo.py::test_numpy_fails")
     result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
     assert result.duration > 0
     assert result.parseoutcomes()["failed"] == 1
@@ -216,7 +196,7 @@ def test_failed_np_assertion_dumps_arrays(setup_pytester: pytest.Pytester) -> No
     )
 
     # Extract the path from the output
-    array_path = _extract_array_path_from_output(result.outlines, setup_pytester.path)
+    array_path = _extract_array_path_from_output(result.outlines, pytester.path)
 
     assert array_path is not None, "Could not find array path in output"
     assert array_path.exists(), f"Array file should exist at {array_path}"
@@ -227,11 +207,9 @@ def test_failed_np_assertion_dumps_arrays(setup_pytester: pytest.Pytester) -> No
         assert "DESIRED" in data, "Array file should contain DESIRED array"
 
 
-def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(setup_pytester: pytest.Pytester) -> None:
+def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(pytester: pytest.Pytester) -> None:
     """Test that the numpy fail approx test is reported correctly."""
-    result = setup_pytester.runpytest(
-        "--image-override=::", "--report-log=report.json", "-k test_numpy_with_approx_fails"
-    )
+    result = pytester.runpytest("demo.py::test_numpy_with_approx_fails")
     result.assert_outcomes(passed=0, failed=1, errors=0, skipped=0, xpassed=0, xfailed=0)
     assert result.duration > 0
     assert result.parseoutcomes()["failed"] == 1
@@ -239,7 +217,7 @@ def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(setup_pytester: pyt
         "Arrays written to should be present in the report"
     )
     # Extract the path from the output
-    array_path = _extract_array_path_from_output(result.outlines, setup_pytester.path)
+    array_path = _extract_array_path_from_output(result.outlines, pytester.path)
 
     assert array_path is not None, "Could not find array path in output"
     assert array_path.exists(), f"Array file should exist at {array_path}"
