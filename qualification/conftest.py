@@ -132,7 +132,8 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
     # better place, and I did look around quite a bit.
     try:
         git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Git information not available: ({e}), defaulting to 'unknown'")
         git_information = "unknown"
 
     logger.info("Git information: %s", git_information)
