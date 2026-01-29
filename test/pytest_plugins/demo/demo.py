@@ -24,7 +24,7 @@ import pytest
 import pytest_asyncio
 from pytest_check import check
 
-from qualification.reporter import POTLocator, Reporter
+from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter
 
 
 @pytest_asyncio.fixture(scope="function")

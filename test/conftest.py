@@ -56,7 +56,10 @@ from katsdpsigproc.abc import AbstractDevice
 from katgpucbf.mapped_array import make_vkgdr
 from katgpucbf.utils import TimeConverter
 
-pytest_plugins = ["katsdpsigproc.pytest_plugin"]
+pytest_plugins = [
+    "katsdpsigproc.pytest_plugin",
+    "pytester",
+]
 
 
 def pytest_configure(config) -> None:

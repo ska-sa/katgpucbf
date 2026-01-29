@@ -17,11 +17,22 @@
 """Numpy utilities for qualification tests."""
 
 import functools
-from collections.abc import Callable, Iterator
-from pathlib import Path
+import itertools
+from collections.abc import Iterator
 
 import numpy as np
 import pytest
+
+
+def pytest_addoption(parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager) -> None:
+    """Add the inifile options for the plugin."""
+    parser.addini("array_dir", "Directory in which to save failed array comparisons", type="paths", default=[])
+
+
+@pytest.fixture(scope="session")
+def _array_compare_counter() -> Iterator[int]:
+    """Counter used to give unique filenames to array dumps."""
+    return itertools.count(0)
 
 
 def _unwrap_pytest_approx(a: np.ndarray) -> np.ndarray:
@@ -33,8 +44,16 @@ def _unwrap_pytest_approx(a: np.ndarray) -> np.ndarray:
     return a
 
 
-def build_numpy_function(path: Path, _array_compare_counter: Iterator[int]) -> Callable[[np.ndarray], str]:
-    """Build a function that saves numpy arrays for the qualification tests."""
+@pytest.fixture(autouse=True)
+def _array_compare(
+    monkeypatch: pytest.MonkeyPatch, pytestconfig: pytest.Config, _array_compare_counter: Iterator[int]
+) -> None:
+    """Patch numpy.testing to save failed array comparisons if enabled."""
+    paths = pytestconfig.getini("array_dir")
+    if not paths:
+        return  # Not enabled
+    path = paths[0]
+    path.mkdir(parents=True, exist_ok=True)
     orig_build_err_msg = np.testing.build_err_msg
 
     @functools.wraps(orig_build_err_msg)
@@ -57,4 +76,5 @@ def build_numpy_function(path: Path, _array_compare_counter: Iterator[int]) -> C
         np.savez(filename, **named_arrays)
         return msg + f"\n\nArrays written to {filename}"
 
-    return build_err_msg
+    # We have to patch in the private module since that's where it gets called.
+    monkeypatch.setattr("numpy.testing._private.utils.build_err_msg", build_err_msg)

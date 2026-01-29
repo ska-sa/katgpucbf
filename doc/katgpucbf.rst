@@ -10,6 +10,7 @@ Subpackages
    katgpucbf.dsim
    katgpucbf.fgpu
    katgpucbf.fsim
+   katgpucbf.pytest_plugins
    katgpucbf.vgpu
    katgpucbf.xbgpu
 

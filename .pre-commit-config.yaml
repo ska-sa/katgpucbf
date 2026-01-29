@@ -93,10 +93,3 @@ repos:
           - --python-version=3.12
           - scratch/benchmarks/requirements.in
         files: '(.*requirements(-dev)?\.(in|txt))$'
-      - id: pip-compile
-        name: pip-compile qualification_tests/requirements.txt
-        args:
-          - --output-file=qualification_tests/requirements.txt
-          - --python-version=3.12
-          - qualification_tests/requirements.in
-        files: '(.*requirements(-dev)?\.(in|txt))$'

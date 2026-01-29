@@ -84,9 +84,13 @@ cloudpickle==3.1.2
     #   -c qualification/../requirements.txt
     #   dask
 contourpy==1.3.3
-    # via matplotlib
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   matplotlib
 cycler==0.12.1
-    # via matplotlib
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   matplotlib
 dask==2025.12.0
     # via
     #   -c qualification/../requirements-dev.txt
@@ -105,7 +109,9 @@ docutils==0.21.2
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (pyproject.toml)
 fonttools==4.61.1
-    # via matplotlib
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   matplotlib
 frozenlist==1.8.0
     # via
     #   -c qualification/../requirements-dev.txt
@@ -168,7 +174,9 @@ katsdptelstate==1.0.0
     #   -c qualification/../requirements.txt
     #   katgpucbf (pyproject.toml)
 kiwisolver==1.4.9
-    # via matplotlib
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   matplotlib
 llvmlite==0.46.0
     # via
     #   -c qualification/../requirements-dev.txt
@@ -191,7 +199,9 @@ markupsafe==3.0.3
     #   jinja2
     #   mako
 matplotlib==3.10.8
-    # via katgpucbf (pyproject.toml)
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   katgpucbf (pyproject.toml)
 msgpack==1.1.2
     # via
     #   -c qualification/../requirements-dev.txt
@@ -255,7 +265,9 @@ partd==1.4.2
     #   -c qualification/../requirements.txt
     #   dask
 pillow==12.1.0
-    # via matplotlib
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   matplotlib
 pluggy==1.6.0
     # via
     #   -c qualification/../requirements-dev.txt
@@ -320,13 +332,17 @@ pytest-asyncio==1.3.0
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (pyproject.toml)
 pytest-check==2.2.2
-    # via katgpucbf (pyproject.toml)
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   katgpucbf (pyproject.toml)
 pytest-custom-exit-code==0.3.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (pyproject.toml)
 pytest-reportlog==1.0.0
-    # via katgpucbf (pyproject.toml)
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   katgpucbf (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via
     #   -c qualification/../requirements-dev.txt
