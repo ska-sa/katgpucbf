@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -14,29 +14,32 @@
 # limitations under the License.
 ################################################################################
 
-"""Example tests helpful in developing the reporting framework."""
+"""Test cases of the qualification framework."""
 
 import asyncio
 
 import matplotlib.figure
 import numpy as np
 import pytest
+import pytest_asyncio
 from pytest_check import check
 
-from ..reporter import POTLocator, Reporter
+from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter
 
 
-@pytest.fixture
-async def slow_fixture(pdf_report: Reporter) -> None:
-    """Fixture that takes a while to set up, to test the time reporting."""
+@pytest_asyncio.fixture(scope="function")
+async def slow_fixture() -> int:
+    """Demonstrates the delay in the timestamp in the report."""
     await asyncio.sleep(0.5)
+    return 1
 
 
 @pytest.mark.requirements("DEMO-000")
-def test_passes(pdf_report: Reporter, slow_fixture) -> None:
+@pytest.mark.asyncio
+async def test_passes(pdf_report: Reporter, slow_fixture) -> None:
     r"""Pass the test.
 
-    Here is some maths: :math:`e^{\pi j} + 1 = 0`.
+    Here is some maths: :math:`e^{pi j} + 1 = 0`.
 
     Verification method
     -------------------
@@ -54,7 +57,7 @@ def test_assert_failure(pdf_report: Reporter) -> None:
     assert 1 == 2
 
 
-def test_figure(pdf_report: Reporter) -> None:
+def test_figure_plot(pdf_report: Reporter) -> None:
     """Plot a figure."""
     fig = matplotlib.figure.Figure()
     ax = fig.add_subplot()
@@ -74,7 +77,7 @@ def three():
     return 3
 
 
-def test_check(pdf_report: Reporter) -> None:
+def test_check_with_failures(pdf_report: Reporter) -> None:
     """Use ``check`` and observe failures."""
     pdf_report.step("Expect some bad things")
     x = 1
@@ -96,7 +99,7 @@ def test_xfail(pdf_report: Reporter) -> None:
         assert 1 == 2
 
 
-def test_numpy_fail(pdf_report: Reporter) -> None:
+def test_numpy_fails(pdf_report: Reporter) -> None:
     """Test saving of numpy arrays on test failure."""
     pdf_report.step("Start the test")
     pdf_report.detail("Check that arrays are equal")
@@ -105,7 +108,7 @@ def test_numpy_fail(pdf_report: Reporter) -> None:
     np.testing.assert_equal(arr1, arr2)
 
 
-def test_numpy_fail_approx(pdf_report: Reporter) -> None:
+def test_numpy_with_approx_fails(pdf_report: Reporter) -> None:
     """Test saving of numpy arrays on test failure with pytest.approx."""
     pdf_report.step("Start the test")
     pdf_report.detail("Check that arrays are equal")

@@ -14,9 +14,9 @@
 # limitations under the License.
 ################################################################################
 
-"""Compatibility shim to :mod:`katgpucbf.pytest_plugins.reporter`.
+"""Load the pytest plugins for the demo of them."""
 
-This module should be removed at some point.
-"""
-
-from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter, custom_report_log, plot_focus  # noqa: F401
+pytest_plugins = [
+    "katgpucbf.pytest_plugins.numpy_dump",
+    "katgpucbf.pytest_plugins.reporter_plugin",
+]

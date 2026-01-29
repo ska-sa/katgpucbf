@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024-2025, National Research Foundation (SARAO)
+# Copyright (c) 2024-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -76,4 +76,4 @@ async def test_channels(
         tones = np.where(power > 0.5 * max_power)[0].tolist()
         pdf_report.detail(f"Tones in {beam}: {tones}")
         with check:
-            assert tones == channels
+            np.testing.assert_array_equal(tones, channels)
