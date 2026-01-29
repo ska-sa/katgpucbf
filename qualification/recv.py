@@ -60,7 +60,7 @@ class XBReceiver:
         acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
         acv_config = cbf.config["outputs"][acv_name]
         self.stream_names = list(stream_names)
-        self.n_inputs: int = len(acv_config["src_streams"])
+        self.n_inputs = len(acv_config["src_streams"])
         self.n_ants = self.n_inputs // 2
         self.n_chans: int = acv_config["n_chans"]
         self.input_labels = acv_config["input_labels"]
@@ -334,11 +334,6 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         self.int_time: float = cbf.init_sensors[f"{stream_name}.int-time"].value
         self.bls_ordering: list[tuple[str, str]] = ast.literal_eval(
             cbf.init_sensors[f"{stream_name}.bls-ordering"].value.decode()
-        )
-        assert isinstance(self.bls_ordering, list)
-        assert all(
-            isinstance(bl, tuple) and len(bl) == 2 and all(isinstance(ant, str) for ant in bl)
-            for bl in self.bls_ordering
         )
         self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
         self.n_xengs = cbf.init_sensors[f"{stream_name}.n-xengs"].value

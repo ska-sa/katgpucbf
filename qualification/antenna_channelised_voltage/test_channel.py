@@ -44,7 +44,7 @@ def measure_sfdr(hdr_data_db: np.ndarray, base_channel: np.ndarray) -> np.ndarra
 
     Returns
     -------
-    A numpy array of computed values from peak_value - next_peak_value.
+    A numpy array of differences, each computed as `peak_value - next_peak_value` for a single channel
     """
     sfdr_measurements = np.empty(len(base_channel), np.float32)
 
@@ -106,7 +106,7 @@ async def test_channelisation_and_sfdr(
 
     # Check tone positions w.r.t. requested channels
     pdf_report.step("Check tone positions.")
-    peak_channels = np.empty(len(rel_freqs), np.int32)
+    peak_channels = np.empty(len(rel_freqs), int)
     for idx, hdr in enumerate(hdr_data):
         peak_channels[idx] = np.argmax(hdr)
 
@@ -122,7 +122,7 @@ async def test_channelisation_and_sfdr(
 
     # Check that minimum SFDR measurement meets the requirement.
     with check:
-        np.testing.assert_array_less(np.full_like(sfdr_measurements, required_sfdr_db), sfdr_measurements)
+        np.testing.assert_array_less(required_sfdr_db, sfdr_measurements)
     sfdr_mean = np.mean(sfdr_measurements)
 
     pdf_report.detail(f"SFDR (mean): {sfdr_mean:.3f}dB for {len(rel_freqs)} channels.")

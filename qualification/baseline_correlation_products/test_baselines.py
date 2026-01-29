@@ -30,11 +30,11 @@ from ..reporter import Reporter
 @pytest.fixture
 def input_index(receive_baseline_correlation_products: BaselineCorrelationProductsReceiver) -> dict[str, int]:
     """A dictionary mapping input names to input indices."""
-    inputs = dict[str, int]()
+    inputs: dict[str, int] = {}
     for _, bl in enumerate(receive_baseline_correlation_products.bls_ordering):
-        for ant in bl:
-            if ant not in inputs:
-                inputs[ant] = len(inputs)
+        for input_label in bl:
+            if input_label not in inputs:
+                inputs[input_label] = len(inputs)
     return inputs
 
 
@@ -59,55 +59,62 @@ def baseline_order_lookup(
 def determine_expected_loud_baselines(
     n_chans: int,
     n_bls: int,
-    antenna_gains: np.ndarray,
+    input_gains: np.ndarray,
     input_reverse_lookup: dict[int, str],
     baseline_order_lookup: dict[tuple[str, str], int],
 ) -> np.ndarray:
     """Determine expected baselines to be loud based on antenna gains.
 
-    Args:
-        n_chans: Number of channels
-        n_bls: Number of baselines
-        antenna_gains: Array of shape (n_inputs, n_chans) with antenna gains
-        input_reverse_lookup: Dictionary mapping input index to antenna name
-        baseline_order_lookup: Dictionary mapping antenna tuple to baseline index
+    Parameters
+    ----------
+    n_chans: int
+        Number of channels.
+    n_bls: int
+        Number of baselines.
+    input_gains : np.ndarray
+        Array of shape (n_inputs, n_chans) with input gains.
+    input_reverse_lookup: dict[int, str]
+        Dictionary mapping input index to antenna name.
+    baseline_order_lookup: dict[tuple[str, str], int]
+        Dictionary mapping antenna tuple to baseline index.
 
     Returns
     -------
-        Array of shape (n_chans, n_bls) with 1.0 for expected loud baselines
+    np.ndarray
+        Boolean array of shape (n_chans, n_bls) with True for expected loud baselines.
     """
-    expected_loud_bls_channels = np.zeros((n_chans, n_bls), np.float32)
+    expected_loud_bls_channels = np.zeros((n_chans, n_bls), bool)
 
     # determine baseline matches
     for channel in range(n_chans):
-        # for the nonzero antenna gains, set the expected loud baselines
-        assert antenna_gains[:, channel].shape == (len(input_reverse_lookup),)
-        nonzero_antennas = np.nonzero(antenna_gains[:, channel])[0]
+        # for the nonzero input gains, set the expected loud baselines
+        assert input_gains[:, channel].shape == (len(input_reverse_lookup),)
+        nonzero_inputs = np.nonzero(input_gains[:, channel])[0]
         # the baselines are all combinations of the nonzero inputs on the same channel
-        expected_antenna_indexed_baselines = list(itertools.permutations(nonzero_antennas, 2))
-        expected_antenna_indexed_baselines.extend([(ant, ant) for ant in nonzero_antennas])
+        expected_antenna_indexed_baselines = list(itertools.permutations(nonzero_inputs, 2))
+        expected_antenna_indexed_baselines.extend([(ant, ant) for ant in nonzero_inputs])
         for baseline_by_antenna_index in expected_antenna_indexed_baselines:
-            antenna_tuple = (
+            input_tuple = (
                 input_reverse_lookup[baseline_by_antenna_index[0]],
                 input_reverse_lookup[baseline_by_antenna_index[1]],
             )
-            # we don't permutate all combinations, only antenna pairs on the same antenna are permutated completely
+            # we don't permutate all combinations, only input pairs on the same antenna are permutated completely
             # ie: ('m800v', 'm800h') and ('m800h', 'm800v') but not ('m800h', 'm801h') and ('m801h', 'm800h')
-            if baseline_order_lookup.get(antenna_tuple) is None:
+            if baseline_order_lookup.get(input_tuple) is None:
                 # if the baseline is not in the dictionary, we need to check the reverse order
-                if baseline_order_lookup.get(antenna_tuple[::-1]) is not None:
+                if baseline_order_lookup.get(input_tuple[::-1]) is not None:
                     # if the reverse order is in the dictionary, we can use it
                     baseline_index = baseline_order_lookup[
                         input_reverse_lookup[baseline_by_antenna_index[1]],
                         input_reverse_lookup[baseline_by_antenna_index[0]],
                     ]
-                    expected_loud_bls_channels[channel, baseline_index] = 1.0
+                    expected_loud_bls_channels[channel, baseline_index] = True
             else:
                 baseline_index = baseline_order_lookup[
                     input_reverse_lookup[baseline_by_antenna_index[0]],
                     input_reverse_lookup[baseline_by_antenna_index[1]],
                 ]
-                expected_loud_bls_channels[channel, baseline_index] = 1.0
+                expected_loud_bls_channels[channel, baseline_index] = True
 
     return expected_loud_bls_channels
 
@@ -137,31 +144,31 @@ async def test_baseline_correlation_products(
 
     amplitude = 0.2
     await pcc.request("dsim-signals", cbf.dsim_names[0], f"common=wgn({amplitude});common;common;")
-    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both poles.")
+    pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
     for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):
         end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
         # The last block may be smaller
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
 
-        antenna_gains = np.zeros((len(input_index), receiver.n_chans), np.float32)
+        input_gains = np.zeros((len(input_index), receiver.n_chans), np.float32)
 
-        # determine antenna gains.
+        # determine input gains.
         await pcc.request("gain-all", "antenna-channelised-voltage", "0")
-        pdf_report.detail("Compute gains to enable atleast one baseline per channel.")
+        pdf_report.detail("Compute gains to enable at least one baseline per channel.")
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1  # Avoid channel 0, which is DC so a bit odd
-            antenna_gains[input_index[receiver.bls_ordering[i][0]], channel] = 1.0
-            antenna_gains[input_index[receiver.bls_ordering[i][1]], channel] = 1.0
+            input_gains[input_index[receiver.bls_ordering[i][0]], channel] = 1.0
+            input_gains[input_index[receiver.bls_ordering[i][1]], channel] = 1.0
 
         pdf_report.detail("Set gains.")
-        for i, channel_gains in enumerate(antenna_gains.tolist()):
+        for i, channel_gains in enumerate(input_gains.tolist()):
             await pcc.request("gain", "antenna-channelised-voltage", input_reverse_lookup[i], *channel_gains)
 
         expected_loud_bls_channels = determine_expected_loud_baselines(
             receiver.n_chans,
             receiver.n_bls,
-            antenna_gains,
+            input_gains,
             input_reverse_lookup,
             baseline_order_lookup,
         )
@@ -171,15 +178,12 @@ async def test_baseline_correlation_products(
 
         # confirm the signals are in baselines as expected
         with check:
-            loud_bln_index = np.nonzero(data[1:, :, 0])
-            expected_loud_bls_index = np.nonzero(expected_loud_bls_channels[1:, :])
-
             pdf_report.detail(
                 "Compare output nonzero correlation values to expected antenna gain configuration for this range."
             )
             np.testing.assert_array_equal(
-                loud_bln_index,
-                expected_loud_bls_index,
+                data[1:, :, 0] > 0,
+                expected_loud_bls_channels[1:, :],
                 err_msg="output nonzero correlation values doesn't match the "
                 + f"expected antenna gain configuration for channels 1 to {receiver.n_chans}",
             )

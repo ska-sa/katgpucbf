@@ -91,10 +91,12 @@ async def test_filter_response(
     # Mask for channels that alias into the passband
     alias_select = (pass_channels.start <= out_channels) & (out_channels < pass_channels.stop)
     alias_select &= ~pass_select  # Ignore the passband itself
-    max_alias_db = data_db[alias_select]
+    alias_db = data_db[alias_select]
     pdf_report.detail("Checking that no alias into the passband exceeds -80 dB.")
     with check:
-        np.testing.assert_array_less(max_alias_db, np.full_like(max_alias_db, -80.0))
+        np.testing.assert_array_less(alias_db, np.full_like(alias_db, -80.0))
+
+    pdf_report.detail(f"Maximum alias into the passband is {np.max(alias_db):.3f} dB.")
 
     stop_bandwidth = 2 * receiver.bandwidth - pass_bandwidth
     fig = Figure()

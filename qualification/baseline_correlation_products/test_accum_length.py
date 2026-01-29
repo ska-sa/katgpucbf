@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2026, National Research Foundation (SARAO)
+# Copyright (c) 2022-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -77,7 +77,7 @@ async def test_accum_power(
     pdf_report.detail(f"Difference is {delta} samples, {delta_s * 1000:.3f} ms.")
     with check:
         # pytest.approx just to allow for floating-point rounding
-        np.testing.assert_allclose(receiver.int_time, delta_s, rtol=1e-15)
+        assert delta_s == pytest.approx(receiver.int_time, rel=1e-15)
 
     pdf_report.step("Compare power against expected value.")
     # Sum over channels, but use only one baseline and real part because
@@ -94,5 +94,5 @@ async def test_accum_power(
     # the values are not fully independent in either time or channel. But 1%
     # variation seems safe.
     with check:
-        np.testing.assert_allclose(total_power, expected_power, rtol=0.01)
+        assert total_power == pytest.approx(expected_power, rel=0.01)
     pdf_report.detail("Power agrees to within 1%.")

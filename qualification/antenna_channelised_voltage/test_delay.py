@@ -253,21 +253,19 @@ async def test_delay_sensors(
     for label in receiver.input_labels:
         value = await delay_sensor_value(label)
         with check:
-            np.testing.assert_array_equal(np.array(value[1:], np.float32), np.array((0.0, 0.0, 0.0, 0.0), np.float32))
+            assert value[1:] == (0.0, 0.0, 0.0, 0.0)
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
     await receiver.next_complete_chunk(min_timestamp=load_ts)
-    sensor_values = np.empty((len(receiver.input_labels), 5), np.float32)
-    expected_values = np.empty((len(receiver.input_labels), 5), np.float32)
+    sensor_values = np.empty((len(receiver.input_labels), 5), np.float64)
+    expected_values = np.empty((len(receiver.input_labels), 5), np.float64)
     for idx, (expected, label) in enumerate(zip(delay_tuples, receiver.input_labels, strict=True)):
-        sensor_values[idx] = np.array(await delay_sensor_value(label), np.float32)
-        expected_values[idx] = np.array(expected, np.float32)
+        sensor_values[idx] = np.array(await delay_sensor_value(label), np.float64)
+        expected_values[idx] = np.array(expected, np.float64)
 
     pdf_report.detail("Comparing sensor values to expected values.")
     with check:
-        np.testing.assert_almost_equal(
-            sensor_values, expected_values, decimal=9, err_msg=f"Delay sensor for {label} has incorrect value"
-        )
+        np.testing.assert_allclose(sensor_values, expected_values, rtol=1e-9, err_msg="Delay has incorrect values")
 
 
 def check_phases(
