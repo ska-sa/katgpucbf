@@ -266,9 +266,12 @@ xbgpu
 
 vgpu
 ^^^^
-:samp:`?capture-start`, :samp:`?capture-stop`
+:samp:`?capture-start [{timestamp}]`, :samp:`?capture-stop`
     Enable or disable transmission of output data. In the initial state
     transmission is disabled.
+
+    If :samp:`{timestamp}` is specified, VDIF frames with timestamps less
+    than this ADC timestamp will not be transmitted.
 
 :samp:`?vlbi-delay {delay}`
     This has the same semantics as the equivalent katsdpcontroller request.
