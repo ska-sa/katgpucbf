@@ -30,12 +30,7 @@ from ..reporter import Reporter
 @pytest.fixture
 def input_index(receive_baseline_correlation_products: BaselineCorrelationProductsReceiver) -> dict[str, int]:
     """A dictionary mapping input names to input indices."""
-    inputs: dict[str, int] = {}
-    for _, bl in enumerate(receive_baseline_correlation_products.bls_ordering):
-        for input_label in bl:
-            if input_label not in inputs:
-                inputs[input_label] = len(inputs)
-    return inputs
+    return {label: i for (i, label) in enumerate(receive_baseline_correlation_products.input_labels)}
 
 
 @pytest.fixture
