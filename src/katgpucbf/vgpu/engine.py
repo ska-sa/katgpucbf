@@ -23,6 +23,7 @@ from fractions import Fraction
 
 import aiokatcp
 import baseband
+import cupy as cp
 import cupyx
 import katcbf_vlbi_resample.cupy_bridge
 import katcbf_vlbi_resample.parameters
@@ -68,7 +69,7 @@ class RecvStream:
         self._samples_between_spectra = layout.heap_timestamp_step // layout.n_spectra_per_heap
         # Properties required by the Stream protocol
         self.channels = layout.n_channels
-        self.is_cupy = False
+        self.is_cupy = True
         self.time_base = Time(time_converter.sync_time, scale="utc", format="unix")
         self.time_scale = Fraction(self._samples_between_spectra) / Fraction(time_converter.adc_sample_rate)
 
@@ -87,14 +88,18 @@ class RecvStream:
         ):
             with chunk:
                 # TODO: need to do something with the presence flags
-                # TODO: it will be cheaper to transfer data to the GPU then transpose.
+                # TODO: pipeline these transfers (but keeping in mind
+                # that we need to recycle the chunk only when the transfer
+                # is complete).
+                data = cp.asarray(chunk.data, blocking=False)
+                await katcbf_vlbi_resample.utils.stream_future(None)
                 # There are two time axes. Transpose to place them together, then flatten
                 # over them.
                 # (N_POLS, layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX),
-                data = chunk.data.transpose(0, 1, 3, 2, 4)
+                data = data.transpose(0, 1, 3, 2, 4)
                 data = data.reshape(N_POLS, -1, self.channels, COMPLEX)
                 # Convert Gaussian integers to complex
-                data = np.require(data, np.float32, "C").view(np.complex64)[..., 0]
+                data = cp.ascontiguousarray(data.astype(np.float32)).view(np.complex64)[..., 0]
                 arr = xr.DataArray(
                     data,
                     dims=("pol", "time", "channel"),
