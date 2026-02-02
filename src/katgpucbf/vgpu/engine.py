@@ -77,6 +77,7 @@ class RecvStream:
             stream.start()
         data_ringbuffer = self._stream_group.data_ringbuffer
         assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
+        last_chunk_id: int | None = None
         async for chunk in recv.iter_chunks(
             data_ringbuffer,
             self._layout,
@@ -94,12 +95,23 @@ class RecvStream:
                 data = data.reshape(N_POLS, -1, self.channels, COMPLEX)
                 # Convert Gaussian integers to complex
                 data = np.require(data, np.float32, "C").view(np.complex64)[..., 0]
-                yield xr.DataArray(
+                arr = xr.DataArray(
                     data,
                     dims=("pol", "time", "channel"),
                     coords={"pol": list(self._pol_labels)},
                     attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
                 )
+                # TODO (NGC-1689): need to properly handle missing data in
+                # katcbf-vlbi-resample. This is a quick hack to keep things
+                # running by injecting zero data into
+                while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
+                    last_chunk_id += 1
+                    zero_arr = xr.zeros_like(arr)
+                    timestamp = last_chunk_id * self._layout.chunk_timestamp_step
+                    zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
+                    yield zero_arr
+                last_chunk_id = chunk.chunk_id
+                yield arr
 
 
 class RecordPower(katcbf_vlbi_resample.power.RecordPower):
