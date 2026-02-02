@@ -230,7 +230,7 @@ async def run_tasks(
     async with AsyncExitStack() as stack:
         conn_options = asyncssh.SSHClientConnectionOptions(keepalive_interval="15s")
         conn = await stack.enter_async_context(
-            asyncssh.connect(server.hostname, username=server.username, options=conn_options)
+            asyncssh.connect(server.hostname, username=server.username, options=conn_options, known_hosts=None)
         )
         server_info = await ServerInfo.factory(conn=conn, override_cpus=server.cpus)
         if pull:
