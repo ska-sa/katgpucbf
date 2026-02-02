@@ -39,7 +39,7 @@ async def slow_fixture() -> int:
 async def test_passes(pdf_report: Reporter, slow_fixture) -> None:
     r"""Pass the test.
 
-    Here is some maths: :math:`e^{pi j} + 1 = 0`.
+    Here is some maths: :math:`e^{\pi j} + 1 = 0`.
 
     Verification method
     -------------------
