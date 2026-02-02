@@ -231,3 +231,39 @@ async def engine_client(engine: Engine) -> AsyncGenerator[aiokatcp.Client, None]
     yield client
     client.close()
     await client.wait_closed()
+
+
+@pytest.fixture
+def n_recv_streams() -> int:
+    """Number of source streams for an Engine."""
+    return 1
+
+
+@pytest.fixture
+def mock_recv_streams(monkeypatch: pytest.MonkeyPatch, n_recv_streams: int) -> list[spead2.InprocQueue]:
+    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
+
+    Returns
+    -------
+    queues
+        A list of in-process queue to use for sending data. The number of queues
+        in the list is determined by :func:`n_recv_streams`.
+    """
+    queues = [spead2.InprocQueue() for _ in range(n_recv_streams)]
+    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
+
+    def add_reader(
+        stream: spead2.recv.ChunkRingStream,
+        *,
+        src: str | list[tuple[str, int]],
+        interface: str | None,
+        ibv: bool,
+        comp_vector: int,
+        buffer_size: int,
+    ) -> None:
+        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
+        queue = next(queue_iter)
+        stream.add_inproc_reader(queue)
+
+    monkeypatch.setattr("katgpucbf.recv.add_reader", add_reader)
+    return queues
