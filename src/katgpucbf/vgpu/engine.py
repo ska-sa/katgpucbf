@@ -272,6 +272,26 @@ class VEngine(Engine):
             )
             chunk.recycle()  # Make available to the stream
 
+    def _process_frameset(self, frameset: baseband.vdif.VDIFFrameSet) -> None:
+        """Handle a received frameset.
+
+        This function is only here temporarily so that it can be mocked out
+        by unit tests to intercept the framesets. It can be removed once
+        the infrastructure for transmitting framesets is in place.
+
+        .. todo:: Remove this method once no longer needed by unit tests.
+        """
+        logger.debug("Received frameset: %s +%s", frameset["seconds"], frameset["frame_nr"])
+
+    def _run_complete(self) -> None:
+        """Handle the end of all processing.
+
+        This method exists only to mock from unit tests.
+
+        .. todo:: Remove this method once no longer needed by unit tests.
+        """
+        pass
+
     async def _run(self) -> None:
         """Do all the primary work of the engine."""
         it: katcbf_vlbi_resample.stream.Stream[xr.DataArray] = RecvStream(
@@ -295,7 +315,8 @@ class VEngine(Engine):
             it, self._threads, station=self.station, samples_per_frame=self.n_samples_per_frame
         )
         async for frameset in frameset_it:
-            logger.info("Received frameset: %s +%s", frameset["seconds"], frameset["frame_nr"])
+            self._process_frameset(frameset)
+        self._run_complete()
 
     async def start(self) -> None:
         """Start the engine."""
