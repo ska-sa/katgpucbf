@@ -39,34 +39,16 @@ def recv_max_chunks_one(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def mock_recv_stream(monkeypatch: pytest.MonkeyPatch) -> spead2.InprocQueue:
-    """Mock out :func:`katgpucbf.recv.add_reader` to use an in-process queue.
+def mock_recv_stream(mock_recv_streams: list[spead2.InprocQueue]) -> spead2.InprocQueue:
+    """Get the singular queue from :func:`.mock_recv_streams`.
 
     Returns
     -------
     queue
         An in-process queue to use for sending data.
     """
-    queue = spead2.InprocQueue()
-    have_reader = False
-
-    def add_reader(
-        stream: spead2.recv.ChunkRingStream,
-        *,
-        src: str | list[tuple[str, int]],
-        interface: str | None,
-        ibv: bool,
-        comp_vector: int,
-        buffer_size: int,
-    ) -> None:
-        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
-        nonlocal have_reader
-        assert not have_reader, "A reader has already been added for this queue"
-        stream.add_inproc_reader(queue)
-        have_reader = True
-
-    monkeypatch.setattr("katgpucbf.recv.add_reader", add_reader)
-    return queue
+    assert len(mock_recv_streams) == 1
+    return mock_recv_streams[0]
 
 
 @pytest.fixture
