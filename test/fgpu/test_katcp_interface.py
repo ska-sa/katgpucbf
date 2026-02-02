@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -77,7 +77,7 @@ class TestKatcpRequests:
         assert sensor_value == "[0.125+0j]"
 
     @pytest.mark.parametrize("pol", range(N_POLS))
-    async def test_gain_set_scalar(self, engine_client: aiokatcp.Client, engine_server: FEngine, pol: int) -> None:
+    async def test_gain_set_scalar(self, engine_client: aiokatcp.Client, engine: FEngine, pol: int) -> None:
         """Test that the eq gain is correctly set with a scalar value."""
         # TODO[nb]: need to update for multiple pipelines
         reply, _informs = await engine_client.request("gain", "wideband", pol, "0.2-3j")
@@ -93,11 +93,11 @@ class TestKatcpRequests:
         sensor_value = await engine_client.sensor_value(f"wideband.input{pol}.eq", str)
         assert_valid_complex_list(sensor_value)
         assert literal_eval(sensor_value) == pytest.approx([0.2 - 3j])
-        np.testing.assert_equal(engine_server._pipelines[0].gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
+        np.testing.assert_equal(engine._pipelines[0].gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
         # Other pol must not have been affected
-        np.testing.assert_equal(engine_server._pipelines[0].gains[:, 1 - pol], np.full(CHANNELS, GAIN, np.complex64))
+        np.testing.assert_equal(engine._pipelines[0].gains[:, 1 - pol], np.full(CHANNELS, GAIN, np.complex64))
 
-    async def test_gain_set_vector(self, engine_client: aiokatcp.Client, engine_server: FEngine) -> None:
+    async def test_gain_set_vector(self, engine_client: aiokatcp.Client, engine: FEngine) -> None:
         """Test that the eq gain is correctly set with a vector of values."""
         # This test doesn't parametrize over pols. It's assumed that anything
         # causing the wrong pol to be set would be picked up by the scalar
@@ -105,7 +105,7 @@ class TestKatcpRequests:
         # TODO[nb]: need to update for multiple pipelines
         gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
         reply, _informs = await engine_client.request("gain", "wideband", 0, *(str(gain) for gain in gains))
-        np.testing.assert_equal(engine_server._pipelines[0].gains[:, 0], gains)
+        np.testing.assert_equal(engine._pipelines[0].gains[:, 0], gains)
         assert reply == []
 
         # Read back the values
@@ -144,7 +144,7 @@ class TestKatcpRequests:
         with pytest.raises(aiokatcp.FailReply):
             await engine_client.request("gain", "wideband", 0, "1", "2")
 
-    async def test_gain_all_set_scalar(self, engine_client: aiokatcp.Client, engine_server: FEngine) -> None:
+    async def test_gain_all_set_scalar(self, engine_client: aiokatcp.Client, engine: FEngine) -> None:
         """Test that ``?gain-all`` works correctly with a vector of values."""
         # TODO[nb]: need to update for multiple pipelines
         reply, _informs = await engine_client.request("gain-all", "wideband", "0.2-3j")
@@ -153,23 +153,21 @@ class TestKatcpRequests:
             sensor_value = await engine_client.sensor_value(f"wideband.input{pol}.eq", str)
             assert_valid_complex_list(sensor_value)
             assert literal_eval(sensor_value) == pytest.approx([0.2 - 3j])
-            np.testing.assert_equal(
-                engine_server._pipelines[0].gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64)
-            )
+            np.testing.assert_equal(engine._pipelines[0].gains[:, pol], np.full(CHANNELS, 0.2 - 3j, np.complex64))
 
-    async def test_gain_all_set_vector(self, engine_client: aiokatcp.Client, engine_server: FEngine) -> None:
+    async def test_gain_all_set_vector(self, engine_client: aiokatcp.Client, engine: FEngine) -> None:
         """Test that ``?gain-all`` works correctly with a scalar value."""
         # TODO[nb]: need to update for multiple pipelines
         gains = np.arange(CHANNELS, dtype=np.float32) * (2 + 3j)
         reply, _informs = await engine_client.request("gain-all", "wideband", *(str(gain) for gain in gains))
         assert reply == []
         for pol in range(N_POLS):
-            np.testing.assert_equal(engine_server._pipelines[0].gains[:, pol], gains)
+            np.testing.assert_equal(engine._pipelines[0].gains[:, pol], gains)
             sensor_value = await engine_client.sensor_value(f"wideband.input{pol}.eq", str)
             assert_valid_complex_list(sensor_value)
             np.testing.assert_equal(np.array(literal_eval(sensor_value)), gains)
 
-    async def test_gain_all_set_default(self, engine_client: aiokatcp.Client, engine_server: FEngine) -> None:
+    async def test_gain_all_set_default(self, engine_client: aiokatcp.Client, engine: FEngine) -> None:
         """Test ``?gain-all default``."""
         await engine_client.request("gain-all", "wideband", "2+3j")
         await engine_client.request("gain-all", "wideband", "default")
@@ -189,7 +187,7 @@ class TestKatcpRequests:
 
     @pytest.mark.parametrize("correct_delay_strings", [("3.76e-9,0.12e-9:7.322,1.91", "2.67e-9,0.02e-9:5.678,1.81")])
     async def test_delay_model_update_correct(
-        self, engine_server: FEngine, engine_client: aiokatcp.Client, correct_delay_strings: tuple[str, str]
+        self, engine: FEngine, engine_client: aiokatcp.Client, correct_delay_strings: tuple[str, str]
     ) -> None:
         """Test correctly-formed delay strings and validate the updates.
 
@@ -210,7 +208,7 @@ class TestKatcpRequests:
         # we're not simulating any. Poke the delay model manually to make it
         # update the sensor.
         # TODO[nb]: need to update for multiple pipelines
-        for model in engine_server._pipelines[0].delay_models:
+        for model in engine._pipelines[0].delay_models:
             model(1)
 
         for pol in range(N_POLS):

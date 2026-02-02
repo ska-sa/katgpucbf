@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,7 +16,6 @@
 
 """Unit tests for XBEngine module."""
 
-import asyncio
 from collections import Counter
 from collections.abc import AsyncGenerator, Callable, Iterable
 from itertools import chain
@@ -625,7 +624,7 @@ def verify_beam_sensors(
         ]
 
 
-class TestEngine:
+class TestXBEngine:
     r"""Grouping of unit tests for :class:`.XBEngine`\'s various functionality."""
 
     @pytest.fixture
@@ -1033,7 +1032,7 @@ class TestEngine:
         return args
 
     @pytest.fixture
-    async def xbengine(
+    async def engine(
         self,
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
@@ -1041,24 +1040,12 @@ class TestEngine:
     ) -> AsyncGenerator[XBEngine, None]:
         """Create and start an engine based on the fixture values."""
         args = parse_args(engine_arglist)
-        xbengine, _ = make_engine(context, vkgdr_handle, args)
-        await xbengine.start()
+        server, _ = make_engine(context, vkgdr_handle, args)
+        await server.start()
 
-        yield xbengine
+        yield server
 
-        await xbengine.stop()
-
-    @pytest.fixture
-    async def client(self, xbengine: XBEngine) -> AsyncGenerator[aiokatcp.Client, None]:
-        """Katcp client for controlling the engine."""
-        host, port = xbengine.sockets[0].getsockname()[:2]
-        async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
-            client = await aiokatcp.Client.connect(host, port)
-
-        yield client
-
-        client.close()
-        await client.wait_closed()
+        await server.stop()
 
     @pytest.mark.combinations(
         "n_ants, n_channels, n_jones_per_batch, missing_antenna, heap_accumulation_threshold",
@@ -1074,8 +1061,8 @@ class TestEngine:
         monkeypatch: pytest.MonkeyPatch,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
-        xbengine: XBEngine,
-        client: aiokatcp.Client,
+        engine: XBEngine,
+        engine_client: aiokatcp.Client,
         n_ants: int,
         n_spectra_per_heap: int,
         n_channels: int,
@@ -1132,7 +1119,7 @@ class TestEngine:
         range_start = frequency
         range_end = range_start + n_channels_per_substream - 1
         for output in corrprod_outputs + beam_outputs:
-            assert xbengine.sensors[f"{output.name}.chan-range"].value == f"({range_start},{range_end})"
+            assert engine.sensors[f"{output.name}.chan-range"].value == f"({range_start},{range_end})"
 
         # Need a method of capturing synchronised aiokatcp.Sensor updates as
         # they happen in the XBEngine.
@@ -1151,7 +1138,7 @@ class TestEngine:
             actual_sensor_updates[sensor.name].append(sensor_reading)
 
         for sensor_name in actual_sensor_updates.keys():
-            xbengine.sensors[sensor_name].attach(sensor_observer)
+            engine.sensors[sensor_name].attach(sensor_observer)
 
         def heap_factory(batch_index: int, present: np.ndarray) -> list[spead2.send.HeapReference]:
             timestamp = batch_index * timestamp_step
@@ -1208,7 +1195,7 @@ class TestEngine:
             BPipeline,
             "_get_in_item",
             count=beam_params_change_index - 1,
-            client=client,
+            client=engine_client,
             requests=chain.from_iterable(katcp_requests[-1]),
         )
         with (
@@ -1230,7 +1217,7 @@ class TestEngine:
                 present[60, missing_antenna] = False  # Just one heap in an accumulation
 
             for beam_request in chain.from_iterable(katcp_requests[0]):
-                await client.request(*beam_request)
+                await engine_client.request(*beam_request)
             # We only capture the timestamps before and after all katcp
             # requests are executed as we only need to ensure it has
             # increased across all `?beam` requests (not in between).
@@ -1261,7 +1248,7 @@ class TestEngine:
             present=present,
         )
 
-        xpipelines: list[XPipeline] = [pipeline for pipeline in xbengine._pipelines if isinstance(pipeline, XPipeline)]
+        xpipelines: list[XPipeline] = [pipeline for pipeline in engine._pipelines if isinstance(pipeline, XPipeline)]
         skipped_accs_total = verify_corrprod_sensors(
             xpipelines=xpipelines,
             prom_diff=prom_diff,
@@ -1293,7 +1280,7 @@ class TestEngine:
             weights=weights,
             delays=delays,
             quant_gains=quant_gains,
-            channel_spacing=xbengine.bandwidth / xbengine.n_channels,
+            channel_spacing=engine.bandwidth / engine.n_channels,
             centre_channel=n_channels // 2 - frequency,
         )
 
@@ -1320,7 +1307,7 @@ class TestEngine:
         self,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
-        xbengine: XBEngine,
+        engine: XBEngine,
         n_ants: int,
         n_channels_per_substream: int,
         frequency: int,
@@ -1363,14 +1350,14 @@ class TestEngine:
                 n_spectra_per_heap=n_spectra_per_heap,
             )
 
-            await xbengine.stop()
+            await engine.stop()
 
         n_vis = n_channels_per_substream * n_baselines
         for corrprod_output in corrprod_outputs:
             stream_diff = prom_diff.with_labels({"stream": corrprod_output.name})
             assert stream_diff.diff("output_x_visibilities_total") == n_vis
             assert stream_diff.diff("output_x_clipped_visibilities_total") == n_vis
-            assert xbengine.sensors[f"{corrprod_output.name}.xeng-clip-cnt"].value == n_vis
+            assert engine.sensors[f"{corrprod_output.name}.xeng-clip-cnt"].value == n_vis
 
     def _patch_method(
         self,
@@ -1439,8 +1426,8 @@ class TestEngine:
         monkeypatch: pytest.MonkeyPatch,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
-        xbengine: XBEngine,
-        client: aiokatcp.Client,
+        engine: XBEngine,
+        engine_client: aiokatcp.Client,
         n_ants: int,
         n_channels_per_substream: int,
         frequency: int,
@@ -1452,7 +1439,7 @@ class TestEngine:
         request_factory: Callable[[str, int], tuple],
     ):
         """Test that the steady-state-timestamp sensor works."""
-        assert (await client.sensor_value("steady-state-timestamp")) == 0
+        assert (await engine_client.sensor_value("steady-state-timestamp")) == 0
 
         timestamp_step = n_samples_between_spectra * n_spectra_per_heap
 
@@ -1463,7 +1450,7 @@ class TestEngine:
             obj=BPipeline,
             method_name="_get_in_item",
             count=3,
-            client=client,
+            client=engine_client,
             requests=[request],
         )
         n_batches = heap_accumulation_threshold[0]
@@ -1487,7 +1474,7 @@ class TestEngine:
             frequency=frequency,
             n_spectra_per_heap=n_spectra_per_heap,
         )
-        await xbengine.stop()
+        await engine.stop()
         assert len(timestamp_list) == 1
         steady_state_timestamp = timestamp_list[0]
         # Not technically required by the definition, but ought to be true
@@ -1500,51 +1487,51 @@ class TestEngine:
         np.testing.assert_equal(data[beam_under_test][steady_state_batch:], 0)
 
     @DEFAULT_PARAMETERS
-    async def test_bad_requests(self, client: aiokatcp.Client, n_ants: int) -> None:
+    async def test_bad_requests(self, engine_client: aiokatcp.Client, n_ants: int) -> None:
         """Test various requests with invalid parameters."""
         # Trying to use beamformer request on wrong stream type
         with pytest.raises(aiokatcp.FailReply, match=r"not a tied-array-channelised-voltage stream"):
-            await client.request("beam-quant-gains", "bcp1", 1.0)
+            await engine_client.request("beam-quant-gains", "bcp1", 1.0)
         with pytest.raises(aiokatcp.FailReply, match=r"not a tied-array-channelised-voltage stream"):
-            await client.request("beam-weights", "bcp1", *([1.0] * n_ants))
+            await engine_client.request("beam-weights", "bcp1", *([1.0] * n_ants))
         with pytest.raises(aiokatcp.FailReply, match=r"not a tied-array-channelised-voltage stream"):
-            await client.request("beam-delays", "bcp1", *(["0.0:0.0"] * n_ants))
+            await engine_client.request("beam-delays", "bcp1", *(["0.0:0.0"] * n_ants))
 
         # Vector requests with wrong number of parameters
         with pytest.raises(aiokatcp.FailReply, match=r"Incorrect number of weights \(expected 4, received 3\)"):
-            await client.request("beam-weights", "beam_0x", 1.0, 2.0, 3.0)
+            await engine_client.request("beam-weights", "beam_0x", 1.0, 2.0, 3.0)
         with pytest.raises(aiokatcp.FailReply, match=r"Incorrect number of delays \(expected 4, received 5\)"):
-            await client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:3", "4:4")
+            await engine_client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:3", "4:4")
 
         # Bad delay formatting
         with pytest.raises(aiokatcp.FailReply):
-            await client.request("beam-delays", "beam_0x", "0", "1", "2", "3")  # Missing ":"
+            await engine_client.request("beam-delays", "beam_0x", "0", "1", "2", "3")  # Missing ":"
         with pytest.raises(aiokatcp.FailReply):
-            await client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:3:3")  # Too many :'s
+            await engine_client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:3:3")  # Too many :'s
         with pytest.raises(aiokatcp.FailReply):
-            await client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:2j")  # Not float
+            await engine_client.request("beam-delays", "beam_0x", "0:0", "1:1", "2:2", "3:2j")  # Not float
 
         # capture-{start, stop} requests with non-existent stream
         with pytest.raises(aiokatcp.FailReply):
-            await client.request("capture-start", "non-existent-stream")
+            await engine_client.request("capture-start", "non-existent-stream")
         with pytest.raises(aiokatcp.FailReply):
-            await client.request("capture-stop", "non-existent-stream")
+            await engine_client.request("capture-stop", "non-existent-stream")
 
     @DEFAULT_PARAMETERS
     async def test_capture_stop_start(
         self,
-        client: aiokatcp.Client,
+        engine_client: aiokatcp.Client,
         corrprod_outputs: list[XOutput],
         beam_outputs: list[BOutput],
-        xbengine: XBEngine,
+        engine: XBEngine,
     ) -> None:
         """Test capture-start and capture-stop requests.
 
-        First issue a capture-stop as `xbengine` is initialised with --send-enabled.
+        First issue a capture-stop as `engine` is initialised with --send-enabled.
         """
 
         def get_stream_status(stream_name: str) -> bool:
-            pipeline, stream_id = xbengine._request_pipeline(stream_name)
+            pipeline, stream_id = engine._request_pipeline(stream_name)
             if isinstance(pipeline, XPipeline):
                 return pipeline.send_stream.send_enabled
             elif isinstance(pipeline, BPipeline):
@@ -1553,10 +1540,10 @@ class TestEngine:
                 raise TypeError(f"{stream_name} is of unknown type")
 
         for output in corrprod_outputs + beam_outputs:
-            await client.request("capture-stop", output.name)
+            await engine_client.request("capture-stop", output.name)
             assert get_stream_status(output.name) is False, f"Stream {output.name} is still enabled"
 
-            await client.request("capture-start", output.name)
+            await engine_client.request("capture-start", output.name)
             assert get_stream_status(output.name) is True, f"Stream {output.name} is still disabled"
 
     @pytest.mark.parametrize(
@@ -1569,7 +1556,7 @@ class TestEngine:
         monkeypatch: pytest.MonkeyPatch,
         mock_recv_streams: list[spead2.InprocQueue],
         mock_send_stream: list[spead2.InprocQueue],
-        client: aiokatcp.Client,
+        engine_client: aiokatcp.Client,
         n_ants: int,
         n_channels_per_substream: int,
         frequency: int,
@@ -1580,7 +1567,7 @@ class TestEngine:
         beam_outputs: list[BOutput],
         n_x_streams_to_stop: int,
         n_b_streams_to_stop: int,
-        xbengine: XBEngine,
+        engine: XBEngine,
     ) -> None:
         """Test capture-stop request on X- and B-engine data streams.
 
@@ -1610,7 +1597,7 @@ class TestEngine:
             stopped_corrprod = corrprod_outputs[stream_id]
             corrprod_capture_stop_accum_indices[stream_id] = capture_stop_accum_index
             capture_stop_corrprod_request = ("capture-stop", stopped_corrprod.name)
-            stopped_xpipeline = xbengine._request_pipeline(stopped_corrprod.name)[0]
+            stopped_xpipeline = engine._request_pipeline(stopped_corrprod.name)[0]
             # NOTE: We patch the instance and not the class in this case as we only
             # want each corrprod stream (XPipeline) to affect its own output.
             self._patch_method(
@@ -1618,7 +1605,7 @@ class TestEngine:
                 stopped_xpipeline.send_stream,
                 "get_free_heap",
                 capture_stop_accum_index,
-                client,
+                engine_client,
                 [capture_stop_corrprod_request],
             )
 
@@ -1639,7 +1626,7 @@ class TestEngine:
             bsend.BSend,
             "get_free_chunk",
             capture_stop_chunk_index,
-            client,
+            engine_client,
             capture_stop_beams,
         )
 
@@ -1684,14 +1671,16 @@ class TestEngine:
     @DEFAULT_PARAMETERS
     async def test_initial_steering_sensors(
         self,
-        client: aiokatcp.Client,
+        engine_client: aiokatcp.Client,
         beam_outputs: list[BOutput],
         n_ants: int,
     ) -> None:
         """Test that dynamic BPipeline sensors have correct initial state."""
         for beam in beam_outputs:
-            assert (await client.sensor_value(f"{beam.name}.weight", str)) == "[" + ", ".join(["1.0"] * n_ants) + "]"
-            assert (await client.sensor_value(f"{beam.name}.quantiser-gain", float)) == 1.0
+            assert (await engine_client.sensor_value(f"{beam.name}.weight", str)) == "[" + ", ".join(
+                ["1.0"] * n_ants
+            ) + "]"
+            assert (await engine_client.sensor_value(f"{beam.name}.quantiser-gain", float)) == 1.0
             expected_delay = "(0" + ", 0.0, 0.0" * n_ants + ")"
-            assert (await client.sensor_value(f"{beam.name}.delay", str)) == expected_delay
-            assert (await client.sensor_value(f"{beam.name}.beng-clip-cnt", int)) == 0
+            assert (await engine_client.sensor_value(f"{beam.name}.delay", str)) == expected_delay
+            assert (await engine_client.sensor_value(f"{beam.name}.beng-clip-cnt", int)) == 0
