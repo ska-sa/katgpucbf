@@ -115,3 +115,11 @@ def test_numpy_with_approx_fails(pdf_report: Reporter) -> None:
     arr1 = np.array([1, 2, 3])
     arr2 = np.array([4, 5, 6])
     np.testing.assert_equal(arr1, pytest.approx(arr2))
+
+
+def test_numpy_fails_with_scalar_comparison(pdf_report: Reporter) -> None:
+    """Test saving of numpy arrays on test failure."""
+    pdf_report.step("Start the test")
+    pdf_report.detail("Check that arrays are equal")
+    arr1 = np.array([1, 1, 1])
+    np.testing.assert_equal(arr1, 2)

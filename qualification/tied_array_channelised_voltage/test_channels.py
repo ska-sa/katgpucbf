@@ -76,4 +76,4 @@ async def test_channels(
         tones = np.where(power > 0.5 * max_power)[0].tolist()
         pdf_report.detail(f"Tones in {beam}: {tones}")
         with check:
-            np.testing.assert_array_equal(tones, channels)
+            assert tones == channels
