@@ -16,10 +16,8 @@
 
 """Fixtures for use in fgpu unit tests."""
 
-import asyncio
 from collections.abc import AsyncGenerator
 
-import aiokatcp
 import pytest
 import spead2
 import vkgdr
@@ -72,7 +70,7 @@ def mock_recv_stream(monkeypatch: pytest.MonkeyPatch) -> spead2.InprocQueue:
 
 
 @pytest.fixture
-async def engine_server(
+async def engine(
     request: pytest.FixtureRequest,
     engine_arglist: list[str],
     mock_recv_stream,
@@ -105,14 +103,3 @@ async def engine_server(
     await server.start()
     yield server
     await server.stop()
-
-
-@pytest.fixture
-async def engine_client(engine_server: FEngine) -> AsyncGenerator[aiokatcp.Client, None]:
-    """Create a KATCP client for communicating with the dummy server."""
-    host, port = engine_server.sockets[0].getsockname()[:2]
-    async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
-        client = await aiokatcp.Client.connect(host, port)
-    yield client
-    client.close()
-    await client.wait_closed()
