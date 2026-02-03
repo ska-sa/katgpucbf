@@ -118,7 +118,7 @@ def test_numpy_with_approx_fails(pdf_report: Reporter) -> None:
 
 
 def test_numpy_fails_with_scalar_comparison(pdf_report: Reporter) -> None:
-    """Test saving of numpy arrays on test failure."""
+    """Test saving of numpy arrays on test failure when comparing to a scalar value."""
     pdf_report.step("Start the test")
     pdf_report.detail("Check that arrays are equal")
     arr1 = np.array([1, 1, 1])

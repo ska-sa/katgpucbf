@@ -36,7 +36,6 @@ def setup_pytester(pytester: pytest.Pytester) -> None:
     pytester.makeini(
         """
         [pytest]
-        addopts = --report-log=report.json
         raw_data = false
         array_dir = arrays
         """
@@ -53,11 +52,7 @@ def _extract_array_path_from_output(outlines: list[str], pytester_path: Path) ->
             idx = line.find(prefix)
             if idx != -1:
                 array_path_str = line[idx + len(prefix) :].strip()
-                # The path might be relative to pytester.path or absolute
-                array_path = Path(array_path_str)
-                if not array_path.is_absolute():  # TODO: uuhhh...
-                    array_path = pytester_path / array_path
-                return array_path
+                return pytester_path / array_path_str
     return None
 
 
@@ -65,9 +60,6 @@ def test_failed_np_assertion_dumps_arrays(pytester: pytest.Pytester) -> None:
     """Test that the numpy fail test is reported correctly."""
     result = pytester.runpytest("demo.py::test_numpy_fails")
     result.assert_outcomes(failed=1)
-    assert any("Arrays written to" in line for line in result.outlines), (
-        "Arrays written to should be present in the report"
-    )
 
     # Extract the path from the output
     array_path = _extract_array_path_from_output(result.outlines, pytester.path)
@@ -79,17 +71,14 @@ def test_failed_np_assertion_dumps_arrays(pytester: pytest.Pytester) -> None:
     with np.load(array_path) as data:
         assert "ACTUAL" in data, "Array file should contain ACTUAL array"
         assert "DESIRED" in data, "Array file should contain DESIRED array"
-        assert np.all(data["ACTUAL"] == np.array([1, 2, 3]))
-        assert np.all(data["DESIRED"] == np.array([4, 5, 6]))
+        np.testing.assert_array_equal(data["ACTUAL"], np.array([1, 2, 3]), strict=True)
+        np.testing.assert_array_equal(data["DESIRED"], np.array([4, 5, 6]), strict=True)
 
 
 def test_failed_np_assertion_dumps_arrays_with_scalar_comparison(pytester: pytest.Pytester) -> None:
     """Test that the numpy fail test is reported correctly."""
     result = pytester.runpytest("demo.py::test_numpy_fails_with_scalar_comparison")
     result.assert_outcomes(failed=1)
-    assert any("Arrays written to" in line for line in result.outlines), (
-        "Arrays written to should be present in the report"
-    )
 
     # Extract the path from the output
     array_path = _extract_array_path_from_output(result.outlines, pytester.path)
@@ -101,8 +90,8 @@ def test_failed_np_assertion_dumps_arrays_with_scalar_comparison(pytester: pytes
     with np.load(array_path) as data:
         assert "ACTUAL" in data, "Array file should contain ACTUAL array"
         assert "DESIRED" in data, "Array file should contain DESIRED array"
-        assert np.all(data["ACTUAL"] == np.array([1, 1, 1]))
-        assert np.all(data["DESIRED"] == np.array([2]))
+        np.testing.assert_array_equal(data["ACTUAL"], np.array([1, 1, 1]), strict=True)
+        np.testing.assert_array_equal(data["DESIRED"], np.array(2), strict=True)
 
 
 def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(pytester: pytest.Pytester) -> None:
@@ -120,8 +109,8 @@ def test_failed_np_assertion_dumps_arrays_and_unwraps_approx(pytester: pytest.Py
     with np.load(array_path) as data:
         assert "ACTUAL" in data, "Array file should contain ACTUAL array"
         assert "DESIRED" in data, "Array file should contain DESIRED array"
-        assert np.all(data["ACTUAL"] == np.array([1, 2, 3]))
-        assert np.all(data["DESIRED"] == np.array([4, 5, 6]))
+        np.testing.assert_array_equal(data["ACTUAL"], np.array([1, 2, 3]), strict=True)
+        np.testing.assert_array_equal(data["DESIRED"], np.array([4, 5, 6]), strict=True)
         assert not isinstance(data["DESIRED"], ApproxBase)
 
 
@@ -130,8 +119,6 @@ def test_failed_with_no_array_path_set(pytester: pytest.Pytester) -> None:
     pytester.makeini(
         """
         [pytest]
-        addopts = --report-log=report.json
-        raw_data = false
         """
     )
     result = pytester.runpytest("demo.py::test_numpy_fails")

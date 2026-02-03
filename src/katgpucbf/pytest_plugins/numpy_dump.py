@@ -22,6 +22,7 @@ from collections.abc import Iterator
 
 import numpy as np
 import pytest
+from _pytest.python_api import ApproxBase
 
 
 def pytest_addoption(parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager) -> None:
@@ -38,8 +39,7 @@ def _array_compare_counter() -> Iterator[int]:
 def _unwrap_pytest_approx(a: np.ndarray) -> np.ndarray:
     """Unwrap an array that has possibly been wrapped in :func:`pytest.approx`."""
     # pytest doesn't explicitly expose this class, so we have to infer it
-    approx_cls = type(pytest.approx(np.array([1])))
-    if a.shape == () and isinstance(a[()], approx_cls):
+    if isinstance(a, ApproxBase):
         return a[()].expected
     return a
 
