@@ -70,12 +70,16 @@ def test_slow_fixture_updates_timestamp(pytester: pytest.Pytester) -> None:
         report_data = [json.loads(line) for line in f]
 
     found_duration = False
-    for msg in _list_test_report_messages(report_data, "call"):
-        duration = msg.get("duration")
-        assert isinstance(duration, float)
-        assert duration > 0.5
-        found_duration = True
-        break
+    for entry in report_data:
+        if entry.get("$report_type") == "TestReport":
+            # Check user_properties for pdf_report_data
+            duration = entry.get("duration")
+            if entry.get("when") == "call":
+                continue
+            assert isinstance(duration, float)
+            assert duration > 0.5
+            found_duration = True
+            break
     assert found_duration, "Duration should be present in the report"
 
 
