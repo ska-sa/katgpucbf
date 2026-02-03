@@ -258,7 +258,7 @@ class Benchmark(ABC):
         l_rates = np.log(rates)[:, np.newaxis]
         l_mid_rates = np.log(mid_rates)[np.newaxis, :]
         noise = expit((l_mid_rates - l_rates) * slope)
-        # Don't allow probabilities to get too close to 0/1, as there are may be some
+        # Don't allow probabilities to get too close to 0/1, as there may be some
         # external factor that makes things go wrong even at very low/high rates.
         noise = np.clip(noise, NOISE, 1 - NOISE)
 

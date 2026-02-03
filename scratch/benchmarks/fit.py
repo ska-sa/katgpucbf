@@ -16,7 +16,7 @@ def main() -> None:
     parser.add_argument("--plot", action="store_true", help="Plot the fitted model")
     args = parser.parse_args()
 
-    orig_df = pd.read_csv(args.filename, sep=" ", names=["rate", "successes", "trials"], index_col="rate")
+    orig_df = pd.read_csv(args.filename, sep=" ", names=["rate", "successes", "trials", "errors"], index_col="rate")
     # Split each entry back into an original set of trials with 0/1 outcomes
     rates = []
     ind = []

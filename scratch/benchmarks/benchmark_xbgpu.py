@@ -301,6 +301,20 @@ async def main():
         result = await benchmark.calibrate(args.low, args.high, args.step, args.calibrate_repeat)
     elif args.oneshot is not None:
         result = (await benchmark.measure(args.oneshot)).message()
+    else:
+        slope = {
+            1: -451.368500,
+            2: -173.264274,  # TODO: Add slope for n=2
+        }[min(args.n, 2)]
+        low, high = await benchmark.search(
+            low=args.low,
+            high=args.high,
+            step=args.step,
+            interval=args.interval,
+            max_comparisons=args.max_comparisons,
+            slope=slope,
+        )
+        result = f"\n{low / 1e6} MHz - {high / 1e6} MHz"
     print(result)
 
 
