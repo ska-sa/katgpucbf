@@ -1677,9 +1677,8 @@ class TestXBEngine:
     ) -> None:
         """Test that dynamic BPipeline sensors have correct initial state."""
         for beam in beam_outputs:
-            assert (await engine_client.sensor_value(f"{beam.name}.weight", str)) == "[" + ", ".join(
-                ["1.0"] * n_ants
-            ) + "]"
+            expected_weight = "[" + ", ".join(["1.0"] * n_ants) + "]"
+            assert (await engine_client.sensor_value(f"{beam.name}.weight", str)) == expected_weight
             assert (await engine_client.sensor_value(f"{beam.name}.quantiser-gain", float)) == 1.0
             expected_delay = "(0" + ", 0.0, 0.0" * n_ants + ")"
             assert (await engine_client.sensor_value(f"{beam.name}.delay", str)) == expected_delay
