@@ -191,10 +191,15 @@ class VEngine(Engine):
         # TODO: will need to be rounded/quantised
         self.sensors["delay"].value = delay
 
-    async def request_capture_start(self, ctx: aiokatcp.RequestContext) -> None:
-        """Start capturing and emitting data."""
+    async def request_capture_start(self, ctx: aiokatcp.RequestContext, timestamp: int = 0) -> None:
+        """Start capturing and emitting data.
+
+        Parameters
+        ----------
+        timestamp
+            Minimum ADC timestamp at which to enable emitting.
+        """
         pass
 
     async def request_capture_stop(self, ctx: aiokatcp.RequestContext) -> None:
         """Stop capturing and emitting data."""
-        pass

@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2021-2022, 2024-2025, National Research Foundation (SARAO)
+# Copyright (c) 2021-2022, 2024-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -16,7 +16,6 @@
 
 """Unit tests for katcp server."""
 
-import asyncio
 import re
 from collections.abc import AsyncGenerator, Sequence
 
@@ -35,7 +34,7 @@ from .conftest import ADC_SAMPLE_RATE, SIGNAL_HEAPS
 
 
 @pytest.fixture
-async def katcp_server(
+async def engine(
     sender: Sender, heap_sets: list[HeapSet], descriptor_sender: DescriptorSender
 ) -> AsyncGenerator[DEngine, None]:
     """A :class:`.DEngine`."""
@@ -57,31 +56,19 @@ async def katcp_server(
     await server.stop()
 
 
-@pytest.fixture
-async def katcp_client(katcp_server: DEngine) -> AsyncGenerator[aiokatcp.Client, None]:
-    """A katcp client connection to :func:`katcp_server`."""
-    host, port = katcp_server.sockets[0].getsockname()[:2]
-    async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
-        client = await aiokatcp.Client.connect(host, port)
-    yield client
-    client.close()
-    await client.wait_closed()
-
-
-async def test_sensors(katcp_server: DEngine, katcp_client: aiokatcp.Client) -> None:
+async def test_sensors(engine_client: aiokatcp.Client) -> None:
     """Test the initial sensor values."""
-    assert await katcp_client.sensor_value("signals-orig", str) == "cw(0.2, 123); cw(0.3, 456);"
-    assert await katcp_client.sensor_value("signals", str) == "cw(0.2, 123); cw(0.3, 456);"
-    assert await katcp_client.sensor_value("adc-sample-rate") == ADC_SAMPLE_RATE
-    assert await katcp_client.sensor_value("sample-bits") == DIG_SAMPLE_BITS
-    assert await katcp_client.sensor_value("max-period") == DIG_HEAP_SAMPLES * SIGNAL_HEAPS
-    assert await katcp_client.sensor_value("period") == SIGNAL_HEAPS
+    assert await engine_client.sensor_value("signals-orig", str) == "cw(0.2, 123); cw(0.3, 456);"
+    assert await engine_client.sensor_value("signals", str) == "cw(0.2, 123); cw(0.3, 456);"
+    assert await engine_client.sensor_value("adc-sample-rate") == ADC_SAMPLE_RATE
+    assert await engine_client.sensor_value("sample-bits") == DIG_SAMPLE_BITS
+    assert await engine_client.sensor_value("max-period") == DIG_HEAP_SAMPLES * SIGNAL_HEAPS
+    assert await engine_client.sensor_value("period") == SIGNAL_HEAPS
 
 
 @pytest.mark.parametrize("period", [8192, None])
 async def test_signals(
-    katcp_server: DEngine,
-    katcp_client: aiokatcp.Client,
+    engine_client: aiokatcp.Client,
     sender: Sender,
     heap_sets: Sequence[HeapSet],
     period: int | None,
@@ -95,9 +82,9 @@ async def test_signals(
     args: list = [signals_str]
     if period is not None:
         args.append(period)
-    reply, _ = await katcp_client.request("signals", *args)
+    reply, _ = await engine_client.request("signals", *args)
     assert reply == [b"1234567"]
-    assert await katcp_client.sensor_value("steady-state-timestamp", int) == 1234567
+    assert await engine_client.sensor_value("steady-state-timestamp", int) == 1234567
     set_heaps.assert_called_once_with(heap_sets[0])
     # Check that pol 0 is now indeed all zeros (and pol 1 is not).
     payload = heap_sets[0].data["payload"]
@@ -116,25 +103,24 @@ async def test_signals(
         # saturation flag consistency test is not vacuous.
         assert not np.all(status.isel(pol=1).data & (1 << DIGITISER_STATUS_SATURATION_FLAG_BIT))
     # Check that sensors were updated
-    assert await katcp_client.sensor_value("signals-orig", str) == signals_str
-    assert await katcp_client.sensor_value("period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
-    assert parse_signals(await katcp_client.sensor_value("signals", str)) == parse_signals(signals_str)
+    assert await engine_client.sensor_value("signals-orig", str) == signals_str
+    assert await engine_client.sensor_value("period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
+    assert parse_signals(await engine_client.sensor_value("signals", str)) == parse_signals(signals_str)
 
 
 async def test_signals_zero(
-    katcp_server: DEngine,
-    katcp_client: aiokatcp.Client,
+    engine_client: aiokatcp.Client,
     sender: Sender,
     heap_sets: Sequence[HeapSet],
 ) -> None:
     """Test the fast path for setting all signals to zero."""
     signals_str = "0;0;"
-    await katcp_client.request("signals", signals_str)
+    await engine_client.request("signals", signals_str)
     assert sender.heap_set is heap_sets[2]
     np.testing.assert_equal(sender.heap_set.data["payload"].data, 0)
     np.testing.assert_equal(sender.heap_set.data["digitiser_status"].data, 0)
-    assert await katcp_client.sensor_value("signals-orig", str) == signals_str
-    assert parse_signals(await katcp_client.sensor_value("signals", str)) == parse_signals(signals_str)
+    assert await engine_client.sensor_value("signals-orig", str) == signals_str
+    assert parse_signals(await engine_client.sensor_value("signals", str)) == parse_signals(signals_str)
 
 
 @pytest.mark.parametrize(
@@ -144,22 +130,20 @@ async def test_signals_zero(
         ("nodither(1.0) + 0.0", "Signal 'nodither(1.0)' cannot be used in a larger expression"),
     ],
 )
-async def test_signals_unparsable(
-    katcp_server: DEngine, katcp_client: aiokatcp.Client, mocker, spec: str, match: str
-) -> None:
+async def test_signals_unparsable(engine_client: aiokatcp.Client, mocker, spec: str, match: str) -> None:
     """Test that ``?signals`` with an invalid signal specification fails gracefully."""
     with pytest.raises(aiokatcp.FailReply, match=re.escape(match)):
-        await katcp_client.request("signals", spec)
+        await engine_client.request("signals", spec)
 
 
-async def test_signals_wrong_length(katcp_server: DEngine, katcp_client: aiokatcp.Client, mocker) -> None:
+async def test_signals_wrong_length(engine_client: aiokatcp.Client, mocker) -> None:
     """Test that ``?signals`` fails gracefully when given the wrong number of signals."""
     with pytest.raises(aiokatcp.FailReply, match="expected 2 signals, received 1"):
-        await katcp_client.request("signals", "cw(0, 0);")
+        await engine_client.request("signals", "cw(0, 0);")
 
 
-async def test_time(katcp_server: DEngine, katcp_client: aiokatcp.Client, mocker) -> None:
+async def test_time(engine_client: aiokatcp.Client, mocker) -> None:
     """Test ?time request."""
     mocker.patch("time.time", return_value=1234567890.0)
-    reply, _ = await katcp_client.request("time")
+    reply, _ = await engine_client.request("time")
     assert aiokatcp.decode(float, reply[0]) == 1234567890.0

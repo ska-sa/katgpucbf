@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -220,7 +220,7 @@ class TestFEngine:
         :meth:`dig_rms_dbfs_window_samples` with the computed value.
 
         This is marked autouse to ensure it will be run before the
-        engine_server fixture.
+        ``engine`` fixture.
         """
 
         def _dig_rms_dbfs_window_samples(self: Pipeline) -> int:
@@ -322,7 +322,7 @@ class TestFEngine:
             "239.10.10.0+15:7149",  # src
         ]
 
-    def test_engine_required_arguments(self, engine_server: FEngine) -> None:
+    def test_engine_required_arguments(self, engine: FEngine) -> None:
         """Test proper setting of required arguments.
 
         .. note::
@@ -331,12 +331,12 @@ class TestFEngine:
           way correct, just whether or not the member variables are being
           correctly populated.
         """
-        assert engine_server._port == 0
-        assert engine_server._recv_interface == ["127.0.0.1"]
+        assert engine._port == 0
+        assert engine._recv_interface == ["127.0.0.1"]
         # TODO: `send_interface` goes to the _sender member, which doesn't have anything we can query.
-        assert engine_server._pipelines[0].output.channels == CHANNELS
-        assert engine_server.time_converter.sync_time == SYNC_TIME
-        assert engine_server._srcs == [(f"239.10.10.{i}", 7149) for i in range(16)]
+        assert engine._pipelines[0].output.channels == CHANNELS
+        assert engine.time_converter.sync_time == SYNC_TIME
+        assert engine._srcs == [(f"239.10.10.{i}", 7149) for i in range(16)]
         # TODO: same problem for `dst` itself.
 
     def _make_digitiser(self, queue: spead2.InprocQueue) -> "spead2.send.asyncio.AsyncStream":
@@ -519,7 +519,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         coherent_scale: np.ndarray,
@@ -574,7 +574,7 @@ class TestFEngine:
 
         # Don't send the first chunk, to avoid complications with the step
         # change in the delay at SYNC_TIME.
-        recv_layout = engine_server.recv_layout
+        recv_layout = engine.recv_layout
         heap_samples = output.spectra_samples * output.spectra_per_heap
         first_timestamp = roundup(recv_layout.chunk_samples, heap_samples)
         n_samples = 20 * recv_layout.chunk_samples
@@ -594,7 +594,7 @@ class TestFEngine:
         out_data, _ = await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
             first_timestamp=first_timestamp,
@@ -625,7 +625,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         coherent_scale: np.ndarray,
@@ -648,8 +648,8 @@ class TestFEngine:
         dig_data = np.concatenate([self._make_tone(np.arange(step), tone, 0) for tone in tones], axis=1)
         # Add some extra data to align to an input heap, and to fill out the
         # last output chunk.
-        output_chunk_samples = engine_server.chunk_jones * 2 * output.decimation
-        padded_size = roundup(dig_data.shape[1] + output_chunk_samples, engine_server.recv_layout.chunk_samples)
+        output_chunk_samples = engine.chunk_jones * 2 * output.decimation
+        padded_size = roundup(dig_data.shape[1] + output_chunk_samples, engine.recv_layout.chunk_samples)
         n_pad = padded_size - dig_data.shape[1]
         padding = np.zeros((2, n_pad), dig_data.dtype)
         dig_data = np.concatenate([dig_data, padding], axis=1)
@@ -668,7 +668,7 @@ class TestFEngine:
         out_data, _ = await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
         )
@@ -701,7 +701,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         extra_delay_samples: float,
@@ -722,7 +722,7 @@ class TestFEngine:
             )
             for channel in tone_channels
         ]
-        recv_layout = engine_server.recv_layout
+        recv_layout = engine.recv_layout
         n_samples = 32 * recv_layout.chunk_samples
 
         # Should be high enough to cause multiple coarse delay changes per chunk
@@ -742,7 +742,7 @@ class TestFEngine:
         out_data, timestamps = await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
             first_timestamp=first_timestamp,
@@ -788,7 +788,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         extra_delay_samples: float,
         extra_phase: float,
@@ -796,7 +796,7 @@ class TestFEngine:
     ) -> None:
         """Test loading several future delay models."""
         # Set up infrastructure for testing delay sensor updates
-        delay_sensors = [engine_server.sensors[f"{output.name}.input{pol}.delay"] for pol in range(N_POLS)]
+        delay_sensors = [engine.sensors[f"{output.name}.input{pol}.delay"] for pol in range(N_POLS)]
         sensor_updates_dict = self._watch_sensors(delay_sensors)
 
         # To keep things simple, we'll just use phase, not delay.
@@ -804,7 +804,7 @@ class TestFEngine:
         tone = CW(
             frac_channel=frac_channel(output, tone_channel), magnitude=110, delay=extra_delay_samples, phase=extra_phase
         )
-        recv_layout = engine_server.recv_layout
+        recv_layout = engine.recv_layout
         n_samples = 10 * recv_layout.chunk_samples
         dig_data = self._make_tone(np.arange(n_samples), tone, 0)
 
@@ -818,7 +818,7 @@ class TestFEngine:
         out_data, timestamps = await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
         )
@@ -853,7 +853,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
@@ -875,7 +875,7 @@ class TestFEngine:
         tone_magnitude = 60
         await engine_client.request("gain-all", output.name, 100 / tone_magnitude * default_gain)
 
-        recv_layout = engine_server.recv_layout
+        recv_layout = engine.recv_layout
         # Don't send the first chunk, to avoid complications with the step
         # change in the delay at SYNC_TIME.
         heap_samples = output.spectra_samples * output.spectra_per_heap
@@ -919,7 +919,7 @@ class TestFEngine:
         out_data, _ = await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
             first_timestamp=first_timestamp,
@@ -951,7 +951,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
@@ -963,10 +963,10 @@ class TestFEngine:
         It then checks that the heaps successfully received in the first half match
         the heaps in the second half, up to a tolerance to account for dithering.
         """
-        sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
+        sensors = [engine.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         spectra_per_heap = output.spectra_per_heap
-        chunk_samples = engine_server.recv_layout.chunk_samples
+        chunk_samples = engine.recv_layout.chunk_samples
         n_samples = 16 * chunk_samples
         # Half-open ranges of input heaps that are missing
         missing_ranges = [
@@ -1002,7 +1002,7 @@ class TestFEngine:
             out_data, timestamps = await self._send_data(
                 mock_recv_stream,
                 mock_send_stream,
-                engine_server,
+                engine,
                 output,
                 dig_data,
                 expected_first_timestamp=0,
@@ -1044,7 +1044,7 @@ class TestFEngine:
                 OPTIONAL_FAILURE = 3
 
             expected_updates = []
-            spectra_per_output_chunk = engine_server.chunk_jones // output.channels
+            spectra_per_output_chunk = engine.chunk_jones // output.channels
             batches_per_output_chunk = spectra_per_output_chunk // spectra_per_heap
             batches_per_window = batches_per_output_chunk * dig_rms_dbfs_window_chunks
             window_timestamp_step = spectra_per_output_chunk * output.spectra_samples * dig_rms_dbfs_window_chunks
@@ -1096,22 +1096,22 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
     ) -> None:
         """Test that the ``dig-clip-cnt`` sensors are set correctly."""
-        sensors = [engine_server.sensors[f"input{pol}.dig-clip-cnt"] for pol in range(N_POLS)]
+        sensors = [engine.sensors[f"input{pol}.dig-clip-cnt"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 9 * CHUNK_SAMPLES
         dig_data = np.zeros((2, n_samples), np.int16)
-        saturation_value = 2 ** (engine_server.recv_layout.sample_bits - 1) - 1
+        saturation_value = 2 ** (engine.recv_layout.sample_bits - 1) - 1
         dig_data[0, 10000:15000] = saturation_value
         dig_data[1, 2 * CHUNK_SAMPLES + 50000 : 2 * CHUNK_SAMPLES + 60000] = -saturation_value
         await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
         )
@@ -1133,7 +1133,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         input_voltage: int,
@@ -1141,7 +1141,7 @@ class TestFEngine:
         dig_rms_dbfs_window_samples: list[int],
     ) -> None:
         """Test that the ``dig-rms-dbfs`` sensors are set correctly."""
-        sensors = [engine_server.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
+        sensors = [engine.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         n_samples = 10 * CHUNK_SAMPLES
         dig_data = np.full((2, n_samples), input_voltage, np.int16)
@@ -1152,7 +1152,7 @@ class TestFEngine:
         await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
         )
@@ -1168,7 +1168,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         default_gain: np.float32,
@@ -1180,14 +1180,14 @@ class TestFEngine:
             # Set gain high enough to make the tone saturate
             await engine_client.request("gain", output.name, pol, default_gain * 2)
 
-        recv_layout = engine_server.recv_layout
+        recv_layout = engine.recv_layout
         n_samples = 20 * recv_layout.chunk_samples
         dig_data = self._make_tone(np.arange(n_samples), tone, tone_pol)
         with PromDiff(namespace=METRIC_NAMESPACE, labels={"stream": output.name}) as prom_diff:
             _, timestamps = await self._send_data(
                 mock_recv_stream,
                 mock_send_stream,
-                engine_server,
+                engine,
                 output,
                 dig_data,
             )
@@ -1197,13 +1197,13 @@ class TestFEngine:
 
         # Compute the expected timestamp. The timestamp is associated with the
         # output chunk, so we need to round up to output chunk size.
-        last_timestamp = roundup(timestamps[-1] + 1, engine_server.chunk_jones * output.decimation * 2)
+        last_timestamp = roundup(timestamps[-1] + 1, engine.chunk_jones * output.decimation * 2)
 
-        sensor = engine_server.sensors[f"{output.name}.input{tone_pol}.feng-clip-cnt"]
+        sensor = engine.sensors[f"{output.name}.input{tone_pol}.feng-clip-cnt"]
         assert sensor.reading == aiokatcp.Reading(
             SYNC_TIME + last_timestamp / ADC_SAMPLE_RATE, aiokatcp.Sensor.Status.NOMINAL, len(timestamps)
         )
-        sensor = engine_server.sensors[f"{output.name}.input{1 - tone_pol}.feng-clip-cnt"]
+        sensor = engine.sensors[f"{output.name}.input{1 - tone_pol}.feng-clip-cnt"]
         assert sensor.reading == aiokatcp.Reading(
             SYNC_TIME + last_timestamp / ADC_SAMPLE_RATE, aiokatcp.Sensor.Status.NOMINAL, 0
         )
@@ -1235,7 +1235,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         monkeypatch,
@@ -1249,7 +1249,7 @@ class TestFEngine:
         out_data, timestamps = await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
         )
@@ -1270,7 +1270,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
         monkeypatch,
@@ -1286,7 +1286,7 @@ class TestFEngine:
         out_data, timestamps = await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
         )
@@ -1307,7 +1307,7 @@ class TestFEngine:
         self,
         mock_recv_stream: spead2.InprocQueue,
         mock_send_stream: list[spead2.InprocQueue],
-        engine_server: FEngine,
+        engine: FEngine,
         engine_client: aiokatcp.Client,
         output: Output,
     ) -> None:
@@ -1323,7 +1323,7 @@ class TestFEngine:
         out_data, timestamps = await self._send_data(
             mock_recv_stream,
             mock_send_stream,
-            engine_server,
+            engine,
             output,
             dig_data,
         )
