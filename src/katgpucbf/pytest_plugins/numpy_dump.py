@@ -38,7 +38,6 @@ def _array_compare_counter() -> Iterator[int]:
 
 def _unwrap_pytest_approx(a: np.ndarray) -> np.ndarray:
     """Unwrap an array that has possibly been wrapped in :func:`pytest.approx`."""
-    # pytest doesn't explicitly expose this class, so we have to infer it
     if a.shape == () and isinstance(a[()], ApproxBase):
         return a[()].expected
     return a

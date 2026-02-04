@@ -17,6 +17,7 @@
 """Reporter plugin unit tests."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -35,23 +36,30 @@ def setup_pytester(pytester: pytest.Pytester) -> None:
         """
         [pytest]
         addopts = --report-log=report.json
+        asyncio_default_fixture_loop_scope = function
         """
     )
     pytester.copy_example("demo.py")
 
 
-def _list_test_report_messages(report_data: list[dict], message_type: str) -> list[dict]:
+def _list_test_reports(report_file: Path) -> list[dict]:
+    """List all test reports in the report data."""
+    with open(report_file, encoding="utf-8") as f:
+        report_data = [json.loads(line) for line in f]
+    return [entry for entry in report_data if entry.get("$report_type") == "TestReport"]
+
+
+def _list_test_report_messages_by_type(report_file: Path, message_type: str) -> list[dict]:
     """List all messages of a given type in the report data."""
     messages = []
-    for entry in report_data:
-        if entry.get("$report_type") == "TestReport":
-            # Check user_properties for pdf_report_data
-            user_props = entry.get("user_properties", [])
-            for prop_name, prop_value in user_props:
-                if prop_name == "pdf_report_data" and isinstance(prop_value, list):
-                    for msg in prop_value:
-                        if msg.get("$msg_type") == message_type:
-                            messages.append(msg)
+    for entry in _list_test_reports(report_file):
+        # Check user_properties for pdf_report_data
+        user_props = entry.get("user_properties", [])
+        for prop_name, prop_value in user_props:
+            if prop_name == "pdf_report_data" and isinstance(prop_value, list):
+                for msg in prop_value:
+                    if msg.get("$msg_type") == message_type:
+                        messages.append(msg)
     return messages
 
 
@@ -66,20 +74,16 @@ def test_slow_fixture_updates_timestamp(pytester: pytest.Pytester) -> None:
     report_file = pytester.path / "report.json"
     assert report_file.exists(), "report.json file should exist"
 
-    with open(report_file, encoding="utf-8") as f:
-        report_data = [json.loads(line) for line in f]
-
     found_duration = False
-    for entry in report_data:
-        if entry.get("$report_type") == "TestReport":
-            # Check user_properties for pdf_report_data
-            duration = entry.get("duration")
-            if entry.get("when") == "call":
-                continue
-            assert isinstance(duration, float)
-            assert duration > 0.5
-            found_duration = True
-            break
+    for entry in _list_test_reports(report_file):
+        # Check user_properties for pdf_report_data
+        duration = entry.get("duration")
+        if entry.get("when") == "call":
+            continue
+        assert isinstance(duration, float)
+        assert duration > 0.5
+        found_duration = True
+        break
     assert found_duration, "Duration should be present in the report"
 
 
@@ -101,12 +105,9 @@ def test_figure_creates_binary_figure_in_report(pytester: pytest.Pytester) -> No
     report_file = pytester.path / "report.json"
     assert report_file.exists(), "report.json file should exist"
 
-    with open(report_file, encoding="utf-8") as f:
-        report_data = [json.loads(line) for line in f]
-
     # Find test report entries and check for binary_figure data
     found_binary_figure = False
-    for msg in _list_test_report_messages(report_data, "step"):
+    for msg in _list_test_report_messages_by_type(report_file, "step"):
         items = msg.get("items", [])
         for item in items:
             if item.get("$msg_type") == "binary_figure":
@@ -129,15 +130,12 @@ def test_check_test_is_reported_correctly(pytester: pytest.Pytester) -> None:
     report_file = pytester.path / "report.json"
     assert report_file.exists(), "report.json file should exist"
 
-    with open(report_file, encoding="utf-8") as f:
-        report_data = [json.loads(line) for line in f]
-
     # Find test report entries and check for step details
     found_bad_things_step = False
     found_good_things_step = False
     bad_things_failures = []
 
-    for msg in _list_test_report_messages(report_data, "step"):
+    for msg in _list_test_report_messages_by_type(report_file, "step"):
         step_message = msg.get("message", "")
         items = msg.get("items", [])
         if step_message == "Expect some bad things":

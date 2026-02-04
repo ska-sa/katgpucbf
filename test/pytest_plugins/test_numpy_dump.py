@@ -36,8 +36,8 @@ def setup_pytester(pytester: pytest.Pytester) -> None:
     pytester.makeini(
         """
         [pytest]
-        raw_data = false
         array_dir = arrays
+        asyncio_default_fixture_loop_scope = function
         """
     )
     pytester.copy_example("demo.py")
