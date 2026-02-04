@@ -304,7 +304,7 @@ async def main():
     else:
         slope = {
             1: -451.368500,
-            2: -173.264274,  # TODO: Add slope for n=2
+            2: -429.814719,
         }[min(args.n, 2)]
         low, high = await benchmark.search(
             low=args.low,
