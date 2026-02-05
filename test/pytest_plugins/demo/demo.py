@@ -16,27 +16,24 @@
 
 """Test cases of the qualification framework."""
 
-import asyncio
+import time
 
 import matplotlib.figure
 import numpy as np
 import pytest
-import pytest_asyncio
 from pytest_check import check
 
 from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter
 
 
-@pytest_asyncio.fixture(scope="function")
-async def slow_fixture() -> int:
+@pytest.fixture(scope="function")
+def slow_fixture() -> None:
     """Demonstrates the delay in the timestamp in the report."""
-    await asyncio.sleep(0.5)
-    return 1
+    time.sleep(0.5)
 
 
 @pytest.mark.requirements("DEMO-000")
-@pytest.mark.asyncio
-async def test_passes(pdf_report: Reporter, slow_fixture) -> None:
+def test_passes(pdf_report: Reporter, slow_fixture) -> None:
     r"""Pass the test.
 
     Here is some maths: :math:`e^{\pi j} + 1 = 0`.

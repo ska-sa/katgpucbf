@@ -329,15 +329,15 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
 
         # Fill in extra sensors specific to baseline-correlation-products
         self.n_bls: int = cbf.init_sensors[f"{stream_name}.n-bls"].value
-        self.n_bits_per_sample = cbf.init_sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
+        self.n_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
         self.n_spectra_per_acc: int = cbf.init_sensors[f"{stream_name}.n-accs"].value
         self.int_time: float = cbf.init_sensors[f"{stream_name}.int-time"].value
         self.bls_ordering: list[tuple[str, str]] = ast.literal_eval(
             cbf.init_sensors[f"{stream_name}.bls-ordering"].value.decode()
         )
-        self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
-        self.n_xengs = cbf.init_sensors[f"{stream_name}.n-xengs"].value
+        self.n_xengs: int = cbf.init_sensors[f"{stream_name}.n-xengs"].value
 
+        self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
         self.stream_group = create_baseline_correlation_product_receive_stream_group(
             interface_address,
             multicast_endpoints=self.multicast_endpoints[0],
