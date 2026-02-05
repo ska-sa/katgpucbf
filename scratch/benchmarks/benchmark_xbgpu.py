@@ -266,7 +266,8 @@ async def main():
     parser.add_argument("--low", type=float, default=3000e6, help="Minimum ADC sample rate to search [%(default)s]")
     parser.add_argument("--high", type=float, default=4000e6, help="Maximum ADC sample rate to search [%(default)s]")
     parser.add_argument("--step", type=float, default=1e6, help="Step size between sample rates to test [%(default)s]")
-
+    parser.add_argument("--interval", type=float, default=20e6, help="Target confidence interval [%(default)s]")
+    parser.add_argument("--max-comparisons", type=int, default=40, help="Maximum comparisons to make [%(default)s]")
     parser.add_argument(
         "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
     )
