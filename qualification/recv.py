@@ -57,30 +57,29 @@ class XBReceiver:
 
     def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
         # Some metadata we know already from the config.
-        acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
+        acv_name: str = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
         acv_config = cbf.config["outputs"][acv_name]
-        self.stream_names = list(stream_names)
-        self.n_inputs = len(acv_config["src_streams"])
-        self.n_ants = self.n_inputs // 2
+        self.stream_names: list[str] = list(stream_names)
+        self.n_inputs: int = len(acv_config["src_streams"])
+        self.n_ants: int = self.n_inputs // 2
         self.n_chans: int = acv_config["n_chans"]
-        self.input_labels = acv_config["input_labels"]
+        self.input_labels: list[str] = acv_config["input_labels"]
+        self.decimation_factor: int = 1
         if "narrowband" in acv_config:
             self.decimation_factor = acv_config["narrowband"]["decimation_factor"]
-        else:
-            self.decimation_factor = 1
-        self.adc_sample_rate = cbf.config["outputs"][acv_config["src_streams"][0]]["adc_sample_rate"]
+        self.adc_sample_rate: float = cbf.config["outputs"][acv_config["src_streams"][0]]["adc_sample_rate"]
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
         # We assume the streams all have the same information except for addresses.
         self.n_chans_per_substream: int = cbf.init_sensors[f"{stream_names[0]}.n-chans-per-substream"].value
-        self.n_spectra_per_heap = cbf.init_sensors[f"{acv_name}.spectra-per-heap"].value
+        self.n_spectra_per_heap: int = cbf.init_sensors[f"{acv_name}.spectra-per-heap"].value
         self.n_samples_between_spectra: int = cbf.init_sensors[f"{acv_name}.n-samples-between-spectra"].value
-        self.sync_time = cbf.init_sensors[f"{acv_name}.sync-time"].value
-        self.scale_factor_timestamp = cbf.init_sensors[f"{acv_name}.scale-factor-timestamp"].value
-        self.bandwidth = cbf.init_sensors[f"{acv_name}.bandwidth"].value
-        self.center_freq = cbf.init_sensors[f"{acv_name}.center-freq"].value
-        self.multicast_endpoints = [
+        self.sync_time: str = cbf.init_sensors[f"{acv_name}.sync-time"].value
+        self.scale_factor_timestamp: float = cbf.init_sensors[f"{acv_name}.scale-factor-timestamp"].value
+        self.bandwidth: float = cbf.init_sensors[f"{acv_name}.bandwidth"].value
+        self.center_freq: int = cbf.init_sensors[f"{acv_name}.center-freq"].value
+        self.multicast_endpoints: list[list[tuple[str, int]]] = [
             [
                 (endpoint.host, endpoint.port)
                 for endpoint in endpoint_list_parser(DEFAULT_PORT)(
