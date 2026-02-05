@@ -809,7 +809,7 @@ class TestXBEngine:
 
         Parameters
         ----------
-        mock_recv_stream, mock_send_stream, corrprod_outputs, beam_outputs
+        mock_recv_streams, mock_send_stream, corrprod_outputs, beam_outputs
             Unit test fixtures.
         heap_factory
             Callback to generate heaps. It is passed a batch index and a
