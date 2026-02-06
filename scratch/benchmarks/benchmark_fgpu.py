@@ -335,7 +335,7 @@ async def main():
     if args.calibrate:
         result = await benchmark.calibrate(args.low, args.high, args.step, args.calibrate_repeat)
     elif args.oneshot is not None:
-        result = await benchmark.measure(args.oneshot)
+        result = (await benchmark.measure(args.oneshot)).message()
     else:
         slope = {
             1: -342.212919,
@@ -351,7 +351,7 @@ async def main():
             slope=slope,
         )
         result = f"\n{low / 1e6} MHz - {high / 1e6} MHz"
-    print(result.message())
+    print(result)
 
 
 if __name__ == "__main__":
