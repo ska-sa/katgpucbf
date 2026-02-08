@@ -29,7 +29,7 @@ sensible placement.
 
 The client machine will also need a few Python packages installed; you can
 use :command:`pip install -r scratch/benchmarks/requirements.txt` to install
-them. You do not need to have katgpucbf installed.
+them. You do not need to have vkgdr installed.
 
 On the client machine, you will need to create a TOML_ file describing the
 servers you want to use. Each table in the TOML file describes one server. You

@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
 
+################################################################################
+# Copyright (c) 2023-2026, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
 """Fit a model to benchmark calibration results."""
 
 import argparse
@@ -16,7 +32,7 @@ def main() -> None:
     parser.add_argument("--plot", action="store_true", help="Plot the fitted model")
     args = parser.parse_args()
 
-    orig_df = pd.read_csv(args.filename, sep=" ", names=["rate", "successes", "trials"], index_col="rate")
+    orig_df = pd.read_csv(args.filename, sep=" ", names=["rate", "successes", "trials", "errors"], index_col="rate")
     # Split each entry back into an original set of trials with 0/1 outcomes
     rates = []
     ind = []

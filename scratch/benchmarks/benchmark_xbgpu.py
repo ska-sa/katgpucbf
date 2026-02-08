@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2023-2025, National Research Foundation (SARAO)
+# Copyright (c) 2023-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -24,8 +24,10 @@ See :doc:`benchmarking`.
 import argparse
 import asyncio
 import functools
+import logging
 import math
 from contextlib import AsyncExitStack
+from typing import override
 
 import asyncssh
 
@@ -54,7 +56,7 @@ def fsim_factory(
     conn: asyncssh.SSHClientConnection,
     index: int,
     *,
-    adc_sample_rate: float,
+    signal_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
 ) -> str:
@@ -63,7 +65,7 @@ def fsim_factory(
     interface = server.interfaces[index % len(server.interfaces)]
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fsim-{index}"
-    info = StreamInfo(args, adc_sample_rate)
+    info = StreamInfo(args, signal_sample_rate)
     command = (
         "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
         f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
@@ -76,7 +78,7 @@ def fsim_factory(
         f"--affinity={cores[0]} "
         f"--main-affinity={cores[1]} "
         f"--prometheus-port={prometheus_port} "
-        f"--adc-sample-rate={adc_sample_rate} "
+        f"--adc-sample-rate={signal_sample_rate} "
         f"--array-size={args.array_size} "
         f"--channels={args.channels} "
         f"--channels-per-substream={info.channels_per_substream} "
@@ -93,7 +95,7 @@ def xbgpu_factory(
     conn: asyncssh.SSHClientConnection,
     index: int,
     *,
-    adc_sample_rate: float,
+    signal_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
 ) -> str:
@@ -105,8 +107,8 @@ def xbgpu_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"xbgpu-{index}"
 
-    info = StreamInfo(args, adc_sample_rate)
-    heap_time = info.samples_between_spectra * info.spectra_per_heap / adc_sample_rate
+    info = StreamInfo(args, signal_sample_rate)
+    heap_time = info.samples_between_spectra * info.spectra_per_heap / signal_sample_rate
     threshold = max(1, round(args.int_time / heap_time))
     # Duplicate logic from katsdpcontroller's generator.py
     batch_size = (
@@ -123,7 +125,7 @@ def xbgpu_factory(
         f"schedrr taskset -c {cores[1]} xbgpu "
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
-        f"--adc-sample-rate={adc_sample_rate} "
+        f"--adc-sample-rate={signal_sample_rate} "
         f"--bandwidth={info.bandwidth} "
         f"--array-size={args.array_size} "
         f"--channels={args.channels} "
@@ -143,12 +145,20 @@ def xbgpu_factory(
         f"--send-ibv "
         f"--send-enabled "
         f"239.102.199.{index}:7148 "
-        f"--corrprod=name=corrprod,dst=239.102.198.{index},heap_accumulation_threshold={threshold} "
     )
     for i in range(args.beams):
         for j in range(N_POLS):
             idx = N_POLS * i + j
-            command += f"--beam=name=beam{idx},dst=239.102.197.{index * args.beams * N_POLS + idx},pol={j} "
+            beam_number = index * args.beams * N_POLS + idx
+            assert beam_number < 255, "beams must be less than 255"
+            command += f"--beam=name=beam{idx},dst=239.102.197.{beam_number},pol={j} "
+
+    for i in range(args.corrprods):
+        corrprod_number = index * args.beams * N_POLS + i
+        assert corrprod_number < 255, "correlation products must be less than 255"
+        command += f"--corrprod=name=corrprod{corrprod_number},"
+        command += f"dst=239.102.198.{corrprod_number},"
+        command += f"heap_accumulation_threshold={threshold} "
     return command
 
 
@@ -164,12 +174,13 @@ class XbgpuBenchmark(Benchmark):
             consumer_server=servers[args.xbgpu_server],
             expected_heaps_scale=args.array_size / heap_samples,
             metric_prefix="xbgpu",
+            max_error_count=args.max_error_count,
         )
 
-    async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
+    async def run_producers(self, signal_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             fsim_factory,
-            adc_sample_rate=adc_sample_rate,
+            signal_sample_rate=signal_sample_rate,
             sync_time=sync_time,
             args=self.args,
         )
@@ -184,10 +195,11 @@ class XbgpuBenchmark(Benchmark):
             pull=self.args.pull,
         )
 
-    async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
+    @override
+    async def run_consumers(self, signal_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             xbgpu_factory,
-            adc_sample_rate=adc_sample_rate,
+            signal_sample_rate=signal_sample_rate,
             sync_time=sync_time,
             args=self.args,
         )
@@ -206,9 +218,9 @@ class XbgpuBenchmark(Benchmark):
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", type=int, required=True, help="Number of engines per host [%(default)s]")
-    parser.add_argument("--channels", type=int, default=1024, help="Channel count [%(default)s]")
-    parser.add_argument("--array-size", type=int, default=80, help="Number of antennas [%(default)s]")
-    parser.add_argument("--substreams", type=int, default=64, help="Total number of engines [%(default)s]")
+    parser.add_argument("--channels", type=int, default=32768, help="Channel count [%(default)s]")
+    parser.add_argument("--array-size", type=int, default=680, help="Number of antennas [%(default)s]")
+    parser.add_argument("--substreams", type=int, default=1024, help="Total number of engines [%(default)s]")
     parser.add_argument("--int-time", type=float, default=0.5, metavar="SECONDS", help="Integration time [%(default)s]")
     parser.add_argument("--narrowband", action="store_true", help="Measure narrowband output [false]")
     parser.add_argument(
@@ -229,6 +241,9 @@ async def main():
     )
     parser.add_argument("--beams", type=int, default=4, help="Number of dual-pol beams to produce [%(default)s]")
     parser.add_argument(
+        "--corrprods", type=int, default=1, help="Number of correlation products to produce [%(default)s]"
+    )
+    parser.add_argument(
         "--jones-per-batch",
         type=int,
         default=DEFAULT_JONES_PER_BATCH,
@@ -240,20 +255,68 @@ async def main():
     parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--fsim-server", type=str, default="fsim", help="Server on which to run fsims [%(default)s]")
     parser.add_argument("--xbgpu-server", type=str, default="xbgpu", help="Server on which to run xbgpu [%(default)s]")
-    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity [no]")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity [no]. Apply multiple times for greater effect.",
+    )
     parser.add_argument("--oneshot", type=float, help="Run one test at the given sampling rate")
+    parser.add_argument("--low", type=float, default=3000e6, help="Minimum ADC sample rate to search [%(default)s]")
+    parser.add_argument("--high", type=float, default=6000e6, help="Maximum ADC sample rate to search [%(default)s]")
+    parser.add_argument("--step", type=float, default=1e6, help="Step size between sample rates to test [%(default)s]")
+    parser.add_argument("--interval", type=float, default=20e6, help="Target confidence interval [%(default)s]")
+    parser.add_argument("--max-comparisons", type=int, default=40, help="Maximum comparisons to make [%(default)s]")
+    parser.add_argument(
+        "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
+    )
+    parser.add_argument(
+        "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
+    )
+    parser.add_argument(
+        "--max-error-count",
+        type=int,
+        default=3,
+        help="Maximum number of errors to tolerate before giving up [%(default)s]",
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose >= 2 else logging.INFO if args.verbose >= 1 else logging.WARNING
+    )
 
     if not args.narrowband:
         args.narrowband_decimation = 1  # Simplifies later logic
     if args.channels % args.substreams:
         parser.error("--substreams must divide evenly into --channels")
-    if not args.oneshot:
-        parser.error("Only --oneshot mode is implemented so far")
-
+    if args.channels < args.substreams:
+        parser.error(
+            "--channels must be greater than or equal to --substreams, cannot have less than 1 channel per substream"
+        )
+    if args.jones_per_batch // args.channels % 16:
+        parser.error("spectra per heap(--jones_per_batch // --channels) must be divisible by 16")
     benchmark = XbgpuBenchmark(args)
-    result = await benchmark.measure(args.oneshot)
-    print(result.message())
+
+    if args.calibrate:
+        result = await benchmark.calibrate(args.low, args.high, args.step, args.calibrate_repeat)
+    elif args.oneshot is not None:
+        result = (await benchmark.measure(args.oneshot)).message()
+    else:
+        slope = {
+            1: -451.368500,
+            2: -429.814719,
+        }[min(args.n, 2)]
+        low, high = await benchmark.search(
+            low=args.low,
+            high=args.high,
+            step=args.step,
+            interval=args.interval,
+            max_comparisons=args.max_comparisons,
+            slope=slope,
+        )
+        result = f"\n{low / 1e6} MHz - {high / 1e6} MHz"
+    print(result)
 
 
 if __name__ == "__main__":
