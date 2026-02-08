@@ -108,7 +108,7 @@ pipeline {
          * tests and mark the build as unstable.
          */
         sh '''
-          spead2_net_raw pytest -v -c ${ini} qualification \
+          spead2_net_raw pytest -vv -c ${ini} qualification \
           --suppress-tests-failed-exit-code \
           --image-override katgpucbf:${katgpucbf_image} \
           --image-override katsdpcontroller:${katsdpcontroller_image} \

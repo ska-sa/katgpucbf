@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -257,11 +257,15 @@ async def test_delay_sensors(
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
     await receiver.next_complete_chunk(min_timestamp=load_ts)
-    for expected, label in zip(delay_tuples, receiver.input_labels, strict=True):
-        value = await delay_sensor_value(label)
-        pdf_report.detail(f"Input {label} has delay sensor {value}, expected value {expected}.")
-        with check:
-            assert value == pytest.approx(expected, rel=1e-9), f"Delay sensor for {label} has incorrect value"
+    sensor_values = np.empty((len(receiver.input_labels), 5), np.float64)
+    expected_values = np.empty((len(receiver.input_labels), 5), np.float64)
+    for idx, (expected, label) in enumerate(zip(delay_tuples, receiver.input_labels, strict=True)):
+        sensor_values[idx] = np.array(await delay_sensor_value(label), np.float64)
+        expected_values[idx] = np.array(expected, np.float64)
+
+    pdf_report.detail("Comparing sensor values to expected values.")
+    with check:
+        np.testing.assert_allclose(sensor_values, expected_values, rtol=1e-9, err_msg="Delay has incorrect values")
 
 
 def check_phases(

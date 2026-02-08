@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2025, National Research Foundation (SARAO)
+# Copyright (c) 2025-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -91,10 +91,12 @@ async def test_filter_response(
     # Mask for channels that alias into the passband
     alias_select = (pass_channels.start <= out_channels) & (out_channels < pass_channels.stop)
     alias_select &= ~pass_select  # Ignore the passband itself
-    max_alias_db = np.max(data_db[alias_select])
-    pdf_report.detail(f"Maximum alias into the passband is {max_alias_db:.3f} dB.")
+    alias_db = data_db[alias_select]
+    pdf_report.detail("Checking that no alias into the passband exceeds -80 dB.")
     with check:
-        assert max_alias_db < -80.0
+        np.testing.assert_array_less(alias_db, np.full_like(alias_db, -80.0))
+
+    pdf_report.detail(f"Maximum alias into the passband is {np.max(alias_db):.3f} dB.")
 
     stop_bandwidth = 2 * receiver.bandwidth - pass_bandwidth
     fig = Figure()

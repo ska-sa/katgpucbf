@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -170,5 +170,5 @@ async def test_gains_capture_start(
     np.testing.assert_equal(data[cut:], 0)
     # It's random, so technically it's possible for any of the values to be
     # zero, but exceedingly unlikely.
-    assert np.min(data[:cut]) > 0
+    np.testing.assert_array_less(0, data[:cut])
     pdf_report.detail("Output reflects effects of gains.")

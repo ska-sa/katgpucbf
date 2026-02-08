@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -49,63 +49,45 @@ async def test_baseline_correlation_products(
     await pcc.request("dsim-signals", cbf.dsim_names[0], f"common=wgn({amplitude});common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude} on both pols.")
 
+    # Look up input index by label
+    input_index = {input_label: i for i, input_label in enumerate(receiver.input_labels)}
+    # First and second elements of each baseline, as indices into input_labels
+    a_idx = [input_index[bl[0]] for bl in receiver.bls_ordering]
+    b_idx = [input_index[bl[1]] for bl in receiver.bls_ordering]
     for start_idx in range(0, receiver.n_bls, receiver.n_chans - 1):
         end_idx = min(start_idx + receiver.n_chans - 1, receiver.n_bls)
+        # The last block may be smaller
         pdf_report.step(f"Check baselines {start_idx} to {end_idx - 1}.")
+
+        input_gains = np.zeros((len(input_index), receiver.n_chans), np.float32)
+
+        # determine input gains.
         await pcc.request("gain-all", "antenna-channelised-voltage", "0")
-        pdf_report.detail("Compute gains to enable one baseline per channel.")
-        gains = {}
+        pdf_report.detail("Compute gains to enable at least one baseline per channel.")
         for i in range(start_idx, end_idx):
             channel = i - start_idx + 1  # Avoid channel 0, which is DC so a bit odd
-            for inp in receiver.bls_ordering[i]:
-                if inp not in gains:
-                    gains[inp] = np.zeros(receiver.n_chans, np.float32)
-                gains[inp][channel] = 1.0
+            input_gains[a_idx[i], channel] = 1.0
+            input_gains[b_idx[i], channel] = 1.0
+
         pdf_report.detail("Set gains.")
-        for inp, g in gains.items():
-            await pcc.request("gain", "antenna-channelised-voltage", inp, *g)
+        for i, channel_gains in enumerate(input_gains.tolist()):
+            await pcc.request("gain", "antenna-channelised-voltage", receiver.input_labels[i], *channel_gains)
+
+        # Compute which visibilities have non-zero total gain
+        gain_non_zero = input_gains > 0
+        expected_non_zero = gain_non_zero[a_idx, :] & gain_non_zero[b_idx, :]
 
         _, data = await receiver.next_complete_chunk()
-        everything_is_awesome = True
-        for i in range(start_idx, end_idx):
-            channel = i - start_idx + 1
-            bl = receiver.bls_ordering[i]
-            loud_bls = np.nonzero(data[channel, :, 0])[0]
-            # Check that the baseline actually appears in the list.
-            appears = i in loud_bls
-            with check:
-                assert appears, f"{bl} ({i}) doesn't show up in the list ({loud_bls})!"
-            # Check that no unexpected baselines have signal.
-            no_unexpected = all(
-                is_signal_expected_in_baseline(bl, receiver.bls_ordering[loud_bl]) for loud_bl in loud_bls
+        assert data.shape == (receiver.n_chans, receiver.n_bls, 2)
+
+        # confirm the signals are in baselines as expected
+        with check:
+            pdf_report.detail(
+                "Compare output nonzero correlation values to expected antenna gain configuration for this range."
             )
-            with check:
-                assert no_unexpected, "Signal found in unexpected baseline."
-            if not (appears and no_unexpected):
-                everything_is_awesome = False
-        pdf_report.detail(
-            "All baselines in this range correct." if everything_is_awesome else "Errors detected in this range."
-        )
-
-
-def is_signal_expected_in_baseline(expected_bl: tuple[str, str], loud_bl: tuple[str, str]) -> bool:
-    """Check whether signal is expected in the loud baseline, given which one had a test signal injected.
-
-    It isn't possible in the general case to get signal in only a single
-    baseline. There will be auto-correlations, and the conjugate correlations
-    which will show signal as well.
-
-    Parameters
-    ----------
-    expected_bl
-        A tuple of the form ("m801h", "m802v") indicating which baseline we are
-        checking.
-    loud_bl
-        A baseline where signal has been detected.
-
-    Returns
-    -------
-    bool
-        Indication of whether signal is expected, i.e. whether the test can pass.
-    """
-    return loud_bl[0] in expected_bl and loud_bl[1] in expected_bl
+            np.testing.assert_array_equal(
+                data[1:, :, 0] > 0,
+                expected_non_zero.T[1:, :],
+                err_msg="output nonzero correlation values doesn't match the "
+                + f"expected antenna gain configuration for channels 1 to {receiver.n_chans}",
+            )

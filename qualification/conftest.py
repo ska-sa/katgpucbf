@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -19,22 +19,16 @@
 import ast
 import asyncio
 import copy
-import inspect
-import itertools
 import logging
 import math
 import os
 import subprocess
-import time
 from collections import deque, namedtuple
-from collections.abc import AsyncGenerator, Generator, Iterable, Iterator, Sequence
+from collections.abc import AsyncGenerator, Iterable, Sequence
 from typing import Any
 
-import matplotlib.style
-import numpy as np
 import pytest
 import pytest_asyncio
-import pytest_check
 from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
@@ -43,12 +37,11 @@ from .cbf import CBFCache, CBFRemoteControl, FailedCBF
 from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
 from .reporter import Reporter, custom_report_log
 
+pytest_plugins = ["katgpucbf.pytest_plugins.numpy_dump", "katgpucbf.pytest_plugins.reporter_plugin"]
 logger = logging.getLogger(__name__)
 FULL_ANTENNAS = [1, 4, 8, 20, 32, 40, 64, 80]
 MAX_PASS_FRACTION = 0.7  # Maximum fraction of total narrowband bandwidth to use as pass_bandwidth
-pdf_report_data_key = pytest.StashKey[dict]()
 _CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
-
 
 # Storing ini options this way makes pytest.ini easier to validate up-front.
 IniOption = namedtuple("IniOption", ["name", "help", "type", "default"], defaults=[None])
@@ -103,8 +96,6 @@ ini_options = [
     ),
     IniOption(name="bands", help="Space-separated list of bands to test", type="args", default=["l"]),
     IniOption(name="beams", help="Number of beams to produce", type="string", default="4"),
-    IniOption(name="raw_data", help="Include raw data for figures", type="bool", default=False),
-    IniOption(name="array_dir", help="Directory in which to save failed array comparisons", type="paths", default=[]),
 ]
 
 
@@ -125,8 +116,6 @@ def pytest_configure(config: pytest.Config) -> None:
         This hook checks whether all the expected ini options are there, not
         whether they're correct or useful.
     """
-    config.addinivalue_line("markers", "requirements(reqs): indicate which system engineering requirements are tested")
-    config.addinivalue_line("markers", "name(name): human-readable name for the test")
     config.addinivalue_line("markers", "wideband_only: do not run the test in narrowband configurations")
     config.addinivalue_line("markers", "no_vlbi: do not run the test in VLBI narrowband configurations")
     config.addinivalue_line("markers", "vlbi_only: only run the test in VLBI narrowband configurations")
@@ -141,7 +130,12 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
     # Using this hook to collect configuration information, because it's run
     # once, after collection but before the actual tests. Couldn't really find a
     # better place, and I did look around quite a bit.
-    git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
+    try:
+        git_information = subprocess.check_output(["git", "describe", "--tags", "--dirty", "--always"]).decode()
+    except Exception as e:
+        logger.warning(f"Git information not available: ({e}), defaulting to 'unknown'")
+        git_information = "unknown"
+
     logger.info("Git information: %s", git_information)
     custom_report_log(
         config,
@@ -230,140 +224,6 @@ def n_dsims() -> int:
 def int_time() -> float:
     """Integration time in seconds."""
     return 0.5
-
-
-@pytest.fixture(autouse=True)
-def pdf_report(request, monkeypatch) -> Reporter:
-    """Fixture for logging steps in a test."""
-    reporter = Reporter(request.node.stash[pdf_report_data_key], raw_data=request.config.getini("raw_data"))
-    orig_log_failure = pytest_check.check_log.log_failure
-    orig_stack = inspect.stack
-
-    def stack():
-        # The real log_failure function constructs a backtrace, and inserting
-        # our wrapper into the call stack messes that up. We need to have it
-        # skip an extra level for each wrapper we're injecting.
-        return orig_stack()[2:]
-
-    def log_failure(msg="", check_str="", tb=None):
-        __tracebackhide__ = True
-        if check_str:
-            reporter.failure(f"Failed assertion: {msg}: {check_str}")
-        else:
-            reporter.failure(f"Failed assertion: {msg}")
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(inspect, "stack", stack)
-            return orig_log_failure(msg, check_str, tb)
-
-    # Patch the central point where pytest-check logs failures so that we can
-    # insert them into the test procedure.
-    monkeypatch.setattr(pytest_check.check_log, "log_failure", log_failure)
-    # context_manager uses `from .check_log import log_failure` so we have to
-    # patch it under that name.
-    monkeypatch.setattr(pytest_check.context_manager, "log_failure", log_failure)
-    return reporter
-
-
-@pytest.fixture(scope="session")
-def _array_compare_counter() -> Iterator[int]:
-    """Counter used to give unique filenames to array dumps."""
-    return itertools.count(0)
-
-
-def _unwrap_pytest_approx(a: np.ndarray) -> np.ndarray:
-    """Unwrap an array that has possibly been wrapped in :func:`pytest.approx`."""
-    # pytest doesn't explicitly expose this class, so we have to infer it
-    approx_cls = type(pytest.approx(np.array([1])))
-    if a.shape == () and isinstance(a[()], approx_cls):
-        return a[()].expected
-    return a
-
-
-@pytest.fixture(autouse=True)
-def _array_compare(
-    monkeypatch: pytest.MonkeyPatch, pytestconfig: pytest.Config, _array_compare_counter: Iterator[int]
-) -> None:
-    """Patch numpy.testing to save failed array comparisons if enabled."""
-    paths = pytestconfig.getini("array_dir")
-    if not paths:
-        return  # Not enabled
-    path = paths[0]
-    path.mkdir(parents=True, exist_ok=True)
-    orig_build_err_msg = np.testing.build_err_msg
-
-    def build_err_msg(arrays, *args, **kwargs) -> str:
-        # Original only requires Iterable, but we need to iterate multiple
-        # times.
-        arrays = list(arrays)
-        msg = orig_build_err_msg(arrays, *args, **kwargs)
-
-        # If any of the arrays are wrapped in pytest.approx, strip that off
-        # to avoid pickling the arrays (which could cause issues when loading
-        # them later).
-        arrays = [_unwrap_pytest_approx(array) for array in arrays]
-        counter = next(_array_compare_counter)
-        filename = path / f"arrays-{counter:06}.npz"
-        # This is not perfect, because names can be passed positionally, but
-        # the various call sites in numpy don't seem to do that.
-        names = kwargs.get("names", ["ACTUAL", "DESIRED"])
-        named_arrays = dict(zip(names, arrays, strict=True))
-        np.savez(filename, **named_arrays)
-        return msg + f"\n\nArrays written to {filename}"
-
-    # We have to patch in the private module since that's where it gets called.
-    monkeypatch.setattr("numpy.testing._private.utils.build_err_msg", build_err_msg)
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_setup(item) -> Generator[None, None, None]:
-    """Set up the user property for passing data to the report generator."""
-    blurb = inspect.getdoc(item.function)
-    if blurb is None:
-        raise AssertionError(f"Test {item.name} has no docstring")
-    reqs: list[str] = []
-    for marker in item.iter_markers("requirements"):
-        if isinstance(marker.args[0], tuple | list):
-            reqs.extend(marker.args[0])
-        else:
-            reqs.extend(name.strip() for name in marker.args[0].split(",") if name.strip())
-    data = [{"$msg_type": "test_info", "blurb": blurb, "test_start": time.time(), "requirements": reqs}]
-    name_marker = item.get_closest_marker("name")
-    if name_marker is not None:
-        data[0]["test_name"] = name_marker.args[0]
-    item.user_properties.append(("pdf_report_data", data))
-    item.stash[pdf_report_data_key] = data
-    yield
-
-
-@pytest.hookimpl(wrapper=True)
-def pytest_runtest_call(item) -> Generator[None, None, None]:
-    """Update the test_start field when the test is actually started.
-
-    This gives a more accurate start time than the one recorded by
-    :func:`pytest_runtest_setup`, which is the time at which setup
-    started.
-    """
-    item.stash[pdf_report_data_key][0]["test_start"] = time.time()
-    yield
-
-
-@pytest.fixture(autouse=True)
-def matplotlib_report_style() -> Generator[None, None, None]:
-    """Set the style of all matplotlib plots."""
-    with (
-        matplotlib.style.context("ggplot"),
-        matplotlib.rc_context(
-            {
-                # Serif fonts better match the rest of the document
-                "font.family": "serif",
-                "font.serif": ["Liberation Serif"],
-                # A lot of the graphs are noisy and a narrower linewidth makes
-                # the detail easier to see.
-                "lines.linewidth": 0.3,
-            }
-        ),
-    ):
-        yield
 
 
 @pytest.fixture(autouse=True)

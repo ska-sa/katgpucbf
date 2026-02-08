@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2021-2024, National Research Foundation (SARAO)
+# Copyright (c) 2021-2024, 2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -210,7 +210,9 @@ async def async_main(args: argparse.Namespace) -> None:
         int_time = await sensor_val("baseline-correlation-products.int-time", float)
 
         # I quite like this trick. It gives us a list of tuples.
-        bls_ordering = ast.literal_eval(await sensor_val("baseline-correlation-products.bls-ordering", str))
+        bls_ordering: list[tuple[str, str]] = ast.literal_eval(
+            await sensor_val("baseline-correlation-products.bls-ordering", str)
+        )
 
     bls_subset = get_bls_subset(args.baseline, bls_ordering)
 
