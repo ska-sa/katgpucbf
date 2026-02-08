@@ -19,6 +19,7 @@
 import asyncio
 from typing import Final
 
+import aiokatcp
 import numpy as np
 import pytest
 import spead2.send.asyncio
@@ -92,7 +93,11 @@ class TestVEngine:
         ]
 
     async def test_smoke(
-        self, engine: VEngine, mock_recv_streams: list[spead2.InprocQueue], monkeypatch: pytest.MonkeyPatch
+        self,
+        engine: VEngine,
+        engine_client: aiokatcp.Client,
+        mock_recv_streams: list[spead2.InprocQueue],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Test that an engine can be started and receives some data.
 
@@ -105,11 +110,13 @@ class TestVEngine:
             nonlocal n_framesets
             n_framesets += 1
 
-        run_complete_event = asyncio.Event()
-        monkeypatch.setattr(engine, "_run_complete", run_complete_event.set)
-        monkeypatch.setattr(engine, "_process_frameset", process_frameset)
-        await _send_data(engine.recv_layout, mock_recv_streams)
+        capture_complete_event = asyncio.Event()
+        await engine_client.request("capture-start")
+        monkeypatch.setattr(engine._capture, "_capture_complete", capture_complete_event.set)
+        monkeypatch.setattr(engine._capture, "_process_frameset", process_frameset)
+        await _send_data(engine.config.recv_config.layout, mock_recv_streams)
         for queue in mock_recv_streams:
             queue.stop()
-        await run_complete_event.wait()
+        await capture_complete_event.wait()
         assert n_framesets > 0
+        await engine_client.request("capture-stop")

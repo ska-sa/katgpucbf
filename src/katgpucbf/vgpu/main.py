@@ -37,7 +37,7 @@ from ..main import (
     parse_source_ipv4,
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
-from .engine import VEngine
+from .engine import CaptureConfig, RecvConfig, SendConfig, VEngine
 
 VTP_DEFAULT_PORT = 52030
 _ARGUMENT_PARSER = argparse.ArgumentParser  # Modified by unit tests
@@ -174,9 +174,7 @@ def make_engine(args: argparse.Namespace) -> VEngine:
     else:
         monitor = NullMonitor()
 
-    return VEngine(
-        katcp_host=args.katcp_host,
-        katcp_port=args.katcp_port,
+    recv_config = RecvConfig(
         sync_time=args.sync_time,
         adc_sample_rate=args.adc_sample_rate,
         n_channels=args.recv_channels,
@@ -186,21 +184,33 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         n_batches_per_chunk=args.recv_batches_per_chunk,
         sample_bits=args.recv_sample_bits,
         srcs=args.src,
-        recv_interface=args.recv_interface,
-        recv_ibv=args.recv_ibv,
-        recv_affinity=args.recv_affinity,
-        recv_comp_vector=args.recv_comp_vector,
-        recv_buffer=args.recv_buffer,
-        recv_pols=tuple(args.recv_pols),
-        send_pols=tuple(args.send_pols),
-        send_bandwidth=args.send_bandwidth,
+        interface=args.recv_interface,
+        ibv=args.recv_ibv,
+        affinity=args.recv_affinity,
+        comp_vector=args.recv_comp_vector,
+        buffer=args.recv_buffer,
+        pols=tuple(args.recv_pols),
+    )
+    send_config = SendConfig(
+        pols=tuple(args.send_pols),
+        bandwidth=args.send_bandwidth,
         n_samples_per_frame=args.send_samples_per_frame,
         station=args.send_station,
+    )
+    config = CaptureConfig(
+        recv_config=recv_config,
+        send_config=send_config,
         fir_taps=args.fir_taps,
         hilbert_taps=args.hilbert_taps,
         passband=args.passband,
         threshold=args.threshold,
         power_int_time=args.power_int_time,
+    )
+
+    return VEngine(
+        katcp_host=args.katcp_host,
+        katcp_port=args.katcp_port,
+        config=config,
         monitor=monitor,
     )
 
