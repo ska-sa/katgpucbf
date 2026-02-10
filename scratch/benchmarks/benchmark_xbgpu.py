@@ -56,7 +56,7 @@ def fsim_factory(
     conn: asyncssh.SSHClientConnection,
     index: int,
     *,
-    signal_sample_rate: float,
+    adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
 ) -> str:
@@ -65,7 +65,7 @@ def fsim_factory(
     interface = server.interfaces[index % len(server.interfaces)]
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fsim-{index}"
-    info = StreamInfo(args, signal_sample_rate)
+    info = StreamInfo(args, adc_sample_rate)
     command = (
         "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
         f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
@@ -78,7 +78,7 @@ def fsim_factory(
         f"--affinity={cores[0]} "
         f"--main-affinity={cores[1]} "
         f"--prometheus-port={prometheus_port} "
-        f"--adc-sample-rate={signal_sample_rate} "
+        f"--adc-sample-rate={adc_sample_rate} "
         f"--array-size={args.array_size} "
         f"--channels={args.channels} "
         f"--channels-per-substream={info.channels_per_substream} "
@@ -95,7 +95,7 @@ def xbgpu_factory(
     conn: asyncssh.SSHClientConnection,
     index: int,
     *,
-    signal_sample_rate: float,
+    adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
 ) -> str:
@@ -107,8 +107,8 @@ def xbgpu_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"xbgpu-{index}"
 
-    info = StreamInfo(args, signal_sample_rate)
-    heap_time = info.samples_between_spectra * info.spectra_per_heap / signal_sample_rate
+    info = StreamInfo(args, adc_sample_rate)
+    heap_time = info.samples_between_spectra * info.spectra_per_heap / adc_sample_rate
     threshold = max(1, round(args.int_time / heap_time))
     # Duplicate logic from katsdpcontroller's generator.py
     batch_size = (
@@ -125,7 +125,7 @@ def xbgpu_factory(
         f"schedrr taskset -c {cores[1]} xbgpu "
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
-        f"--adc-sample-rate={signal_sample_rate} "
+        f"--adc-sample-rate={adc_sample_rate} "
         f"--bandwidth={info.bandwidth} "
         f"--array-size={args.array_size} "
         f"--channels={args.channels} "
@@ -150,12 +150,10 @@ def xbgpu_factory(
         for j in range(N_POLS):
             idx = N_POLS * i + j
             beam_number = index * args.beams * N_POLS + idx
-            assert beam_number < 255, "beams must be less than 255"
             command += f"--beam=name=beam{idx},dst=239.102.197.{beam_number},pol={j} "
 
     for i in range(args.corrprods):
-        corrprod_number = index * args.beams * N_POLS + i
-        assert corrprod_number < 255, "correlation products must be less than 255"
+        corrprod_number = index * args.corrprods + i
         command += f"--corrprod=name=corrprod{corrprod_number},"
         command += f"dst=239.102.198.{corrprod_number},"
         command += f"heap_accumulation_threshold={threshold} "
@@ -177,10 +175,10 @@ class XbgpuBenchmark(Benchmark):
             max_error_count=args.max_error_count,
         )
 
-    async def run_producers(self, signal_sample_rate: float, sync_time: int) -> AsyncExitStack:
+    async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             fsim_factory,
-            signal_sample_rate=signal_sample_rate,
+            adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,
         )
@@ -196,10 +194,10 @@ class XbgpuBenchmark(Benchmark):
         )
 
     @override
-    async def run_consumers(self, signal_sample_rate: float, sync_time: int) -> AsyncExitStack:
+    async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             xbgpu_factory,
-            signal_sample_rate=signal_sample_rate,
+            adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,
         )
@@ -296,6 +294,11 @@ async def main():
         )
     if args.jones_per_batch // args.channels % 16:
         parser.error("spectra per heap(--jones_per_batch // --channels) must be divisible by 16")
+    if args.beams * N_POLS > 255:
+        parser.error("total number of output beams must be less than 255 to fit range 239.102.197.0/24")
+    if args.corrprods > 255:
+        parser.error("total number of correlation products must be less than 255 to fit range 239.102.198.0/24")
+
     benchmark = XbgpuBenchmark(args)
 
     if args.calibrate:

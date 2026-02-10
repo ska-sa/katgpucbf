@@ -42,7 +42,7 @@ def dsim_factory(
     conn: asyncssh.SSHClientConnection,
     index: int,
     *,
-    signal_sample_rate: float,
+    adc_sample_rate: float,
     n: int,
     single_pol: bool,
     sync_time: int,
@@ -83,7 +83,7 @@ def dsim_factory(
         f"--main-affinity={cores[1]} "
         "--ibv "
         f"--interface={interface} "
-        f"--adc-sample-rate={signal_sample_rate} "
+        f"--adc-sample-rate={adc_sample_rate} "
         f"--heap-samples={args.dig_heap_samples} "
         "--ttl=2 "
         "--period=16777216 "  # Speeds things up
@@ -104,7 +104,7 @@ def fgpu_factory(
     conn: asyncssh.SSHClientConnection,
     index: int,
     *,
-    signal_sample_rate: float,
+    adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
 ) -> str:
@@ -151,7 +151,7 @@ def fgpu_factory(
         f"--send-interface={interface} --send-ibv "
         f"--recv-affinity={recv_affinity} --recv-comp-vector={recv_affinity} "
         f"--send-affinity={send_affinity} --send-comp-vector={send_affinity} "
-        f"--adc-sample-rate={signal_sample_rate} "
+        f"--adc-sample-rate={adc_sample_rate} "
         f"--katcp-port={katcp_port} "
         f"--prometheus-port={prometheus_port} "
         f"--sync-time={sync_time} "
@@ -165,7 +165,7 @@ def fgpu_factory(
             "name": f"narrowband{i}",
             "channels": args.narrowband_channels,
             "decimation": args.narrowband_decimation,
-            "centre_frequency": signal_sample_rate / 4,
+            "centre_frequency": adc_sample_rate / 4,
             "dst": f"239.102.{216 + index}.0+{args.xb // args.narrowband_decimation - 1}:7148",
         }
         if args.jones_per_batch is not None:
@@ -195,7 +195,7 @@ class FgpuBenchmark(Benchmark):
 
     async def run_producers(
         self,
-        signal_sample_rate: float,
+        adc_sample_rate: float,
         sync_time: int,
     ) -> AsyncExitStack:
         """Run all the dsims.
@@ -210,7 +210,7 @@ class FgpuBenchmark(Benchmark):
             single_pol = True
         factory = functools.partial(
             dsim_factory,
-            signal_sample_rate=signal_sample_rate,
+            adc_sample_rate=adc_sample_rate,
             n=n,
             single_pol=single_pol,
             sync_time=sync_time,
@@ -229,7 +229,7 @@ class FgpuBenchmark(Benchmark):
 
     async def run_consumers(
         self,
-        signal_sample_rate: float,
+        adc_sample_rate: float,
         sync_time: int,
     ) -> AsyncExitStack:
         """Run all the fgpu instances.
@@ -239,7 +239,7 @@ class FgpuBenchmark(Benchmark):
         """
         factory = functools.partial(
             fgpu_factory,
-            signal_sample_rate=signal_sample_rate,
+            adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,
         )

@@ -123,9 +123,6 @@ may need:
 This is not a complete list of options; run the command with :option:`!--help`
 to see others.
 
-Note that at the time of writing, :program:`benchmark_xbgpu.py` only works in
-:option:`--oneshot` mode as it has not yet been calibrated for searches.
-
 Multicast groups
 ----------------
 The benchmark code currently hard-codes a number of multicast groups. Thus,

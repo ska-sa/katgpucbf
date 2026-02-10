@@ -137,10 +137,10 @@ class Benchmark(ABC):
         pass
 
     @abstractmethod
-    async def run_consumers(self, signal_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
+    async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
         pass
 
-    async def process(self, signal_sample_rate: float) -> Result:
+    async def process(self, adc_sample_rate: float) -> Result:
         """Perform a single trial on running engines."""
         async with aiohttp.client.ClientSession() as session:
             await asyncio.sleep(self.args.startup_time)  # Give a chance for startup losses
@@ -155,20 +155,20 @@ class Benchmark(ABC):
                 orig_heaps, orig_missing = await self.heap_counts(session)
             new_heaps, new_missing = await self.heap_counts(session)
 
-        expected_heaps = self.args.runtime * self.args.n * signal_sample_rate * self.expected_heaps_scale
+        expected_heaps = self.args.runtime * self.args.n * adc_sample_rate * self.expected_heaps_scale
         return Result(
             expected_heaps=expected_heaps,
             heaps=new_heaps - orig_heaps,
             missing_heaps=new_missing - orig_missing,
         )
 
-    async def trial(self, signal_sample_rate: float, sync_time: int) -> Result:
+    async def trial(self, adc_sample_rate: float, sync_time: int) -> Result:
         """Perform a single trial."""
-        async with await self.run_producers(signal_sample_rate, sync_time):
-            async with await self.run_consumers(signal_sample_rate, sync_time):
-                return await self.process(signal_sample_rate)
+        async with await self.run_producers(adc_sample_rate, sync_time):
+            async with await self.run_consumers(adc_sample_rate, sync_time):
+                return await self.process(adc_sample_rate)
 
-    async def measure(self, signal_sample_rate: float) -> Result:
+    async def measure(self, adc_sample_rate: float) -> Result:
         """Perform a single trial, but repeat if no heaps were lost yet the wrong number were received.
 
         This also prints status information to stderr.
@@ -176,17 +176,17 @@ class Benchmark(ABC):
         error_count = 0
         while True:
             if self.verbose_results():
-                print(f"Testing {signal_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-            result = await self.trial(signal_sample_rate, int(time.time()))
+                print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
+            result = await self.trial(adc_sample_rate, int(time.time()))
             if not result.good() and result.missing_heaps == 0:
                 logger.warning(f"{result.message()}")
                 error_count += 1
                 if error_count < self.max_error_count:
                     logger.warning("Re-running")
                 else:
-                    logger.error(f"Failed to get heaps for {signal_sample_rate / 1e6} MHz after {error_count} attempts")
+                    logger.error(f"Failed to get heaps for {adc_sample_rate / 1e6} MHz after {error_count} attempts")
                     raise RuntimeError(
-                        f"Failed to get heaps for {signal_sample_rate / 1e6} MHz after {error_count} attempts"
+                        f"Failed to get heaps for {adc_sample_rate / 1e6} MHz after {error_count} attempts"
                     )
             else:
                 if self.verbose_results():
@@ -199,14 +199,14 @@ class Benchmark(ABC):
         successes = [0] * len(rates)
         errors = [0] * len(rates)
         for trial in range(repeat):
-            for j, signal_sample_rate in enumerate(rates):
+            for j, adc_sample_rate in enumerate(rates):
                 sync_time = int(time.time())
                 redo = True
                 while redo:
                     redo = False
                     if self.verbose_results():
-                        print(f"Testing {signal_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-                    result = await self.trial(signal_sample_rate, sync_time)
+                        print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
+                    result = await self.trial(adc_sample_rate, sync_time)
                     if result.good():
                         successes[j] += 1
                     elif result.missing_heaps == 0:
@@ -216,7 +216,7 @@ class Benchmark(ABC):
                             redo = True  # Unexpected number of heaps received
                         else:
                             error_detail = (
-                                f"Failed to get heaps for {signal_sample_rate / 1e6} MHz after {errors[j]} attempts."
+                                f"Failed to get heaps for {adc_sample_rate / 1e6} MHz after {errors[j]} attempts."
                             )
                             if j != 0:
                                 error_detail += f" Last completed sample rate was {rates[j - 1] / 1e6} MHz"
@@ -231,8 +231,8 @@ class Benchmark(ABC):
                             file=sys.stderr,
                         )
         output = ""
-        for success, signal_sample_rate, error in zip(successes, rates, errors, strict=True):
-            output += f"{signal_sample_rate} {success} {repeat} {error}\n"
+        for success, adc_sample_rate, error in zip(successes, rates, errors, strict=True):
+            output += f"{adc_sample_rate} {success} {repeat} {error}\n"
         return output
 
     async def search(
@@ -240,8 +240,8 @@ class Benchmark(ABC):
     ) -> tuple[float, float]:
         """Search for the critical rate."""
 
-        async def compare(signal_sample_rate: float) -> bool:
-            return not (await self.measure(signal_sample_rate)).good()
+        async def compare(adc_sample_rate: float) -> bool:
+            return not (await self.measure(adc_sample_rate)).good()
 
         # The additional 0.01 * args.step is to ensure high is included rather
         # than excluded if the range is a multiple of step.
