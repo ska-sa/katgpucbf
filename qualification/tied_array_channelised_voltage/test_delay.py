@@ -24,10 +24,10 @@ from matplotlib.figure import Figure
 from pytest_check import check
 
 from katgpucbf.fgpu.delay import wrap_angle
+from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter, plot_focus
 
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
-from ..reporter import POTLocator, Reporter, plot_focus
 
 
 @pytest.mark.requirements("CBF-REQ-0220")

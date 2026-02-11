@@ -27,10 +27,10 @@ import pytest
 from pytest_check import check
 
 from katgpucbf.fgpu.delay import wrap_angle
+from katgpucbf.pytest_plugins.reporter import Reporter
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver, XBReceiver
-from ..reporter import Reporter
 
 #: Time to run the test for (in seconds)
 TEST_TIME = 30.0

@@ -32,10 +32,10 @@ import pytest_asyncio
 from katsdpservices import get_interface_address
 
 from katgpucbf.meerkat import BANDS
+from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
 
 from .cbf import CBFCache, CBFRemoteControl, FailedCBF
 from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
-from .reporter import Reporter, custom_report_log
 
 pytest_plugins = ["katgpucbf.pytest_plugins.numpy_dump", "katgpucbf.pytest_plugins.reporter_plugin"]
 logger = logging.getLogger(__name__)

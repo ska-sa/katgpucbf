@@ -19,9 +19,10 @@
 import numpy as np
 from matplotlib.figure import Figure
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
-from ..reporter import Reporter
 from . import sample_tone_response
 
 

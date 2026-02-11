@@ -22,8 +22,9 @@ import pytest
 import scipy.stats
 from pytest_check import check
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..recv import BaselineCorrelationProductsReceiver
-from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0103")

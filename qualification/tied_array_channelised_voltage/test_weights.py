@@ -22,9 +22,10 @@ import numpy as np
 import pytest
 from pytest_check import check
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
-from ..reporter import Reporter
 
 MIN_INPUTS_TO_TEST = 16
 

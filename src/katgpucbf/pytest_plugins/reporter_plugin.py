@@ -24,7 +24,7 @@ import matplotlib.style
 import pytest
 import pytest_check
 
-from .reporter import Reporter
+from katgpucbf.pytest_plugins.reporter import Reporter
 
 pytest_plugins = ["pytest_check"]
 pdf_report_data_key = pytest.StashKey[dict]()

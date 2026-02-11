@@ -23,9 +23,10 @@ import pytest
 from numpy.typing import NDArray
 from pytest_check import check
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
-from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0119")

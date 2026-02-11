@@ -23,7 +23,7 @@ import logging
 import math
 import os
 from collections.abc import AsyncGenerator, Callable, Sequence
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numba
 import numpy as np
@@ -57,8 +57,8 @@ class XBReceiver:
 
     def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
         # Some metadata we know already from the config.
-        acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
-        acv_config = cbf.config["outputs"][acv_name]
+        acv_name: str = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
+        acv_config: dict[str, Any] = cbf.config["outputs"][acv_name]
         self.stream_names = list(stream_names)
         self.n_inputs = len(acv_config["src_streams"])
         self.n_ants = self.n_inputs // 2
