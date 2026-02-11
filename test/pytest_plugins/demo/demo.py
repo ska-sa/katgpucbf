@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Test cases of the qualification framework."""
+"""Demonstrate the functionality of :mod:`katgpucbf.pytest_plugins`."""
 
 import time
 
