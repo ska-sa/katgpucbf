@@ -75,10 +75,10 @@ class XBReceiver:
         self.n_chans_per_substream: int = cbf.init_sensors[f"{stream_names[0]}.n-chans-per-substream"].value
         self.n_spectra_per_heap: int = cbf.init_sensors[f"{acv_name}.spectra-per-heap"].value
         self.n_samples_between_spectra: int = cbf.init_sensors[f"{acv_name}.n-samples-between-spectra"].value
-        self.sync_time: str = cbf.init_sensors[f"{acv_name}.sync-time"].value
+        self.sync_time: float = cbf.init_sensors[f"{acv_name}.sync-time"].value
         self.scale_factor_timestamp: float = cbf.init_sensors[f"{acv_name}.scale-factor-timestamp"].value
         self.bandwidth: float = cbf.init_sensors[f"{acv_name}.bandwidth"].value
-        self.center_freq: int = cbf.init_sensors[f"{acv_name}.center-freq"].value
+        self.center_freq: float = cbf.init_sensors[f"{acv_name}.center-freq"].value
         self.multicast_endpoints: list[list[tuple[str, int]]] = [
             [
                 (endpoint.host, endpoint.port)
