@@ -30,6 +30,8 @@ import numpy as np
 from prometheus_client.parser import text_string_to_metric_families
 from scipy.special import expit
 
+from katgpucbf import DEFAULT_JONES_PER_BATCH
+
 from noisy_search import noisy_search
 from remote import Server
 
@@ -42,6 +44,74 @@ VERBOSE_RESULTS = 1
 #: Starting port for Prometheus metrics
 PROMETHEUS_PORT_BASE = 7250
 logger = logging.getLogger(__name__)
+
+
+def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add common command-line arguments shared by benchmark_fgpu and benchmark_xbgpu.
+
+    Parameters
+    ----------
+    parser
+        Argument parser to add arguments to.
+    """
+    parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")
+    parser.add_argument("--channels", type=int, default=1024, help="Channel count [%(default)s]")
+    parser.add_argument(
+        "--array-size",
+        type=int,
+        default=80,
+        help="The number of antennas in the array [%(default)s]",
+    )
+    parser.add_argument(
+        "--jones-per-batch",
+        type=int,
+        default=DEFAULT_JONES_PER_BATCH,
+        metavar="SAMPLES",
+        help="Jones vectors in each output batch [%(default)s]",
+    )
+    parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
+    parser.add_argument("--high", type=float, default=2200e6, help="Maximum ADC sample rate to search [%(default)s]")
+    # For backwards compatibility, specifying --narrowband (without an argument) is
+    # equivalent to specifying --narrowband=1.
+    parser.add_argument(
+        "--narrowband", type=int, default=0, const=1, nargs="?", help="Number of narrowband outputs [0]"
+    )
+    parser.add_argument(
+        "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
+    )
+    parser.add_argument(
+        "--init-time", type=float, default=20.0, metavar="SECONDS", help="Time for engines to start [%(default)s]"
+    )
+    parser.add_argument(
+        "--startup-time",
+        type=float,
+        default=1.0,
+        metavar="SECONDS",
+        help="Time to run before starting measurement [%(default)s]",
+    )
+    parser.add_argument(
+        "--runtime", type=float, default=20.0, metavar="SECONDS", help="Time to let engine run [%(default)s]"
+    )
+    parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
+    parser.add_argument("--no-pull", dest="pull", action="store_false", help="Do not pull Docker image")
+    parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity [no]. Apply multiple times for greater effect.",
+    )
+    parser.add_argument("--oneshot", type=float, help="Run one test at the given sampling rate")
+    parser.add_argument("--step", type=float, default=1e6, help="Step size between sample rates to test [%(default)s]")
+    parser.add_argument("--interval", type=float, default=20e6, help="Target confidence interval [%(default)s]")
+    parser.add_argument("--max-comparisons", type=int, default=40, help="Maximum comparisons to make [%(default)s]")
+    parser.add_argument(
+        "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
+    )
+    parser.add_argument(
+        "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
+    )
 
 
 @dataclass
@@ -100,14 +170,14 @@ class Benchmark(ABC):
         consumer_server: Server,
         expected_heaps_scale: float,
         metric_prefix: str,
-        max_error_count: int = 3,
+        slope: dict[int, float],
     ) -> None:
         self.args = args
         self.generator_server = generator_server
         self.consumer_server = consumer_server
         self.expected_heaps_scale = expected_heaps_scale
         self.metric_prefix = metric_prefix
-        self.max_error_count = max_error_count
+        self.slope = slope
 
     def verbose_results(self) -> bool:
         return self.args.verbose >= VERBOSE_RESULTS
@@ -258,3 +328,21 @@ class Benchmark(ABC):
             raise RuntimeError("upper bound is too low")
         else:
             return rates[result.low], rates[result.high]
+
+    async def run(self) -> None:
+        if self.args.calibrate:
+            result = await self.calibrate(self.args.low, self.args.high, self.args.step, self.args.calibrate_repeat)
+        elif self.args.oneshot is not None:
+            result = (await self.measure(self.args.oneshot)).message()
+        else:
+            slope = self.slope[min(self.args.n, max(self.slope.keys()))]
+            low, high = await self.search(
+                low=self.args.low,
+                high=self.args.high,
+                step=self.args.step,
+                interval=self.args.interval,
+                max_comparisons=self.args.max_comparisons,
+                slope=slope,
+            )
+            result = f"\n{low / 1e6} MHz - {high / 1e6} MHz"
+        print(result)

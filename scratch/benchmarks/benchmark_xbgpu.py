@@ -31,9 +31,9 @@ from typing import override
 
 import asyncssh
 
-from katgpucbf import COMPLEX, DEFAULT_JONES_PER_BATCH, N_POLS
+from katgpucbf import COMPLEX, N_POLS
 
-from benchmark_tools import DEFAULT_IMAGE, PROMETHEUS_PORT_BASE, Benchmark
+from benchmark_tools import PROMETHEUS_PORT_BASE, Benchmark, add_common_benchmark_arguments
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
 
 SAMPLE_BITS = 8
@@ -172,7 +172,10 @@ class XbgpuBenchmark(Benchmark):
             consumer_server=servers[args.xbgpu_server],
             expected_heaps_scale=args.array_size / heap_samples,
             metric_prefix="xbgpu",
-            max_error_count=args.max_error_count,
+            slope={
+                1: -451.368500,
+                2: -429.814719,
+            },
         )
 
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
@@ -215,69 +218,15 @@ class XbgpuBenchmark(Benchmark):
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", type=int, required=True, help="Number of engines per host [%(default)s]")
-    parser.add_argument("--channels", type=int, default=32768, help="Channel count [%(default)s]")
-    parser.add_argument("--array-size", type=int, default=680, help="Number of antennas [%(default)s]")
     parser.add_argument("--substreams", type=int, default=1024, help="Total number of engines [%(default)s]")
     parser.add_argument("--int-time", type=float, default=0.5, metavar="SECONDS", help="Integration time [%(default)s]")
-    parser.add_argument("--narrowband", action="store_true", help="Measure narrowband output [false]")
-    parser.add_argument(
-        "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
-    )
-    parser.add_argument(
-        "--init-time", type=float, default=20.0, metavar="SECONDS", help="Time for engines to start [%(default)s]"
-    )
-    parser.add_argument(
-        "--startup-time",
-        type=float,
-        default=1.0,
-        metavar="SECONDS",
-        help="Time to run before starting measurement [%(default)s]",
-    )
-    parser.add_argument(
-        "--runtime", type=float, default=20.0, metavar="SECONDS", help="Time to let engine run [%(default)s]"
-    )
     parser.add_argument("--beams", type=int, default=4, help="Number of dual-pol beams to produce [%(default)s]")
     parser.add_argument(
         "--corrprods", type=int, default=1, help="Number of correlation products to produce [%(default)s]"
     )
-    parser.add_argument(
-        "--jones-per-batch",
-        type=int,
-        default=DEFAULT_JONES_PER_BATCH,
-        metavar="SAMPLES",
-        help="Jones vectors in each output batch [%(default)s]",
-    )
-    parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
-    parser.add_argument("--no-pull", dest="pull", action="store_false", help="Do not pull Docker image")
-    parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--fsim-server", type=str, default="fsim", help="Server on which to run fsims [%(default)s]")
     parser.add_argument("--xbgpu-server", type=str, default="xbgpu", help="Server on which to run xbgpu [%(default)s]")
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Increase verbosity [no]. Apply multiple times for greater effect.",
-    )
-    parser.add_argument("--oneshot", type=float, help="Run one test at the given sampling rate")
-    parser.add_argument("--low", type=float, default=3000e6, help="Minimum ADC sample rate to search [%(default)s]")
-    parser.add_argument("--high", type=float, default=6000e6, help="Maximum ADC sample rate to search [%(default)s]")
-    parser.add_argument("--step", type=float, default=1e6, help="Step size between sample rates to test [%(default)s]")
-    parser.add_argument("--interval", type=float, default=20e6, help="Target confidence interval [%(default)s]")
-    parser.add_argument("--max-comparisons", type=int, default=40, help="Maximum comparisons to make [%(default)s]")
-    parser.add_argument(
-        "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
-    )
-    parser.add_argument(
-        "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
-    )
-    parser.add_argument(
-        "--max-error-count",
-        type=int,
-        default=3,
-        help="Maximum number of errors to tolerate before giving up [%(default)s]",
-    )
+    add_common_benchmark_arguments(parser)
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -299,27 +248,7 @@ async def main():
     if args.corrprods > 255:
         parser.error("total number of correlation products must be less than 255 to fit range 239.102.198.0/24")
 
-    benchmark = XbgpuBenchmark(args)
-
-    if args.calibrate:
-        result = await benchmark.calibrate(args.low, args.high, args.step, args.calibrate_repeat)
-    elif args.oneshot is not None:
-        result = (await benchmark.measure(args.oneshot)).message()
-    else:
-        slope = {
-            1: -451.368500,
-            2: -429.814719,
-        }[min(args.n, 2)]
-        low, high = await benchmark.search(
-            low=args.low,
-            high=args.high,
-            step=args.step,
-            interval=args.interval,
-            max_comparisons=args.max_comparisons,
-            slope=slope,
-        )
-        result = f"\n{low / 1e6} MHz - {high / 1e6} MHz"
-    print(result)
+    await XbgpuBenchmark(args).run()
 
 
 if __name__ == "__main__":
