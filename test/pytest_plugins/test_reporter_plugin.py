@@ -75,6 +75,7 @@ def test_slow_fixture_updates_timestamp(pytester: pytest.Pytester) -> None:
     assert report_file.exists(), "report.json file should exist"
 
     found_duration = False
+    # TODO: Check the duration of the "test_start" entry instead
     for entry in _list_test_reports(report_file):
         # Check user_properties for pdf_report_data
         duration = entry.get("duration")

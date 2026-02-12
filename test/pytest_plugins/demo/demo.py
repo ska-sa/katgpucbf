@@ -29,6 +29,7 @@ from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter
 @pytest.fixture(scope="function")
 def slow_fixture() -> None:
     """Demonstrates the delay in the timestamp in the report."""
+    # TODO: Use a time manipulation library rather than a real sleep
     time.sleep(0.5)
 
 
