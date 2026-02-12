@@ -80,6 +80,8 @@ may need:
    Lower and upper bounds on the ADC sample rate. The critical rate will be
    searched between these two bounds. The benchmark will error out if the
    lower bound fails or the upper bound passes.
+   The lower bound should be set to a rate high enough to ensure that there is
+   at least one chunk sent in the duration of the benchmark.
 
 .. option:: --oneshot <rate>
 
@@ -175,3 +177,24 @@ information is the ``np.log(rate)`` term, which can then be stored in the
 ``slope`` variable in :file:`benchmark_fgpu.py`. You can also pass
 :option:`!--plot` to :program:`./fit.py` to get a plot of the calibration
 results versus the fitted model (requires matplotlib).
+
+
+Calibration output data is stored in the :file:`fgpu_benchmarks/benchmarks` and
+:file:`xbgpu_benchmarks/benchmarks` subdirectories.
+
+Because the network speeds of the device is a larger factor for XBGPU, we need to
+increase array size to increase computation, but still keep the output rate within
+the network limits (since output baselines is relative to the number of antennas).
+This is done by increasing the substreams.
+
+.. table:: XBGPU Calibration Data Parameters
+
+   +------------------------------+---------+----------+------------+------------+-------------+---------------------+-------+-----------+----------+-------------------+
+   | File                         | Engines | Channels | Array Size | Substreams | Decimation  | Jones per Batch     | Beams | Corrprods | Int Time | Calibrate Repeat  |
+   +==============================+=========+==========+============+============+=============+=====================+=======+===========+==========+===================+
+   | :file:`calibration-n1.txt`   | 1       | 32768    | 680        | 1024       | 8           | 1048576             | 4     | 1         | 0.5      | 100               |
+   +------------------------------+---------+----------+------------+------------+-------------+---------------------+-------+-----------+----------+-------------------+
+   | :file:`calibration-n2.txt`   | 2       | 32768    | 680        | 1024       | 8           | 1048576             | 4     | 1         | 0.5      | 100               |
+   +------------------------------+---------+----------+------------+------------+-------------+---------------------+-------+-----------+----------+-------------------+
+   | :file:`calibration-n4.txt`   | 4       | 32768    | 680        | 1024       | 8           | 1048576             | 4     | 1         | 0.5      | 100               |
+   +------------------------------+---------+----------+------------+------------+-------------+---------------------+-------+-----------+----------+-------------------+
