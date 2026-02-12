@@ -64,6 +64,12 @@ class Result:
             return False
         return (1.0 - HEAPS_TOL) * self.expected_heaps <= self.heaps <= (1.0 + HEAPS_TOL) * self.expected_heaps
 
+    def throttled(self) -> bool:
+        """Whether the trial was throttled (kept up with the rate, but not at the correct data rate).
+
+        This typically happens when the rate is too high for the network devices to keep up with."""
+        return not self.good() and self.missing_heaps == 0 and self.heaps != 0
+
     def message(self) -> str:
         """Human-readable description of the outcome."""
         if self.missing_heaps > 0:
@@ -169,70 +175,45 @@ class Benchmark(ABC):
                 return await self.process(adc_sample_rate)
 
     async def measure(self, adc_sample_rate: float) -> Result:
-        """Perform a single trial, but repeat if no heaps were lost yet the wrong number were received.
-
-        This also prints status information to stderr.
+        """Perform a single trial.
+        Returns a Result object describing the outcome of the trial.
         """
-        error_count = 0
-        while True:
-            if self.verbose_results():
-                print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-            result = await self.trial(adc_sample_rate, int(time.time()))
-            if not result.good() and result.missing_heaps == 0:
-                logger.warning(f"{result.message()}")
-                error_count += 1
-                if error_count < self.max_error_count:
-                    logger.warning("Re-running")
-                else:
-                    logger.error(f"Failed to get heaps for {adc_sample_rate / 1e6} MHz after {error_count} attempts")
-                    raise RuntimeError(
-                        f"Failed to get heaps for {adc_sample_rate / 1e6} MHz after {error_count} attempts"
-                    )
-            else:
-                if self.verbose_results():
-                    print(result.message() + "\n", file=sys.stderr)
-                return result
+        if self.verbose_results():
+            print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
+        result = await self.trial(adc_sample_rate, int(time.time()))
+        if self.verbose_results():
+            print(result.message() + "\n", file=sys.stderr)
+        return result
 
     async def calibrate(self, low: float, high: float, step: float, repeat: int) -> str:
         """Run multiple trials on all the possible rates."""
         rates = np.arange(low, high + 0.01 * step, step).tolist()
         successes = [0] * len(rates)
-        errors = [0] * len(rates)
+        throttled = [0] * len(rates)
         for trial in range(repeat):
             for j, adc_sample_rate in enumerate(rates):
                 sync_time = int(time.time())
-                redo = True
-                while redo:
-                    redo = False
-                    if self.verbose_results():
-                        print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-                    result = await self.trial(adc_sample_rate, sync_time)
-                    if result.good():
-                        successes[j] += 1
-                    elif result.missing_heaps == 0:
-                        logger.warning(f"{result.message()}")
-                        errors[j] += 1
-                        if errors[j] < self.max_error_count:
-                            redo = True  # Unexpected number of heaps received
-                        else:
-                            error_detail = (
-                                f"Failed to get heaps for {adc_sample_rate / 1e6} MHz after {errors[j]} attempts."
-                            )
-                            if j != 0:
-                                error_detail += f" Last completed sample rate was {rates[j - 1] / 1e6} MHz"
-                                error_detail += f" with {successes[j - 1]} successes"
-                            raise RuntimeError(error_detail)
-                    if redo:
-                        logger.warning("Re-running")
-                    elif self.verbose_results():
-                        print(
-                            f"{result.message()}, {successes[j]}/{trial + 1} passed, {errors[j]} errors\n",
-                            flush=True,
-                            file=sys.stderr,
-                        )
+                if self.verbose_results():
+                    print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
+                result = await self.trial(adc_sample_rate, sync_time)
+                if result.good():
+                    successes[j] += 1
+                elif result.throttled():
+                    logger.warning(f"{result.message()}")
+                    successes[j] += 1
+                    throttled[j] += 1
+                elif result.heaps == 0:
+                    logger.error(f"No heaps received for {adc_sample_rate / 1e6} MHz")
+                    raise RuntimeError(f"No heaps received for {adc_sample_rate / 1e6} MHz result is inconclusive")
+                if self.verbose_results():
+                    print(
+                        f"{result.message()}, {successes[j]}/{trial + 1} passed, {throttled[j]} throttled\n",
+                        flush=True,
+                        file=sys.stderr,
+                    )
         output = ""
-        for success, adc_sample_rate, error in zip(successes, rates, errors, strict=True):
-            output += f"{adc_sample_rate} {success} {repeat} {error}\n"
+        for success, adc_sample_rate, throttle in zip(successes, rates, throttled, strict=True):
+            output += f"{adc_sample_rate} {success} {repeat} {throttle}\n"
         return output
 
     async def search(
@@ -241,17 +222,18 @@ class Benchmark(ABC):
         """Search for the critical rate."""
 
         async def compare(adc_sample_rate: float) -> bool:
-            return not (await self.measure(adc_sample_rate)).good()
+            result = await self.measure(adc_sample_rate)
+            return not result.good() and not result.throttled()
 
         # The additional 0.01 * args.step is to ensure high is included rather
         # than excluded if the range is a multiple of step.
         rates = np.arange(low, high + 0.01 * step, step)
         low_result = await self.measure(rates[0])
-        if not low_result.good():
+        if not low_result.good() and not low_result.throttled():
             raise RuntimeError(f"failed on low: {low_result.message()}")
         high_result = await self.measure(rates[-1])
-        if high_result.good():
-            raise RuntimeError("succeeded on high")
+        if high_result.good() or high_result.throttled():
+            raise RuntimeError(f"succeeded on high: {high_result.message()}")
 
         mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
         mid_rates = np.r_[low, mid_rates, high]
