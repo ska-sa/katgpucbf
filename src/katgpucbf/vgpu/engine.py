@@ -61,6 +61,7 @@ class RecvStream:
         stream_group: spead2.recv.ChunkStreamRingGroup,
         sensors: aiokatcp.SensorSet,
         pol_labels: tuple[str, str],
+        min_timestamp: int,
     ) -> None:
         self._layout = layout
         self._time_converter = time_converter
@@ -68,6 +69,7 @@ class RecvStream:
         self._sensors = sensors
         self._pol_labels = pol_labels
         self._samples_between_spectra = layout.heap_timestamp_step // layout.n_spectra_per_heap
+        self._min_timestamp = min_timestamp
         # Properties required by the Stream protocol
         self.channels = layout.n_channels
         self.is_cupy = True
@@ -88,6 +90,8 @@ class RecvStream:
             [label[-1] for label in self._pol_labels],
         ):
             with chunk:
+                if chunk.timestamp < self._min_timestamp:
+                    continue
                 # TODO: need to do something with the presence flags
                 # TODO: pipeline these transfers (but keeping in mind
                 # that we need to recycle the chunk only when the transfer
@@ -214,7 +218,7 @@ class CaptureConfig:
 class _CaptureSession:
     """Manage the lifetime of actions between ``?capture-start`` and ``?capture-stop``."""
 
-    def __init__(self, config: CaptureConfig, engine: Engine, monitor: Monitor) -> None:
+    def __init__(self, config: CaptureConfig, engine: Engine, monitor: Monitor, min_timestamp: int) -> None:
         recv_chunks = 4  # TODO: may need tuning?
         data_ringbuffer = ChunkRingbuffer(recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=monitor)
         free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
@@ -250,6 +254,7 @@ class _CaptureSession:
         self.config = config
         self._recv_group = recv_group
         self._sensors = engine.sensors
+        self._min_timestamp = min_timestamp
         self._capture_task = asyncio.create_task(self._capture(), name="capture")
         engine.add_service_task(self._capture_task, wait_on_stop=True)
 
@@ -289,6 +294,7 @@ class _CaptureSession:
             self._recv_group,
             self._sensors,
             recv_config.pols,
+            self._min_timestamp,
         )
         it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
         it = katcbf_vlbi_resample.resample.IFFT(it)
@@ -397,8 +403,8 @@ class VEngine(Engine):
         """
         if self._capture is not None:
             raise aiokatcp.FailReply("a capture is already in progress")
-        # TODO: use timestamp and delay
-        self._capture = _CaptureSession(self.config, self, self.monitor)
+        # TODO: use delay
+        self._capture = _CaptureSession(self.config, self, self.monitor, timestamp)
 
     async def _stop_capture(self) -> None:
         assert self._capture is not None

@@ -26,7 +26,7 @@ import spead2.send.asyncio
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.utils import TimeConverter
-from katgpucbf.vgpu.engine import VEngine
+from katgpucbf.vgpu.engine import VEngine, _CaptureSession
 from katgpucbf.vgpu.recv import Layout
 
 from .test_recv import gen_heaps
@@ -43,6 +43,7 @@ NB_DECIMATION: Final = 8
 SEND_BANDWIDTH: Final = 64e3
 FIR_TAPS: Final = 7201
 STATION: Final = "me"
+FIRST_TIMESTAMP = 0x30000000  # must be a multiple of chunk_timestamp_step
 
 
 @pytest.fixture
@@ -57,16 +58,43 @@ def _make_beng(queues: list[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncSt
 
 async def _send_data(layout: Layout, mock_recv_streams: list[spead2.InprocQueue]) -> None:
     """Send data to the engine."""
+    assert FIRST_TIMESTAMP % layout.chunk_timestamp_step == 0
     beng = _make_beng(mock_recv_streams)
     data = np.zeros(
         (N_POLS, 4 * layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8
     )
-    for heap in gen_heaps(layout, data, 0):
+    for heap in gen_heaps(layout, data, FIRST_TIMESTAMP):
         await beng.async_send_heap(heap.heap, substream_index=heap.substream_index)
 
 
 class TestVEngine:
     """Test :class:`.VEngine`."""
+
+    @pytest.fixture
+    def process_frameset_count(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        """Monkeypatch :meth:`._CaptureSession._process_frameset` on the `engine` to count the number of calls.
+
+        The fixture value is a list with a single integer, which will be
+        incremented each time the method is called.
+        """
+        value = [0]
+
+        def process_frameset(self, frameset):
+            value[0] += 1
+
+        monkeypatch.setattr(_CaptureSession, "_process_frameset", process_frameset)
+        return value
+
+    @pytest.fixture
+    def capture_complete_event(self, engine: VEngine, monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
+        """Asyncio event that is set when :meth:`._CaptureSession._capture_complete` is called."""
+        capture_complete_event = asyncio.Event()
+
+        def capture_complete(self):
+            capture_complete_event.set()
+
+        monkeypatch.setattr(_CaptureSession, "_capture_complete", capture_complete)
+        return capture_complete_event
 
     @pytest.fixture
     def engine_arglist(self) -> list[str]:
@@ -97,28 +125,41 @@ class TestVEngine:
         engine: VEngine,
         engine_client: aiokatcp.Client,
         mock_recv_streams: list[spead2.InprocQueue],
-        monkeypatch: pytest.MonkeyPatch,
+        process_frameset_count: list[int],
+        capture_complete_event: asyncio.Event,
     ) -> None:
         """Test that an engine can be started and receives some data.
 
         This is a weak test that will need to be filled out later to ensure
         that the framesets contain the right headers and data.
         """
-        n_framesets = 0
-
-        def process_frameset(frameset):
-            nonlocal n_framesets
-            n_framesets += 1
-
-        capture_complete_event = asyncio.Event()
         await engine_client.request("capture-start", 0)
-        monkeypatch.setattr(engine._capture, "_capture_complete", capture_complete_event.set)
-        monkeypatch.setattr(engine._capture, "_process_frameset", process_frameset)
         await _send_data(engine.config.recv_config.layout, mock_recv_streams)
         for queue in mock_recv_streams:
             queue.stop()
         await capture_complete_event.wait()
-        assert n_framesets > 0
+        assert process_frameset_count[0] > 0
+        await engine_client.request("capture-stop")
+
+    async def test_min_timestamp(
+        self,
+        engine: VEngine,
+        engine_client: aiokatcp.Client,
+        mock_recv_streams: list[spead2.InprocQueue],
+        process_frameset_count: list[int],
+        capture_complete_event: asyncio.Event,
+    ) -> None:
+        """Test ``?capture-start`` with a non-trivial minimum timestamp."""
+        # TODO: this is a very weak test, which just uses a very large
+        # min_timestamp and checks that no data gets through. Once we have
+        # more precise tests that model the delays involved, this should be
+        # improved.
+        await engine_client.request("capture-start", 0xF00000000000)
+        await _send_data(engine.config.recv_config.layout, mock_recv_streams)
+        for queue in mock_recv_streams:
+            queue.stop()
+        await capture_complete_event.wait()
+        assert process_frameset_count[0] == 0
         await engine_client.request("capture-stop")
 
     async def test_capture_start_while_capturing(self, engine_client: aiokatcp.Client) -> None:
