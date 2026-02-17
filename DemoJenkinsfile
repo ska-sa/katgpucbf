@@ -98,10 +98,8 @@ pipeline {
     stage('Run qualification demo tests') {
       steps {
         sh '''
-          spead2_net_raw pytest -vv -c ${ini} qualification/demo/demo.py \
+          spead2_net_raw pytest -vv -c ./test/pytest_plugins/demo/pytest.ini ./test/pytest_plugins/demo/demo.py  \
           --suppress-tests-failed-exit-code \
-          --image-override katgpucbf:${katgpucbf_image} \
-          --image-override katsdpcontroller:${katsdpcontroller_image} \
           --junitxml=result.xml \
           ${extra_args}
         '''
