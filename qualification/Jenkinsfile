@@ -118,8 +118,6 @@ pipeline {
       }
     }
 
-
-
     stage('Publish results') {
       steps {
         // skipPublishingChecks because it's a feature we don't use.
