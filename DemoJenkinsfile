@@ -127,7 +127,7 @@ pipeline {
         // Save any numpy arrays recorded by failing tests. We use zstd
         // because --xz and --gzip can be extremely slow if there is a
         // lot of data.
-        sh 'tar --zstd -cf arrays.tar.zstd -C qualification arrays/'
+        sh 'tar --zstd -cf arrays.tar.zstd -C qualification test/pytest_plugins/demo/arrays/'
         publishHTML(target: [
           keepAll: true,
           reportName: 'Qualification Test Raw Failed Arrays',
