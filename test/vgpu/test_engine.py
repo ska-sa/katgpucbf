@@ -111,7 +111,7 @@ class TestVEngine:
             n_framesets += 1
 
         capture_complete_event = asyncio.Event()
-        await engine_client.request("capture-start")
+        await engine_client.request("capture-start", 0)
         monkeypatch.setattr(engine._capture, "_capture_complete", capture_complete_event.set)
         monkeypatch.setattr(engine._capture, "_process_frameset", process_frameset)
         await _send_data(engine.config.recv_config.layout, mock_recv_streams)
@@ -120,3 +120,18 @@ class TestVEngine:
         await capture_complete_event.wait()
         assert n_framesets > 0
         await engine_client.request("capture-stop")
+
+    async def test_capture_start_while_capturing(self, engine_client: aiokatcp.Client) -> None:
+        """Test that ``?capture-start`` while already capturing fails."""
+        await engine_client.request("capture-start", 0)
+        with pytest.raises(aiokatcp.FailReply, match="a capture is already in progress"):
+            await engine_client.request("capture-start", 0)
+
+    async def test_capture_stop_while_not_capturing(self, engine_client: aiokatcp.Client) -> None:
+        """Test that ``?capture-stop`` while not capturing fails."""
+        with pytest.raises(aiokatcp.FailReply, match="no capture in progress"):
+            await engine_client.request("capture-stop")
+        await engine_client.request("capture-start", 0)
+        await engine_client.request("capture-stop")
+        with pytest.raises(aiokatcp.FailReply, match="no capture in progress"):
+            await engine_client.request("capture-stop")
