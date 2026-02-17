@@ -113,7 +113,7 @@ class RecvStream:
                 )
                 # TODO (NGC-1689): need to properly handle missing data in
                 # katcbf-vlbi-resample. This is a quick hack to keep things
-                # running by injecting zero data into
+                # running by injecting zero data into the stream.
                 while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
                     last_chunk_id += 1
                     zero_arr = xr.zeros_like(arr)
