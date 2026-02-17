@@ -74,7 +74,7 @@ pipeline {
 
   options {
     disableConcurrentBuilds()
-    timeout(time: 16, unit: 'HOURS')
+    timeout(time: 2, unit: 'HOURS')
   }
 
   stages {
@@ -94,83 +94,70 @@ pipeline {
       }
     }
 
-    /* This stage executes the qualification tests on the latest docker image
-     * of katgpucbf that has been previously unit-tested, and generates a report of the
-     * qualification test results.
-     */
-    stage('Run qualification tests') {
+
+    stage('Run qualification demo tests') {
       steps {
-        /* Run the actual pytest.
-         * Jenkins will not run subsequent steps if pytest returns a non-zero
-         * exit code. Passing --suppress-tests-failed-exit-code causes the
-         * exit code to be zero if there are failed tests, so that we can still
-         * get the report in that case. The junit step will detect the failed
-         * tests and mark the build as unstable.
-         */
         sh '''
-          spead2_net_raw pytest -vv -c ${ini} qualification \
-          --suppress-tests-failed-exit-code \
+          spead2_net_raw pytest -vv -c ${ini} qualification/demo/demo.py \
           --image-override katgpucbf:${katgpucbf_image} \
           --image-override katsdpcontroller:${katsdpcontroller_image} \
-          --junitxml=result.xml \
+          --junitxml=demo_result.xml \
           ${extra_args}
         '''
       }
     }
 
-
-
-    stage('Publish results') {
+    stage('Publish demo results') {
       steps {
         // skipPublishingChecks because it's a feature we don't use.
         // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
-        junit testResults: 'result.xml', skipPublishingChecks: true
+        junit testResults: 'demo_result.xml', skipPublishingChecks: true
 
         // Compress and publish json file so that at least we have that.
         // 'includes' specifies which files from the current directory to archive;
         // we only want the linked file itself
-        sh 'xz --keep --force -T 0 report.json'
+        sh 'xz --keep --force -T 0 demo_report.json'
         publishHTML(target: [
           keepAll: true,
-          reportName: 'Qualification Test Intermediate JSON',
+          reportName: 'Qualification Demo Intermediate JSON',
           reportDir: '',
-          reportFiles: 'report.json.xz',
-          includes: 'report.json.xz'
+          reportFiles: 'demo_report.json.xz',
+          includes: 'demo_report.json.xz'
         ])
 
         // Save any numpy arrays recorded by failing tests. We use zstd
         // because --xz and --gzip can be extremely slow if there is a
         // lot of data.
-        sh 'tar --zstd -cf arrays.tar.zstd -C qualification arrays/'
+        sh 'tar --zstd -cf arrays.tar.zstd -C qualification demo_arrays/'
         publishHTML(target: [
           keepAll: true,
           reportName: 'Qualification Test Raw Failed Arrays',
           reportDir: '',
-          reportFiles: 'arrays.tar.zstd',
-          includes: 'arrays.tar.zstd'
+          reportFiles: 'demo_arrays.tar.zstd',
+          includes: 'demo_arrays.tar.zstd'
         ])
 
         script {
           // Generate and publish test report
-          COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
+          COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py demo_report.json demo_report.pdf -c', returnStdout: true)
           currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
         }
         publishHTML(target: [
           keepAll: true,
-          reportName: 'Qualification Test Report',
+          reportName: 'Qualification Demo Report',
           reportDir: '',
-          reportFiles: 'report.pdf',
-          includes: 'report.pdf'
+          reportFiles: 'demo_report.pdf',
+          includes: 'demo_report.pdf'
         ])
 
         // If that worked, we can probably generate and publish a procedure as well
-        sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
+        sh 'qualification/report/generate_pdf.py demo_report.json demo_procedure.pdf --generate-procedure-doc'
         publishHTML(target: [
           keepAll: true,
-          reportName: 'Qualification Test Procedure',
+          reportName: 'Qualification Demo Procedure',
           reportDir: '',
-          reportFiles: 'procedure.pdf',
-          includes: 'procedure.pdf'
+          reportFiles: 'demo_procedure.pdf',
+          includes: 'demo_procedure.pdf'
         ])
       }
     }
@@ -187,7 +174,7 @@ pipeline {
     always {
       emailext(
         attachLog: true,
-        body: """<b>Overall Test Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
+        body: """<b>Overall Demo Results:</b> ${env.JOB_NAME} - Build#${env.BUILD_NUMBER} - ${currentBuild.result}<br>
         <b>Node:</b> ${env.NODE_NAME}<br>
         <b>Duration:</b> ${currentBuild.durationString}<br>
         <b>Build URL:</b> ${env.BUILD_URL}<br>
@@ -197,7 +184,7 @@ pipeline {
         <br>
         <i>Note: This is an Automated email notification.</i>""",
         recipientProviders: [developers(), requestor()],
-        subject: "${params.environment} Qualification Tests - katgpucbf - \$BUILD_STATUS!",
+        subject: "${params.environment} Qualification Demo - katgpucbf - \$BUILD_STATUS!",
         to: '$DEFAULT_RECIPIENTS'
       )
       sh "qualification/cleanup.py -- ${ini}"
