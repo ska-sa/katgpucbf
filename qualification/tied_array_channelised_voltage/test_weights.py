@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024-2025, National Research Foundation (SARAO)
+# Copyright (c) 2024-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -22,9 +22,10 @@ import numpy as np
 import pytest
 from pytest_check import check
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
-from ..reporter import Reporter
 
 MIN_INPUTS_TO_TEST = 16
 
@@ -107,5 +108,5 @@ async def test_weight_mapping(
         data[test_beam, channel_to_test] = 0
 
         with check:
-            assert np.all(data[test_beam, channel_to_test] == 0)
+            np.testing.assert_array_equal(data[test_beam, channel_to_test], 0)
             pdf_report.detail("All other beams have no signal in the channel.")
