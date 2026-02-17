@@ -99,6 +99,7 @@ pipeline {
       steps {
         sh '''
           spead2_net_raw pytest -vv -c ${ini} qualification/demo/demo.py \
+          --suppress-tests-failed-exit-code \
           --image-override katgpucbf:${katgpucbf_image} \
           --image-override katsdpcontroller:${katsdpcontroller_image} \
           --junitxml=demo_result.xml \
