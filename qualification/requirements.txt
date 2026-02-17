@@ -264,7 +264,7 @@ partd==1.4.2
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   dask
-pillow==12.1.0
+pillow==12.1.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   matplotlib
