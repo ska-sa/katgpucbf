@@ -102,7 +102,7 @@ pipeline {
           --suppress-tests-failed-exit-code \
           --image-override katgpucbf:${katgpucbf_image} \
           --image-override katsdpcontroller:${katsdpcontroller_image} \
-          --junitxml=demo_result.xml \
+          --junitxml=result.xml \
           ${extra_args}
         '''
       }
@@ -112,53 +112,53 @@ pipeline {
       steps {
         // skipPublishingChecks because it's a feature we don't use.
         // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
-        junit testResults: 'demo_result.xml', skipPublishingChecks: true
+        junit testResults: 'result.xml', skipPublishingChecks: true
 
         // Compress and publish json file so that at least we have that.
         // 'includes' specifies which files from the current directory to archive;
         // we only want the linked file itself
-        sh 'xz --keep --force -T 0 demo_report.json'
+        sh 'xz --keep --force -T 0 report.json'
         publishHTML(target: [
           keepAll: true,
           reportName: 'Qualification Demo Intermediate JSON',
           reportDir: '',
-          reportFiles: 'demo_report.json.xz',
-          includes: 'demo_report.json.xz'
+          reportFiles: 'report.json.xz',
+          includes: 'report.json.xz'
         ])
 
         // Save any numpy arrays recorded by failing tests. We use zstd
         // because --xz and --gzip can be extremely slow if there is a
         // lot of data.
-        sh 'tar --zstd -cf arrays.tar.zstd -C qualification demo_arrays/'
+        sh 'tar --zstd -cf arrays.tar.zstd -C qualification arrays/'
         publishHTML(target: [
           keepAll: true,
           reportName: 'Qualification Test Raw Failed Arrays',
           reportDir: '',
-          reportFiles: 'demo_arrays.tar.zstd',
-          includes: 'demo_arrays.tar.zstd'
+          reportFiles: 'arrays.tar.zstd',
+          includes: 'arrays.tar.zstd'
         ])
 
         script {
           // Generate and publish test report
-          COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py demo_report.json demo_report.pdf -c', returnStdout: true)
+          COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
           currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
         }
         publishHTML(target: [
           keepAll: true,
           reportName: 'Qualification Demo Report',
           reportDir: '',
-          reportFiles: 'demo_report.pdf',
-          includes: 'demo_report.pdf'
+          reportFiles: 'report.pdf',
+          includes: 'report.pdf'
         ])
 
         // If that worked, we can probably generate and publish a procedure as well
-        sh 'qualification/report/generate_pdf.py demo_report.json demo_procedure.pdf --generate-procedure-doc'
+        sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
         publishHTML(target: [
           keepAll: true,
           reportName: 'Qualification Demo Procedure',
           reportDir: '',
-          reportFiles: 'demo_procedure.pdf',
-          includes: 'demo_procedure.pdf'
+          reportFiles: 'procedure.pdf',
+          includes: 'procedure.pdf'
         ])
       }
     }
