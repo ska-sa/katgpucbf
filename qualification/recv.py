@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -23,7 +23,7 @@ import logging
 import math
 import os
 from collections.abc import AsyncGenerator, Callable, Sequence
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numba
 import numpy as np
@@ -57,30 +57,29 @@ class XBReceiver:
 
     def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
         # Some metadata we know already from the config.
-        acv_name = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
-        acv_config = cbf.config["outputs"][acv_name]
+        acv_name: str = cbf.config["outputs"][stream_names[0]]["src_streams"][0]
+        acv_config: dict[str, Any] = cbf.config["outputs"][acv_name]
         self.stream_names = list(stream_names)
         self.n_inputs = len(acv_config["src_streams"])
         self.n_ants = self.n_inputs // 2
-        self.n_chans = acv_config["n_chans"]
-        self.input_labels = acv_config["input_labels"]
+        self.n_chans: int = acv_config["n_chans"]
+        self.input_labels: list[str] = acv_config["input_labels"]
+        self.decimation_factor: int = 1
         if "narrowband" in acv_config:
             self.decimation_factor = acv_config["narrowband"]["decimation_factor"]
-        else:
-            self.decimation_factor = 1
-        self.adc_sample_rate = cbf.config["outputs"][acv_config["src_streams"][0]]["adc_sample_rate"]
+        self.adc_sample_rate: float = cbf.config["outputs"][acv_config["src_streams"][0]]["adc_sample_rate"]
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
         # We assume the streams all have the same information except for addresses.
-        self.n_chans_per_substream = cbf.init_sensors[f"{stream_names[0]}.n-chans-per-substream"].value
-        self.n_spectra_per_heap = cbf.init_sensors[f"{acv_name}.spectra-per-heap"].value
-        self.n_samples_between_spectra = cbf.init_sensors[f"{acv_name}.n-samples-between-spectra"].value
-        self.sync_time = cbf.init_sensors[f"{acv_name}.sync-time"].value
-        self.scale_factor_timestamp = cbf.init_sensors[f"{acv_name}.scale-factor-timestamp"].value
-        self.bandwidth = cbf.init_sensors[f"{acv_name}.bandwidth"].value
-        self.center_freq = cbf.init_sensors[f"{acv_name}.center-freq"].value
-        self.multicast_endpoints = [
+        self.n_chans_per_substream: int = cbf.init_sensors[f"{stream_names[0]}.n-chans-per-substream"].value
+        self.n_spectra_per_heap: int = cbf.init_sensors[f"{acv_name}.spectra-per-heap"].value
+        self.n_samples_between_spectra: int = cbf.init_sensors[f"{acv_name}.n-samples-between-spectra"].value
+        self.sync_time: float = cbf.init_sensors[f"{acv_name}.sync-time"].value
+        self.scale_factor_timestamp: float = cbf.init_sensors[f"{acv_name}.scale-factor-timestamp"].value
+        self.bandwidth: float = cbf.init_sensors[f"{acv_name}.bandwidth"].value
+        self.center_freq: float = cbf.init_sensors[f"{acv_name}.center-freq"].value
+        self.multicast_endpoints: list[list[tuple[str, int]]] = [
             [
                 (endpoint.host, endpoint.port)
                 for endpoint in endpoint_list_parser(DEFAULT_PORT)(
@@ -328,14 +327,16 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
         super().__init__(cbf, [stream_name])
 
         # Fill in extra sensors specific to baseline-correlation-products
-        self.n_bls = cbf.init_sensors[f"{stream_name}.n-bls"].value
-        self.n_bits_per_sample = cbf.init_sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
-        self.n_spectra_per_acc = cbf.init_sensors[f"{stream_name}.n-accs"].value
-        self.int_time = cbf.init_sensors[f"{stream_name}.int-time"].value
-        self.bls_ordering = ast.literal_eval(cbf.init_sensors[f"{stream_name}.bls-ordering"].value.decode())
-        self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
-        self.n_xengs = cbf.init_sensors[f"{stream_name}.n-xengs"].value
+        self.n_bls: int = cbf.init_sensors[f"{stream_name}.n-bls"].value
+        self.n_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.xeng-out-bits-per-sample"].value
+        self.n_spectra_per_acc: int = cbf.init_sensors[f"{stream_name}.n-accs"].value
+        self.int_time: float = cbf.init_sensors[f"{stream_name}.int-time"].value
+        self.bls_ordering: list[tuple[str, str]] = ast.literal_eval(
+            cbf.init_sensors[f"{stream_name}.bls-ordering"].value.decode()
+        )
+        self.n_xengs: int = cbf.init_sensors[f"{stream_name}.n-xengs"].value
 
+        self.timestamp_step = self.n_samples_between_spectra * self.n_spectra_per_acc
         self.stream_group = create_baseline_correlation_product_receive_stream_group(
             interface_address,
             multicast_endpoints=self.multicast_endpoints[0],

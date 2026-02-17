@@ -26,10 +26,10 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from katgpucbf import N_POLS
+from katgpucbf.pytest_plugins.reporter import Reporter
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
-from ..reporter import Reporter
 
 
 async def sample_tone_response_hdr(

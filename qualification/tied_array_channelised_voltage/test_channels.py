@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024-2025, National Research Foundation (SARAO)
+# Copyright (c) 2024-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -21,9 +21,10 @@ import random
 import numpy as np
 from pytest_check import check
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
-from ..reporter import Reporter
 
 
 async def test_channels(
