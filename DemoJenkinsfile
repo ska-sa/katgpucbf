@@ -186,7 +186,6 @@ pipeline {
         subject: "${params.environment} Qualification Demo - katgpucbf - \$BUILD_STATUS!",
         to: '$DEFAULT_RECIPIENTS'
       )
-      sh "qualification/cleanup.py -- ${ini}"
     }
     // The final step removes the workspace when the build is complete.
     cleanup {
