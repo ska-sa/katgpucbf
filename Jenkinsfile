@@ -30,258 +30,254 @@ pipeline {
   }
 
   stages {
-    stage('Testing') {
-      parallel {
-      /* This is an outer stage that serves just to hold the 'agent' config for
-      * stages that run inside a Docker container. The build of the Docker
-      * image is done outside of that Docker container because of the
-      * complexities of running Docker-in-docker.
-      */
-        stage('Unit Tests') {
-          agent {
-            dockerfile {
-              reuseNode true
-              registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
+    /* This is an outer stage that serves just to hold the 'agent' config for
+    * stages that run inside a Docker container. The build of the Docker
+    * image is done outside of that Docker container because of the
+    * complexities of running Docker-in-docker.
+    */
+    stage('Unit Tests') {
+      agent {
+        dockerfile {
+          reuseNode true
+          registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
-              /* Use the Jenkins-specific stage of the Dockerfile as the image for
-              * testing. This provides the appropriate dependencies.
-              */
-              additionalBuildArgs '--target=jenkins'
+          /* Use the Jenkins-specific stage of the Dockerfile as the image for
+          * testing. This provides the appropriate dependencies.
+          */
+          additionalBuildArgs '--target=jenkins'
 
-              /* The following arguments needs to be specified in order for the container
-              * to launch correctly.
-              *
-              * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
-              * devices from the host to the container. It requires the NVIDIA Container
-              * Toolkit to be installed on the host.
-              */
-              args '--runtime=nvidia --gpus=all'
-            }
+          /* The following arguments needs to be specified in order for the container
+          * to launch correctly.
+          *
+          * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
+          * devices from the host to the container. It requires the NVIDIA Container
+          * Toolkit to be installed on the host.
+          */
+          args '--runtime=nvidia --gpus=all'
+        }
+      }
+      stages {
+        stage('Install katgpucbf package') {
+          steps {
+            sh 'pip install --no-deps ".[test]" && pip check'
           }
-          stages {
-            stage('Install katgpucbf package') {
+        }
+
+        stage('Parallel stage') {
+          parallel {
+            stage('Compile and test microbenchmarks') {
+              options { timeout(time: 10, unit: 'MINUTES') }
               steps {
-                sh 'pip install --no-deps ".[test]" && pip check'
-              }
-            }
+                dir('scratch') {
+                  sh 'make clean'
+                  sh 'make'
+                  sh './memcpy_loop -T'
 
-            stage('Parallel stage') {
-              parallel {
-                stage('Compile and test microbenchmarks') {
-                  options { timeout(time: 10, unit: 'MINUTES') }
-                  steps {
-                    dir('scratch') {
-                      sh 'make clean'
-                      sh 'make'
-                      sh './memcpy_loop -T'
+                  // We just want to know if they run without crashing, so we use a small
+                  // number of passes to speed things up.
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel all --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --mode=narrowband-discard --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --mode=narrowband-no-discard --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel pfb_fir --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel fft --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel postproc --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel all --mode=narrowband-discard --passes 10'
+                  sh 'fgpu/benchmarks/compute_bench.py --kernel all --mode=narrowband-no-discard --passes 10'
 
-                      // We just want to know if they run without crashing, so we use a small
-                      // number of passes to speed things up.
-                      sh 'fgpu/benchmarks/compute_bench.py --kernel all --passes 10'
-                      sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --mode=narrowband-discard --passes 10'
-                      sh 'fgpu/benchmarks/compute_bench.py --kernel ddc --mode=narrowband-no-discard --passes 10'
-                      sh 'fgpu/benchmarks/compute_bench.py --kernel pfb_fir --passes 10'
-                      sh 'fgpu/benchmarks/compute_bench.py --kernel fft --passes 10'
-                      sh 'fgpu/benchmarks/compute_bench.py --kernel postproc --passes 10'
-                      sh 'fgpu/benchmarks/compute_bench.py --kernel all --mode=narrowband-discard --passes 10'
-                      sh 'fgpu/benchmarks/compute_bench.py --kernel all --mode=narrowband-no-discard --passes 10'
+                  sh 'fgpu/benchmarks/ddc_bench.py --passes 10'
 
-                      sh 'fgpu/benchmarks/ddc_bench.py --passes 10'
+                  sh 'fgpu/benchmarks/fft_bench.py --mode r2c --passes 10'
+                  sh 'fgpu/benchmarks/fft_bench.py --mode c2c --passes 10'
 
-                      sh 'fgpu/benchmarks/fft_bench.py --mode r2c --passes 10'
-                      sh 'fgpu/benchmarks/fft_bench.py --mode c2c --passes 10'
+                  sh 'xbgpu/benchmarks/beamform_bench.py --passes 10'
+                  sh 'xbgpu/benchmarks/correlate_bench.py --passes 10'
 
-                      sh 'xbgpu/benchmarks/beamform_bench.py --passes 10'
-                      sh 'xbgpu/benchmarks/correlate_bench.py --passes 10'
-
-                      sh './gpu_copy.py htod --repeat 10'
-                      sh './gpu_copy.py dtoh --repeat 10'
-                      sh './gpu_copy.py dtod --repeat 10'
-                      // Fails on newer pycuda: https://github.com/inducer/pycuda/issues/459
-                      // sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
-                    }
-                  }
-                }
-
-                /* This stage ensures that all the python style guidelines checks pass.
-                * This will catch if someone has committed to the repo without
-                * installing the required pre-commit hooks, or has bypassed them.
-                */
-                stage('Run pre-commit checks') {
-                  steps {
-                    // no-commit-to-branch complains if we are on the main branch
-                    sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
-                  }
-                }
-
-                /* This stage actually runs pytest. Pytest has a number of flags that are
-                * not required but make life easier:
-                * 1. -n X: Launches X processes and runs the tests in parallel across
-                *     multiple processes. This speeds up testing significantly. NOTE: This
-                *     can create resource contention over things like GPU RAM. If it
-                *     starts becoming an issue set X to 1.
-                * 2. -v: Increases verbosity
-                * 3. --junitxml=reports/result.xml' Writes the results to a file for later
-                *    examination.
-                * 4. -m "not slow": skip slow tests
-                */
-                stage('Run pytest (quick)') {
-                  when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
-                  options { timeout(time: 30, unit: 'MINUTES') }
-                  steps {
-                    sh 'pytest -n 4 -v -ra -m "not slow" --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
-                  }
-                }
-                stage('Run pytest (full)') {
-                  when { anyOf { changeRequest target: 'main'; branch 'main' } }
-                  options { timeout(time: 60, unit: 'MINUTES') }
-                  steps {
-                    sh 'pytest -n 4 -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
-                  }
-                }
-
-                stage('Build documentation') {
-                  options { timeout(time: 5, unit: 'MINUTES') }
-                  steps {
-                    // -W causes warnings to become errors.
-                    // --keep-going ensures we get all warnings instead of just the first.
-                    sh 'make -C doc clean html latexpdf SPHINXOPTS="-W --keep-going"'
-                    publishHTML(target: [reportName: 'Module documentation', reportDir: 'doc/_build/html', reportFiles: 'index.html'])
-                    publishHTML(target: [reportName: 'Module documentation (PDF)', reportDir: 'doc/_build/latex', reportFiles: 'katgpucbf.pdf'])
-                  }
+                  sh './gpu_copy.py htod --repeat 10'
+                  sh './gpu_copy.py dtoh --repeat 10'
+                  sh './gpu_copy.py dtod --repeat 10'
+                  // Fails on newer pycuda: https://github.com/inducer/pycuda/issues/459
+                  // sh './gpu_copy.py htod --mem huge --fill 1 --repeat 10'
                 }
               }
             }
 
-            stage('Publish test results') {
+            /* This stage ensures that all the python style guidelines checks pass.
+            * This will catch if someone has committed to the repo without
+            * installing the required pre-commit hooks, or has bypassed them.
+            */
+            stage('Run pre-commit checks') {
               steps {
-                junit 'reports/result.xml'
-                recordCoverage sourceCodeEncoding: 'UTF-8', tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']]
+                // no-commit-to-branch complains if we are on the main branch
+                sh 'SKIP=no-commit-to-branch pre-commit run --all-files'
+              }
+            }
+
+            /* This stage actually runs pytest. Pytest has a number of flags that are
+            * not required but make life easier:
+            * 1. -n X: Launches X processes and runs the tests in parallel across
+            *     multiple processes. This speeds up testing significantly. NOTE: This
+            *     can create resource contention over things like GPU RAM. If it
+            *     starts becoming an issue set X to 1.
+            * 2. -v: Increases verbosity
+            * 3. --junitxml=reports/result.xml' Writes the results to a file for later
+            *    examination.
+            * 4. -m "not slow": skip slow tests
+            */
+            stage('Run pytest (quick)') {
+              when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
+              options { timeout(time: 30, unit: 'MINUTES') }
+              steps {
+                sh 'pytest -n 4 -v -ra -m "not slow" --junitxml=reports/result.xml --cov=katgpucbf --cov=test --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
+              }
+            }
+            stage('Run pytest (full)') {
+              when { anyOf { changeRequest target: 'main'; branch 'main' } }
+              options { timeout(time: 60, unit: 'MINUTES') }
+              steps {
+                sh 'pytest -n 4 -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
+              }
+            }
+
+            stage('Build documentation') {
+              options { timeout(time: 5, unit: 'MINUTES') }
+              steps {
+                // -W causes warnings to become errors.
+                // --keep-going ensures we get all warnings instead of just the first.
+                sh 'make -C doc clean html latexpdf SPHINXOPTS="-W --keep-going"'
+                publishHTML(target: [reportName: 'Module documentation', reportDir: 'doc/_build/html', reportFiles: 'index.html'])
+                publishHTML(target: [reportName: 'Module documentation (PDF)', reportDir: 'doc/_build/latex', reportFiles: 'katgpucbf.pdf'])
               }
             }
           }
         }
 
-        stage('Demo Qualification Tests') {
-          agent {
-            dockerfile {
-              label params.label
-              registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
-
-              /* Use the Jenkins-specific stage of the Dockerfile as the image for
-              * testing. This provides the appropriate dependencies.
-              */
-              additionalBuildArgs '--target=jenkins'
-
-              /* The following argument needs to be specified in order for the container
-              * to launch correctly.
-              *
-              * --network=host: The Docker container requires access to the high-speed
-              * CBF network. This command passes all the host network interfaces to the
-              * container to be used as required.
-              *
-              * --ulimit=memlock=-1: This argument is required when using ibverbs.
-              *
-              * --ulimit=rtprio=1: Allows qualification tests to use real-time scheduling.
-              *
-              * -e NVIDIA_MOFED=enabled: This will pass the drivers required for ibverbs
-              * to the container.
-              *
-              * --runtime=nvidia': The NVIDIA Container Runtime is used to pass the ibverbs
-              * devices into the container.
-              */
-              args '--network=host --ulimit=memlock=-1 --ulimit=rtprio=1 -e NVIDIA_MOFED=enabled --runtime=nvidia'
-            }
+        stage('Publish test results') {
+          steps {
+            junit 'reports/result.xml'
+            recordCoverage sourceCodeEncoding: 'UTF-8', tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']]
           }
+        }
+      }
+    }
 
-          options {
-            disableConcurrentBuilds()
-            timeout(time: 2, unit: 'HOURS')
+    stage('Demo Qualification Tests') {
+      agent {
+        dockerfile {
+          label params.label
+          registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
+
+          /* Use the Jenkins-specific stage of the Dockerfile as the image for
+          * testing. This provides the appropriate dependencies.
+          */
+          additionalBuildArgs '--target=jenkins'
+
+          /* The following argument needs to be specified in order for the container
+          * to launch correctly.
+          *
+          * --network=host: The Docker container requires access to the high-speed
+          * CBF network. This command passes all the host network interfaces to the
+          * container to be used as required.
+          *
+          * --ulimit=memlock=-1: This argument is required when using ibverbs.
+          *
+          * --ulimit=rtprio=1: Allows qualification tests to use real-time scheduling.
+          *
+          * -e NVIDIA_MOFED=enabled: This will pass the drivers required for ibverbs
+          * to the container.
+          *
+          * --runtime=nvidia': The NVIDIA Container Runtime is used to pass the ibverbs
+          * devices into the container.
+          */
+          args '--network=host --ulimit=memlock=-1 --ulimit=rtprio=1 -e NVIDIA_MOFED=enabled --runtime=nvidia'
+        }
+      }
+
+      options {
+        disableConcurrentBuilds()
+        timeout(time: 2, unit: 'HOURS')
+      }
+
+      stages {
+        stage('Install requirements to run qualification tests') {
+          steps {
+            // Workaround for https://github.com/JelteF/PyLaTeX/issues/391
+            // See NGC-1657
+            sh 'pip install uv==0.9.8'
+            // Extract the pinned versions of pylatex and its dependencies
+            sh 'echo "pylatex" | uv pip compile - -c qualification/requirements.txt -o constrain-setuptools.txt'
+            // Pin setuptools to a version that is known to work (it still warns)
+            sh 'echo "setuptools<78" >> constrain-setuptools.txt'
+            // Using PIP_CONSTRAINT pins the version used for the build environment too
+            sh 'PIP_CONSTRAINT="constrain-setuptools.txt" pip install pylatex'
+            sh 'pip install -r qualification/requirements.txt'
+            sh 'pip install --no-deps ".[qualification]" && pip check'
           }
+        }
 
-          stages {
-            stage('Install requirements to run qualification tests') {
-              steps {
-                // Workaround for https://github.com/JelteF/PyLaTeX/issues/391
-                // See NGC-1657
-                sh 'pip install uv==0.9.8'
-                // Extract the pinned versions of pylatex and its dependencies
-                sh 'echo "pylatex" | uv pip compile - -c qualification/requirements.txt -o constrain-setuptools.txt'
-                // Pin setuptools to a version that is known to work (it still warns)
-                sh 'echo "setuptools<78" >> constrain-setuptools.txt'
-                // Using PIP_CONSTRAINT pins the version used for the build environment too
-                sh 'PIP_CONSTRAINT="constrain-setuptools.txt" pip install pylatex'
-                sh 'pip install -r qualification/requirements.txt'
-                sh 'pip install --no-deps ".[qualification]" && pip check'
-              }
+
+        stage('Run qualification demo tests') {
+          steps {
+            sh '''
+              spead2_net_raw pytest -vv -c ./test/pytest_plugins/demo/pytest.ini ./test/pytest_plugins/demo/demo.py  \
+              --suppress-tests-failed-exit-code \
+              --junitxml=result.xml \
+              ${extra_args}
+            '''
+          }
+        }
+
+        stage('Publish demo results') {
+          steps {
+            // skipPublishingChecks because it's a feature we don't use.
+            // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
+            junit testResults: 'result.xml', skipPublishingChecks: true
+
+            // Compress and publish json file so that at least we have that.
+            // 'includes' specifies which files from the current directory to archive;
+            // we only want the linked file itself
+            sh 'xz --keep --force -T 0 report.json'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Demo Intermediate JSON',
+              reportDir: '',
+              reportFiles: 'report.json.xz',
+              includes: 'report.json.xz'
+            ])
+
+            // Save any numpy arrays recorded by failing tests. We use zstd
+            // because --xz and --gzip can be extremely slow if there is a
+            // lot of data.
+            sh 'tar --zstd -cf arrays.tar.zstd -C qualification test/pytest_plugins/demo/arrays/'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Test Raw Failed Arrays',
+              reportDir: '',
+              reportFiles: 'arrays.tar.zstd',
+              includes: 'arrays.tar.zstd'
+            ])
+
+            script {
+              // Generate and publish test report
+              COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
+              currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
             }
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Demo Report',
+              reportDir: '',
+              reportFiles: 'report.pdf',
+              includes: 'report.pdf'
+            ])
 
-
-            stage('Run qualification demo tests') {
-              steps {
-                sh '''
-                  spead2_net_raw pytest -vv -c ./test/pytest_plugins/demo/pytest.ini ./test/pytest_plugins/demo/demo.py  \
-                  --suppress-tests-failed-exit-code \
-                  --junitxml=result.xml \
-                  ${extra_args}
-                '''
-              }
-            }
-
-            stage('Publish demo results') {
-              steps {
-                // skipPublishingChecks because it's a feature we don't use.
-                // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
-                junit testResults: 'result.xml', skipPublishingChecks: true
-
-                // Compress and publish json file so that at least we have that.
-                // 'includes' specifies which files from the current directory to archive;
-                // we only want the linked file itself
-                sh 'xz --keep --force -T 0 report.json'
-                publishHTML(target: [
-                  keepAll: true,
-                  reportName: 'Qualification Demo Intermediate JSON',
-                  reportDir: '',
-                  reportFiles: 'report.json.xz',
-                  includes: 'report.json.xz'
-                ])
-
-                // Save any numpy arrays recorded by failing tests. We use zstd
-                // because --xz and --gzip can be extremely slow if there is a
-                // lot of data.
-                sh 'tar --zstd -cf arrays.tar.zstd -C qualification test/pytest_plugins/demo/arrays/'
-                publishHTML(target: [
-                  keepAll: true,
-                  reportName: 'Qualification Test Raw Failed Arrays',
-                  reportDir: '',
-                  reportFiles: 'arrays.tar.zstd',
-                  includes: 'arrays.tar.zstd'
-                ])
-
-                script {
-                  // Generate and publish test report
-                  COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
-                  currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
-                }
-                publishHTML(target: [
-                  keepAll: true,
-                  reportName: 'Qualification Demo Report',
-                  reportDir: '',
-                  reportFiles: 'report.pdf',
-                  includes: 'report.pdf'
-                ])
-
-                // If that worked, we can probably generate and publish a procedure as well
-                sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
-                publishHTML(target: [
-                  keepAll: true,
-                  reportName: 'Qualification Demo Procedure',
-                  reportDir: '',
-                  reportFiles: 'procedure.pdf',
-                  includes: 'procedure.pdf'
-                ])
-              }
-            }
+            // If that worked, we can probably generate and publish a procedure as well
+            sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Demo Procedure',
+              reportDir: '',
+              reportFiles: 'procedure.pdf',
+              includes: 'procedure.pdf'
+            ])
           }
         }
       }
