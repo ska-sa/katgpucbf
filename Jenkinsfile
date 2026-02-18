@@ -163,7 +163,7 @@ pipeline {
     stage('Demo Qualification Tests') {
       agent {
         dockerfile {
-          label params.label
+          reuseNode true
           registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
           /* Use the Jenkins-specific stage of the Dockerfile as the image for
@@ -171,30 +171,15 @@ pipeline {
           */
           additionalBuildArgs '--target=jenkins'
 
-          /* The following argument needs to be specified in order for the container
+          /* The following arguments needs to be specified in order for the container
           * to launch correctly.
           *
-          * --network=host: The Docker container requires access to the high-speed
-          * CBF network. This command passes all the host network interfaces to the
-          * container to be used as required.
-          *
-          * --ulimit=memlock=-1: This argument is required when using ibverbs.
-          *
-          * --ulimit=rtprio=1: Allows qualification tests to use real-time scheduling.
-          *
-          * -e NVIDIA_MOFED=enabled: This will pass the drivers required for ibverbs
-          * to the container.
-          *
-          * --runtime=nvidia': The NVIDIA Container Runtime is used to pass the ibverbs
-          * devices into the container.
+          * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
+          * devices from the host to the container. It requires the NVIDIA Container
+          * Toolkit to be installed on the host.
           */
-          args '--network=host --ulimit=memlock=-1 --ulimit=rtprio=1 -e NVIDIA_MOFED=enabled --runtime=nvidia'
+          args '--runtime=nvidia --gpus=all'
         }
-      }
-
-      options {
-        disableConcurrentBuilds()
-        timeout(time: 2, unit: 'HOURS')
       }
 
       stages {
