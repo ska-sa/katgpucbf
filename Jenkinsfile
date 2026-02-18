@@ -215,7 +215,7 @@ pipeline {
           steps {
             // skipPublishingChecks because it's a feature we don't use.
             // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
-            junit testResults: 'result.xml', skipPublishingChecks: true
+            // junit testResults: 'result.xml', skipPublishingChecks: true
 
             // Compress and publish json file so that at least we have that.
             // 'includes' specifies which files from the current directory to archive;
