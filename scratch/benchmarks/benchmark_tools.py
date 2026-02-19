@@ -24,6 +24,7 @@ import time
 from abc import ABC, abstractmethod
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from enum import Enum
 
 import aiohttp.client
 import numpy as np
@@ -32,7 +33,7 @@ from scipy.special import expit
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH
 
-from noisy_search import noisy_search
+from noisy_search import NoisySearchResult, noisy_search
 from remote import Server
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
@@ -43,6 +44,7 @@ TOLERANCE = 0.001  #: Complement of confidence interval probability
 VERBOSE_RESULTS = 1
 #: Starting port for Prometheus metrics
 PROMETHEUS_PORT_BASE = 7250
+THROTTLE_RETRIES = 3  #: Maximum number of times to retry a throttled trial
 logger = logging.getLogger(__name__)
 
 
@@ -137,8 +139,9 @@ class Result:
     def throttled(self) -> bool:
         """Whether the trial was throttled (kept up with the rate, but not at the correct data rate).
 
-        This typically happens when the rate is too high for the network devices to keep up with."""
-        return not self.good() and self.missing_heaps == 0 and self.heaps != 0
+        This typically happens when the rate is too high for the network devices to keep up with.
+        """
+        return not self.good() and self.missing_heaps == 0 and self.heaps < (1.0 + HEAPS_TOL) * self.expected_heaps
 
     def message(self) -> str:
         """Human-readable description of the outcome."""
@@ -148,6 +151,23 @@ class Result:
             return f"Expected ±{self.expected_heaps}, received {self.heaps}"
         else:
             return "Good"
+
+
+class TrialState(Enum):
+    """State of a benchmark trial."""
+
+    SUCCESS = "success"
+    THROTTLED = "throttled"
+    FAILED = "failed"
+
+
+@dataclass
+class MeasureResult:
+    """Result of a single measurement."""
+
+    trail: Result
+    throttled_adc: int
+    state: TrialState
 
 
 class Benchmark(ABC):
@@ -238,49 +258,66 @@ class Benchmark(ABC):
             missing_heaps=new_missing - orig_missing,
         )
 
-    async def trial(self, adc_sample_rate: float, sync_time: int) -> Result:
+    async def trial(self, adc_sample_rate: float) -> Result:
         """Perform a single trial."""
+
+        sync_time = int(time.time())
         async with await self.run_producers(adc_sample_rate, sync_time):
             async with await self.run_consumers(adc_sample_rate, sync_time):
                 return await self.process(adc_sample_rate)
 
-    async def measure(self, adc_sample_rate: float) -> Result:
+    async def measure(self, adc_sample_rate: float) -> MeasureResult:
         """Perform a single trial.
-        Returns a Result object describing the outcome of the trial.
+        Returns a :class:`Result` describing the outcome of the trial.
         """
+
         if self.verbose_results():
             print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-        result = await self.trial(adc_sample_rate, int(time.time()))
+
+        state = TrialState.FAILED
+
+        throttled_results = []
+        for _ in range(THROTTLE_RETRIES):
+            result = await self.trial(adc_sample_rate)
+            if result.throttled():
+                throttled_results.append(result)
+            elif result.good():
+                state = TrialState.SUCCESS
+                break
+
+        throttled_adc = 0
+        if len(throttled_results) == THROTTLE_RETRIES:
+            state = TrialState.THROTTLED
+            percent_throttled = sum([result.heaps for result in throttled_results]) / sum(
+                [result.expected_heaps for result in throttled_results]
+            )
+            throttled_adc = int(adc_sample_rate * percent_throttled)
+
         if self.verbose_results():
-            print(result.message() + "\n", file=sys.stderr)
-        return result
+            print(result.message(), file=sys.stderr)
+            if state == TrialState.THROTTLED:
+                print(f" Throttled to {throttled_adc / 1e6} MHz", file=sys.stderr)
+            print("\n", file=sys.stderr)
+
+        return MeasureResult(trail=result, throttled_adc=throttled_adc, state=state)
 
     async def calibrate(self, low: float, high: float, step: float, repeat: int) -> str:
         """Run multiple trials on all the possible rates."""
         rates = np.arange(low, high + 0.01 * step, step).tolist()
         successes = [0] * len(rates)
         throttled = [0] * len(rates)
-        for trial in range(repeat):
+        for _ in range(repeat):
             for j, adc_sample_rate in enumerate(rates):
-                sync_time = int(time.time())
                 if self.verbose_results():
                     print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
-                result = await self.trial(adc_sample_rate, sync_time)
-                if result.good():
+                measurement = await self.measure(adc_sample_rate)
+                if measurement.state == TrialState.SUCCESS:
                     successes[j] += 1
-                elif result.throttled():
-                    logger.warning(f"{result.message()}")
-                    successes[j] += 1
+                elif measurement.state == TrialState.THROTTLED:
                     throttled[j] += 1
-                elif result.heaps == 0:
+                elif measurement.state == TrialState.FAILED:
                     logger.error(f"No heaps received for {adc_sample_rate / 1e6} MHz")
                     raise RuntimeError(f"No heaps received for {adc_sample_rate / 1e6} MHz result is inconclusive")
-                if self.verbose_results():
-                    print(
-                        f"{result.message()}, {successes[j]}/{trial + 1} passed, {throttled[j]} throttled\n",
-                        flush=True,
-                        file=sys.stderr,
-                    )
         output = ""
         for success, adc_sample_rate, throttle in zip(successes, rates, throttled, strict=True):
             output += f"{adc_sample_rate} {success} {repeat} {throttle}\n"
@@ -291,19 +328,27 @@ class Benchmark(ABC):
     ) -> tuple[float, float]:
         """Search for the critical rate."""
 
-        async def compare(adc_sample_rate: float) -> bool:
-            result = await self.measure(adc_sample_rate)
-            return not result.good() and not result.throttled()
+        async def compare(adc_sample_rate: float, comparisons: int) -> bool | NoisySearchResult:
+            measurement = await self.measure(adc_sample_rate)
+            if measurement.state == TrialState.THROTTLED:
+                return NoisySearchResult(
+                    low=measurement.throttled_adc,
+                    high=measurement.throttled_adc,
+                    comparisons=comparisons,
+                    confidence=100.0,
+                )
+            else:
+                return measurement.state == TrialState.FAILED
 
         # The additional 0.01 * args.step is to ensure high is included rather
         # than excluded if the range is a multiple of step.
         rates = np.arange(low, high + 0.01 * step, step)
         low_result = await self.measure(rates[0])
-        if not low_result.good() and not low_result.throttled():
-            raise RuntimeError(f"failed on low: {low_result.message()}")
+        if low_result.state == TrialState.FAILED:
+            raise RuntimeError(f"failed on low: {low_result.trail.message()}")
         high_result = await self.measure(rates[-1])
-        if high_result.good() or high_result.throttled():
-            raise RuntimeError(f"succeeded on high: {high_result.message()}")
+        if low_result.state == TrialState.SUCCESS:
+            raise RuntimeError(f"succeeded on high: {high_result.trail.message()}")
 
         mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
         mid_rates = np.r_[low, mid_rates, high]
@@ -333,7 +378,7 @@ class Benchmark(ABC):
         if self.args.calibrate:
             result = await self.calibrate(self.args.low, self.args.high, self.args.step, self.args.calibrate_repeat)
         elif self.args.oneshot is not None:
-            result = (await self.measure(self.args.oneshot)).message()
+            result = (await self.measure(self.args.oneshot)).trail.message()
         else:
             slope = self.slope[min(self.args.n, max(self.slope.keys()))]
             low, high = await self.search(

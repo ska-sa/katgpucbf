@@ -42,7 +42,7 @@ async def noisy_search[T](
     items: Sequence[T],
     noise: ArrayLike,
     tolerance: float,
-    compare: Callable[[T], Awaitable[bool]],
+    compare: Callable[[T, int], Awaitable[bool | NoisySearchResult]],
     *,
     max_interval: int = 1,
     max_comparisons: int | None = None,
@@ -126,7 +126,11 @@ async def noisy_search[T](
         # Pick the query value that will minimise expected entropy
         i = int(np.argmin(entropy))
         comparisons += 1
-        if await compare(items[i]):
-            a[:] = yes[i]
-        else:
-            a[:] = no[i]
+        result = await compare(items[i], comparisons)
+        if isinstance(result, bool):
+            if result:
+                a[:] = yes[i]
+            else:
+                a[:] = no[i]
+        elif isinstance(result, NoisySearchResult):
+            return result
