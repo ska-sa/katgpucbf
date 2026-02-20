@@ -35,7 +35,7 @@ pipeline {
      * image is done outside of that Docker container because of the
      * complexities of running Docker-in-docker.
      */
-    stage('Testing') {
+    stage('Unit Tests') {
       agent {
         dockerfile {
           reuseNode true
@@ -155,6 +155,114 @@ pipeline {
           steps {
             junit 'reports/result.xml'
             recordCoverage sourceCodeEncoding: 'UTF-8', tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']]
+          }
+        }
+      }
+    }
+
+    stage('Demo Qualification Tests') {
+      agent {
+        dockerfile {
+          reuseNode true
+          registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
+
+          /* Use the Jenkins-specific stage of the Dockerfile as the image for
+           * testing. This provides the appropriate dependencies.
+           */
+          additionalBuildArgs '--target=jenkins'
+
+          /* The following arguments needs to be specified in order for the container
+           * to launch correctly.
+           *
+           * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
+           * devices from the host to the container. It requires the NVIDIA Container
+           * Toolkit to be installed on the host.
+           */
+          args '--runtime=nvidia --gpus=all'
+        }
+      }
+
+      stages {
+        stage('Install requirements to run qualification tests') {
+          steps {
+            // Workaround for https://github.com/JelteF/PyLaTeX/issues/391
+            // See NGC-1657
+            sh 'pip install uv==0.9.8'
+            // Extract the pinned versions of pylatex and its dependencies
+            sh 'echo "pylatex" | uv pip compile - -c qualification/requirements.txt -o constrain-setuptools.txt'
+            // Pin setuptools to a version that is known to work (it still warns)
+            sh 'echo "setuptools<78" >> constrain-setuptools.txt'
+            // Using PIP_CONSTRAINT pins the version used for the build environment too
+            sh 'PIP_CONSTRAINT="constrain-setuptools.txt" pip install pylatex'
+            sh 'pip install -r qualification/requirements.txt'
+            sh 'pip install --no-deps ".[qualification]" && pip check'
+          }
+        }
+
+
+        stage('Run qualification demo tests') {
+          steps {
+            sh '''
+              spead2_net_raw pytest -vv -c test/pytest_plugins/demo/pytest.ini test/pytest_plugins/demo/demo.py  \
+              --suppress-tests-failed-exit-code \
+              --junitxml=result.xml \
+              ${extra_args}
+            '''
+          }
+        }
+
+        stage('Publish demo results') {
+          steps {
+            // skipPublishingChecks because it's a feature we don't use.
+            // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
+            // junit testResults: 'result.xml', skipPublishingChecks: true
+
+            // Compress and publish json file so that at least we have that.
+            // 'includes' specifies which files from the current directory to archive;
+            // we only want the linked file itself
+            sh 'xz --keep --force -T 0 report.json'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Demo Intermediate JSON',
+              reportDir: '',
+              reportFiles: 'report.json.xz',
+              includes: 'report.json.xz'
+            ])
+
+            // Save any numpy arrays recorded by failing tests. We use zstd
+            // because --xz and --gzip can be extremely slow if there is a
+            // lot of data.
+            sh 'tar --zstd -cf arrays.tar.zstd -C test/pytest_plugins/demo/ arrays'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Test Raw Failed Arrays',
+              reportDir: '',
+              reportFiles: 'arrays.tar.zstd',
+              includes: 'arrays.tar.zstd'
+            ])
+
+            script {
+              // Generate and publish test report
+              COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
+              currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
+            }
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Demo Report',
+              reportDir: '',
+              reportFiles: 'report.pdf',
+              includes: 'report.pdf'
+            ])
+
+            // If that worked, we can probably generate and publish a procedure as well
+            sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Demo Procedure',
+              reportDir: '',
+              reportFiles: 'procedure.pdf',
+              includes: 'procedure.pdf'
+            ])
           }
         }
       }
