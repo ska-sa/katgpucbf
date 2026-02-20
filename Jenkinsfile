@@ -31,10 +31,10 @@ pipeline {
 
   stages {
     /* This is an outer stage that serves just to hold the 'agent' config for
-    * stages that run inside a Docker container. The build of the Docker
-    * image is done outside of that Docker container because of the
-    * complexities of running Docker-in-docker.
-    */
+     * stages that run inside a Docker container. The build of the Docker
+     * image is done outside of that Docker container because of the
+     * complexities of running Docker-in-docker.
+     */
     stage('Unit Tests') {
       agent {
         dockerfile {
@@ -42,17 +42,17 @@ pipeline {
           registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
           /* Use the Jenkins-specific stage of the Dockerfile as the image for
-          * testing. This provides the appropriate dependencies.
-          */
+           * testing. This provides the appropriate dependencies.
+           */
           additionalBuildArgs '--target=jenkins'
 
           /* The following arguments needs to be specified in order for the container
-          * to launch correctly.
-          *
-          * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
-          * devices from the host to the container. It requires the NVIDIA Container
-          * Toolkit to be installed on the host.
-          */
+           * to launch correctly.
+           *
+           * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
+           * devices from the host to the container. It requires the NVIDIA Container
+           * Toolkit to be installed on the host.
+           */
           args '--runtime=nvidia --gpus=all'
         }
       }
@@ -102,9 +102,9 @@ pipeline {
             }
 
             /* This stage ensures that all the python style guidelines checks pass.
-            * This will catch if someone has committed to the repo without
-            * installing the required pre-commit hooks, or has bypassed them.
-            */
+             * This will catch if someone has committed to the repo without
+             * installing the required pre-commit hooks, or has bypassed them.
+             */
             stage('Run pre-commit checks') {
               steps {
                 // no-commit-to-branch complains if we are on the main branch
@@ -113,16 +113,16 @@ pipeline {
             }
 
             /* This stage actually runs pytest. Pytest has a number of flags that are
-            * not required but make life easier:
-            * 1. -n X: Launches X processes and runs the tests in parallel across
-            *     multiple processes. This speeds up testing significantly. NOTE: This
-            *     can create resource contention over things like GPU RAM. If it
-            *     starts becoming an issue set X to 1.
-            * 2. -v: Increases verbosity
-            * 3. --junitxml=reports/result.xml' Writes the results to a file for later
-            *    examination.
-            * 4. -m "not slow": skip slow tests
-            */
+             * not required but make life easier:
+             * 1. -n X: Launches X processes and runs the tests in parallel across
+             *     multiple processes. This speeds up testing significantly. NOTE: This
+             *     can create resource contention over things like GPU RAM. If it
+             *     starts becoming an issue set X to 1.
+             * 2. -v: Increases verbosity
+             * 3. --junitxml=reports/result.xml' Writes the results to a file for later
+             *    examination.
+             * 4. -m "not slow": skip slow tests
+             */
             stage('Run pytest (quick)') {
               when { not { anyOf { changeRequest target: 'main'; branch 'main' } } }
               options { timeout(time: 30, unit: 'MINUTES') }
@@ -167,17 +167,17 @@ pipeline {
           registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
           /* Use the Jenkins-specific stage of the Dockerfile as the image for
-          * testing. This provides the appropriate dependencies.
-          */
+           * testing. This provides the appropriate dependencies.
+           */
           additionalBuildArgs '--target=jenkins'
 
           /* The following arguments needs to be specified in order for the container
-          * to launch correctly.
-          *
-          * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
-          * devices from the host to the container. It requires the NVIDIA Container
-          * Toolkit to be installed on the host.
-          */
+           * to launch correctly.
+           *
+           * --runtime=nvidia --gpus=all: This argument passes the NVIDIA driver and
+           * devices from the host to the container. It requires the NVIDIA Container
+           * Toolkit to be installed on the host.
+           */
           args '--runtime=nvidia --gpus=all'
         }
       }
@@ -203,7 +203,7 @@ pipeline {
         stage('Run qualification demo tests') {
           steps {
             sh '''
-              spead2_net_raw pytest -vv -c ./test/pytest_plugins/demo/pytest.ini ./test/pytest_plugins/demo/demo.py  \
+              spead2_net_raw pytest -vv -c test/pytest_plugins/demo/pytest.ini test/pytest_plugins/demo/demo.py  \
               --suppress-tests-failed-exit-code \
               --junitxml=result.xml \
               ${extra_args}
@@ -232,7 +232,7 @@ pipeline {
             // Save any numpy arrays recorded by failing tests. We use zstd
             // because --xz and --gzip can be extremely slow if there is a
             // lot of data.
-            sh 'tar --zstd -cf arrays.tar.zstd -C test/pytest_plugins/demo arrays/'
+            sh 'tar --zstd -cf arrays.tar.zstd -C test/pytest_plugins/demo/ arrays'
             publishHTML(target: [
               keepAll: true,
               reportName: 'Qualification Test Raw Failed Arrays',
