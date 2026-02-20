@@ -344,7 +344,7 @@ class Benchmark(ABC):
         # than excluded if the range is a multiple of step.
         rates = np.arange(low, high + 0.01 * step, step)
         low_result = await self.measure(rates[0])
-        if low_result.state == TrialState.FAILED:
+        if low_result.state != TrialState.SUCCESS:
             raise RuntimeError(f"failed on low: {low_result.trail.message()}")
         high_result = await self.measure(rates[-1])
         if low_result.state == TrialState.SUCCESS:

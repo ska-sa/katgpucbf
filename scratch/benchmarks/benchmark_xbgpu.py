@@ -178,6 +178,7 @@ class XbgpuBenchmark(Benchmark):
             },
         )
 
+    @override
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             fsim_factory,

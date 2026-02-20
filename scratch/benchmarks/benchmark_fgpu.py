@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import functools
 from contextlib import AsyncExitStack
+from typing import override
 
 import asyncssh
 
@@ -198,6 +199,7 @@ class FgpuBenchmark(Benchmark):
             },
         )
 
+    @override
     async def run_producers(
         self,
         adc_sample_rate: float,
@@ -232,6 +234,7 @@ class FgpuBenchmark(Benchmark):
             pull=self.args.pull,
         )
 
+    @override
     async def run_consumers(
         self,
         adc_sample_rate: float,
