@@ -33,7 +33,12 @@ import asyncssh
 
 from katgpucbf import COMPLEX, N_POLS
 
-from benchmark_tools import PROMETHEUS_PORT_BASE, Benchmark, add_common_benchmark_arguments
+from benchmark_tools import (
+    PROMETHEUS_PORT_BASE,
+    Benchmark,
+    add_common_benchmark_arguments,
+    validate_common_benchmark_arguments,
+)
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
 
 SAMPLE_BITS = 8
@@ -234,8 +239,6 @@ async def main():
         level=logging.DEBUG if args.verbose >= 2 else logging.INFO if args.verbose >= 1 else logging.WARNING
     )
 
-    if not args.narrowband:
-        args.narrowband_decimation = 1  # Simplifies later logic
     if args.channels % args.substreams:
         parser.error("--substreams must divide evenly into --channels")
     if args.jones_per_batch % args.channels or args.jones_per_batch // args.channels % 16:
@@ -244,6 +247,7 @@ async def main():
         parser.error("total number of output beams must be less than 255 to fit range 239.102.197.0/24")
     if args.corrprods > 255:
         parser.error("total number of correlation products must be less than 255 to fit range 239.102.198.0/24")
+    validate_common_benchmark_arguments(args, parser)
 
     await XbgpuBenchmark(args).run()
 

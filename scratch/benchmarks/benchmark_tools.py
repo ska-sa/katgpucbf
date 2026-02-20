@@ -45,6 +45,7 @@ VERBOSE_RESULTS = 1
 #: Starting port for Prometheus metrics
 PROMETHEUS_PORT_BASE = 7250
 THROTTLE_RETRIES = 3  #: Maximum number of times to retry a throttled trial
+MAXIMUM_RANGES = 2**20
 logger = logging.getLogger(__name__)
 
 
@@ -114,6 +115,24 @@ def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
     )
+
+
+def validate_common_benchmark_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Validate common command-line arguments shared by benchmark_fgpu and benchmark_xbgpu.
+
+    Parameters
+    ----------
+    args
+        Argument parser to validate arguments from.
+    """
+    if not args.narrowband:
+        args.narrowband_decimation = 1  # Simplifies later logic
+    if args.calibrate and args.oneshot is not None:
+        parser.error("Cannot specify both --calibrate and --oneshot")
+    if args.interval < args.step and args.calibrate is None and args.oneshot is None:
+        parser.error("--interval must be greater than or equal to --step")
+    if (args.high - args.low) / args.step > MAXIMUM_RANGES:
+        parser.error(f"range is too large: {(args.high - args.low) / args.step} > {MAXIMUM_RANGES}")
 
 
 @dataclass
@@ -293,6 +312,9 @@ class Benchmark(ABC):
             elif result.good():
                 state = TrialState.SUCCESS
                 break
+            elif not result.good() and not result.throttled():
+                state = TrialState.FAILED
+                break
 
         throttled_adc = 0
         if len(throttled_results) == THROTTLE_RETRIES:
@@ -332,32 +354,48 @@ class Benchmark(ABC):
             output += f"{adc_sample_rate} {success} {repeat} {throttle}\n"
         return output
 
-    async def search(
-        self, low: float, high: float, step: float, interval: float, max_comparisons: int, slope: float
-    ) -> tuple[float, float]:
+    def _throttled_result(self, measurement: MeasureResult, comparisons: int, rates: np.ndarray) -> NoisySearchResult:
+        low = idx = (np.abs(rates - measurement.throttled_adc)).argmin() - 1
+        high = idx
+        if low < 0:
+            low = 0
+
+        return NoisySearchResult(
+            low=low,
+            high=high,
+            comparisons=comparisons,
+            confidence=100.0,
+        )
+
+    async def _search(
+        self,
+        low: float,
+        high: float,
+        step: float,
+        interval: float,
+        max_comparisons: int,
+        slope: float,
+        rates: np.ndarray,
+    ) -> NoisySearchResult:
         """Search for the critical rate."""
 
         async def compare(adc_sample_rate: float, comparisons: int) -> bool | NoisySearchResult:
             measurement = await self.measure(adc_sample_rate)
             if measurement.state == TrialState.THROTTLED:
-                return NoisySearchResult(
-                    low=measurement.throttled_adc,
-                    high=measurement.throttled_adc,
-                    comparisons=comparisons,
-                    confidence=100.0,
-                )
+                if self.verbose_results():
+                    print(f"Throttled to {measurement.throttled_adc / 1e6} MHz", file=sys.stderr)
+                return self._throttled_result(measurement, comparisons, rates)
             else:
                 return measurement.state == TrialState.FAILED
 
-        # The additional 0.01 * args.step is to ensure high is included rather
-        # than excluded if the range is a multiple of step.
-        rates = np.arange(low, high + 0.01 * step, step)
         low_result = await self.measure(rates[0])
         if low_result.state != TrialState.SUCCESS:
             raise RuntimeError(f"failed on low: {low_result.message()}")
         high_result = await self.measure(rates[-1])
         if high_result.state == TrialState.SUCCESS:
             raise RuntimeError(f"succeeded on high: {high_result.message()}")
+        if high_result.state == TrialState.THROTTLED:
+            return self._throttled_result(high_result, max_comparisons, rates)
 
         mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
         mid_rates = np.r_[low, mid_rates, high]
@@ -368,7 +406,7 @@ class Benchmark(ABC):
         # external factor that makes things go wrong even at very low/high rates.
         noise = np.clip(noise, NOISE, 1 - NOISE)
 
-        result = await noisy_search(
+        return await noisy_search(
             rates.tolist(),
             noise,
             TOLERANCE,
@@ -376,12 +414,21 @@ class Benchmark(ABC):
             max_interval=round(interval / step),
             max_comparisons=max_comparisons,
         )
+
+    async def search(
+        self, low: float, high: float, step: float, interval: float, max_comparisons: int, slope: float
+    ) -> tuple[float, float]:
+        # The additional 0.01 * args.step is to ensure high is included rather
+        # than excluded if the range is a multiple of step.
+        rates = np.arange(low, high + 0.01 * step, step)
+
+        result = await self._search(low, high, step, interval, max_comparisons, slope, rates)
         if result.low == -1:
             raise RuntimeError("lower bound is too high")
-        elif result.high == len(rates):
+        elif result.high == len(rates) - 1:
             raise RuntimeError("upper bound is too low")
         else:
-            return rates[result.low], rates[result.high]
+            return rates[result.low], rates[result.high + 1]
 
     async def run(self) -> None:
         if self.args.calibrate:

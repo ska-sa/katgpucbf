@@ -31,7 +31,12 @@ import asyncssh
 
 from katgpucbf import N_POLS
 
-from benchmark_tools import PROMETHEUS_PORT_BASE, Benchmark, add_common_benchmark_arguments
+from benchmark_tools import (
+    PROMETHEUS_PORT_BASE,
+    Benchmark,
+    add_common_benchmark_arguments,
+    validate_common_benchmark_arguments,
+)
 from remote import InsufficientCoresError, Server, ServerInfo, run_tasks, servers_from_toml
 
 KATCP_PORT_BASE = 7140
@@ -291,8 +296,8 @@ async def main():
     add_common_benchmark_arguments(parser)
     parser.add_argument("extra", nargs="*", help="Remaining arguments are passed to fgpu")
     args = parser.parse_args()
-    if args.calibrate and args.oneshot is not None:
-        parser.error("Cannot specify both --calibrate and --oneshot")
+
+    validate_common_benchmark_arguments(args, parser)
 
     await FgpuBenchmark(args).run()
 
