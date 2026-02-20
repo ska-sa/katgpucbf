@@ -169,6 +169,15 @@ class MeasureResult:
     throttled_adc: int
     state: TrialState
 
+    def message(self) -> str:
+        match self.state:
+            case TrialState.SUCCESS:
+                return self.trail.message()
+            case TrialState.THROTTLED:
+                return f"Throttled to {self.throttled_adc / 1e6} MHz"
+            case TrialState.FAILED:
+                return self.trail.message()
+
 
 class Benchmark(ABC):
     """Abstract base class for benchmarks.
@@ -345,10 +354,10 @@ class Benchmark(ABC):
         rates = np.arange(low, high + 0.01 * step, step)
         low_result = await self.measure(rates[0])
         if low_result.state != TrialState.SUCCESS:
-            raise RuntimeError(f"failed on low: {low_result.trail.message()}")
+            raise RuntimeError(f"failed on low: {low_result.message()}")
         high_result = await self.measure(rates[-1])
         if low_result.state == TrialState.SUCCESS:
-            raise RuntimeError(f"succeeded on high: {high_result.trail.message()}")
+            raise RuntimeError(f"succeeded on high: {high_result.message()}")
 
         mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
         mid_rates = np.r_[low, mid_rates, high]
@@ -378,7 +387,7 @@ class Benchmark(ABC):
         if self.args.calibrate:
             result = await self.calibrate(self.args.low, self.args.high, self.args.step, self.args.calibrate_repeat)
         elif self.args.oneshot is not None:
-            result = (await self.measure(self.args.oneshot)).trail.message()
+            result = (await self.measure(self.args.oneshot)).message()
         else:
             slope = self.slope[min(self.args.n, max(self.slope.keys()))]
             low, high = await self.search(
