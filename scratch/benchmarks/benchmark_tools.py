@@ -356,7 +356,7 @@ class Benchmark(ABC):
         if low_result.state != TrialState.SUCCESS:
             raise RuntimeError(f"failed on low: {low_result.message()}")
         high_result = await self.measure(rates[-1])
-        if low_result.state == TrialState.SUCCESS:
+        if high_result.state == TrialState.SUCCESS:
             raise RuntimeError(f"succeeded on high: {high_result.message()}")
 
         mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
