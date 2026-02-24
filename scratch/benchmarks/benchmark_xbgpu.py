@@ -242,7 +242,7 @@ async def main():
     if args.channels % args.substreams:
         parser.error("--substreams must divide evenly into --channels")
     if args.jones_per_batch % args.channels or args.jones_per_batch // args.channels % 16:
-        parser.error("spectra per heap(--jones_per_batch // --channels) must divide evenly and be a multiple of 16")
+        parser.error("spectra per heap (--jones_per_batch // --channels) must divide evenly and be a multiple of 16")
     if args.beams * N_POLS > 255:
         parser.error("total number of output beams must be less than 255 to fit range 239.102.197.0/24")
     if args.corrprods > 255:
