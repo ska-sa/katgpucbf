@@ -49,4 +49,4 @@ Welcome to katgpucbf's documentation!
    :maxdepth: 3
    :caption: Module reference
 
-   katgpucbf
+   _modules/modules

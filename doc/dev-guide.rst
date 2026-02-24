@@ -143,25 +143,6 @@ The package contains the following boiler-plate files:
 Making a contribution
 ---------------------
 
-Module documentation updates
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-:mod:`katgpucbf` holds documentation within its code-base.
-:external+sphinx-apidoc:doc:`sphinx-apidoc <index>` provides a manner to generate
-module documentation as reStructuredText. If you, the developer, add or remove
-a module or file, execute the full ``sphinx-apidoc`` command below to regenerate
-the module documentation with your updates. The incantation below is run from the
-root :mod:`katgpucbf` directory.
-
-.. code-block:: bash
-
-  sphinx-apidoc -efo doc/ src/
-
-.. note::
-
-    The above command will likely generate a :file:`modules.rst` file, which is
-    not necessary to commit.
-
 Raising the Pull Request
 ^^^^^^^^^^^^^^^^^^^^^^^^
 

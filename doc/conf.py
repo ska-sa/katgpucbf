@@ -53,6 +53,7 @@ version = release
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "sphinx.ext.apidoc",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.graphviz",
@@ -95,6 +96,13 @@ templates_path = ["_templates"]
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
+apidoc_modules = [
+    {
+        "path": "../src/katgpucbf",
+        "destination": "_modules",
+        "separate_modules": True,
+    }
+]
 
 # -- Options for HTML output -------------------------------------------------
 
