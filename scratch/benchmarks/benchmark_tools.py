@@ -182,7 +182,7 @@ class Result:
 
         This typically happens when the rate is too high for the network devices to keep up with.
         """
-        return not self.good() and self.missing_heaps == 0 and 0 < self.heaps < (1.0 + HEAPS_TOL) * self.expected_heaps
+        return self.missing_heaps == 0 and 0 < self.heaps < (1.0 - HEAPS_TOL) * self.expected_heaps
 
     def message(self) -> str:
         """Human-readable description of the outcome."""
