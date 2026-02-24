@@ -125,8 +125,6 @@ def validate_common_benchmark_arguments(args: argparse.Namespace, parser: argpar
     args
         Argument parser to validate arguments from.
     """
-    if not args.narrowband:
-        args.narrowband_decimation = 1  # Simplifies later logic
     if args.calibrate and args.oneshot is not None:
         parser.error("Cannot specify both --calibrate and --oneshot")
     if args.interval < args.step and args.calibrate is None and args.oneshot is None:
@@ -353,7 +351,7 @@ class Benchmark(ABC):
         rates = np.arange(low, high + 0.01 * step, step).tolist()
         successes = [0] * len(rates)
         throttled = [0] * len(rates)
-        for _ in range(repeat):
+        for trial in range(repeat):
             for j, adc_sample_rate in enumerate(rates):
                 if self.verbose_results():
                     print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
@@ -366,6 +364,10 @@ class Benchmark(ABC):
                     case ResultState.NO_HEAPS:
                         logger.error(f"No heaps received for {adc_sample_rate / 1e6} MHz")
                         raise RuntimeError(f"No heaps received for {adc_sample_rate / 1e6} MHz result is inconclusive")
+                if self.verbose_results():
+                    print(
+                        f"{measurement.message()}, {successes[j]}/{trial + 1} passed, {throttled[j]} throttled\n",
+                    )
         output = ""
         for success, adc_sample_rate, throttle in zip(successes, rates, throttled, strict=True):
             output += f"{adc_sample_rate} {success} {repeat} {throttle}\n"
@@ -444,6 +446,8 @@ class Benchmark(ABC):
             return rates[result.low], rates[result.high + 1]
 
     async def run(self) -> None:
+        if not self.args.narrowband:
+            self.args.narrowband_decimation = 1  # Simplifies later logic
         if self.args.calibrate:
             result = await self.calibrate(self.args.low, self.args.high, self.args.step, self.args.calibrate_repeat)
         elif self.args.oneshot is not None:
