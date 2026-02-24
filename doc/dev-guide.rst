@@ -69,12 +69,11 @@ to monitor Python development.
 - ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
   be run before committing to the repo.
 - ``pyproject.toml`` dictates the configuration of utilities such as
-  :external+black:doc:`black <getting_started>`, `isort`_ and `ruff`_.
+  `ruff`_.
 - ``mypy.ini`` file for :external+mypy:doc:`mypy <getting_started>`, a static type checker
   (or lint-like tool) for type annotations in the Python code - according to
   :pep:`484` and :pep:`526` notation.
 
-.. _isort: https://pycqa.github.io/isort/
 .. _ruff: https://docs.astral.sh/ruff/
 
 Pre-commit compliance
@@ -91,13 +90,13 @@ on the work at hand - rather than maintaining code readability and appearance.
 Installation Prerequisites
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Although :external+black:doc:`black <getting_started>`, `ruff`_,
-and :external+mypy:doc:`mypy <getting_started>`
-are used, the only prerequisite is the **pre-commit**  Python library. That is,
-the YAML configuration file is set up so that when the pre-commit hooks are
-installed, all dependencies are automatically installed. (Note, they won't be
-available to you in your Python environment; they will be used only by pre-commit.
-If you want to use them separately, you will need to install them separately with pip.)
+Although `ruff`_ and :external+mypy:doc:`mypy <getting_started>` are used, the
+only prerequisite is the **pre-commit**  Python library. That is, the YAML
+configuration file is set up so that when the pre-commit hooks are installed,
+all dependencies are automatically installed. (Note, they won't be available
+to you in your Python environment; they will be used only by pre-commit. If
+you want to use them separately, you will need to install them separately with
+pip.)
 
 Light-weight installation
 -------------------------

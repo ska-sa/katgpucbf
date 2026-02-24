@@ -63,7 +63,6 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinxcontrib.tikz",
     "sphinxcontrib.bibtex",
-    "sphinx-mathjax-offline",
 ]
 
 
@@ -73,7 +72,6 @@ warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 intersphinx_mapping = {
     "aiokatcp": ("https://aiokatcp.readthedocs.io/en/latest/", None),
-    "black": ("https://black.readthedocs.io/en/stable/", None),
     "coverage": ("https://coverage.readthedocs.io/en/latest/", None),
     "katcbf-vlbi-resample": ("https://katcbf-vlbi-resample.readthedocs.io/en/latest/", None),
     "katpoint": ("https://katpoint.readthedocs.io/en/latest", None),
@@ -81,7 +79,6 @@ intersphinx_mapping = {
     "katsdptelstate": ("https://katsdptelstate.readthedocs.io/en/latest", None),
     "mypy": ("https://mypy.readthedocs.io/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable", None),
-    "pip": ("https://pip.pypa.io/en/stable/", None),
     "pytest": ("https://docs.pytest.org/en/stable/", None),
     "python": ("https://docs.python.org/3", None),
     "setuptools": ("https://setuptools.pypa.io/en/stable/", None),
@@ -110,16 +107,8 @@ html_theme = "sphinx_rtd_theme"
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-
 # Bibtex files to look for references.
 bibtex_bibfiles = ["references.bib"]
-
-
-# Autodoc settings, need these here to get the proper signatures from the
-# imported C++ functions and classes.
-autodoc_docstring_signature = True
-autoclass_content = "both"
-# TODO: autodoc_default_options
 
 todo_include_todos = True
 
@@ -127,6 +116,7 @@ todo_include_todos = True
 # "fit" for rendering flowcharts.
 tikz_tikzlibraries = "chains,fit"
 
-# Force MathJax to render as SVG rather than CHTML, to work around
-# https://github.com/mathjax/MathJax/issues/2701
-mathjax3_config = {"loader": {"load": ["input/tex", "output/svg"]}, "startup": {"output": "svg"}}
+# Update MathJax to version 4 (stored in _static) to fix
+# https://github.com/mathjax/MathJax/issues/2701. This will be the default
+# from Sphinx 9.0.
+mathjax_path = "https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"
