@@ -135,6 +135,15 @@ def validate_common_benchmark_arguments(args: argparse.Namespace, parser: argpar
         parser.error(f"range is too large: {(args.high - args.low) / args.step} > {MAXIMUM_RANGES}")
 
 
+class ResultState(Enum):
+    """State of a benchmark trial."""
+
+    SUCCESS = "success"
+    THROTTLED = "throttled"
+    FAILED = "failed"
+    NO_HEAPS = "no heaps"
+
+
 @dataclass
 class Result:
     """Result of a single trial."""
@@ -142,6 +151,17 @@ class Result:
     expected_heaps: float  #: Number of heaps expected, based on runtime and data rate
     heaps: int  #: Number of heaps received
     missing_heaps: int  #: Number of heaps reported as missing (gaps in incoming data)
+
+    @property
+    def state(self) -> ResultState:
+        if self.good():
+            return ResultState.SUCCESS
+        elif self.throttled():
+            return ResultState.THROTTLED
+        elif self.missing_heaps == 0:
+            return ResultState.NO_HEAPS
+        else:
+            return ResultState.FAILED
 
     def good(self) -> bool:
         """Whether the trial was a success (kept up with the rate).
@@ -160,42 +180,39 @@ class Result:
 
         This typically happens when the rate is too high for the network devices to keep up with.
         """
-        return not self.good() and self.missing_heaps == 0 and self.heaps < (1.0 + HEAPS_TOL) * self.expected_heaps
+        return not self.good() and self.missing_heaps == 0 and 0 < self.heaps < (1.0 + HEAPS_TOL) * self.expected_heaps
 
     def message(self) -> str:
         """Human-readable description of the outcome."""
-        if self.missing_heaps > 0:
-            return f"Missing {self.missing_heaps} heaps"
-        elif not self.good():
-            return f"Expected ±{self.expected_heaps}, received {self.heaps}"
-        else:
-            return "Good"
-
-
-class TrialState(Enum):
-    """State of a benchmark trial."""
-
-    SUCCESS = "success"
-    THROTTLED = "throttled"
-    FAILED = "failed"
+        match self.state:
+            case ResultState.SUCCESS:
+                return "Good"
+            case ResultState.FAILED:
+                return f"Missing {self.missing_heaps} heaps"
+            case ResultState.THROTTLED:
+                return f"Throttled {self.heaps / self.expected_heaps * 100:.1f}%"
+            case ResultState.NO_HEAPS:
+                return "No heaps"
 
 
 @dataclass
 class MeasureResult:
     """Result of a single measurement."""
 
-    trail: Result
-    throttled_adc: int
-    state: TrialState
+    throttled_adc_high: int
+    throttled_adc_low: int
+    state: ResultState
 
     def message(self) -> str:
         match self.state:
-            case TrialState.SUCCESS:
-                return self.trail.message()
-            case TrialState.THROTTLED:
-                return f"Throttled to {self.throttled_adc / 1e6} MHz"
-            case TrialState.FAILED:
-                return self.trail.message()
+            case ResultState.SUCCESS:
+                return "Good"
+            case ResultState.FAILED:
+                return "Missing heaps"
+            case ResultState.THROTTLED:
+                return f"Throttled to {self.throttled_adc_high / 1e6} ~ {self.throttled_adc_low} MHz"
+            case ResultState.NO_HEAPS:
+                return "No heaps"
 
 
 class Benchmark(ABC):
@@ -296,41 +313,34 @@ class Benchmark(ABC):
 
     async def measure(self, adc_sample_rate: float) -> MeasureResult:
         """Perform a single trial.
-        Returns a :class:`Result` describing the outcome of the trial.
+        Returns a :class:`MeasureResult` describing the outcome of the trial.
         """
 
         if self.verbose_results():
             print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
 
-        state = TrialState.FAILED
+        state = ResultState.FAILED
 
-        throttled_results = []
+        throttled_results: list[Result] = []
         for _ in range(THROTTLE_RETRIES):
             result = await self.trial(adc_sample_rate)
-            if result.throttled():
+            if result.state == ResultState.NO_HEAPS:
                 throttled_results.append(result)
-            elif result.good():
-                state = TrialState.SUCCESS
-                break
-            elif not result.good() and not result.throttled():
-                state = TrialState.FAILED
+            else:
+                state = result.state
                 break
 
-        throttled_adc = 0
         if len(throttled_results) == THROTTLE_RETRIES:
-            state = TrialState.THROTTLED
-            percent_throttled = sum([result.heaps for result in throttled_results]) / sum(
-                [result.expected_heaps for result in throttled_results]
-            )
-            throttled_adc = int(adc_sample_rate * percent_throttled)
+            state = ResultState.THROTTLED
+            heap_recieved_high = max(throttled_results, key=lambda x: x.heaps).heaps
+            heap_recieved_low = min(throttled_results, key=lambda x: x.heaps).heaps
+            throttled_adc_high = int(adc_sample_rate * heap_recieved_high / throttled_results[0].expected_heaps)
+            throttled_adc_low = int(adc_sample_rate * heap_recieved_low / throttled_results[0].expected_heaps)
 
         if self.verbose_results():
             print(result.message(), file=sys.stderr)
-            if state == TrialState.THROTTLED:
-                print(f" Throttled to {throttled_adc / 1e6} MHz", file=sys.stderr)
-            print("\n", file=sys.stderr)
 
-        return MeasureResult(trail=result, throttled_adc=throttled_adc, state=state)
+        return MeasureResult(throttled_adc_high=throttled_adc_high, throttled_adc_low=throttled_adc_low, state=state)
 
     async def calibrate(self, low: float, high: float, step: float, repeat: int) -> str:
         """Run multiple trials on all the possible rates."""
@@ -342,29 +352,28 @@ class Benchmark(ABC):
                 if self.verbose_results():
                     print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
                 measurement = await self.measure(adc_sample_rate)
-                if measurement.state == TrialState.SUCCESS:
-                    successes[j] += 1
-                elif measurement.state == TrialState.THROTTLED:
-                    throttled[j] += 1
-                elif measurement.state == TrialState.FAILED:
-                    logger.error(f"No heaps received for {adc_sample_rate / 1e6} MHz")
-                    raise RuntimeError(f"No heaps received for {adc_sample_rate / 1e6} MHz result is inconclusive")
+                match measurement.state:
+                    case ResultState.SUCCESS:
+                        successes[j] += 1
+                    case ResultState.THROTTLED:
+                        throttled[j] += 1
+                    case ResultState.NO_HEAPS:
+                        logger.error(f"No heaps received for {adc_sample_rate / 1e6} MHz")
+                        raise RuntimeError(f"No heaps received for {adc_sample_rate / 1e6} MHz result is inconclusive")
         output = ""
         for success, adc_sample_rate, throttle in zip(successes, rates, throttled, strict=True):
             output += f"{adc_sample_rate} {success} {repeat} {throttle}\n"
         return output
 
     def _throttled_result(self, measurement: MeasureResult, comparisons: int, rates: np.ndarray) -> NoisySearchResult:
-        low = idx = (np.abs(rates - measurement.throttled_adc)).argmin() - 1
-        high = idx
-        if low < 0:
-            low = 0
+        low = (np.abs(rates - measurement.throttled_adc_low)).argmin()
+        high = (np.abs(rates - measurement.throttled_adc_high)).argmin()
 
         return NoisySearchResult(
             low=low,
             high=high,
             comparisons=comparisons,
-            confidence=100.0,
+            confidence=1.0,
         )
 
     async def _search(
@@ -381,20 +390,18 @@ class Benchmark(ABC):
 
         async def compare(adc_sample_rate: float, comparisons: int) -> bool | NoisySearchResult:
             measurement = await self.measure(adc_sample_rate)
-            if measurement.state == TrialState.THROTTLED:
-                if self.verbose_results():
-                    print(f"Throttled to {measurement.throttled_adc / 1e6} MHz", file=sys.stderr)
+            if measurement.state == ResultState.THROTTLED:
                 return self._throttled_result(measurement, comparisons, rates)
             else:
-                return measurement.state == TrialState.FAILED
+                return measurement.state != ResultState.SUCCESS
 
         low_result = await self.measure(rates[0])
-        if low_result.state != TrialState.SUCCESS:
+        if low_result.state != ResultState.SUCCESS:
             raise RuntimeError(f"failed on low: {low_result.message()}")
         high_result = await self.measure(rates[-1])
-        if high_result.state == TrialState.SUCCESS:
+        if high_result.state == ResultState.SUCCESS:
             raise RuntimeError(f"succeeded on high: {high_result.message()}")
-        if high_result.state == TrialState.THROTTLED:
+        if high_result.state == ResultState.THROTTLED:
             return self._throttled_result(high_result, max_comparisons, rates)
 
         mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals

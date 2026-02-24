@@ -169,21 +169,18 @@ a much smaller range around the critical rate, as this process is extremely
 slow.
 
 The output of this calibration process is a text file of space-separated
-values.  Previously-collected results are in the assorted calibration
-subdirectories, and new additions should go there too. After adding or updating
-one of these files, run :program:`./fit.py` and pass it the filename. It will
-print out the coefficients for a fitted logistic regression model. The key
-information is the ``np.log(rate)`` term, which can then be stored in the
-``slope`` variable in the corresponding `Benchmark` class. You can also pass
+values. Previously-collected results are in the:file:`fgpu_calibration` and
+:file:`xbgpu_calibration` subdirectories, and new additions should go there too.
+After adding or updating one of these files, run :program:`./fit.py` and pass it
+the filename. It will print out the coefficients for a fitted logistic regression
+model. The key information is the ``np.log(rate)`` term, which can then be stored
+in the ``slope`` variable in the corresponding `Benchmark` class. You can also pass
 :option:`!--plot` to :program:`./fit.py` to get a plot of the calibration
 results versus the fitted model (requires matplotlib).
 
-Calibration output data is stored in the :file:`fgpu_calibration` and
-:file:`xbgpu_calibration` subdirectories.
-
 Because the network speeds of the device is a larger factor for XBGPU, we need to
 increase array size to increase computation, but still keep the output rate within
-the network limits (since number of output baselines is proportional to the number
+the network limits (since the number of output baselines is proportional to the number
 of antennas), by increasing the number of total substreams.
 
 Execution parameters for the XBGPU calibration are:
