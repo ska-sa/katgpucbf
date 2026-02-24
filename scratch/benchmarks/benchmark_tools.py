@@ -132,7 +132,11 @@ def validate_common_benchmark_arguments(args: argparse.Namespace, parser: argpar
     if args.interval < args.step and args.calibrate is None and args.oneshot is None:
         parser.error("--interval must be greater than or equal to --step")
     if (args.high - args.low) / args.step > MAXIMUM_RANGES:
-        parser.error(f"range is too large: {(args.high - args.low) / args.step} > {MAXIMUM_RANGES}")
+        parser.error(
+            f"range is too large: total steps:{(args.high - args.low) / args.step}"
+            + f"maximum total steps: {MAXIMUM_RANGES}, reduce number of steps by increasing --step"
+            + "or decrease the range by adjusting --low and --high."
+        )
 
 
 class ResultState(Enum):
@@ -158,7 +162,7 @@ class Result:
             return ResultState.SUCCESS
         elif self.throttled():
             return ResultState.THROTTLED
-        elif self.missing_heaps == 0:
+        elif self.heaps == 0:
             return ResultState.NO_HEAPS
         else:
             return ResultState.FAILED
@@ -210,7 +214,7 @@ class MeasureResult:
             case ResultState.FAILED:
                 return "Missing heaps"
             case ResultState.THROTTLED:
-                return f"Throttled to {self.throttled_adc_high / 1e6} ~ {self.throttled_adc_low} MHz"
+                return f"Throttled to {self.throttled_adc_high / 1e6} ~ {self.throttled_adc_low / 1e6} MHz"
             case ResultState.NO_HEAPS:
                 return "No heaps"
 
@@ -324,12 +328,14 @@ class Benchmark(ABC):
         throttled_results: list[Result] = []
         for _ in range(THROTTLE_RETRIES):
             result = await self.trial(adc_sample_rate)
-            if result.state == ResultState.NO_HEAPS:
+            if result.state == ResultState.THROTTLED:
                 throttled_results.append(result)
             else:
                 state = result.state
                 break
 
+        throttled_adc_high = 0
+        throttled_adc_low = 0
         if len(throttled_results) == THROTTLE_RETRIES:
             state = ResultState.THROTTLED
             heap_recieved_high = max(throttled_results, key=lambda x: x.heaps).heaps
