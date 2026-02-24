@@ -201,8 +201,8 @@ class Result:
 class MeasureResult:
     """Result of a single measurement."""
 
-    throttled_adc_high: int
-    throttled_adc_low: int
+    throttled_adc_high: float
+    throttled_adc_low: float
     state: ResultState
 
     def message(self) -> str:
@@ -332,14 +332,14 @@ class Benchmark(ABC):
                 state = result.state
                 break
 
-        throttled_adc_high = 0
-        throttled_adc_low = 0
+        throttled_adc_high = 0.0
+        throttled_adc_low = 0.0
         if len(throttled_results) == THROTTLE_RETRIES:
             state = ResultState.THROTTLED
             heap_recieved_high = max(throttled_results, key=lambda x: x.heaps).heaps
             heap_recieved_low = min(throttled_results, key=lambda x: x.heaps).heaps
-            throttled_adc_high = int(adc_sample_rate * heap_recieved_high / throttled_results[0].expected_heaps)
-            throttled_adc_low = int(adc_sample_rate * heap_recieved_low / throttled_results[0].expected_heaps)
+            throttled_adc_high = adc_sample_rate * heap_recieved_high / throttled_results[0].expected_heaps
+            throttled_adc_low = adc_sample_rate * heap_recieved_low / throttled_results[0].expected_heaps
 
         if self.verbose_results():
             print(result.message(), file=sys.stderr)
@@ -374,8 +374,8 @@ class Benchmark(ABC):
         return output
 
     def _throttled_result(self, measurement: MeasureResult, comparisons: int, rates: np.ndarray) -> NoisySearchResult:
-        low = (np.abs(rates - measurement.throttled_adc_low)).argmin()
-        high = (np.abs(rates - measurement.throttled_adc_high)).argmin()
+        low = int((np.abs(rates - measurement.throttled_adc_low)).argmin())
+        high = int((np.abs(rates - measurement.throttled_adc_high)).argmin())
 
         return NoisySearchResult(
             low=low,
