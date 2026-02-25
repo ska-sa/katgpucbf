@@ -99,10 +99,14 @@ class RecvStream:
                 data = cp.asarray(chunk.data, blocking=False)
                 await katcbf_vlbi_resample.utils.stream_future(None)
                 # There are two time axes. Transpose to place them together, then flatten
-                # over them.
-                # (N_POLS, layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX),
+                # over them. The current shape is
+                # (N_POLS, n_batches_per_chunk, channels, n_spectra_per_heap, COMPLEX)
                 data = data.transpose(0, 1, 3, 2, 4)
+                # Now it is
+                # (N_POLS, n_batches_per_chunk, n_spectra_per_heap, channels, COMPLEX)
                 data = data.reshape(N_POLS, -1, self.channels, COMPLEX)
+                # Now it is
+                # (N_POLS, n_spectra_per_chunk, channels, COMPLEX)
                 # Convert Gaussian integers to complex
                 data = cp.ascontiguousarray(data.astype(np.float32)).view(np.complex64)[..., 0]
                 arr = xr.DataArray(
@@ -255,7 +259,7 @@ class _CaptureSession:
         self._recv_group = recv_group
         self._sensors = engine.sensors
         self._min_timestamp = min_timestamp
-        self._capture_task = asyncio.create_task(self._capture(), name="capture")
+        self._capture_task = asyncio.create_task(self._capture(), name="Capture Loop")
         engine.add_service_task(self._capture_task, wait_on_stop=True)
 
     def _process_frameset(self, frameset: baseband.vdif.VDIFFrameSet) -> None:
