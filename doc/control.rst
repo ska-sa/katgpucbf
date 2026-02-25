@@ -271,7 +271,7 @@ vgpu
     transmission is disabled.
 
     If :samp:`{timestamp}` is specified, input heaps with timestamps
-    less than this value will be discarded.
+    less than this ADC timestamp will be discarded.
 
 :samp:`?vlbi-delay {delay}`
     This has the same semantics as the equivalent katsdpcontroller request.
