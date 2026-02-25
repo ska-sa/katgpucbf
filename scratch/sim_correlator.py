@@ -38,6 +38,13 @@ import katgpucbf.configure_tools
 from katgpucbf.main import comma_split
 from katgpucbf.meerkat import BANDS
 
+#: Stream types for which ``?capture-start`` is valid
+CAPTURE_START_TYPES = {
+    "gpucbf.baseline_correlation_products",
+    "gpucbf.tied_array_channelised_voltage",
+    "gpucbf.tied_array_resampled_voltage",
+}
+
 
 def parse_input_labels(value: str) -> list[str]:
     return value.split(",")
@@ -307,7 +314,7 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
 
         product_client = await aiokatcp.Client.connect(product_host, product_port)
         for output_name, output in config["outputs"].items():
-            if output["type"] in {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}:
+            if output["type"] in CAPTURE_START_TYPES:
                 print(f"Enabling {output_name} transmission...")
                 await product_client.request("capture-start", output_name)
     except (aiokatcp.FailReply, ConnectionError) as exc:
