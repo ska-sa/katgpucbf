@@ -59,7 +59,7 @@ class DummyFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
 
 # Allow docs to be built even if pycuda or CUDA are not installed
-sys.meta_path.insert(0, DummyFinder(["katsdpsigproc.cuda", "cupy", "cupyx"]))
+sys.meta_path.insert(0, DummyFinder(["katsdpsigproc.cuda", "cupy", "cupyx", "vkgdr"]))
 sys.path.insert(0, os.path.abspath("."))
 
 # -- Project information -----------------------------------------------------
