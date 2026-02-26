@@ -169,7 +169,7 @@ a much smaller range around the critical rate, as this process is extremely
 slow.
 
 The output of this calibration process is a text file of space-separated
-values. Previously-collected results are in the:file:`fgpu_calibration` and
+values. Previously-collected results are in the :file:`fgpu_calibration` and
 :file:`xbgpu_calibration` subdirectories, and new additions should go there too.
 After adding or updating one of these files, run :program:`./fit.py` and pass it
 the filename. It will print out the coefficients for a fitted logistic regression
