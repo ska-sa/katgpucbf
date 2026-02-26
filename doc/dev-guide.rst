@@ -68,8 +68,7 @@ to monitor Python development.
 
 - ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
   be run before committing to the repo.
-- ``pyproject.toml`` dictates the configuration of utilities such as
-  `ruff`_.
+- ``pyproject.toml`` dictates the configuration of utilities such as `ruff`_.
 - ``mypy.ini`` file for :external+mypy:doc:`mypy <getting_started>`, a static type checker
   (or lint-like tool) for type annotations in the Python code - according to
   :pep:`484` and :pep:`526` notation.
