@@ -129,11 +129,12 @@ def validate_common_benchmark_arguments(args: argparse.Namespace, parser: argpar
         parser.error("Cannot specify both --calibrate and --oneshot")
     if args.interval < args.step and args.calibrate is None and args.oneshot is None:
         parser.error("--interval must be greater than or equal to --step")
-    if (args.high - args.low) / args.step > MAXIMUM_RANGES:
+    total_steps = int(((args.high + 0.01 * args.step) - args.low) / args.step)
+    if total_steps > MAXIMUM_RANGES:
         parser.error(
-            f"range is too large: total steps:{(args.high - args.low) / args.step}"
-            + f"maximum total steps: {MAXIMUM_RANGES}, reduce number of steps by increasing --step"
-            + "or decrease the range by adjusting --low and --high."
+            f"range is too large: total steps:{int(total_steps)}"
+            + f" maximum total steps: {MAXIMUM_RANGES}, reduce number of steps by increasing --step"
+            + " or decrease the range by adjusting --low and --high."
         )
 
 
@@ -212,7 +213,7 @@ class MeasureResult:
             case ResultState.FAILED:
                 return "Missing heaps"
             case ResultState.THROTTLED:
-                return f"Throttled to {self.throttled_adc_high / 1e6} ~ {self.throttled_adc_low / 1e6} MHz"
+                return f"Throttled to {self.throttled_adc_low / 1e6} ~ {self.throttled_adc_high / 1e6} MHz"
             case ResultState.NO_HEAPS:
                 return "No heaps"
 
@@ -336,10 +337,10 @@ class Benchmark(ABC):
         throttled_adc_low = 0.0
         if len(throttled_results) == THROTTLE_RETRIES:
             state = ResultState.THROTTLED
-            heap_recieved_high = max(throttled_results, key=lambda x: x.heaps).heaps
-            heap_recieved_low = min(throttled_results, key=lambda x: x.heaps).heaps
-            throttled_adc_high = adc_sample_rate * heap_recieved_high / throttled_results[0].expected_heaps
-            throttled_adc_low = adc_sample_rate * heap_recieved_low / throttled_results[0].expected_heaps
+            heap_received_high = max(throttled_results, key=lambda x: x.heaps).heaps
+            heap_received_low = min(throttled_results, key=lambda x: x.heaps).heaps
+            throttled_adc_high = adc_sample_rate * heap_received_high / throttled_results[0].expected_heaps
+            throttled_adc_low = adc_sample_rate * heap_received_low / throttled_results[0].expected_heaps
 
         if self.verbose_results():
             print(result.message(), file=sys.stderr)
