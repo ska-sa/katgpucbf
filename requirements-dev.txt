@@ -34,6 +34,7 @@ appdirs==1.4.4
 astropy==7.2.0
     # via
     #   -c requirements.txt
+    #   katgpucbf (pyproject.toml)
     #   baseband
     #   katcbf-vlbi-resample
 astropy-iers-data==0.2026.1.12.0.42.13
@@ -145,7 +146,7 @@ jinja2==3.1.6
     #   -c requirements.txt
     #   aiomonitor
     #   sphinx
-katcbf-vlbi-resample==0.3
+katcbf-vlbi-resample==0.4
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)

@@ -23,6 +23,7 @@ import re
 from collections.abc import MutableMapping, Sequence
 
 import aiokatcp
+import katcbf_vlbi_resample.polarisation
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import DEFAULT_JONES_PER_BATCH
@@ -36,7 +37,7 @@ from ..main import (
     parse_source_ipv4,
 )
 from ..monitor import FileMonitor, Monitor, NullMonitor
-from .engine import VEngine
+from .engine import CaptureConfig, RecvConfig, SendConfig, VEngine
 
 VTP_DEFAULT_PORT = 52030
 _ARGUMENT_PARSER = argparse.ArgumentParser  # Modified by unit tests
@@ -71,7 +72,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Timestamp increment between spectra",
     )
     parser.add_argument(
-        "--recv-batches-per-chunk", type=int, metavar="BATCHES", default=32, help="Number of batches per input chunk"
+        "--recv-batches-per-chunk", type=int, metavar="BATCHES", default=8, help="Number of batches per input chunk"
     )
     parser.add_argument(
         "--recv-sample-bits",
@@ -81,7 +82,11 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         choices=[8],
         help="Number of bits in each real sample [%(default)s]",
     )
-    parser.add_argument("--recv-bandwidth", type=float, metavar="HZ", required=True, help="Input bandwidth")
+    # TODO: remove this redundant parameter once katsdpcontroller no longer passes it
+    # (NGC-1862).
+    parser.add_argument(
+        "--recv-bandwidth", dest="do_not_use", type=float, metavar="HZ", help="Input bandwidth (deprecated)"
+    )
     parser.add_argument(
         "--recv-pols",
         type=comma_split(str, 2),
@@ -147,12 +152,17 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         )
     for pol in args.recv_pols:
         if not re.fullmatch(r"^[-+]?[xyLR]", pol):
-            parser.error(f"{pol!r} is not a valid --recv-pol value")
+            parser.error(f"{pol!r} is not a valid --recv-pols value")
     if set(pol[-1] for pol in args.recv_pols) not in [{"x", "y"}, {"L", "R"}]:
-        parser.error("--recv-pol is not an orthogonal polarisation basis")
+        parser.error(f"argument: --recv-pols: polarisations {','.join(args.recv_pols)} do not form an orthogonal basis")
     for pol in args.send_pols:
         if pol not in ["x", "y", "L", "R"]:
-            parser.error(f"{pol!r} is not a valid --send-pol value")
+            parser.error(f"{pol!r} is not a valid --send-pols value")
+    try:
+        # Return value is discarded; called just for error checking
+        katcbf_vlbi_resample.polarisation.to_linear(args.send_pols)
+    except ValueError as exc:
+        parser.error(f"argument --send-pols: {exc}")
     return args
 
 
@@ -164,9 +174,7 @@ def make_engine(args: argparse.Namespace) -> VEngine:
     else:
         monitor = NullMonitor()
 
-    return VEngine(
-        katcp_host=args.katcp_host,
-        katcp_port=args.katcp_port,
+    recv_config = RecvConfig(
         sync_time=args.sync_time,
         adc_sample_rate=args.adc_sample_rate,
         n_channels=args.recv_channels,
@@ -176,14 +184,33 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         n_batches_per_chunk=args.recv_batches_per_chunk,
         sample_bits=args.recv_sample_bits,
         srcs=args.src,
-        recv_interface=args.recv_interface,
-        recv_ibv=args.recv_ibv,
-        recv_affinity=args.recv_affinity,
-        recv_comp_vector=args.recv_comp_vector,
-        recv_buffer=args.recv_buffer,
-        recv_pols=tuple(args.recv_pols),
-        send_pols=tuple(args.send_pols),
+        interface=args.recv_interface,
+        ibv=args.recv_ibv,
+        affinity=args.recv_affinity,
+        comp_vector=args.recv_comp_vector,
+        buffer=args.recv_buffer,
+        pols=tuple(args.recv_pols),
+    )
+    send_config = SendConfig(
+        pols=tuple(args.send_pols),
+        bandwidth=args.send_bandwidth,
+        n_samples_per_frame=args.send_samples_per_frame,
+        station=args.send_station,
+    )
+    config = CaptureConfig(
+        recv_config=recv_config,
+        send_config=send_config,
+        fir_taps=args.fir_taps,
+        hilbert_taps=args.hilbert_taps,
+        passband=args.passband,
+        threshold=args.threshold,
         power_int_time=args.power_int_time,
+    )
+
+    return VEngine(
+        katcp_host=args.katcp_host,
+        katcp_port=args.katcp_port,
+        config=config,
         monitor=monitor,
     )
 
