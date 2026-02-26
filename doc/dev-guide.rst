@@ -68,13 +68,11 @@ to monitor Python development.
 
 - ``.pre-commit-config.yaml`` for `pre-commit`_ specifies which git hooks will
   be run before committing to the repo.
-- ``pyproject.toml`` dictates the configuration of utilities such as
-  :external+black:doc:`black <getting_started>`, `isort`_ and `ruff`_.
+- ``pyproject.toml`` dictates the configuration of utilities such as `ruff`_.
 - ``mypy.ini`` file for :external+mypy:doc:`mypy <getting_started>`, a static type checker
   (or lint-like tool) for type annotations in the Python code - according to
   :pep:`484` and :pep:`526` notation.
 
-.. _isort: https://pycqa.github.io/isort/
 .. _ruff: https://docs.astral.sh/ruff/
 
 Pre-commit compliance
@@ -91,13 +89,13 @@ on the work at hand - rather than maintaining code readability and appearance.
 Installation Prerequisites
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Although :external+black:doc:`black <getting_started>`, `ruff`_,
-and :external+mypy:doc:`mypy <getting_started>`
-are used, the only prerequisite is the **pre-commit**  Python library. That is,
-the YAML configuration file is set up so that when the pre-commit hooks are
-installed, all dependencies are automatically installed. (Note, they won't be
-available to you in your Python environment; they will be used only by pre-commit.
-If you want to use them separately, you will need to install them separately with pip.)
+Although `ruff`_ and :external+mypy:doc:`mypy <getting_started>` are used, the
+only prerequisite is the **pre-commit**  Python library. That is, the YAML
+configuration file is set up so that when the pre-commit hooks are installed,
+all dependencies are automatically installed. (Note, they won't be available
+to you in your Python environment; they will be used only by pre-commit. If
+you want to use them separately, you will need to install them separately with
+pip.)
 
 Light-weight installation
 -------------------------
@@ -143,25 +141,6 @@ The package contains the following boiler-plate files:
 
 Making a contribution
 ---------------------
-
-Module documentation updates
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-:mod:`katgpucbf` holds documentation within its code-base.
-:external+sphinx-apidoc:doc:`sphinx-apidoc <index>` provides a manner to generate
-module documentation as reStructuredText. If you, the developer, add or remove
-a module or file, execute the full ``sphinx-apidoc`` command below to regenerate
-the module documentation with your updates. The incantation below is run from the
-root :mod:`katgpucbf` directory.
-
-.. code-block:: bash
-
-  sphinx-apidoc -efo doc/ src/
-
-.. note::
-
-    The above command will likely generate a :file:`modules.rst` file, which is
-    not necessary to commit.
 
 Raising the Pull Request
 ^^^^^^^^^^^^^^^^^^^^^^^^

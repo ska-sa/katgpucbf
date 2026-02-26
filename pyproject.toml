@@ -50,11 +50,14 @@ gpu = [
 ]
 
 doc = [
+    "matplotlib",
     "sphinx<9",  # Until https://github.com/sphinx-doc/sphinx/issues/14223 is fixed
     "sphinx-rtd-theme",
     "sphinxcontrib-bibtex",
     "sphinxcontrib-tikz",
     "sphinx-mathjax-offline",
+    "pytest",
+    "pytest-check>=1.3,<2.2.3",  # Upper bound due to https://github.com/okken/pytest-check/issues/173
 ]
 
 test = [
