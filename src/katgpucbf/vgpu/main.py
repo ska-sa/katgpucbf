@@ -82,11 +82,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         choices=[8],
         help="Number of bits in each real sample [%(default)s]",
     )
-    # TODO: remove this redundant parameter once katsdpcontroller no longer passes it
-    # (NGC-1862).
-    parser.add_argument(
-        "--recv-bandwidth", dest="do_not_use", type=float, metavar="HZ", help="Input bandwidth (deprecated)"
-    )
     parser.add_argument(
         "--recv-pols",
         type=comma_split(str, 2),
