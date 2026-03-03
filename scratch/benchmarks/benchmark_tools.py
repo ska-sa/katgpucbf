@@ -25,6 +25,7 @@ from abc import ABC, abstractmethod
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from enum import Enum
+from typing import override
 
 import aiohttp.client
 import numpy as np
@@ -44,7 +45,7 @@ TOLERANCE = 0.001  #: Complement of confidence interval probability
 VERBOSE_RESULTS = 1
 #: Starting port for Prometheus metrics
 PROMETHEUS_PORT_BASE = 7250
-THROTTLE_RETRIES = 3  #: Maximum number of times to retry a throttled trial
+UNSTABLE_RETRIES = 3  #: Maximum number of times to retry a throttled trial
 MAXIMUM_RANGES = 2**20
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def validate_common_benchmark_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+def process_common_benchmark_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     """Validate common command-line arguments shared by benchmark_fgpu and benchmark_xbgpu.
 
     Parameters
@@ -125,6 +126,8 @@ def validate_common_benchmark_arguments(args: argparse.Namespace, parser: argpar
     args
         Argument parser to validate arguments from.
     """
+    if not args.narrowband:
+        args.narrowband_decimation = 1  # Simplifies later logic
     if args.calibrate and args.oneshot is not None:
         parser.error("Cannot specify both --calibrate and --oneshot")
     if args.interval < args.step and args.calibrate is None and args.oneshot is None:
@@ -141,14 +144,16 @@ def validate_common_benchmark_arguments(args: argparse.Namespace, parser: argpar
 class ResultState(Enum):
     """State of a benchmark trial."""
 
-    SUCCESS = "success"
+    WITHIN_EXPECTATIONS = "within expectations"
     THROTTLED = "throttled"
-    FAILED = "failed"
+    UNDER_EXPECTATIONS = "under expectations"
     NO_HEAPS = "no heaps"
+    OVER_EXPECTATIONS = "over expectations"
+    UNKNOWN = "unknown"
 
 
 @dataclass
-class Result:
+class TrialResult:
     """Result of a single trial."""
 
     expected_heaps: float  #: Number of heaps expected, based on runtime and data rate
@@ -157,16 +162,18 @@ class Result:
 
     @property
     def state(self) -> ResultState:
-        if self.good():
-            return ResultState.SUCCESS
-        elif self.throttled():
+        if self._good():
+            return ResultState.WITHIN_EXPECTATIONS
+        elif self._throttled():
             return ResultState.THROTTLED
         elif self.heaps == 0:
             return ResultState.NO_HEAPS
+        elif self._over_expectations():
+            return ResultState.OVER_EXPECTATIONS
         else:
-            return ResultState.FAILED
+            return ResultState.UNDER_EXPECTATIONS
 
-    def good(self) -> bool:
+    def _good(self) -> bool:
         """Whether the trial was a success (kept up with the rate).
 
         If this is false, it does not mean that heaps were lost. If
@@ -178,7 +185,11 @@ class Result:
             return False
         return (1.0 - HEAPS_TOL) * self.expected_heaps <= self.heaps <= (1.0 + HEAPS_TOL) * self.expected_heaps
 
-    def throttled(self) -> bool:
+    def _over_expectations(self) -> bool:
+        """Whether the trial had more than the expected number of heaps counted outside allowed tolerance."""
+        return self.heaps > (1.0 + HEAPS_TOL) * self.expected_heaps
+
+    def _throttled(self) -> bool:
         """Whether the trial was throttled (kept up with the rate, but not at the correct data rate).
 
         This typically happens when the rate is too high for the network devices to keep up with.
@@ -188,34 +199,71 @@ class Result:
     def message(self) -> str:
         """Human-readable description of the outcome."""
         match self.state:
-            case ResultState.SUCCESS:
+            case ResultState.WITHIN_EXPECTATIONS:
                 return "Good"
-            case ResultState.FAILED:
+            case ResultState.UNDER_EXPECTATIONS:
                 return f"Missing {self.missing_heaps} heaps"
             case ResultState.THROTTLED:
-                return f"Throttled {self.heaps / self.expected_heaps * 100:.1f}%"
+                return f"Throttled to {self.heaps / self.expected_heaps * 100:.1f}% of requested rate"
+            case ResultState.OVER_EXPECTATIONS:
+                return f"There were {self.heaps - self.expected_heaps} more heaps than expected"
             case ResultState.NO_HEAPS:
                 return "No heaps"
+            case ResultState.UNKNOWN:
+                return "Unknown"
 
 
 @dataclass
-class MeasureResult:
+class MeasuredResult:
     """Result of a single measurement."""
 
-    throttled_adc_high: float
-    throttled_adc_low: float
     state: ResultState
 
     def message(self) -> str:
         match self.state:
-            case ResultState.SUCCESS:
-                return "Good"
-            case ResultState.FAILED:
-                return "Missing heaps"
-            case ResultState.THROTTLED:
-                return f"Throttled to {self.throttled_adc_low / 1e6} ~ {self.throttled_adc_high / 1e6} MHz"
-            case ResultState.NO_HEAPS:
-                return "No heaps"
+            case _:
+                return self.state.value
+
+
+@dataclass
+class ThrottledResult(MeasuredResult):
+    """Result of a throttled trial."""
+
+    def __init__(self, trials: list[TrialResult], adc_sample_rate: float):
+        heap_received_high = max(trials, key=lambda x: x.heaps).heaps
+        heap_received_low = min(trials, key=lambda x: x.heaps).heaps
+        self.throttled_adc_high = adc_sample_rate * heap_received_high / trials[0].expected_heaps
+        self.throttled_adc_low = adc_sample_rate * heap_received_low / trials[0].expected_heaps
+        super().__init__(ResultState.THROTTLED)
+
+    @override
+    def message(self) -> str:
+        return f"Throttled to {self.throttled_adc_low / 1e6} ~ {self.throttled_adc_high / 1e6} MHz"
+
+
+@dataclass
+class OverExpectationsResult(MeasuredResult):
+    """Result of a over expectations trial."""
+
+    def __init__(self, trials: list[TrialResult]):
+        self.heaps_median = np.median([trial.heaps for trial in trials])
+        self.heaps_tolerated = trials[0].expected_heaps * (1.0 + HEAPS_TOL)
+        super().__init__(ResultState.OVER_EXPECTATIONS)
+
+    @override
+    def message(self) -> str:
+        return f"Recieved heaps {self.heaps_median} are over expected tolerable number of heaps: {self.heaps_tolerated}"
+
+
+def _find_measured_result(state: ResultState, trials: list[TrialResult], adc_sample_rate: float) -> MeasuredResult:
+    if len(trials) == 0:
+        return MeasuredResult(state)
+    if all(trial.state == ResultState.THROTTLED for trial in trials):
+        return ThrottledResult(trials, adc_sample_rate)
+    elif all(trial.state == ResultState.OVER_EXPECTATIONS for trial in trials):
+        return OverExpectationsResult(trials)
+    else:
+        return MeasuredResult(state=ResultState.UNKNOWN)
 
 
 class Benchmark(ABC):
@@ -246,6 +294,9 @@ class Benchmark(ABC):
         self.expected_heaps_scale = expected_heaps_scale
         self.metric_prefix = metric_prefix
         self.slope = slope
+        logging.basicConfig(
+            level=logging.DEBUG if args.verbose >= 3 else logging.INFO if args.verbose >= 2 else logging.WARNING
+        )
 
     def verbose_results(self) -> bool:
         return self.args.verbose >= VERBOSE_RESULTS
@@ -284,7 +335,7 @@ class Benchmark(ABC):
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
         pass
 
-    async def process(self, adc_sample_rate: float) -> Result:
+    async def process(self, adc_sample_rate: float) -> TrialResult:
         """Perform a single trial on running engines."""
         async with aiohttp.client.ClientSession() as session:
             await asyncio.sleep(self.args.startup_time)  # Give a chance for startup losses
@@ -300,13 +351,13 @@ class Benchmark(ABC):
             new_heaps, new_missing = await self.heap_counts(session)
 
         expected_heaps = self.args.runtime * self.args.n * adc_sample_rate * self.expected_heaps_scale
-        return Result(
+        return TrialResult(
             expected_heaps=expected_heaps,
             heaps=new_heaps - orig_heaps,
             missing_heaps=new_missing - orig_missing,
         )
 
-    async def trial(self, adc_sample_rate: float) -> Result:
+    async def trial(self, adc_sample_rate: float) -> TrialResult:
         """Perform a single trial."""
 
         sync_time = int(time.time())
@@ -314,7 +365,7 @@ class Benchmark(ABC):
             async with await self.run_consumers(adc_sample_rate, sync_time):
                 return await self.process(adc_sample_rate)
 
-    async def measure(self, adc_sample_rate: float) -> MeasureResult:
+    async def measure(self, adc_sample_rate: float) -> MeasuredResult:
         """Perform a single trial.
         Returns a :class:`MeasureResult` describing the outcome of the trial.
         """
@@ -322,30 +373,22 @@ class Benchmark(ABC):
         if self.verbose_results():
             print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
 
-        state = ResultState.FAILED
-
-        throttled_results: list[Result] = []
-        for _ in range(THROTTLE_RETRIES):
+        state = ResultState.UNKNOWN
+        results: list[TrialResult] = []
+        for _ in range(UNSTABLE_RETRIES):
             result = await self.trial(adc_sample_rate)
-            if result.state == ResultState.THROTTLED:
-                throttled_results.append(result)
+            if result.state == ResultState.THROTTLED or result.state == ResultState.OVER_EXPECTATIONS:
+                results.append(result)
             else:
                 state = result.state
                 break
 
-        throttled_adc_high = 0.0
-        throttled_adc_low = 0.0
-        if len(throttled_results) == THROTTLE_RETRIES:
-            state = ResultState.THROTTLED
-            heap_received_high = max(throttled_results, key=lambda x: x.heaps).heaps
-            heap_received_low = min(throttled_results, key=lambda x: x.heaps).heaps
-            throttled_adc_high = adc_sample_rate * heap_received_high / throttled_results[0].expected_heaps
-            throttled_adc_low = adc_sample_rate * heap_received_low / throttled_results[0].expected_heaps
+        measured_result = _find_measured_result(state, results, adc_sample_rate)
 
         if self.verbose_results():
-            print(result.message(), file=sys.stderr)
+            print(measured_result.message(), file=sys.stderr)
 
-        return MeasureResult(throttled_adc_high=throttled_adc_high, throttled_adc_low=throttled_adc_low, state=state)
+        return measured_result
 
     async def calibrate(self, low: float, high: float, step: float, repeat: int) -> str:
         """Run multiple trials on all the possible rates."""
@@ -358,13 +401,14 @@ class Benchmark(ABC):
                     print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
                 measurement = await self.measure(adc_sample_rate)
                 match measurement.state:
-                    case ResultState.SUCCESS:
+                    case ResultState.WITHIN_EXPECTATIONS:
                         successes[j] += 1
                     case ResultState.THROTTLED:
                         throttled[j] += 1
-                    case ResultState.NO_HEAPS:
-                        logger.error(f"No heaps received for {adc_sample_rate / 1e6} MHz")
-                        raise RuntimeError(f"No heaps received for {adc_sample_rate / 1e6} MHz result is inconclusive")
+                    case ResultState.UNDER_EXPECTATIONS:
+                        pass
+                    case _:
+                        raise RuntimeError("Measurement failed: " + measurement.message())
                 if self.verbose_results():
                     print(
                         f"{measurement.message()}, {successes[j]}/{trial + 1} passed, {throttled[j]} throttled\n",
@@ -374,7 +418,7 @@ class Benchmark(ABC):
             output += f"{adc_sample_rate} {success} {repeat} {throttle}\n"
         return output
 
-    def _throttled_result(self, measurement: MeasureResult, comparisons: int, rates: np.ndarray) -> NoisySearchResult:
+    def _throttled_result(self, measurement: ThrottledResult, comparisons: int, rates: np.ndarray) -> NoisySearchResult:
         low = int((np.abs(rates - measurement.throttled_adc_low)).argmin())
         high = int((np.abs(rates - measurement.throttled_adc_high)).argmin())
 
@@ -399,18 +443,22 @@ class Benchmark(ABC):
 
         async def compare(adc_sample_rate: float, comparisons: int) -> bool | NoisySearchResult:
             measurement = await self.measure(adc_sample_rate)
-            if measurement.state == ResultState.THROTTLED:
+            if isinstance(measurement, ThrottledResult):
                 return self._throttled_result(measurement, comparisons, rates)
+            if measurement.state == ResultState.WITHIN_EXPECTATIONS:
+                return False
+            if measurement.state == ResultState.UNDER_EXPECTATIONS:
+                return True
             else:
-                return measurement.state != ResultState.SUCCESS
+                raise RuntimeError("Measurement failed: " + measurement.message())
 
         low_result = await self.measure(rates[0])
-        if low_result.state != ResultState.SUCCESS:
+        if low_result.state != ResultState.WITHIN_EXPECTATIONS:
             raise RuntimeError(f"failed on low: {low_result.message()}")
         high_result = await self.measure(rates[-1])
-        if high_result.state == ResultState.SUCCESS:
+        if high_result.state == ResultState.WITHIN_EXPECTATIONS:
             raise RuntimeError(f"succeeded on high: {high_result.message()}")
-        if high_result.state == ResultState.THROTTLED:
+        if isinstance(high_result, ThrottledResult):
             return self._throttled_result(high_result, max_comparisons, rates)
 
         mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
@@ -447,8 +495,6 @@ class Benchmark(ABC):
             return rates[result.low], rates[result.high + 1]
 
     async def run(self) -> None:
-        if not self.args.narrowband:
-            self.args.narrowband_decimation = 1  # Simplifies later logic
         if self.args.calibrate:
             result = await self.calibrate(self.args.low, self.args.high, self.args.step, self.args.calibrate_repeat)
         elif self.args.oneshot is not None:

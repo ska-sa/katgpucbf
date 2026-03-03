@@ -35,7 +35,7 @@ from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
     add_common_benchmark_arguments,
-    validate_common_benchmark_arguments,
+    process_common_benchmark_arguments,
 )
 from remote import InsufficientCoresError, Server, ServerInfo, run_tasks, servers_from_toml
 
@@ -297,7 +297,7 @@ async def main():
     parser.add_argument("extra", nargs="*", help="Remaining arguments are passed to fgpu")
     args = parser.parse_args()
 
-    validate_common_benchmark_arguments(args, parser)
+    process_common_benchmark_arguments(args, parser)
 
     await FgpuBenchmark(args).run()
 
