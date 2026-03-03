@@ -55,7 +55,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")
     parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
     parser.add_argument("--first-id", type=int, default=0, help="Digitiser ID for first stream [%(default)s]")
-    add_send_arguments(parser, prefix="")
+    add_send_arguments(parser, prefix="", rate_factor=False)
     parser.add_argument(
         "--main-affinity", type=int, default=-1, help="Core affinity for the main Python thread [not bound]"
     )

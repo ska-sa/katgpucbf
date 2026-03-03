@@ -68,9 +68,9 @@ def parse_dither(value: str) -> utils.DitherType:
     return parse_enum("dither", value, utils.DitherType)
 
 
-def parse_source_ipv4(value: str) -> list[tuple[str, int]]:
+def parse_source_ipv4(value: str, default_port=spead.DEFAULT_PORT) -> list[tuple[str, int]]:
     """Parse a string into a list of IPv4 endpoints."""
-    endpoints = endpoint_list_parser(spead.DEFAULT_PORT)(value)
+    endpoints = endpoint_list_parser(default_port)(value)
     for endpoint in endpoints:
         ipaddress.IPv4Address(endpoint.host)  # Raises if invalid syntax
     return [(ep.host, ep.port) for ep in endpoints]
@@ -265,7 +265,13 @@ def add_recv_arguments(parser: argparse.ArgumentParser, *, multi: bool = False) 
 
 
 def add_send_arguments(
-    parser: argparse.ArgumentParser, *, prefix: str = "send-", multi: bool = False, ibverbs: bool = True
+    parser: argparse.ArgumentParser,
+    *,
+    prefix: str = "send-",
+    multi: bool = False,
+    ibverbs: bool = True,
+    affinity: bool = True,
+    rate_factor: bool = True,
 ) -> None:
     """Add arguments for sending interface (optionally supporting ibverbs).
 
@@ -279,14 +285,19 @@ def add_send_arguments(
         If true, multiple interfaces are supported.
     ibverbs
         If true, ibverbs-related options will be added.
+    affinity
+        If true, a separate thread is used for sending, and the core affinity may be set.
+    rate_factor
+        If true, provide the ``--send-rate-factor`` command-line argument.
     """
-    parser.add_argument(
-        f"--{prefix}affinity",
-        type=int,
-        default=-1,
-        metavar="CORE",
-        help="Core for output-handling thread [not bound]",
-    )
+    if affinity:
+        parser.add_argument(
+            f"--{prefix}affinity",
+            type=int,
+            default=-1,
+            metavar="CORE",
+            help="Core for output-handling thread [not bound]",
+        )
     _multi_add_argument(
         multi,
         parser,
@@ -314,6 +325,15 @@ def add_send_arguments(
             default=0,
             metavar="VECTOR",
             help="Completion vector for transmission, or -1 for polling [%(default)s]",
+        )
+    if rate_factor:
+        parser.add_argument(
+            f"--{prefix}rate-factor",
+            type=float,
+            default=1.1,
+            metavar="FACTOR",
+            help="Target transmission rate faster than ADC sample rate by this factor. "
+            "Set to zero to send as fast as possible. [%(default)s]",
         )
 
 

@@ -46,7 +46,7 @@ from ..monitor import Monitor
 from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..utils import Engine, TimeConverter
-from . import N_SIDEBANDS, recv
+from . import N_SIDEBANDS, recv, send
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,12 @@ class SendConfig:
     pols: tuple[str, str]
     bandwidth: float
     n_samples_per_frame: int
+    send_rate_factor: float
     station: str
+    dsts: list[tuple[str, int]]
+    interfaces: list[str]
+    buffer: int
+    ttl: int
 
 
 @dataclass
@@ -222,7 +227,9 @@ class CaptureConfig:
 class _CaptureSession:
     """Manage the lifetime of actions between ``?capture-start`` and ``?capture-stop``."""
 
-    def __init__(self, config: CaptureConfig, engine: Engine, monitor: Monitor, min_timestamp: int) -> None:
+    def __init__(
+        self, config: CaptureConfig, engine: Engine, monitor: Monitor, min_timestamp: int, sender: send.VDIFSender
+    ) -> None:
         recv_chunks = 4  # TODO: may need tuning?
         data_ringbuffer = ChunkRingbuffer(recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=monitor)
         free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
@@ -259,6 +266,7 @@ class _CaptureSession:
         self._recv_group = recv_group
         self._sensors = engine.sensors
         self._min_timestamp = min_timestamp
+        self._sender = sender
         self._capture_task = asyncio.create_task(self._capture(), name="Capture Loop")
         engine.add_service_task(self._capture_task, wait_on_stop=True)
 
@@ -319,6 +327,9 @@ class _CaptureSession:
         )
         async for frameset in frameset_it:
             self._process_frameset(frameset)
+            # TODO: do we need to insert some buffering?
+            # TODO: catch and log exceptions instead of falling over?
+            await self._sender.send(frameset)
         self._capture_complete()
 
     async def stop(self) -> None:
@@ -355,6 +366,15 @@ class VEngine(Engine):
         )
         self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
         self._capture: _CaptureSession | None = None
+        print(send_config.bandwidth)
+        self._sender = send.VDIFSender(
+            send_config.dsts,
+            send_config.bandwidth,
+            send_config.bandwidth * send_config.send_rate_factor,
+            interfaces=send_config.interfaces,
+            ttl=send_config.ttl,
+            buffer=send_config.buffer,
+        )
 
     def _populate_sensors(
         self,
@@ -408,7 +428,7 @@ class VEngine(Engine):
         if self._capture is not None:
             raise aiokatcp.FailReply("a capture is already in progress")
         # TODO: use delay
-        self._capture = _CaptureSession(self.config, self, self.monitor, timestamp)
+        self._capture = _CaptureSession(self.config, self, self.monitor, timestamp, self._sender)
 
     async def _stop_capture(self) -> None:
         assert self._capture is not None

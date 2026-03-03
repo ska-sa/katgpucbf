@@ -19,12 +19,12 @@
 import argparse
 import asyncio
 import contextlib
+import functools
 import re
 from collections.abc import MutableMapping, Sequence
 
 import aiokatcp
 import katcbf_vlbi_resample.polarisation
-from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import DEFAULT_JONES_PER_BATCH
 from ..main import (
@@ -48,7 +48,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser = _ARGUMENT_PARSER(prog="vgpu")
     add_common_arguments(parser)
     add_recv_arguments(parser)
-    add_send_arguments(parser, ibverbs=False)
+    add_send_arguments(parser, ibverbs=False, multi=True, affinity=False)
     add_time_converter_arguments(parser)
     parser.add_argument("--recv-channels", type=int, metavar="CHANNELS", required=True, help="Number of input channels")
     parser.add_argument(
@@ -132,7 +132,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
     parser.add_argument("src", type=parse_source_ipv4, nargs=2, help="Source endpoints")
-    parser.add_argument("dst", type=endpoint_list_parser(VTP_DEFAULT_PORT), help="Destination endpoints")
+    parser.add_argument(
+        "dst", type=functools.partial(parse_source_ipv4, default_port=VTP_DEFAULT_PORT), help="Destination endpoints"
+    )
 
     args = parser.parse_args(arglist)
     if args.recv_channels % args.recv_channels_per_substream != 0:
@@ -191,6 +193,11 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         bandwidth=args.send_bandwidth,
         n_samples_per_frame=args.send_samples_per_frame,
         station=args.send_station,
+        send_rate_factor=args.send_rate_factor,
+        dsts=args.dst,
+        interfaces=args.send_interface,
+        buffer=args.send_buffer,
+        ttl=args.send_ttl,
     )
     config = CaptureConfig(
         recv_config=recv_config,

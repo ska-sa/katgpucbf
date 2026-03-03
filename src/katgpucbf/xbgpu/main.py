@@ -143,13 +143,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         type=float,
         help="Total bandwidth (Hz) of all channels (--channels) [computed assuming critically-sampled PFB].",
     )
-    parser.add_argument(
-        "--send-rate-factor",
-        type=float,
-        default=1.1,
-        help="Target transmission rate faster than ADC sample rate by this factor. "
-        "Set to zero to send as fast as possible. [%(default)s]",
-    )
     parser.add_argument("--array-size", type=int, required=True, help="Number of antennas in the array.")
     parser.add_argument(
         "--channels",

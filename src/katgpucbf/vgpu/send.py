@@ -18,8 +18,17 @@
 
 import asyncio
 import functools
+import io
+import ipaddress
+import logging
+import socket
+import struct
 from abc import ABC, abstractmethod
-from typing import Self, overload
+from typing import Self, overload, override
+
+from baseband.vdif import VDIFFrame, VDIFFrameSet
+
+logger = logging.getLogger(__name__)
 
 
 @functools.total_ordering
@@ -133,10 +142,12 @@ class RateLimiter[T](ABC):
     ----------
     rate
         Normal pace for acceptance, in units per second, where the units are
-        determined by :meth:`item_size`.
+        determined by :meth:`item_size`. It can also be zero to disable this
+        pacing.
     burst_rate
         Pace at which to catch up if falling behind (for example, because a
-        sleep took too long, or a garbage collection pause).
+        sleep took too long, or a garbage collection pause). It can also be
+        zero to disable this pacing.
     """
 
     def __init__(self, rate: float, burst_rate: float) -> None:
@@ -145,8 +156,8 @@ class RateLimiter[T](ABC):
         self._loop = asyncio.get_running_loop()
         self._next = PreciseTime(self._loop.time())
         self._next_burst = self._next
-        self._per_unit = PreciseTimeDelta(1 / rate)
-        self._per_unit_burst = PreciseTimeDelta(1 / burst_rate)
+        self._per_unit = PreciseTimeDelta(1 / rate if rate else 0.0)
+        self._per_unit_burst = PreciseTimeDelta(1 / burst_rate if burst_rate else 0.0)
         self._lock = asyncio.Lock()
 
     @abstractmethod
@@ -174,3 +185,96 @@ class RateLimiter[T](ABC):
             self._next += self._per_unit * size
             self._next_burst = max(self._next_burst, now) + self._per_unit_burst * size
             await self._process_item(item)
+
+
+class VDIFSender(RateLimiter[VDIFFrameSet]):
+    """Send VDIF frames at a limited rate to a set of multicast addresses.
+
+    The units for `rate` and `burst_rate` are samples per second.
+    """
+
+    def __init__(
+        self,
+        dsts: list[tuple[str, int]],
+        rate: float,
+        burst_rate: float,
+        *,
+        ttl: int,
+        buffer: int,
+        interfaces: list[str],
+    ) -> None:
+        super().__init__(rate, burst_rate)
+        # Create a socket per destination, distributing them
+        # over the interfaces.
+        if_addrs = [ipaddress.IPv4Address(address) for address in interfaces]
+        self._socks = []
+        self._sequence = 0
+        for i, dst in enumerate(dsts):
+            if not ipaddress.IPv4Address(dst[0]).is_multicast:
+                raise ValueError(f"Destination address {dst[0]} is not a multicast address")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+            if_addr = if_addrs[i % len(if_addrs)]
+            # struct ip_mreq contains an address and an interface address;
+            # IP_MULTICAST_IF only uses the latter.
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, b"\0\0\0\0" + if_addr.packed)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, buffer)
+            except OSError as exc:
+                logger.warning("Failed to set socket buffer size to %d: %s", buffer, exc)
+            actual_buffer = sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
+            if actual_buffer < buffer:
+                logger.warning("Requested socket buffer size %d but actual size is %d", buffer, actual_buffer)
+            sock.connect(dst)
+            self._socks.append(sock)
+        self._next_sock = 0
+
+    @override
+    def item_size(self, item: VDIFFrameSet) -> int:
+        return item.header0.samples_per_frame
+
+    @staticmethod
+    def _try_send(sock: socket.socket, buffers: list[bytes]) -> bool:
+        try:
+            sock.sendmsg(buffers, [], socket.MSG_DONTWAIT)
+            return True
+        except (BlockingIOError, InterruptedError):
+            return False
+
+    @staticmethod
+    def _write_callback(sock: socket.socket, buffers: list[bytes], future: asyncio.Future) -> None:
+        try:
+            if VDIFSender._try_send(sock, buffers):
+                _set_result(future)
+                # The finally in _process_item will also do this, but doing it
+                # now ensures that we don't get called back again before that
+                # happens.
+                asyncio.get_running_loop().remove_writer(sock.fileno())
+                buffers.clear()  # Makes doubly sure we can't send twice
+        except Exception as exc:
+            if not future.done():
+                future.set_exception(exc)
+
+    async def _send_frame(self, frame: VDIFFrame) -> None:
+        header_fh = io.BytesIO()
+        frame.header.tofile(header_fh)
+        buffers = [struct.pack(">Q", self._sequence), header_fh.getvalue(), frame.payload.words.tobytes()]
+        sock = self._socks[self._next_sock]
+        self._next_sock = (self._next_sock + 1) % len(self._socks)
+        self._sequence += 1
+        # Try to send immediately
+        if not self._try_send(sock, buffers):
+            # Fall back to doing it asynchronously via a callback when
+            # the socket is ready for writing.
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            try:
+                loop.add_writer(sock.fileno(), self._write_callback, sock, buffers, future)
+                await future
+            finally:
+                loop.remove_writer(sock.fileno())
+
+    @override
+    async def _process_item(self, item: VDIFFrameSet) -> None:
+        for frame in item.frames:
+            await self._send_frame(frame)

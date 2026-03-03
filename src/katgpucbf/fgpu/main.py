@@ -182,14 +182,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     )
     add_time_converter_arguments(parser)
     parser.add_argument(
-        "--send-rate-factor",
-        type=float,
-        default=1.1,
-        metavar="FACTOR",
-        help="Target transmission rate faster than ADC sample rate by this factor. \
-            Set to zero to send as fast as possible. [%(default)s]",
-    )
-    parser.add_argument(
         "--feng-id",
         type=int,
         default=0,
