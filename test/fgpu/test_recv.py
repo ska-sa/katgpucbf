@@ -303,9 +303,8 @@ class TestIterChunks:
         # Large timeout so that it doesn't affect the test
         return make_sensors(sensor_timeout=1e6, prefixes=[f"input{pol}." for pol in range(N_POLS)])
 
-    async def test(  # noqa: D102
-        self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter
-    ) -> None:
+    async def test(self, layout: Layout, sensors: aiokatcp.SensorSet, time_converter: TimeConverter) -> None:
+        """Test :func:`.iter_chunks`."""
         streams = [Mock() for _ in range(N_POLS)]
         # Fake up stream stats
         config = spead2.recv.StreamConfig()

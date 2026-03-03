@@ -24,9 +24,10 @@ import numpy as np
 import pytest
 from matplotlib.figure import Figure
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
-from ..reporter import Reporter
 
 
 # TODO (NGC-1266): use itertools.batched once Python 3.12 is required.

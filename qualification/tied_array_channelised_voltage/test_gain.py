@@ -21,10 +21,10 @@ import pytest
 from pytest_check import check
 
 from katgpucbf import DIG_SAMPLE_BITS
+from katgpucbf.pytest_plugins.reporter import Reporter
 
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
-from ..reporter import Reporter
 
 
 @pytest.mark.requirements("CBF-REQ-0117")

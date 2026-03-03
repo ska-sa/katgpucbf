@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2020-2025, National Research Foundation (SARAO)
+# Copyright (c) 2020-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -41,11 +41,14 @@ is given a dictionary mapping names to values, and returns true if that
 combination is a candidate.
 """
 
+import asyncio
 import itertools
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
 from typing import Any
 
+import aiokatcp
 import katsdpsigproc.cuda
 import pycuda.driver
 import pytest
@@ -54,9 +57,12 @@ import vkgdr
 from katsdpsigproc.abc import AbstractDevice
 
 from katgpucbf.mapped_array import make_vkgdr
-from katgpucbf.utils import TimeConverter
+from katgpucbf.utils import Engine, TimeConverter
 
-pytest_plugins = ["katsdpsigproc.pytest_plugin"]
+pytest_plugins = [
+    "katsdpsigproc.pytest_plugin",
+    "pytester",
+]
 
 
 def pytest_configure(config) -> None:
@@ -213,3 +219,54 @@ def vkgdr_handle(_vkgdr_handles: dict[pycuda.driver.Device, vkgdr.Vkgdr], device
         handle = make_vkgdr(device)
         _vkgdr_handles[pycuda_device] = handle
     return handle
+
+
+@pytest.fixture
+async def engine_client(engine: Engine) -> AsyncGenerator[aiokatcp.Client, None]:
+    """Create a KATCP client for communicating with the dummy server.
+
+    The `engine` fixture is not defined in at this level. It's
+    defined differently for each type of engine, in lower-level sub-packages.
+    """
+    host, port = engine.sockets[0].getsockname()[:2]
+    async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
+        client = await aiokatcp.Client.connect(host, port)
+    yield client
+    client.close()
+    await client.wait_closed()
+
+
+@pytest.fixture
+def n_recv_streams() -> int:
+    """Number of source streams for an Engine."""
+    return 1
+
+
+@pytest.fixture
+def mock_recv_streams(monkeypatch: pytest.MonkeyPatch, n_recv_streams: int) -> list[spead2.InprocQueue]:
+    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
+
+    Returns
+    -------
+    queues
+        A list of in-process queue to use for sending data. The number of queues
+        in the list is determined by :func:`n_recv_streams`.
+    """
+    queues = [spead2.InprocQueue() for _ in range(n_recv_streams)]
+    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
+
+    def add_reader(
+        stream: spead2.recv.ChunkRingStream,
+        *,
+        src: str | list[tuple[str, int]],
+        interface: str | None,
+        ibv: bool,
+        comp_vector: int,
+        buffer_size: int,
+    ) -> None:
+        """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
+        queue = next(queue_iter)
+        stream.add_inproc_reader(queue)
+
+    monkeypatch.setattr("katgpucbf.recv.add_reader", add_reader)
+    return queues

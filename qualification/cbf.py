@@ -30,9 +30,9 @@ import aiokatcp
 import pytest
 
 from katgpucbf import DIG_SAMPLE_BITS
+from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
 
 from .host_config import HostConfigQuerier
-from .reporter import Reporter, custom_report_log
 
 if TYPE_CHECKING:
     # This is only imported for type checkers, because importing at runtime

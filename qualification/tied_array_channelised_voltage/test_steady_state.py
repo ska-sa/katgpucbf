@@ -22,9 +22,10 @@ from collections.abc import Awaitable, Callable
 import numpy as np
 import pytest
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
-from ..reporter import Reporter
 
 
 async def _test_capture_start(

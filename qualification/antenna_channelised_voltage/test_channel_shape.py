@@ -22,9 +22,10 @@ from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 from pytest_check import check
 
+from katgpucbf.pytest_plugins.reporter import Reporter
+
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
-from ..reporter import Reporter
 from . import sample_tone_response_hdr
 
 
