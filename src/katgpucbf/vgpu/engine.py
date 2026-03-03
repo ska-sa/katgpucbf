@@ -321,7 +321,7 @@ class _CaptureSession:
             it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / config.threshold
         )
         it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(it, samples_per_frame=send_config.n_samples_per_frame)
-        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
+        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it, 2)
         frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
             it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
         )

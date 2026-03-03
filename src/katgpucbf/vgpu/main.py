@@ -135,6 +135,10 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "dst", type=functools.partial(parse_source_ipv4, default_port=VTP_DEFAULT_PORT), help="Destination endpoints"
     )
+    # The default in add_send_arguments is okay for C++ code, but the Python
+    # code in vgpu is much more prone to falling behind and needs to be allowed
+    # to catch up.
+    parser.set_defaults(send_rate_factor=1.5)
 
     args = parser.parse_args(arglist)
     if args.recv_channels % args.recv_channels_per_substream != 0:
