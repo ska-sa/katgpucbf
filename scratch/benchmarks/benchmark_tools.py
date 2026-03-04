@@ -214,19 +214,18 @@ class TrialResult:
 
 
 @dataclass
-class MeasuredResult:
+class MeasuredTrials:
     """Result of a single measurement."""
 
     state: ResultState
+    result: TrialResult
 
     def message(self) -> str:
-        match self.state:
-            case _:
-                return self.state.value
+        return self.result.message()
 
 
 @dataclass
-class ThrottledResult(MeasuredResult):
+class ThrottledMeasurement(MeasuredTrials):
     """Result of a throttled trial."""
 
     def __init__(self, trials: list[TrialResult], adc_sample_rate: float):
@@ -234,7 +233,7 @@ class ThrottledResult(MeasuredResult):
         heap_received_low = min(trials, key=lambda x: x.heaps).heaps
         self.throttled_adc_high = adc_sample_rate * heap_received_high / trials[0].expected_heaps
         self.throttled_adc_low = adc_sample_rate * heap_received_low / trials[0].expected_heaps
-        super().__init__(ResultState.THROTTLED)
+        super().__init__(ResultState.THROTTLED, trials[0])
 
     @override
     def message(self) -> str:
@@ -242,28 +241,28 @@ class ThrottledResult(MeasuredResult):
 
 
 @dataclass
-class OverExpectationsResult(MeasuredResult):
+class OverExpectationsMeasurement(MeasuredTrials):
     """Result of a over expectations trial."""
 
     def __init__(self, trials: list[TrialResult]):
         self.heaps_median = np.median([trial.heaps for trial in trials])
         self.heaps_tolerated = trials[0].expected_heaps * (1.0 + HEAPS_TOL)
-        super().__init__(ResultState.OVER_EXPECTATIONS)
+        super().__init__(ResultState.OVER_EXPECTATIONS, trials[0])
 
     @override
     def message(self) -> str:
         return f"Recieved heaps {self.heaps_median} are over expected tolerable number of heaps: {self.heaps_tolerated}"
 
 
-def _find_measured_result(state: ResultState, trials: list[TrialResult], adc_sample_rate: float) -> MeasuredResult:
-    if len(trials) == 0:
-        return MeasuredResult(state)
+def _find_measured_result(trials: list[TrialResult], adc_sample_rate: float) -> MeasuredTrials:
+    if len(trials) == 1:
+        return MeasuredTrials(state=trials[0].state, result=trials[0])
     if all(trial.state == ResultState.THROTTLED for trial in trials):
-        return ThrottledResult(trials, adc_sample_rate)
+        return ThrottledMeasurement(trials, adc_sample_rate)
     elif all(trial.state == ResultState.OVER_EXPECTATIONS for trial in trials):
-        return OverExpectationsResult(trials)
+        return OverExpectationsMeasurement(trials)
     else:
-        return MeasuredResult(state=ResultState.UNKNOWN)
+        return MeasuredTrials(state=ResultState.UNKNOWN, result=trials[0])
 
 
 class Benchmark(ABC):
@@ -365,7 +364,7 @@ class Benchmark(ABC):
             async with await self.run_consumers(adc_sample_rate, sync_time):
                 return await self.process(adc_sample_rate)
 
-    async def measure(self, adc_sample_rate: float) -> MeasuredResult:
+    async def measure(self, adc_sample_rate: float) -> MeasuredTrials:
         """Perform a single trial.
         Returns a :class:`MeasureResult` describing the outcome of the trial.
         """
@@ -373,17 +372,14 @@ class Benchmark(ABC):
         if self.verbose_results():
             print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
 
-        state = ResultState.UNKNOWN
         results: list[TrialResult] = []
         for _ in range(UNSTABLE_RETRIES):
             result = await self.trial(adc_sample_rate)
-            if result.state == ResultState.THROTTLED or result.state == ResultState.OVER_EXPECTATIONS:
-                results.append(result)
-            else:
-                state = result.state
+            results.append(result)
+            if not (result.state == ResultState.THROTTLED or result.state == ResultState.OVER_EXPECTATIONS):
                 break
 
-        measured_result = _find_measured_result(state, results, adc_sample_rate)
+        measured_result = _find_measured_result(results, adc_sample_rate)
 
         if self.verbose_results():
             print(measured_result.message(), file=sys.stderr)
@@ -418,7 +414,9 @@ class Benchmark(ABC):
             output += f"{adc_sample_rate} {success} {repeat} {throttle}\n"
         return output
 
-    def _throttled_result(self, measurement: ThrottledResult, comparisons: int, rates: np.ndarray) -> NoisySearchResult:
+    def _throttled_result(
+        self, measurement: ThrottledMeasurement, comparisons: int, rates: np.ndarray
+    ) -> NoisySearchResult:
         low = int((np.abs(rates - measurement.throttled_adc_low)).argmin())
         high = int((np.abs(rates - measurement.throttled_adc_high)).argmin())
 
@@ -443,7 +441,7 @@ class Benchmark(ABC):
 
         async def compare(adc_sample_rate: float, comparisons: int) -> bool | NoisySearchResult:
             measurement = await self.measure(adc_sample_rate)
-            if isinstance(measurement, ThrottledResult):
+            if isinstance(measurement, ThrottledMeasurement):
                 return self._throttled_result(measurement, comparisons, rates)
             if measurement.state == ResultState.WITHIN_EXPECTATIONS:
                 return False
@@ -458,7 +456,7 @@ class Benchmark(ABC):
         high_result = await self.measure(rates[-1])
         if high_result.state == ResultState.WITHIN_EXPECTATIONS:
             raise RuntimeError(f"succeeded on high: {high_result.message()}")
-        if isinstance(high_result, ThrottledResult):
+        if isinstance(high_result, ThrottledMeasurement):
             return self._throttled_result(high_result, max_comparisons, rates)
 
         mid_rates = 0.5 * (rates[:-1] + rates[1:])  # Rates in the middle of the intervals
@@ -492,7 +490,7 @@ class Benchmark(ABC):
         elif result.high == len(rates) - 1:
             raise RuntimeError("upper bound is too low")
         else:
-            return rates[result.low], rates[result.high + 1]
+            return rates[result.low], rates[result.high]
 
     async def run(self) -> None:
         if self.args.calibrate:
