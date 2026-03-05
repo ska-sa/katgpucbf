@@ -144,12 +144,13 @@ def process_common_benchmark_arguments(args: argparse.Namespace, parser: argpars
 class ResultState(Enum):
     """State of a benchmark trial."""
 
-    WITHIN_EXPECTATIONS = "within expectations"
-    THROTTLED = "throttled"
-    UNDER_EXPECTATIONS = "under expectations"
-    NO_HEAPS = "no heaps"
-    OVER_EXPECTATIONS = "over expectations"
-    UNKNOWN = "unknown"
+    SUCCESS = "success"  # The trial was a success (kept up with the rate)
+    THROTTLED = "throttled"  # the trial was throttled (kept up with the rate, but not at the correct data rate)
+    FAILED = "failed"  # The trial failed (missing heaps)
+    NO_HEAPS = "no heaps"  # The trial did not receive any heaps (no data was sent)
+    TIMING_ERROR = (
+        "timing error"  # The trial had more than the expected number of heaps counted outside allowed tolerance.
+    )
 
 
 @dataclass
@@ -162,55 +163,32 @@ class TrialResult:
 
     @property
     def state(self) -> ResultState:
-        if self._good():
-            return ResultState.WITHIN_EXPECTATIONS
-        elif self._throttled():
+        if self.missing_heaps > 0:
+            return ResultState.FAILED
+        elif (1.0 - HEAPS_TOL) * self.expected_heaps <= self.heaps <= (1.0 + HEAPS_TOL) * self.expected_heaps:
+            return ResultState.SUCCESS
+        elif self.missing_heaps == 0 and 0 < self.heaps < (1.0 - HEAPS_TOL) * self.expected_heaps:
             return ResultState.THROTTLED
         elif self.heaps == 0:
             return ResultState.NO_HEAPS
-        elif self._over_expectations():
-            return ResultState.OVER_EXPECTATIONS
+        elif self.heaps > (1.0 + HEAPS_TOL) * self.expected_heaps:
+            return ResultState.TIMING_ERROR
         else:
-            return ResultState.UNDER_EXPECTATIONS
-
-    def _good(self) -> bool:
-        """Whether the trial was a success (kept up with the rate).
-
-        If this is false, it does not mean that heaps were lost. If
-        :attr:`missing_heaps` is 0, it could mean that data was not being sent
-        at the correct rate, or that latency prevented the queries from
-        being performed at the correct times.
-        """
-        if self.missing_heaps > 0:
-            return False
-        return (1.0 - HEAPS_TOL) * self.expected_heaps <= self.heaps <= (1.0 + HEAPS_TOL) * self.expected_heaps
-
-    def _over_expectations(self) -> bool:
-        """Whether the trial had more than the expected number of heaps counted outside allowed tolerance."""
-        return self.heaps > (1.0 + HEAPS_TOL) * self.expected_heaps
-
-    def _throttled(self) -> bool:
-        """Whether the trial was throttled (kept up with the rate, but not at the correct data rate).
-
-        This typically happens when the rate is too high for the network devices to keep up with.
-        """
-        return self.missing_heaps == 0 and 0 < self.heaps < (1.0 - HEAPS_TOL) * self.expected_heaps
+            return ResultState.FAILED
 
     def message(self) -> str:
         """Human-readable description of the outcome."""
         match self.state:
-            case ResultState.WITHIN_EXPECTATIONS:
+            case ResultState.SUCCESS:
                 return "Good"
-            case ResultState.UNDER_EXPECTATIONS:
+            case ResultState.FAILED:
                 return f"Missing {self.missing_heaps} heaps"
             case ResultState.THROTTLED:
                 return f"Throttled to {self.heaps / self.expected_heaps * 100:.1f}% of requested rate"
-            case ResultState.OVER_EXPECTATIONS:
+            case ResultState.TIMING_ERROR:
                 return f"There were {self.heaps - self.expected_heaps} more heaps than expected"
             case ResultState.NO_HEAPS:
                 return "No heaps"
-            case ResultState.UNKNOWN:
-                return "Unknown"
 
 
 @dataclass
@@ -241,17 +219,17 @@ class ThrottledMeasurement(MeasuredTrials):
 
 
 @dataclass
-class OverExpectationsMeasurement(MeasuredTrials):
-    """Result of a over expectations trial."""
+class TimingErrorMeasurement(MeasuredTrials):
+    """Result of a complete list of timing error trials."""
 
     def __init__(self, trials: list[TrialResult]):
         self.heaps_median = np.median([trial.heaps for trial in trials])
         self.heaps_tolerated = trials[0].expected_heaps * (1.0 + HEAPS_TOL)
-        super().__init__(ResultState.OVER_EXPECTATIONS, trials[0])
+        super().__init__(ResultState.TIMING_ERROR, trials[0])
 
     @override
     def message(self) -> str:
-        return f"Recieved heaps {self.heaps_median} are over expected tolerable number of heaps: {self.heaps_tolerated}"
+        return f"Received heaps {self.heaps_median} are over expected tolerable number of heaps: {self.heaps_tolerated}"
 
 
 def _find_measured_result(trials: list[TrialResult], adc_sample_rate: float) -> MeasuredTrials:
@@ -259,10 +237,10 @@ def _find_measured_result(trials: list[TrialResult], adc_sample_rate: float) -> 
         return MeasuredTrials(state=trials[0].state, result=trials[0])
     if all(trial.state == ResultState.THROTTLED for trial in trials):
         return ThrottledMeasurement(trials, adc_sample_rate)
-    elif all(trial.state == ResultState.OVER_EXPECTATIONS for trial in trials):
-        return OverExpectationsMeasurement(trials)
+    elif all(trial.state == ResultState.TIMING_ERROR for trial in trials):
+        return TimingErrorMeasurement(trials)
     else:
-        return MeasuredTrials(state=ResultState.UNKNOWN, result=trials[0])
+        return MeasuredTrials(state=ResultState.TIMING_ERROR, result=trials[0])
 
 
 class Benchmark(ABC):
@@ -376,7 +354,7 @@ class Benchmark(ABC):
         for _ in range(UNSTABLE_RETRIES):
             result = await self.trial(adc_sample_rate)
             results.append(result)
-            if not (result.state == ResultState.THROTTLED or result.state == ResultState.OVER_EXPECTATIONS):
+            if not (result.state == ResultState.THROTTLED or result.state == ResultState.TIMING_ERROR):
                 break
 
         measured_result = _find_measured_result(results, adc_sample_rate)
@@ -397,11 +375,11 @@ class Benchmark(ABC):
                     print(f"Testing {adc_sample_rate / 1e6} MHz... ", end="", flush=True, file=sys.stderr)
                 measurement = await self.measure(adc_sample_rate)
                 match measurement.state:
-                    case ResultState.WITHIN_EXPECTATIONS:
+                    case ResultState.SUCCESS:
                         successes[j] += 1
                     case ResultState.THROTTLED:
                         throttled[j] += 1
-                    case ResultState.UNDER_EXPECTATIONS:
+                    case ResultState.FAILED:
                         pass
                     case _:
                         raise RuntimeError("Measurement failed: " + measurement.message())
@@ -443,18 +421,17 @@ class Benchmark(ABC):
             measurement = await self.measure(adc_sample_rate)
             if isinstance(measurement, ThrottledMeasurement):
                 return self._throttled_result(measurement, comparisons, rates)
-            if measurement.state == ResultState.WITHIN_EXPECTATIONS:
+            if measurement.state == ResultState.SUCCESS:
                 return False
-            if measurement.state == ResultState.UNDER_EXPECTATIONS:
+            if measurement.state == ResultState.FAILED:
                 return True
-            else:
-                raise RuntimeError("Measurement failed: " + measurement.message())
+            raise RuntimeError("Measurement failed: " + measurement.message())
 
         low_result = await self.measure(rates[0])
-        if low_result.state != ResultState.WITHIN_EXPECTATIONS:
+        if low_result.state != ResultState.SUCCESS:
             raise RuntimeError(f"failed on low: {low_result.message()}")
         high_result = await self.measure(rates[-1])
-        if high_result.state == ResultState.WITHIN_EXPECTATIONS:
+        if high_result.state == ResultState.SUCCESS:
             raise RuntimeError(f"succeeded on high: {high_result.message()}")
         if isinstance(high_result, ThrottledMeasurement):
             return self._throttled_result(high_result, max_comparisons, rates)
