@@ -44,16 +44,20 @@ A typical file looks like this:
    hostname = 'server01.domain'
    username = 'myusername'
    interfaces = ['enp193s0f0np0', 'enp193s0f1np1']
+   multicast_group = ['239.102.0.64', '239.102.200.255']
 
    [fgpu]
    hostname = 'server02.domain'
    username = 'myusername'
    interfaces = ['enp193s0f0np0', 'enp193s0f1np1']
+   multicast_group = ['239.102.200.64', '239.102.236.255']
 
 .. _TOML: https://toml.io/
 
 The `interfaces` arrays list the names of the ibverbs-capable network
 interfaces that can be used for sending or receiving the data.
+The `multicast_group` list can be in either a start and end ip list or a
+subnet format (ex `239.102.0.0/16`)
 
 By default the servers are loaded from :file:`servers.toml` in the current
 directory, although the :option:`--servers` command-line option can override
