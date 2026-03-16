@@ -11,3 +11,4 @@ pandas       # Only needed for fit.py
 prometheus-client
 scipy
 statsmodels  # Only needed for fit.py
+netaddr

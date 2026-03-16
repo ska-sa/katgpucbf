@@ -27,6 +27,7 @@ import functools
 from contextlib import AsyncExitStack
 
 import asyncssh
+import netaddr
 
 from katgpucbf import N_POLS
 
@@ -66,13 +67,14 @@ def dsim_factory(
         # For larger n, send the two pols over the same interface
         # (because fgpu_factory expects them to arrive on the same interface)
         interface = server.interfaces[index // 2 % len(server.interfaces)]
+    dsim_multicast_group = list(server.multicast_group)
     katcp_port = KATCP_PORT_BASE + index
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"feng-dsim-{index}"
     if single_pol:
-        addresses = f"239.102.{index // 2}.{64 + index % 2 * 8}+7:7148"
+        addresses = f"{dsim_multicast_group[index * 8]}+7:7148"
     else:
-        addresses = f"239.102.{index}.64+7:7148 239.102.{index}.72+7:7148"
+        addresses = f"{dsim_multicast_group[index * 16]}+7:7148 {dsim_multicast_group[index * 16 + 8]}+7:7148"
     command = (
         "docker run "
         f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
@@ -107,6 +109,7 @@ def fgpu_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
+    dsim_multicast_group: netaddr.IPRange,
 ) -> str:
     """Generate command to run fgpu."""
     n = args.n
@@ -126,15 +129,18 @@ def fgpu_factory(
     send_affinity = str(cores[-2])
     other_affinity = str(cores[-1])
     gpu = server.gpus[index % len(server.gpus)]
-
+    wideband_network_prefix = list(server.multicast_group)[: server.multicast_group.size // 2]
+    narrowband_network_prefix = list(server.multicast_group)[server.multicast_group.size // 2 :]
+    narrowband_address = narrowband_network_prefix[index * (args.xb // args.narrowband_decimation)]
     katcp_port = KATCP_PORT_BASE + index
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fgpu-{index}"
     wideband_kwargs = {
         "name": "wideband",
         "channels": args.channels,
-        "dst": f"239.102.{200 + index}.0+{args.xb - 1}:7148",
+        "dst": f"{wideband_network_prefix[index * args.xb]}+{args.xb - 1}:7148",
     }
+
     if args.jones_per_batch is not None:
         wideband_kwargs["jones_per_batch"] = args.jones_per_batch
     wideband_arg = ",".join(f"{key}={value}" for key, value in wideband_kwargs.items())
@@ -158,7 +164,7 @@ def fgpu_factory(
         f"--feng-id={index} "
         f"{'--use-vkgdr' if args.use_vkgdr else ''} "
         f"--wideband={wideband_arg} "
-        f"239.102.{index}.64+15:7148 "
+        f"{list(dsim_multicast_group)[index * 16]}+15:7148 "
     )
     for i in range(args.narrowband):
         narrowband_kwargs = {
@@ -166,7 +172,7 @@ def fgpu_factory(
             "channels": args.narrowband_channels,
             "decimation": args.narrowband_decimation,
             "centre_frequency": adc_sample_rate / 4,
-            "dst": f"239.102.{216 + index}.0+{args.xb // args.narrowband_decimation - 1}:7148",
+            "dst": f"{narrowband_address}+{(args.xb // args.narrowband_decimation - 1)}:7148",
         }
         if args.jones_per_batch is not None:
             narrowband_kwargs["jones_per_batch"] = args.jones_per_batch
@@ -240,6 +246,7 @@ class FgpuBenchmark(Benchmark):
         factory = functools.partial(
             fgpu_factory,
             adc_sample_rate=adc_sample_rate,
+            dsim_multicast_group=self.generator_server.multicast_group,
             sync_time=sync_time,
             args=self.args,
         )

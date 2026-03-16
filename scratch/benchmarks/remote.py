@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Self
 
 import asyncssh
+import netaddr
 
 VERBOSE_PASS_OUTPUT = 2  #: Verbosity level at which process output is passed through
 
@@ -37,6 +38,9 @@ class Server:
     interfaces: list[str] = field(default_factory=list)
     gpus: list[str] = field(default_factory=lambda: ["0"])
     cpus: list[list[int]] = field(default_factory=list)
+    multicast_group: netaddr.IPRange = field(
+        default_factory=lambda: netaddr.IPRange("239.102.200.0", "239.102.232.255")
+    )
 
 
 def servers_from_toml(filename: str) -> dict[str, "Server"]:
@@ -53,6 +57,13 @@ def servers_from_toml(filename: str) -> dict[str, "Server"]:
         toml = tomllib.load(f)
     servers = {}
     for key, value in toml.items():
+        if value.get("multicast_group") is not None:
+            if len(value["multicast_group"]) == 1:
+                value["multicast_group"] = netaddr.IPRange(value["multicast_group"][0])  # ex: 192.168.8.0/24
+            else:
+                value["multicast_group"] = netaddr.IPRange(
+                    value["multicast_group"][0], value["multicast_group"][1]
+                )  # ex: 192.168.8.0, 192.168.8.255
         servers[key] = Server(**value)
     return servers
 
