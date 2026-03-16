@@ -142,6 +142,14 @@ The package contains the following boiler-plate files:
 Making a contribution
 ---------------------
 
+Copyright notices
+^^^^^^^^^^^^^^^^^
+New source files need a copyright notice: just copy-and-paste from an existing
+file and replace the year(s) with the current year. When updating an existing
+file, you should **not** update the year range as it has been deemed
+unnecessary and just adds noise: the Git history is a more accurate record of
+what contributions were made and when.
+
 Raising the Pull Request
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
