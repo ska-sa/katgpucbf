@@ -154,8 +154,8 @@ class RateLimiter[T](ABC):
         self.rate = rate
         self.burst_rate = burst_rate
         self._loop = asyncio.get_running_loop()
-        self._next = PreciseTime(self._loop.time())
-        self._next_burst = self._next
+        self._next: PreciseTime | None = None
+        self._next_burst: PreciseTime | None = None
         self._per_unit = PreciseTimeDelta(1 / rate if rate else 0.0)
         self._per_unit_burst = PreciseTimeDelta(1 / burst_rate if burst_rate else 0.0)
         self._lock = asyncio.Lock()
@@ -175,6 +175,10 @@ class RateLimiter[T](ABC):
         """Wait for the rate limiter, then process an item."""
         async with self._lock:
             now = PreciseTime(self._loop.time())
+            if self._next is None:
+                self._next = now
+            if self._next_burst is None:
+                self._next_burst = now
             target = max(self._next, self._next_burst)
             if now < target:
                 future = self._loop.create_future()
