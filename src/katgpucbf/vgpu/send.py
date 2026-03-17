@@ -148,17 +148,20 @@ class RateLimiter[T](ABC):
         Pace at which to catch up if falling behind (for example, because a
         sleep took too long, or a garbage collection pause). It can also be
         zero to disable this pacing.
+    capacity
+        Maximum number of items in the queue (0 for unlimited).
     """
 
-    def __init__(self, rate: float, burst_rate: float) -> None:
+    def __init__(self, rate: float, burst_rate: float, capacity: int) -> None:
         self.rate = rate
         self.burst_rate = burst_rate
         self._loop = asyncio.get_running_loop()
-        self._next: PreciseTime | None = None
-        self._next_burst: PreciseTime | None = None
+        self._next = PreciseTime(0.0)
+        self._next_burst = PreciseTime(0.0)
         self._per_unit = PreciseTimeDelta(1 / rate if rate else 0.0)
         self._per_unit_burst = PreciseTimeDelta(1 / burst_rate if burst_rate else 0.0)
-        self._lock = asyncio.Lock()
+        self._queue: asyncio.Queue[T] = asyncio.Queue(capacity)
+        self._run_task: asyncio.Task | None = None
 
     @abstractmethod
     def item_size(self, item: T) -> int:
@@ -171,27 +174,57 @@ class RateLimiter[T](ABC):
         This method does not handle the rate limiting.
         """
 
+    async def _run(self) -> None:
+        """Process queue items.
+
+        This is scheduled as an asyncio task, only when the queue is non-empty.
+        """
+        try:
+            while True:
+                try:
+                    item = self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+                now = PreciseTime(self._loop.time())
+                target = max(self._next, self._next_burst)
+                # Don't try to sleep for short times. We tend to oversleep and
+                # then are unable to catch up.
+                if float(target - now) > 1e-3:
+                    future = self._loop.create_future()
+                    self._loop.call_at(float(target), _set_result, future)
+                    await future
+                else:
+                    await asyncio.sleep(0)  # Give other asyncio tasks a chance to run
+                now = PreciseTime(self._loop.time())
+                size = self.item_size(item)
+                self._next += self._per_unit * size
+                self._next_burst = max(self._next_burst, max(target, now)) + self._per_unit_burst * size
+                try:
+                    await self._process_item(item)
+                except Exception:
+                    logger.exception("Exception in processing rate-limited item")
+
+        finally:
+            self._run_task = None
+
     async def send(self, item: T) -> None:
-        """Wait for the rate limiter, then process an item."""
-        async with self._lock:
+        """Add an item to the queue.
+
+        Note that this will not block unless the queue becomes full, and the
+        item should not be modified after submitting it.
+        """
+        await self._queue.put(item)
+        if not self._queue.empty() and self._run_task is None:
             now = PreciseTime(self._loop.time())
-            if self._next is None:
-                self._next = now
-            if self._next_burst is None:
-                self._next_burst = now
-            target = max(self._next, self._next_burst)
-            if float(target - now) > 0.001:  # Don't bother sleeping for short times
-                future = self._loop.create_future()
-                self._loop.call_at(float(target), _set_result, future)
-                await future
-            else:
-                self._next = max(self._next, now)
-                await asyncio.sleep(0)  # Give other asyncio tasks a chance to run
-            now = PreciseTime(self._loop.time())
-            size = self.item_size(item)
-            self._next += self._per_unit * size
-            self._next_burst = max(self._next_burst, max(target, now)) + self._per_unit_burst * size
-            await self._process_item(item)
+            self._next = max(self._next, now)
+            self._next_burst = max(self._next_burst, now)
+            self._run_task = asyncio.create_task(self._run(), name="RateLimiter")
+
+    async def join(self) -> None:
+        """Wait until all queued items have been processed."""
+        while self._run_task is not None:
+            await self._run_task
 
 
 class VDIFSender(RateLimiter[list[VDIFFrame]]):
@@ -205,12 +238,13 @@ class VDIFSender(RateLimiter[list[VDIFFrame]]):
         dsts: list[tuple[str, int]],
         rate: float,
         burst_rate: float,
+        capacity: int,
         *,
         ttl: int,
         buffer: int,
         interfaces: list[str],
     ) -> None:
-        super().__init__(rate, burst_rate)
+        super().__init__(rate, burst_rate, capacity)
         # Create a socket per destination, distributing them
         # over the interfaces.
         if_addrs = [ipaddress.IPv4Address(address) for address in interfaces]

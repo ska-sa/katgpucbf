@@ -371,6 +371,7 @@ class VEngine(Engine):
             send_config.dsts,
             send_rate,
             send_rate * 2.0,  # Python can introduce large pauses, so catch up aggressively
+            30000,  # TODO: compute in a sensible way
             interfaces=send_config.interfaces,
             ttl=send_config.ttl,
             buffer=send_config.buffer,

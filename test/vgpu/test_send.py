@@ -75,7 +75,7 @@ class DummyRateLimiter(RateLimiter[int]):
     """Process integers and store the times they were processed."""
 
     def __init__(self, rate: float, burst_rate: float) -> None:
-        super().__init__(rate, burst_rate)
+        super().__init__(rate, burst_rate, 2)
         self.times: list[float] = []
 
     @override
@@ -85,6 +85,8 @@ class DummyRateLimiter(RateLimiter[int]):
     @override
     async def _process_item(self, item: int) -> None:
         self.times.append(asyncio.get_running_loop().time())
+        if item == 4:
+            await asyncio.sleep(0.5)
 
 
 class TestRateLimiter:
@@ -105,18 +107,27 @@ class TestRateLimiter:
             # Two back-to-back
             tg.create_task(limiter.send(1))
             tg.create_task(limiter.send(1))
-            # Long gap so we have to start catching up
-            await asyncio.sleep(0.7)
-            # More back-to-back so we catch up then level out
-            for _ in range(4):
+            # Long gap so that we reset the reference point
+            await asyncio.sleep(0.5)
+            # More back-to-back, for which processing causes delays
+            # (special case in DummyRateLimiter for item=4).
+            for _ in range(3):
                 tg.create_task(limiter.send(4))
+            # Some more back-to-back for which we will be catching up
+            for _ in range(5):
+                tg.create_task(limiter.send(2))
+        await limiter.join()
         assert limiter.times == pytest.approx(
             [
                 0.0,
                 0.1,
-                0.7,
-                0.9,  # Catchup
-                1.1,  # Catchup
-                1.4,  # Have caught up
+                0.5,
+                1.0,
+                1.5,
+                2.0,
+                2.1,
+                2.2,
+                2.3,
+                2.5,  # All caught up now, revert to standard rate
             ]
         )
