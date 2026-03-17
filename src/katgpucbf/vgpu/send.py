@@ -18,15 +18,15 @@
 
 import asyncio
 import functools
-import io
 import ipaddress
 import logging
 import socket
 import struct
 from abc import ABC, abstractmethod
+from collections.abc import Buffer
 from typing import Self, overload, override
 
-from baseband.vdif import VDIFFrame, VDIFFrameSet
+from katcbf_vlbi_resample.vdif_writer import VDIFFrame
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +193,7 @@ class RateLimiter[T](ABC):
             await self._process_item(item)
 
 
-class VDIFSender(RateLimiter[VDIFFrameSet]):
+class VDIFSender(RateLimiter[list[VDIFFrame]]):
     """Send VDIF frames at a limited rate to a set of multicast addresses.
 
     The units for `rate` and `burst_rate` are samples per second.
@@ -236,11 +236,12 @@ class VDIFSender(RateLimiter[VDIFFrameSet]):
         self._next_sock = 0
 
     @override
-    def item_size(self, item: VDIFFrameSet) -> int:
-        return item.header0.samples_per_frame
+    def item_size(self, item: list[VDIFFrame]) -> int:
+        # 2 bits per sample, so 4 samples per byte
+        return item[0].payload.nbytes * 4
 
     @staticmethod
-    def _try_send(sock: socket.socket, buffers: list[bytes]) -> bool:
+    def _try_send(sock: socket.socket, buffers: list[Buffer]) -> bool:
         try:
             sock.sendmsg(buffers, [], socket.MSG_DONTWAIT)
             return True
@@ -248,7 +249,7 @@ class VDIFSender(RateLimiter[VDIFFrameSet]):
             return False
 
     @staticmethod
-    def _write_callback(sock: socket.socket, buffers: list[bytes], future: asyncio.Future) -> None:
+    def _write_callback(sock: socket.socket, buffers: list[Buffer], future: asyncio.Future) -> None:
         try:
             if VDIFSender._try_send(sock, buffers):
                 _set_result(future)
@@ -262,9 +263,7 @@ class VDIFSender(RateLimiter[VDIFFrameSet]):
                 future.set_exception(exc)
 
     async def _send_frame(self, frame: VDIFFrame) -> None:
-        header_fh = io.BytesIO()
-        frame.header.tofile(header_fh)
-        buffers = [struct.pack(">Q", self._sequence), header_fh.getvalue(), frame.payload.words.tobytes()]
+        buffers = [struct.pack(">Q", self._sequence), frame.header, frame.payload]
         sock = self._socks[self._next_sock]
         self._next_sock = (self._next_sock + 1) % len(self._socks)
         self._sequence += 1
@@ -281,6 +280,6 @@ class VDIFSender(RateLimiter[VDIFFrameSet]):
                 loop.remove_writer(sock.fileno())
 
     @override
-    async def _process_item(self, item: VDIFFrameSet) -> None:
-        for frame in item.frames:
+    async def _process_item(self, item: list[VDIFFrame]) -> None:
+        for frame in item:
             await self._send_frame(frame)

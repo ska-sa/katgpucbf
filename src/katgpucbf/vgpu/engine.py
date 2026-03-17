@@ -270,7 +270,7 @@ class _CaptureSession:
         self._capture_task = asyncio.create_task(self._capture(), name="Capture Loop")
         engine.add_service_task(self._capture_task, wait_on_stop=True)
 
-    def _process_frameset(self, frameset: baseband.vdif.VDIFFrameSet) -> None:
+    def _process_frameset(self, frameset: list[katcbf_vlbi_resample.vdif_writer.VDIFFrame]) -> None:
         """Handle a received frameset.
 
         This function is only here temporarily so that it can be mocked out
@@ -279,7 +279,7 @@ class _CaptureSession:
 
         .. todo:: Remove this method once no longer needed by unit tests.
         """
-        logger.debug("Received frameset: %s +%s", frameset["seconds"], frameset["frame_nr"])
+        logger.debug("Received frameset")
 
     def _capture_complete(self) -> None:
         """Handle the end of all processing.
