@@ -184,7 +184,9 @@ class RateLimiter[T](ABC):
                 future = self._loop.create_future()
                 self._loop.call_at(float(target), _set_result, future)
                 await future
-                now = PreciseTime(self._loop.time())
+            else:
+                await asyncio.sleep(0)  # Give other asyncio tasks a chance to run
+            now = PreciseTime(self._loop.time())
             size = self.item_size(item)
             self._next += self._per_unit * size
             self._next_burst = max(self._next_burst, now) + self._per_unit_burst * size
