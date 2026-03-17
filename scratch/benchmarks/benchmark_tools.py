@@ -147,10 +147,9 @@ class ResultState(Enum):
     SUCCESS = "success"  # The trial was a success (kept up with the rate)
     THROTTLED = "throttled"  # the trial was throttled (kept up with the rate, but not at the correct data rate)
     FAILED = "failed"  # The trial failed (missing heaps)
-    NO_HEAPS = "no heaps"  # The trial did not receive any heaps (no data was sent)
-    TIMING_ERROR = (
-        "timing error"  # The trial had more than the expected number of heaps counted outside allowed tolerance.
-    )
+    NO_HEAPS = "no heaps"  # The trial did not receive any heaps
+    # The trial had more than the expected number of heaps counted outside allowed tolerance.
+    TIMING_ERROR = "timing error"
 
 
 @dataclass
