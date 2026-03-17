@@ -366,7 +366,6 @@ class VEngine(Engine):
         )
         self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
         self._capture: _CaptureSession | None = None
-        print(send_config.bandwidth)
         self._sender = send.VDIFSender(
             send_config.dsts,
             send_config.bandwidth,
