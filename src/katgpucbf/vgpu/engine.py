@@ -366,10 +366,11 @@ class VEngine(Engine):
         )
         self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
         self._capture: _CaptureSession | None = None
+        send_rate = send_config.bandwidth * send_config.send_rate_factor
         self._sender = send.VDIFSender(
             send_config.dsts,
-            send_config.bandwidth,
-            send_config.bandwidth * send_config.send_rate_factor,
+            send_rate,
+            send_rate * 2.0,  # Python can introduce large pauses, so catch up aggressively
             interfaces=send_config.interfaces,
             ttl=send_config.ttl,
             buffer=send_config.buffer,
