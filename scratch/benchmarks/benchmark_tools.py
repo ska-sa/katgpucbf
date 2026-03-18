@@ -166,7 +166,7 @@ class TrialResult:
             return ResultState.FAILED
         elif (1.0 - HEAPS_TOL) * self.expected_heaps <= self.heaps <= (1.0 + HEAPS_TOL) * self.expected_heaps:
             return ResultState.SUCCESS
-        elif self.missing_heaps == 0 and 0 < self.heaps < (1.0 - HEAPS_TOL) * self.expected_heaps:
+        elif 0 < self.heaps < (1.0 - HEAPS_TOL) * self.expected_heaps:
             return ResultState.THROTTLED
         elif self.heaps == 0:
             return ResultState.NO_HEAPS
