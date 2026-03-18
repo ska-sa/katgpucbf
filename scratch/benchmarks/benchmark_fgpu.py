@@ -24,7 +24,6 @@ See :doc:`benchmarking`.
 import argparse
 import asyncio
 import functools
-import math
 from contextlib import AsyncExitStack
 
 import asyncssh
@@ -114,13 +113,12 @@ def fgpu_factory(
     # When we run > 4, we assume we have enough RAM (GPU and host) that we
     # don't need to scale buffers down to tiny amounts.
     scaling_n = min(n, 4)
-    alignment_extra = 0
     if n == 3:
-        alignment_extra = 1  # Without this the memory is not enough even though it is less than n=4 case in total
+        # Currently the chunk_jones must be a power of 2, this ensures that it is for n=3 and that it fits in memory
+        scaling_n = 4
 
-    intermediate = 2**27 // scaling_n
-    recv_chunk_samples = 2 ** (math.ceil(math.log2(intermediate)))
-    send_chunk_jones = 2 ** (math.ceil(math.log2(intermediate // 4)) - alignment_extra)
+    recv_chunk_samples = 2**27 // scaling_n
+    send_chunk_jones = recv_chunk_samples // 4
     if n == 1:
         interface = ",".join(server.interfaces[:2])
         recv_cores = 4

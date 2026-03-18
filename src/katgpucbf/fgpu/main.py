@@ -269,10 +269,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         parser.error("Live source requires --recv-interface")
     if args.recv_ibv and len(args.recv_affinity) != len(args.recv_comp_vector):
         parser.error("--recv-comp-vector must have same length as --recv-affinity")
-    if 2 ** math.log2(args.send_chunk_jones) != args.send_chunk_jones:
-        parser.error(f"--send-chunk-jones ({args.send_chunk_jones}) must be a power of 2")
-    if 2 ** math.log2(args.recv_chunk_samples) != args.recv_chunk_samples:
-        parser.error(f"--recv-chunk-samples ({args.recv_chunk_samples}) must be a power of 2")
 
     # Convert from _*OutputDict to *Output
     used_names = set()
@@ -313,7 +309,7 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
         monitor = NullMonitor()
 
     batch_jones_lcm = math.lcm(*(output.jones_per_batch for output in args.outputs))
-    # TODO: This doesn't seem to prevent window misalignment in pfb, specifically for the wideband output.
+    # TODO(NGC-1917): This doesn't seem to prevent window misalignment in pfb, specifically for the wideband output.
     chunk_jones = accel.roundup(args.send_chunk_jones, batch_jones_lcm)
     engine = FEngine(
         katcp_host=args.katcp_host,
