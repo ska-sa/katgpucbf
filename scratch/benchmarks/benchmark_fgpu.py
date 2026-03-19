@@ -119,6 +119,10 @@ def fgpu_factory(
     # When we run > 4, we assume we have enough RAM (GPU and host) that we
     # don't need to scale buffers down to tiny amounts.
     scaling_n = min(n, 4)
+    if n == 3:
+        # Currently the chunk_jones must be a power of 2, this ensures that it is for n=3 and that it fits in memory
+        scaling_n = 4
+
     recv_chunk_samples = 2**27 // scaling_n
     send_chunk_jones = recv_chunk_samples // 4
     if n == 1:
