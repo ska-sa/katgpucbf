@@ -29,7 +29,7 @@ sensible placement.
 
 The client machine will also need a few Python packages installed; you can
 use :command:`pip install -r scratch/benchmarks/requirements.txt` to install
-them. You do not need to have katgpucbf installed.
+them. You do not need to have vkgdr installed.
 
 On the client machine, you will need to create a TOML_ file describing the
 servers you want to use. Each table in the TOML file describes one server. You
@@ -80,6 +80,8 @@ may need:
    Lower and upper bounds on the ADC sample rate. The critical rate will be
    searched between these two bounds. The benchmark will error out if the
    lower bound fails or the upper bound passes.
+   The lower bound should be set to a rate high enough to ensure that there is
+   at least one chunk sent in the duration of the benchmark.
 
 .. option:: --oneshot <rate>
 
@@ -122,9 +124,6 @@ may need:
 
 This is not a complete list of options; run the command with :option:`!--help`
 to see others.
-
-Note that at the time of writing, :program:`benchmark_xbgpu.py` only works in
-:option:`--oneshot` mode as it has not yet been calibrated for searches.
 
 Multicast groups
 ----------------
@@ -170,11 +169,24 @@ a much smaller range around the critical rate, as this process is extremely
 slow.
 
 The output of this calibration process is a text file of space-separated
-values.  Previously-collected results are in the :file:`fgpu_benchmarks`
-subdirectory, and new additions should go here too. After adding or updating
-one of these files, run :program:`./fit.py` and pass it the filename. It will
-print out the coefficients for a fitted logistic regression model. The key
-information is the ``np.log(rate)`` term, which can then be stored in the
-``slope`` variable in :file:`benchmark_fgpu.py`. You can also pass
+values. Previously-collected results are in the :file:`fgpu_calibration` and
+:file:`xbgpu_calibration` subdirectories, and new additions should go there too.
+After adding or updating one of these files, run :program:`./fit.py` and pass it
+the filename. It will print out the coefficients for a fitted logistic regression
+model. The key information is the ``np.log(rate)`` term, which can then be stored
+in the ``slope`` variable in the corresponding `Benchmark` class. You can also pass
 :option:`!--plot` to :program:`./fit.py` to get a plot of the calibration
 results versus the fitted model (requires matplotlib).
+
+Because the network speeds of the device is a larger factor for XBGPU, we need to
+increase array size to increase computation, but still keep the output rate within
+the network limits (since the number of output baselines is proportional to the number
+of antennas), by increasing the number of total substreams.
+
+Execution parameters for the XBGPU calibration are:
+
+```bash
+benchmark_xbgpu.py -n 1 --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 100 > xbgpu_calibration/calibration-n1.txt
+benchmark_xbgpu.py -n 2 --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 100 > xbgpu_calibration/calibration-n2.txt
+benchmark_xbgpu.py -n 4 --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 100 > xbgpu_calibration/calibration-n4.txt
+```

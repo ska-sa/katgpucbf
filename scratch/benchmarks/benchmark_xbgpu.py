@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2023-2025, National Research Foundation (SARAO)
+# Copyright (c) 2023-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -26,12 +26,18 @@ import asyncio
 import functools
 import math
 from contextlib import AsyncExitStack
+from typing import override
 
 import asyncssh
 
-from katgpucbf import COMPLEX, DEFAULT_JONES_PER_BATCH, N_POLS
+from katgpucbf import COMPLEX, N_POLS
 
-from benchmark_tools import DEFAULT_IMAGE, PROMETHEUS_PORT_BASE, Benchmark
+from benchmark_tools import (
+    PROMETHEUS_PORT_BASE,
+    Benchmark,
+    add_common_benchmark_arguments,
+    process_common_benchmark_arguments,
+)
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
 
 SAMPLE_BITS = 8
@@ -143,12 +149,18 @@ def xbgpu_factory(
         f"--send-ibv "
         f"--send-enabled "
         f"239.102.199.{index}:7148 "
-        f"--corrprod=name=corrprod,dst=239.102.198.{index},heap_accumulation_threshold={threshold} "
     )
     for i in range(args.beams):
         for j in range(N_POLS):
             idx = N_POLS * i + j
-            command += f"--beam=name=beam{idx},dst=239.102.197.{index * args.beams * N_POLS + idx},pol={j} "
+            beam_number = index * args.beams * N_POLS + idx
+            command += f"--beam=name=beam{idx},dst=239.102.197.{beam_number},pol={j} "
+
+    for i in range(args.corrprods):
+        corrprod_number = index * args.corrprods + i
+        command += f"--corrprod=name=corrprod{corrprod_number},"
+        command += f"dst=239.102.198.{corrprod_number},"
+        command += f"heap_accumulation_threshold={threshold} "
     return command
 
 
@@ -164,8 +176,13 @@ class XbgpuBenchmark(Benchmark):
             consumer_server=servers[args.xbgpu_server],
             expected_heaps_scale=args.array_size / heap_samples,
             metric_prefix="xbgpu",
+            slope={
+                1: -451.368500,
+                2: -429.814719,
+            },
         )
 
+    @override
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             fsim_factory,
@@ -184,6 +201,7 @@ class XbgpuBenchmark(Benchmark):
             pull=self.args.pull,
         )
 
+    @override
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             xbgpu_factory,
@@ -205,55 +223,28 @@ class XbgpuBenchmark(Benchmark):
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", type=int, required=True, help="Number of engines per host [%(default)s]")
-    parser.add_argument("--channels", type=int, default=1024, help="Channel count [%(default)s]")
-    parser.add_argument("--array-size", type=int, default=80, help="Number of antennas [%(default)s]")
     parser.add_argument("--substreams", type=int, default=64, help="Total number of engines [%(default)s]")
     parser.add_argument("--int-time", type=float, default=0.5, metavar="SECONDS", help="Integration time [%(default)s]")
-    parser.add_argument("--narrowband", action="store_true", help="Measure narrowband output [false]")
-    parser.add_argument(
-        "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
-    )
-    parser.add_argument(
-        "--init-time", type=float, default=20.0, metavar="SECONDS", help="Time for engines to start [%(default)s]"
-    )
-    parser.add_argument(
-        "--startup-time",
-        type=float,
-        default=1.0,
-        metavar="SECONDS",
-        help="Time to run before starting measurement [%(default)s]",
-    )
-    parser.add_argument(
-        "--runtime", type=float, default=20.0, metavar="SECONDS", help="Time to let engine run [%(default)s]"
-    )
     parser.add_argument("--beams", type=int, default=4, help="Number of dual-pol beams to produce [%(default)s]")
     parser.add_argument(
-        "--jones-per-batch",
-        type=int,
-        default=DEFAULT_JONES_PER_BATCH,
-        metavar="SAMPLES",
-        help="Jones vectors in each output batch [%(default)s]",
+        "--corrprods", type=int, default=1, help="Number of correlation products to produce [%(default)s]"
     )
-    parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
-    parser.add_argument("--no-pull", dest="pull", action="store_false", help="Do not pull Docker image")
-    parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--fsim-server", type=str, default="fsim", help="Server on which to run fsims [%(default)s]")
     parser.add_argument("--xbgpu-server", type=str, default="xbgpu", help="Server on which to run xbgpu [%(default)s]")
-    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity [no]")
-    parser.add_argument("--oneshot", type=float, help="Run one test at the given sampling rate")
+    add_common_benchmark_arguments(parser)
     args = parser.parse_args()
 
-    if not args.narrowband:
-        args.narrowband_decimation = 1  # Simplifies later logic
     if args.channels % args.substreams:
         parser.error("--substreams must divide evenly into --channels")
-    if not args.oneshot:
-        parser.error("Only --oneshot mode is implemented so far")
+    if args.jones_per_batch % args.channels or args.jones_per_batch // args.channels % 16:
+        parser.error("spectra per heap (--jones_per_batch // --channels) must divide evenly and be a multiple of 16")
+    if args.beams * N_POLS > 255:
+        parser.error("total number of output beams must be less than 255 to fit range 239.102.197.0/24")
+    if args.corrprods > 255:
+        parser.error("total number of correlation products must be less than 255 to fit range 239.102.198.0/24")
+    process_common_benchmark_arguments(args, parser)
 
-    benchmark = XbgpuBenchmark(args)
-    result = await benchmark.measure(args.oneshot)
-    print(result.message())
+    await XbgpuBenchmark(args).run()
 
 
 if __name__ == "__main__":

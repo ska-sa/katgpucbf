@@ -42,7 +42,7 @@ async def noisy_search[T](
     items: Sequence[T],
     noise: ArrayLike,
     tolerance: float,
-    compare: Callable[[T], Awaitable[bool]],
+    compare: Callable[[T, int], Awaitable[bool | NoisySearchResult]],
     *,
     max_interval: int = 1,
     max_comparisons: int | None = None,
@@ -79,9 +79,11 @@ async def noisy_search[T](
         Maximum probability that this function may return an incorrect result
         (with a uniform prior).
     compare
-        Comparison function. It is passed an existing element, and should
-        mostly return true if the new element comes before it and false
-        otherwise.
+        Comparison function. It is passed an existing element, and the number of
+        comparisons made so far, and should mostly return true if the new
+        element comes before it and false otherwise, though it may return
+        a :class:`NoisySearchResult` to indicate that a precise result was found
+        during the comparison, this will cause the search to terminate early.
     max_interval
         Maximum width of the returned interval (in indices)
     max_comparisons
@@ -126,7 +128,11 @@ async def noisy_search[T](
         # Pick the query value that will minimise expected entropy
         i = int(np.argmin(entropy))
         comparisons += 1
-        if await compare(items[i]):
+        result = await compare(items[i], comparisons)
+        if isinstance(result, NoisySearchResult):
+            return result
+
+        if result:
             a[:] = yes[i]
         else:
             a[:] = no[i]
