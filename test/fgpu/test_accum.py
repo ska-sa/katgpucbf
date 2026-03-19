@@ -50,7 +50,7 @@ def invalid_accum() -> Accum:
     [
         (0, 100, "new data starts before end of previous data"),
         (210, 230, "new data starts before end of previous data"),
-        (250, 24, "start_timestamp (250) > end_timestamp (24)"),
+        (250, 249, "start_timestamp (250) > end_timestamp (249)"),
         (220, 301, "new data crosses a window boundary"),
     ],
 )
