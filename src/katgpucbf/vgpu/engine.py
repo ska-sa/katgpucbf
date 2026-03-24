@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 import aiokatcp
-import baseband
 import cupy as cp
 import cupyx
 import katcbf_vlbi_resample.cupy_bridge
@@ -317,10 +316,10 @@ class _CaptureSession:
         it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
         it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
         it_rms = RecordPower(it_rms, sensors=self._sensors)
-        it = katcbf_vlbi_resample.power.NormalisePower(
-            it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / config.threshold
+        it = katcbf_vlbi_resample.power.NormalisePower(it_rms, 1.0)
+        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(
+            it, samples_per_frame=send_config.n_samples_per_frame, threshold=config.threshold
         )
-        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(it, samples_per_frame=send_config.n_samples_per_frame)
         it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it, 2)
         frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
             it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
