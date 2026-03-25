@@ -160,6 +160,9 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         katcbf_vlbi_resample.polarisation.to_linear(args.send_pols)
     except ValueError as exc:
         parser.error(f"argument --send-pols: {exc}")
+    if args.power_int_time != 1:
+        # TODO implement this: it will probably need changes in katcbf-vlbi-resample
+        parser.error("--power-int-time is not yet implemented for non-default values")
     return args
 
 

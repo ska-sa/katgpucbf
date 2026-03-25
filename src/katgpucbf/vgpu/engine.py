@@ -364,11 +364,16 @@ class VEngine(Engine):
         self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
         self._capture: _CaptureSession | None = None
         send_rate = send_config.bandwidth * send_config.rate_factor
+        # Data comes out of the processing chain in chunks of size
+        # power_int_time. We need to smooth that out, so we use a send
+        # queue that is deeper than that (2 is the number of chunks to
+        # buffer).
+        queue_size = round(2 * config.power_int_time * send_config.bandwidth / send_config.n_samples_per_frame)
         self._sender = send.VDIFSender(
             send_config.dsts,
             send_rate,
             send_rate * 2.0,  # Python can introduce large pauses, so catch up aggressively
-            30000,  # TODO: compute in a sensible way
+            queue_size,
             interfaces=send_config.interfaces,
             ttl=send_config.ttl,
             buffer=send_config.buffer,
