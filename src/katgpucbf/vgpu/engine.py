@@ -269,17 +269,6 @@ class _CaptureSession:
         self._capture_task = asyncio.create_task(self._capture(), name="Capture Loop")
         engine.add_service_task(self._capture_task, wait_on_stop=True)
 
-    def _process_frameset(self, frameset: list[katcbf_vlbi_resample.vdif_writer.VDIFFrame]) -> None:
-        """Handle a received frameset.
-
-        This function is only here temporarily so that it can be mocked out
-        by unit tests to intercept the framesets. It can be removed once
-        the infrastructure for transmitting framesets is in place.
-
-        .. todo:: Remove this method once no longer needed by unit tests.
-        """
-        logger.debug("Received frameset")
-
     def _capture_complete(self) -> None:
         """Handle the end of all processing.
 
@@ -325,7 +314,6 @@ class _CaptureSession:
             it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
         )
         async for frameset in frameset_it:
-            self._process_frameset(frameset)
             await self._sender.send(frameset)
         self._capture_complete()
 
