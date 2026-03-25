@@ -98,7 +98,7 @@ def stream_group(
     It is connected to the :func:`queues` fixture for input and
     :func:`data_ringbuffer` for output.
     """
-    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, -1, POL_LABELS)
+    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, -1)
     for _ in range(free_ringbuffer.maxsize):
         data = np.empty(
             (N_POLS, layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8

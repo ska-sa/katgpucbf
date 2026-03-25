@@ -228,9 +228,7 @@ class _CaptureSession:
         free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
         layout = config.recv_config.layout
         dtype = np.dtype(f"int{layout.sample_bits}")
-        recv_group = recv.make_stream_group(
-            layout, data_ringbuffer, free_ringbuffer, config.recv_config.affinity, config.recv_config.pol_labels
-        )
+        recv_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, config.recv_config.affinity)
         for _ in range(recv_chunks):
             chunk = recv.Chunk(
                 present=np.empty(
@@ -355,6 +353,9 @@ class VEngine(Engine):
         )
         self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
         self._capture: _CaptureSession | None = None
+        # Reference counters to make the labels exist before the first scrape
+        for pol in recv_config.pol_labels:
+            recv.counters.labels(str(pol))
 
     def _populate_sensors(
         self,

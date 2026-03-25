@@ -206,8 +206,34 @@ class StatsCollector(Collector):
         }
         self._labelnames = tuple(labelnames)
         self._label_sets: dict[tuple[str, ...], StatsCollector._LabelSet] = {}
+        # If there are no labels, then we can instantiate the counters
+        # immediately since we know their full names.
+        if self._labelnames == ():
+            self.add_label_set(())
         if registry:
             registry.register(self)
+
+    def add_label_set(self, labels: Iterable[str]) -> tuple[str, ...]:
+        """Ensure that statistics exist for a given label set.
+
+        This is automatically done by :meth:`add_stream` and
+        :meth:`add_stream_group`. It may be useful if the streams
+        will only be added later but the statistics are required now.
+
+        It is a no-op to call this function with a label set that already
+        exists.
+
+        Returns
+        -------
+        labels
+            The input labels as a tuple
+        """
+        labels_tuple = tuple(labels)
+        if len(labels_tuple) != len(self._labelnames):
+            raise ValueError("labels must have the same length as labelnames")
+        if labels_tuple not in self._label_sets:
+            self._label_sets[labels_tuple] = self._LabelSet(labels_tuple, self._counter_map.keys())
+        return labels_tuple
 
     def update(self) -> None:
         """Update the internal totals from the streams.
@@ -232,11 +258,7 @@ class StatsCollector(Collector):
            Calling this more than once with the same stream will cause that
            stream's statistics to be counted multiple times.
         """
-        labels_tuple = tuple(labels)
-        if len(labels_tuple) != len(self._labelnames):
-            raise ValueError("labels must have the same length as labelnames")
-        if labels_tuple not in self._label_sets:
-            self._label_sets[labels_tuple] = self._LabelSet(labels_tuple, self._counter_map.keys())
+        labels_tuple = self.add_label_set(labels)
         self._label_sets[labels_tuple].add_stream(stream)
 
     def add_stream_group(self, stream_group: spead2.recv.ChunkStreamRingGroup, labels: Iterable[str] = ()) -> None:
@@ -251,11 +273,7 @@ class StatsCollector(Collector):
            Calling this more than once with the same stream group will cause
            that group's statistics to be counted multiple times.
         """
-        labels_tuple = tuple(labels)
-        if len(labels_tuple) != len(self._labelnames):
-            raise ValueError("labels must have the same length as labelnames")
-        if labels_tuple not in self._label_sets:
-            self._label_sets[labels_tuple] = self._LabelSet(labels_tuple, self._counter_map.keys())
+        labels_tuple = self.add_label_set(labels)
         self._label_sets[labels_tuple].add_stream_group(stream_group)
 
     def collect(self) -> Iterable[Metric]:
