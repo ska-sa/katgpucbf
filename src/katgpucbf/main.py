@@ -51,6 +51,9 @@ from . import (
 
 logger = logging.getLogger(__name__)
 
+# Force Astropy to use local config directory
+os.environ["ASTROPY_CONFIG_DIR"] = os.path.dirname(__file__)
+
 
 def parse_enum[E: enum.Enum](name: str, value: str, cls: type[E]) -> E:
     """Parse a command-line argument into an enum type."""
