@@ -124,8 +124,9 @@ class RateLimiter[T](ABC):
     async def send(self, item: T) -> None:
         """Add an item to the queue.
 
-        Note that this will not block unless the queue becomes full, and the
-        item should not be modified after submitting it.
+        Note that this will return as soon as the item is admitted to the
+        queue, rather than when it is processed. The item should thus not be
+        modified after submitting it.
         """
         await self._queue.put(item)
         if not self._queue.empty() and self._run_task is None:
