@@ -64,7 +64,6 @@ class RateLimiter[T](ABC):
     def __init__(self, rate: float, burst_rate: float, capacity: int) -> None:
         self.rate = rate
         self.burst_rate = burst_rate
-        self._loop = asyncio.get_running_loop()
         # Loop time at which next item could be sent based on `rate`
         self._next = 0.0
         # Loop time at which next item could be sent based on `burst_rate`
@@ -92,6 +91,7 @@ class RateLimiter[T](ABC):
 
         This is scheduled as an asyncio task, only when the queue is non-empty.
         """
+        loop = asyncio.get_running_loop()
         try:
             while True:
                 try:
@@ -99,17 +99,17 @@ class RateLimiter[T](ABC):
                 except asyncio.QueueEmpty:
                     break
 
-                now = self._loop.time()
+                now = loop.time()
                 target = max(self._next, self._next_burst)
                 # Don't try to sleep for short times. We tend to oversleep and
                 # then are unable to catch up.
                 if target - now > 1e-3:
-                    future = self._loop.create_future()
-                    self._loop.call_at(target, _set_result, future)
+                    future = loop.create_future()
+                    loop.call_at(target, _set_result, future)
                     await future
                 else:
                     await asyncio.sleep(0)  # Give other asyncio tasks a chance to run
-                now = self._loop.time()
+                now = loop.time()
                 size = self.item_size(item)
                 self._next += self._per_unit * size
                 self._next_burst = max(self._next_burst, max(target, now)) + self._per_unit_burst * size
@@ -130,7 +130,7 @@ class RateLimiter[T](ABC):
         """
         await self._queue.put(item)
         if not self._queue.empty() and self._run_task is None:
-            now = self._loop.time()
+            now = asyncio.get_running_loop().time()
             self._next = max(self._next, now)
             self._next_burst = max(self._next_burst, now)
             self._run_task = asyncio.create_task(self._run(), name="RateLimiter")
