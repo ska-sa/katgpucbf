@@ -207,6 +207,7 @@ def make_stream_group(
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     recv_affinity: int,
+    pol_labels: Sequence[str],
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a stream group for receiving dual-polarised beam data.
 
@@ -223,7 +224,14 @@ def make_stream_group(
     recv_affinity
         CPU core affinity for the worker thread.
         Use -1 to indicate no affinity.
+    pol_labels
+        Prometheus labels to apply to the polarisations (must have length 2).
     """
+    # Reference counters to make the labels exist before the first scrape
+    assert len(pol_labels) == N_POLS
+    for pol in pol_labels:
+        counters.labels(pol)
+
     user_data = np.zeros(N_POLS, dtype=user_data_type.dtype)
     user_data["pol"] = np.arange(N_POLS)
     group = base_recv.make_stream_group(

@@ -228,7 +228,9 @@ class _CaptureSession:
         free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
         layout = config.recv_config.layout
         dtype = np.dtype(f"int{layout.sample_bits}")
-        recv_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, config.recv_config.affinity)
+        recv_group = recv.make_stream_group(
+            layout, data_ringbuffer, free_ringbuffer, config.recv_config.affinity, config.recv_config.pol_labels
+        )
         for _ in range(recv_chunks):
             chunk = recv.Chunk(
                 present=np.empty(
