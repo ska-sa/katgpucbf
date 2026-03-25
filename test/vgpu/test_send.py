@@ -22,53 +22,7 @@ from typing import override
 import async_solipsism
 import pytest
 
-from katgpucbf.vgpu.send import PreciseTime, PreciseTimeDelta, RateLimiter
-
-
-class TestPreciseTime:
-    """Test :class:`.PreciseTime` and :class:`.PreciseTimeDelta`."""
-
-    def test_round_trip(self) -> None:
-        """Test that constructing and converting a time/timedelta round trips."""
-        assert float(PreciseTime(1234.5)) == 1234.5
-        assert float(PreciseTimeDelta(1234.5)) == 1234.5
-
-    def test_add_sub(self) -> None:
-        """Test adding and subtracting times/timedeltas."""
-        assert float(PreciseTime(1234.5) + PreciseTimeDelta(1.5)) == 1236.0
-        assert float(PreciseTimeDelta(1234.5) + PreciseTimeDelta(1.5)) == 1236.0
-        assert float(PreciseTime(1234.5) - PreciseTimeDelta(2.0)) == 1232.5
-        assert float(PreciseTimeDelta(1234.5) - PreciseTimeDelta(2.0)) == 1232.5
-        assert float(PreciseTime(1234.5) - PreciseTime(1234.25)) == 0.25
-
-    def test_compare(self) -> None:
-        """Test comparisons between times/timedeltas."""
-        assert PreciseTime(1234.5) < PreciseTime(1234.6)
-        assert not (PreciseTime(1234.5) < PreciseTime(1234.5))
-        assert not (PreciseTime(1234.5) < PreciseTime(1234.4))
-
-        assert PreciseTime(1234.5) == PreciseTime(1234.5)
-        assert PreciseTime(1234.5) != PreciseTime(1234.6)
-
-    def test_type_mismatch(self) -> None:
-        """Test various badly-defined combinations of types."""
-        with pytest.raises(TypeError):
-            PreciseTime(1234.5) + 3  # type: ignore[operator]
-        with pytest.raises(TypeError):
-            PreciseTime(1234.5) + PreciseTime(1.0)  # type: ignore[operator]
-        with pytest.raises(TypeError):
-            PreciseTimeDelta(1234.5) - PreciseTime(1.0)  # type: ignore[operator]
-        with pytest.raises(TypeError):
-            PreciseTime(1234.5) < PreciseTimeDelta(1234.5)  # type: ignore[operator] # noqa: B015
-
-    def test_precision(self) -> None:
-        """Test that PreciseTime can maintain precision over many additions."""
-        start = PreciseTime(1234567890.0)
-        step = PreciseTimeDelta(1e-9)
-        cur = start
-        for _ in range(100000):
-            cur += step
-        assert float(cur - start) == pytest.approx(1e-4, rel=1e-9)
+from katgpucbf.vgpu.send import RateLimiter
 
 
 class DummyRateLimiter(RateLimiter[int]):

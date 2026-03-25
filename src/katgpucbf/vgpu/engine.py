@@ -326,8 +326,6 @@ class _CaptureSession:
         )
         async for frameset in frameset_it:
             self._process_frameset(frameset)
-            # TODO: do we need to insert some buffering?
-            # TODO: catch and log exceptions instead of falling over?
             await self._sender.send(frameset)
         self._capture_complete()
 

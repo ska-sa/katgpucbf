@@ -17,110 +17,17 @@
 """Send VDIF frames at a steady rate."""
 
 import asyncio
-import functools
 import ipaddress
 import logging
 import socket
 import struct
 from abc import ABC, abstractmethod
 from collections.abc import Buffer
-from typing import Self, overload, override
+from typing import override
 
 from katcbf_vlbi_resample.vdif_writer import VDIFFrame
 
 logger = logging.getLogger(__name__)
-
-
-@functools.total_ordering
-class _PreciseTimeBase:
-    """Common base class for :class:`PreciseTime` and :class:`PreciseTimeDelta`."""
-
-    def __init__(self, t: float) -> None:
-        self._ticks = round(t * 1e15)
-
-    @classmethod
-    def _from_ticks(cls, ticks: int) -> Self:
-        t = cls(0.0)
-        t._ticks = ticks
-        return t
-
-    def __float__(self) -> float:
-        return self._ticks * 1e-15
-
-    def __eq__(self, other: object) -> bool:
-        if type(self) is not type(other):
-            return NotImplemented
-        # mypy doesn't recognise the comparison on type()
-        return self._ticks == other._ticks  # type: ignore[attr-defined]
-
-    def __lt__(self, other: Self) -> bool:
-        if type(self) is not type(other):
-            return NotImplemented
-        return self._ticks < other._ticks
-
-    def __hash__(self) -> int:
-        return hash(self._ticks)
-
-
-class PreciseTime(_PreciseTimeBase):
-    """Time with femtosecond (1e-15 second) precision.
-
-    The time is internally represented as a integer number of femtoseconds
-    since an arbitrary epoch. When cast to float, it returns the time as
-    floating-point seconds, losing precision.
-
-    This represents a point in time. Use :class:`PreciseTimeDelta` for a
-    time difference.
-    """
-
-    @overload
-    def __sub__(self, other: "PreciseTime") -> "PreciseTimeDelta": ...
-    @overload
-    def __sub__(self, other: "PreciseTimeDelta") -> Self: ...
-
-    def __sub__(self, other):
-        if isinstance(other, PreciseTime):
-            return PreciseTimeDelta._from_ticks(self._ticks - other._ticks)
-        elif isinstance(other, PreciseTimeDelta):
-            return self._from_ticks(self._ticks - other._ticks)
-        else:
-            return NotImplemented
-
-    def __add__(self, other: "PreciseTimeDelta") -> Self:
-        if not isinstance(other, PreciseTimeDelta):
-            return NotImplemented
-        return self._from_ticks(self._ticks + other._ticks)
-
-
-class PreciseTimeDelta(_PreciseTimeBase):
-    """Time difference with femtosecond (1e-15 second) precision.
-
-    The delta is internally represented as a integer number of femtoseconds.
-    When cast to float, it returns the value as floating-point seconds, losing
-    precision.
-
-    This represents a change in time. Use :class:`PreciseTime` for an absolute
-    time.
-    """
-
-    def __add__(self, other: "PreciseTimeDelta") -> Self:
-        if not isinstance(other, PreciseTimeDelta):
-            return NotImplemented
-        return self._from_ticks(self._ticks + other._ticks)
-
-    def __sub__(self, other: "PreciseTimeDelta") -> Self:
-        if not isinstance(other, PreciseTimeDelta):
-            return NotImplemented
-        return self._from_ticks(self._ticks - other._ticks)
-
-    def __mul__(self, other: float) -> Self:
-        if isinstance(other, int):
-            return self._from_ticks(self._ticks * other)
-        elif isinstance(other, float):
-            # This loses precision, but `other` is imprecise anyway
-            return type(self)(float(self) * other)
-        else:
-            return NotImplemented
 
 
 def _set_result(future: asyncio.Future) -> None:
@@ -147,7 +54,9 @@ class RateLimiter[T](ABC):
     burst_rate
         Pace at which to catch up if falling behind (for example, because a
         sleep took too long, or a garbage collection pause). It can also be
-        zero to disable this pacing.
+        zero to disable this pacing. Note that if the producer doesn't
+        produce items fast enough, this is *not* used to make up for time that
+        the queue is empty.
     capacity
         Maximum number of items in the queue (0 for unlimited).
     """
@@ -156,10 +65,14 @@ class RateLimiter[T](ABC):
         self.rate = rate
         self.burst_rate = burst_rate
         self._loop = asyncio.get_running_loop()
-        self._next = PreciseTime(0.0)
-        self._next_burst = PreciseTime(0.0)
-        self._per_unit = PreciseTimeDelta(1 / rate if rate else 0.0)
-        self._per_unit_burst = PreciseTimeDelta(1 / burst_rate if burst_rate else 0.0)
+        # Loop time at which next item could be sent based on `rate`
+        self._next = 0.0
+        # Loop time at which next item could be sent based on `burst_rate`
+        self._next_burst = 0.0
+        # Seconds per unit for `rate`
+        self._per_unit = 1 / rate if rate else 0.0
+        # Seconds per unit for `burst_rate`
+        self._per_unit_burst = 1 / burst_rate if burst_rate else 0.0
         self._queue: asyncio.Queue[T] = asyncio.Queue(capacity)
         self._run_task: asyncio.Task | None = None
 
@@ -186,17 +99,17 @@ class RateLimiter[T](ABC):
                 except asyncio.QueueEmpty:
                     break
 
-                now = PreciseTime(self._loop.time())
+                now = self._loop.time()
                 target = max(self._next, self._next_burst)
                 # Don't try to sleep for short times. We tend to oversleep and
                 # then are unable to catch up.
-                if float(target - now) > 1e-3:
+                if target - now > 1e-3:
                     future = self._loop.create_future()
-                    self._loop.call_at(float(target), _set_result, future)
+                    self._loop.call_at(target, _set_result, future)
                     await future
                 else:
                     await asyncio.sleep(0)  # Give other asyncio tasks a chance to run
-                now = PreciseTime(self._loop.time())
+                now = self._loop.time()
                 size = self.item_size(item)
                 self._next += self._per_unit * size
                 self._next_burst = max(self._next_burst, max(target, now)) + self._per_unit_burst * size
@@ -216,7 +129,7 @@ class RateLimiter[T](ABC):
         """
         await self._queue.put(item)
         if not self._queue.empty() and self._run_task is None:
-            now = PreciseTime(self._loop.time())
+            now = self._loop.time()
             self._next = max(self._next, now)
             self._next_burst = max(self._next_burst, now)
             self._run_task = asyncio.create_task(self._run(), name="RateLimiter")
