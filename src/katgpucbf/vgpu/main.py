@@ -193,7 +193,7 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         bandwidth=args.send_bandwidth,
         n_samples_per_frame=args.send_samples_per_frame,
         station=args.send_station,
-        send_rate_factor=args.send_rate_factor,
+        rate_factor=args.send_rate_factor,
         dsts=args.dst,
         interfaces=args.send_interface,
         buffer=args.send_buffer,

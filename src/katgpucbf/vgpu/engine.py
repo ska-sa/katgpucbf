@@ -190,7 +190,7 @@ class SendConfig:
     pols: tuple[str, str]
     bandwidth: float
     n_samples_per_frame: int
-    send_rate_factor: float
+    rate_factor: float
     station: str
     dsts: list[tuple[str, int]]
     interfaces: list[str]
@@ -365,7 +365,7 @@ class VEngine(Engine):
         )
         self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
         self._capture: _CaptureSession | None = None
-        send_rate = send_config.bandwidth * send_config.send_rate_factor
+        send_rate = send_config.bandwidth * send_config.rate_factor
         self._sender = send.VDIFSender(
             send_config.dsts,
             send_rate,
