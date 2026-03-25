@@ -212,7 +212,7 @@ class VDIFSender(RateLimiter[list[VDIFFrame]]):
                 future.set_exception(exc)
 
     async def _send_frame(self, frame: VDIFFrame) -> None:
-        buffers: list[Buffer] = [struct.pack(">Q", self._sequence), frame.header, frame.payload]
+        buffers: list[Buffer] = [struct.pack("<Q", self._sequence), frame.header, frame.payload]
         sock = self._socks[self._next_sock]
         self._next_sock = (self._next_sock + 1) % len(self._socks)
         self._sequence += 1
