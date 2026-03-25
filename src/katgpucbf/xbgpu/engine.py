@@ -1108,7 +1108,7 @@ class XBEngine(Engine):
         Handle to vkgdr for the same device as `context`.
     """
 
-    VERSION = "katgpucbf-xbgpu-icd-0.1"
+    VERSION = "katgpucbf-xbgpu-1.0"
 
     def __init__(
         self,

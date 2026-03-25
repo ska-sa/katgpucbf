@@ -1261,9 +1261,7 @@ class FEngine(Engine):
         reporting for :class:`~asyncio.Queue` sizes and events.
     """
 
-    # TODO: VERSION means interface version, rather than software version. It
-    # will need to wait on a proper ICD for a release.
-    VERSION = "katgpucbf-fgpu-icd-0.1"
+    VERSION = "katgpucbf-fgpu-1.0"
 
     def __init__(
         self,
