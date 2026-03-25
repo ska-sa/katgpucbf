@@ -115,6 +115,7 @@ class TestVEngine:
             f"--fir-taps={FIR_TAPS}",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--sync-time={SYNC_TIME}",
+            "--send-rate-factor=0",  # Make it send infinitely fast, to avoid slowing the test
             f"239.10.0.0+{RECV_SUBSTREAMS - 1}:7148",
             f"239.10.1.0+{RECV_SUBSTREAMS - 1}:7148",
             "239.10.2.0",
