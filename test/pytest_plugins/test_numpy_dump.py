@@ -119,6 +119,7 @@ def test_failed_with_no_array_path_set(pytester: pytest.Pytester) -> None:
     pytester.makeini(
         """
         [pytest]
+        asyncio_default_fixture_loop_scope = function
         """
     )
     result = pytester.runpytest("demo.py::test_numpy_fails")
