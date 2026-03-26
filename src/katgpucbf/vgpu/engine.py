@@ -355,6 +355,9 @@ class VEngine(Engine):
         )
         self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
         self._capture: _CaptureSession | None = None
+        # Reference counters to make the labels exist before the first scrape
+        for pol in recv_config.pol_labels:
+            recv.counters.labels(str(pol))
 
     def _populate_sensors(
         self,
