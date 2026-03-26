@@ -330,9 +330,7 @@ class _CaptureSession:
 class VEngine(Engine):
     """Top-level class running the whole thing."""
 
-    # TODO: VERSION means interface version, rather than software version. It
-    # will need to wait on a proper ICD for a release.
-    VERSION = "katgpucbf-vgpu-icd-0.1"
+    VERSION = "katgpucbf-vgpu-1.0"
 
     def __init__(
         self,

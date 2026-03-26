@@ -57,9 +57,7 @@ class DEngine(Engine):
         Passed to base class
     """
 
-    # TODO: VERSION means interface version, rather than software version. It
-    # will need to wait on a proper ICD for a release.
-    VERSION = "katgpucbf-dsim-0.1"
+    VERSION = "katgpucbf-dsim-1.0"
 
     def __init__(
         self,
