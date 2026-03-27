@@ -19,7 +19,6 @@
 import argparse
 import asyncio
 import contextlib
-import os
 import re
 from collections.abc import MutableMapping, Sequence
 
@@ -42,9 +41,6 @@ from .engine import CaptureConfig, RecvConfig, SendConfig, VEngine
 
 VTP_DEFAULT_PORT = 52030
 _ARGUMENT_PARSER = argparse.ArgumentParser  # Modified by unit tests
-
-# Force Astropy to use local config directory
-os.environ["ASTROPY_CONFIG_DIR"] = os.path.dirname(__file__) + "/.."
 
 
 def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
