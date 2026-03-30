@@ -365,7 +365,7 @@ redis==7.1.0
     # via
     #   -c requirements.txt
     #   katsdptelstate
-requests==2.32.5
+requests==2.33.0
     # via sphinx
 roman-numerals==4.1.0
     # via roman-numerals-py
