@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2023-2025, National Research Foundation (SARAO)
+# Copyright (c) 2023-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -25,12 +25,18 @@ import argparse
 import asyncio
 import functools
 from contextlib import AsyncExitStack
+from typing import override
 
 import asyncssh
 
 from katgpucbf import N_POLS
 
-from benchmark_tools import DEFAULT_IMAGE, PROMETHEUS_PORT_BASE, Benchmark
+from benchmark_tools import (
+    PROMETHEUS_PORT_BASE,
+    Benchmark,
+    add_common_benchmark_arguments,
+    process_common_benchmark_arguments,
+)
 from remote import InsufficientCoresError, Server, ServerInfo, run_tasks, servers_from_toml
 
 KATCP_PORT_BASE = 7140
@@ -113,6 +119,10 @@ def fgpu_factory(
     # When we run > 4, we assume we have enough RAM (GPU and host) that we
     # don't need to scale buffers down to tiny amounts.
     scaling_n = min(n, 4)
+    if n == 3:
+        # Currently the chunk_jones must be a power of 2, this ensures that it is for n=3 and that it fits in memory
+        scaling_n = 4
+
     recv_chunk_samples = 2**27 // scaling_n
     send_chunk_jones = recv_chunk_samples // 4
     if n == 1:
@@ -191,8 +201,14 @@ class FgpuBenchmark(Benchmark):
             consumer_server=servers[args.fgpu_server],
             expected_heaps_scale=N_POLS / args.dig_heap_samples,
             metric_prefix="fgpu",
+            slope={
+                1: -342.212919,
+                2: -173.264274,
+                4: -582.668296,
+            },
         )
 
+    @override
     async def run_producers(
         self,
         adc_sample_rate: float,
@@ -227,6 +243,7 @@ class FgpuBenchmark(Benchmark):
             pull=self.args.pull,
         )
 
+    @override
     async def run_consumers(
         self,
         adc_sample_rate: float,
@@ -257,23 +274,10 @@ class FgpuBenchmark(Benchmark):
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", type=int, default=4, help="Number of engines [%(default)s]")
-    parser.add_argument("--channels", type=int, default=1024, help="Wideband channel count [%(default)s]")
     parser.add_argument(
         "--use-vkgdr",
         action="store_true",
         help="Assemble chunks directly in GPU memory (requires sufficient GPU BAR space)",
-    )
-    parser.add_argument(
-        "--array-size",
-        type=int,
-        help="The number of antennas in the array.",
-    )
-    parser.add_argument(
-        "--jones-per-batch",
-        type=int,
-        metavar="SAMPLES",
-        help="Jones vectors in each output batch",
     )
     parser.add_argument(
         "--dig-heap-samples",
@@ -288,70 +292,18 @@ async def main():
         metavar="BITS",
         help="Number of bits per digitised sample",
     )
-    # For backwards compatibility, specifying --narrowband (without an argument) is
-    # equivalent to specifying --narrowband=1.
-    parser.add_argument(
-        "--narrowband", type=int, default=0, const=1, nargs="?", help="Number of narrowband outputs [0]"
-    )
-    parser.add_argument(
-        "--narrowband-decimation", type=int, default=8, help="Narrowband decimation factor [%(default)s]"
-    )
     parser.add_argument("--narrowband-channels", type=int, default=32768, help="Narrowband channels [%(default)s]")
     parser.add_argument("--xb", type=int, default=64, help="Number of XB-engines [%(default)s]")
     parser.add_argument("--fgpu-docker-arg", action="append", default=[], help="Add Docker argument for invoking fgpu")
-
-    parser.add_argument(
-        "--init-time", type=float, default=20.0, metavar="SECONDS", help="Time for engines to start [%(default)s]"
-    )
-    parser.add_argument(
-        "--startup-time", type=float, default=1.0, help="Time to run before starting measurement [%(default)s]"
-    )
-    parser.add_argument("--runtime", type=float, default=20.0, help="Time to let engine run (s) [%(default)s]")
-    parser.add_argument("--low", type=float, default=1500e6, help="Minimum ADC sample rate to search [%(default)s]")
-    parser.add_argument("--high", type=float, default=2200e6, help="Maximum ADC sample rate to search [%(default)s]")
-    parser.add_argument("--step", type=float, default=1e6, help="Step size between sample rates to test [%(default)s]")
-    parser.add_argument("--interval", type=float, default=20e6, help="Target confidence interval [%(default)s]")
-    parser.add_argument("--max-comparisons", type=int, default=40, help="Maximum comparisons to make [%(default)s]")
-    parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Docker image [%(default)s]")
-    parser.add_argument("--no-pull", dest="pull", action="store_false", help="Do not pull Docker image")
-    parser.add_argument("--servers", type=str, default="servers.toml", help="Server description file [%(default)s]")
     parser.add_argument("--dsim-server", type=str, default="dsim", help="Server on which to run dsims [%(default)s]")
     parser.add_argument("--fgpu-server", type=str, default="fgpu", help="Server on which to run fgpu [%(default)s]")
-    parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity [no]")
-    parser.add_argument(
-        "--calibrate", action="store_true", help="Run at multiple rates to calibrate expectations [%(default)s]"
-    )
-    parser.add_argument(
-        "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
-    )
-    parser.add_argument("--oneshot", type=float, help="Run one test at the given sampling rate")
+    add_common_benchmark_arguments(parser)
     parser.add_argument("extra", nargs="*", help="Remaining arguments are passed to fgpu")
     args = parser.parse_args()
-    if args.calibrate and args.oneshot is not None:
-        parser.error("Cannot specify both --calibrate and --oneshot")
 
-    benchmark = FgpuBenchmark(args)
+    process_common_benchmark_arguments(args, parser)
 
-    if args.calibrate:
-        await benchmark.calibrate(args.low, args.high, args.step, args.calibrate_repeat)
-    elif args.oneshot is not None:
-        result = await benchmark.measure(args.oneshot)
-        print(result.message())
-    else:
-        slope = {
-            1: -342.212919,
-            2: -173.264274,
-            4: -582.668296,
-        }[min(args.n, 4)]
-        low, high = await benchmark.search(
-            low=args.low,
-            high=args.high,
-            step=args.step,
-            interval=args.interval,
-            max_comparisons=args.max_comparisons,
-            slope=slope,
-        )
-        print(f"\n{low / 1e6} MHz - {high / 1e6} MHz")
+    await FgpuBenchmark(args).run()
 
 
 if __name__ == "__main__":

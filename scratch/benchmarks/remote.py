@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2023-2025, National Research Foundation (SARAO)
+# Copyright (c) 2023-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,6 +17,7 @@
 """Launch and manage remote tasks over SSH."""
 
 import asyncio
+import logging
 import tomllib
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -26,6 +27,8 @@ from typing import Self
 import asyncssh
 
 VERBOSE_PASS_OUTPUT = 2  #: Verbosity level at which process output is passed through
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -262,4 +265,3 @@ async def run_tasks(
                     if tasks[1] in done:
                         raise RuntimeError("process shut down before becoming ready")
         return stack.pop_all()
-    raise AssertionError("should be unreachable")

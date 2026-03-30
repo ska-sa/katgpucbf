@@ -211,6 +211,8 @@ are described in :ref:`monitoring-sensors`.
 
 dsim
 ^^^^
+This describes version ``katgpucbf-dsim-1.0`` of the katcp-device API.
+
 :samp:`?signals {spec} [{period}]`
     Change the signals that are generated. The signal specification is
     described in :ref:`dsim-dsl`. The resulting signal will be periodic with a
@@ -235,6 +237,8 @@ dsim
 
 fgpu
 ^^^^
+This describes version ``katgpucbf-fgpu-1.0`` of the katcp-device API.
+
 :samp:`?gain {stream} {input} [{values}...]`
     Set the complex gains. This has the same semantics as the equivalent
     katsdpcontroller request, but :samp:`{input}` must be 0 or 1 to select
@@ -251,6 +255,8 @@ fgpu
 
 xbgpu
 ^^^^^
+This describes version ``katgpucbf-xbgpu-1.0`` of the katcp-device API.
+
 :samp:`?capture-start {stream} [{timestamp}]`, :samp:`?capture-stop {stream}`
     Enable or disable transmission of output data. This does not affect
     transmission of descriptors, which cannot be disabled. In the initial
@@ -266,6 +272,8 @@ xbgpu
 
 vgpu
 ^^^^
+This describes version ``katgpucbf-vgpu-1.0`` of the katcp-device API.
+
 :samp:`?capture-start [{timestamp}]`, :samp:`?capture-stop`
     Enable or disable transmission of output data. In the initial state
     transmission is disabled.

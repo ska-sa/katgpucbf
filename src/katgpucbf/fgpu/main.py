@@ -301,6 +301,7 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
         monitor = NullMonitor()
 
     batch_jones_lcm = math.lcm(*(output.jones_per_batch for output in args.outputs))
+    # TODO(NGC-1917): This doesn't seem to prevent window misalignment in pfb, specifically for the wideband output.
     chunk_jones = accel.roundup(args.send_chunk_jones, batch_jones_lcm)
     engine = FEngine(
         katcp_host=args.katcp_host,

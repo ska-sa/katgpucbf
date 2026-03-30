@@ -326,9 +326,7 @@ class _CaptureSession:
 class VEngine(Engine):
     """Top-level class running the whole thing."""
 
-    # TODO: VERSION means interface version, rather than software version. It
-    # will need to wait on a proper ICD for a release.
-    VERSION = "katgpucbf-vgpu-icd-0.1"
+    VERSION = "katgpucbf-vgpu-1.0"
 
     def __init__(
         self,
@@ -366,6 +364,9 @@ class VEngine(Engine):
             ttl=send_config.ttl,
             buffer=send_config.buffer,
         )
+        # Reference counters to make the labels exist before the first scrape
+        for pol in recv_config.pol_labels:
+            recv.counters.labels(str(pol))
 
     def _populate_sensors(
         self,

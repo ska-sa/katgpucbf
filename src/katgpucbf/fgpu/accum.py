@@ -123,7 +123,7 @@ class Accum[T: _SupportsAdd]:
             If [start_timestamp, end_timestamp) crosses a window boundary
         """
         if start_timestamp > end_timestamp:
-            raise ValueError("start_timestamp ({start_timestamp}) > end_timestamp ({end_timestamp})")
+            raise ValueError(f"start_timestamp ({start_timestamp}) > end_timestamp ({end_timestamp})")
         new_window_id = start_timestamp // self._window_size
         new_window_end = (new_window_id + 1) * self._window_size
         if end_timestamp > new_window_end:
