@@ -36,8 +36,8 @@ from katgpucbf import COMPLEX, N_POLS
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
-    _ip_plus,
-    _split_half_network_addresses,
+    _address_at_index,
+    _split_network,
     add_common_benchmark_arguments,
     process_common_benchmark_arguments,
 )
@@ -92,7 +92,7 @@ def fsim_factory(
         f"--channels-per-substream={info.channels_per_substream} "
         f"--samples-between-spectra={info.samples_between_spectra} "
         f"--jones-per-batch={args.jones_per_batch} "
-        f"{str(_ip_plus(multicast_group, index))}:7148 "
+        f"{str(_address_at_index(multicast_group, index))}:7148 "
     )
     return command
 
@@ -126,7 +126,7 @@ def xbgpu_factory(
     )
     target_chunk_size = 64 * 1024**2
     batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
-    beam_multicast_group, corrprod_multicast_group = _split_half_network_addresses(multicast_group)
+    beam_multicast_group, corrprod_multicast_group = _split_network(multicast_group)
 
     command = (
         "docker run "
@@ -155,18 +155,18 @@ def xbgpu_factory(
         f"--send-interface={interface} "
         f"--send-ibv "
         f"--send-enabled "
-        f"{str(_ip_plus(fsim_multicast_group, index))}:7148 "
+        f"{str(_address_at_index(fsim_multicast_group, index))}:7148 "
     )
     for i in range(args.beams):
         for j in range(N_POLS):
             idx = N_POLS * i + j
             beam_number = index * args.beams * N_POLS + idx
-            command += f"--beam=name=beam{idx},dst={str(_ip_plus(beam_multicast_group, beam_number))},pol={j} "
+            command += f"--beam=name=beam{idx},dst={str(_address_at_index(beam_multicast_group, beam_number))},pol={j} "
 
     for i in range(args.corrprods):
         corrprod_number = index * args.corrprods + i
         command += f"--corrprod=name=corrprod{corrprod_number},"
-        command += f"dst={str(_ip_plus(corrprod_multicast_group, corrprod_number))},"
+        command += f"dst={str(_address_at_index(corrprod_multicast_group, corrprod_number))},"
         command += f"heap_accumulation_threshold={threshold} "
     return command
 

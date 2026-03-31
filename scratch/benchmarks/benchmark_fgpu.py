@@ -35,9 +35,8 @@ from katgpucbf import N_POLS
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
-    _ip_plus,
-    _ip_plus_addr,
-    _split_half_network_addresses,
+    _address_at_index,
+    _split_network,
     add_common_benchmark_arguments,
     process_common_benchmark_arguments,
 )
@@ -81,11 +80,11 @@ def dsim_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"feng-dsim-{index}"
     if single_pol:
-        addresses = f"{str(_ip_plus(multicast_group, index * 8))}+7:7148"
+        addresses = f"{str(_address_at_index(multicast_group, index * 8))}+7:7148"
     else:
         addresses = (
-            f"{str(_ip_plus(multicast_group, index * 16))}+7:7148 "
-            f"{str(_ip_plus(multicast_group, index * 16 + 8))}+7:7148"
+            f"{str(_address_at_index(multicast_group, index * 16))}+7:7148 "
+            f"{str(_address_at_index(multicast_group, index * 16 + 8))}+7:7148"
         )
     command = (
         "docker run "
@@ -149,17 +148,15 @@ def fgpu_factory(
     other_affinity = str(cores[-1])
     gpu = server.gpus[index % len(server.gpus)]
     # Split the CIDR in half: first half used for wideband, second half for narrowband.
-    _, narrowband_net = _split_half_network_addresses(multicast_group)
-    narrowband_address_start = _ip_plus_addr(
-        multicast_group, narrowband_net.network_address, index * narrowband_addresses_per_fgpu
-    )
+    wideband_net, narrowband_net = _split_network(multicast_group)
+    narrowband_address_offset = index * narrowband_addresses_per_fgpu
     katcp_port = KATCP_PORT_BASE + index
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fgpu-{index}"
     wideband_kwargs = {
         "name": "wideband",
         "channels": args.channels,
-        "dst": f"{str(_ip_plus(multicast_group, index * args.xb))}+{args.xb - 1}:7148",
+        "dst": f"{str(_address_at_index(wideband_net, index * args.xb))}+{args.xb - 1}:7148",
     }
 
     if args.jones_per_batch is not None:
@@ -185,18 +182,17 @@ def fgpu_factory(
         f"--feng-id={index} "
         f"{'--use-vkgdr' if args.use_vkgdr else ''} "
         f"--wideband={wideband_arg} "
-        f"{str(_ip_plus(dsim_multicast_group, index * 16))}+15:7148 "
+        f"{str(_address_at_index(dsim_multicast_group, index * 16))}+15:7148 "
     )
     for i in range(args.narrowband):
-        narrowband_address = str(
-            _ip_plus_addr(multicast_group, narrowband_address_start, i * narrowband_addresses_per_fgpu)
-        )
         narrowband_kwargs = {
             "name": f"narrowband{i}",
             "channels": args.narrowband_channels,
             "decimation": args.narrowband_decimation,
             "centre_frequency": adc_sample_rate / 4,
-            "dst": f"{narrowband_address}+{narrowband_addresses_per_fgpu - 1}:7148",
+            "dst": f"{
+                str(_address_at_index(narrowband_net, narrowband_address_offset + i * narrowband_addresses_per_fgpu))
+            } + {narrowband_addresses_per_fgpu - 1}: 7148",
         }
         if args.jones_per_batch is not None:
             narrowband_kwargs["jones_per_batch"] = args.jones_per_batch

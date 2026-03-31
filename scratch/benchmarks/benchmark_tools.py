@@ -51,35 +51,18 @@ MAXIMUM_RANGES = 2**20
 logger = logging.getLogger(__name__)
 
 
-def _ip_plus(
-    network: ipaddress.IPv4Network | ipaddress.IPv6Network, offset: int
+def _address_at_index(
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network, index: int
 ) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-    """Return the IP address at the first address in the network + offset, validated to be inside of the network."""
-    if offset < 0:
+    """Return the IP address at the given index in the network, validated to be inside of the network."""
+    if index < 0:
         raise ValueError("offset must be non-negative")
-    addr_int = int(network.network_address) + offset
-    addr = ipaddress.IPv4Address(addr_int)
-    if addr not in network:
-        raise ValueError(f"computed address {addr} is outside multicast_group {network}")
-    return addr
+    if index >= network.num_addresses:
+        raise ValueError(f"offset {index} is greater than the number of addresses in the network {network}")
+    return ipaddress.ip_address(int(network.network_address) + index)
 
 
-def _ip_plus_addr(
-    network: ipaddress.IPv4Network | ipaddress.IPv6Network,
-    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
-    offset: int,
-) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-    """Return the IP address at the given address + offset, validated to be inside of the network."""
-    if offset < 0:
-        raise ValueError("offset must be non-negative")
-    addr_int = int(address) + offset
-    addr = ipaddress.IPv4Address(addr_int)
-    if addr not in network:
-        raise ValueError(f"computed address {addr} is outside multicast_group {network}")
-    return addr
-
-
-def _split_half_network_addresses(
+def _split_network(
     multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ipaddress.IPv4Network | ipaddress.IPv6Network]:
     """Split a CIDR in half and return the two subnets."""
@@ -87,7 +70,7 @@ def _split_half_network_addresses(
         raise ValueError(f"multicast_group {multicast_group} is too small to split")
     half_prefixlen = multicast_group.prefixlen + 1
     first = ipaddress.ip_network(f"{multicast_group.network_address}/{half_prefixlen}")
-    second_base = _ip_plus_addr(multicast_group, multicast_group.network_address, first.num_addresses)
+    second_base = _address_at_index(multicast_group, first.num_addresses)
     second = ipaddress.ip_network(f"{second_base}/{half_prefixlen}")
     return first, second
 
@@ -321,9 +304,7 @@ class Benchmark(ABC):
         logging.basicConfig(
             level=logging.DEBUG if args.verbose >= 3 else logging.INFO if args.verbose >= 2 else logging.WARNING
         )
-        self.producer_multicast_group, self.consumer_multicast_group = _split_half_network_addresses(
-            args.multicast_group
-        )
+        self.producer_multicast_group, self.consumer_multicast_group = _split_network(args.multicast_group)
 
     def verbose_results(self) -> bool:
         return self.args.verbose >= VERBOSE_RESULTS
