@@ -24,10 +24,12 @@ See :doc:`benchmarking`.
 import argparse
 import asyncio
 import functools
+import ipaddress
 import math
 from contextlib import AsyncExitStack
 from typing import override
 
+from benchmark_tools import _ip_plus, _split_half_network_addresses
 import asyncssh
 
 from katgpucbf import COMPLEX, N_POLS
@@ -63,6 +65,7 @@ def fsim_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
+    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> str:
     """Generate command to run fsim."""
     cores = server_info.allocate_cores(args.n, 2)[index]
@@ -88,7 +91,7 @@ def fsim_factory(
         f"--channels-per-substream={info.channels_per_substream} "
         f"--samples-between-spectra={info.samples_between_spectra} "
         f"--jones-per-batch={args.jones_per_batch} "
-        f"239.102.199.{index}:7148 "
+        f"{str(_ip_plus(multicast_group, index))}:7148 "
     )
     return command
 
@@ -102,6 +105,8 @@ def xbgpu_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
+    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    fsim_multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> str:
     """Generate command to run xbgpu."""
     cores = server_info.allocate_cores(args.n, 2)[index]
@@ -120,6 +125,7 @@ def xbgpu_factory(
     )
     target_chunk_size = 64 * 1024**2
     batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
+    beam_multicast_group, corrprod_multicast_group = _split_half_network_addresses(multicast_group)
 
     command = (
         "docker run "
@@ -148,18 +154,18 @@ def xbgpu_factory(
         f"--send-interface={interface} "
         f"--send-ibv "
         f"--send-enabled "
-        f"239.102.199.{index}:7148 "
+        f"{str(_ip_plus(fsim_multicast_group, index))}:7148 "
     )
     for i in range(args.beams):
         for j in range(N_POLS):
             idx = N_POLS * i + j
             beam_number = index * args.beams * N_POLS + idx
-            command += f"--beam=name=beam{idx},dst=239.102.197.{beam_number},pol={j} "
+            command += f"--beam=name=beam{idx},dst={str(_ip_plus(beam_multicast_group, beam_number))},pol={j} "
 
     for i in range(args.corrprods):
         corrprod_number = index * args.corrprods + i
         command += f"--corrprod=name=corrprod{corrprod_number},"
-        command += f"dst=239.102.198.{corrprod_number},"
+        command += f"dst={str(_ip_plus(corrprod_multicast_group, corrprod_number))},"
         command += f"heap_accumulation_threshold={threshold} "
     return command
 
@@ -186,6 +192,7 @@ class XbgpuBenchmark(Benchmark):
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             fsim_factory,
+            multicast_group=self.producer_multicast_group,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,
@@ -205,6 +212,8 @@ class XbgpuBenchmark(Benchmark):
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             xbgpu_factory,
+            multicast_group=self.consumer_multicast_group,
+            fsim_multicast_group=self.producer_multicast_group,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,
