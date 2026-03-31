@@ -35,40 +35,15 @@ from katgpucbf import N_POLS
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
+    _ip_plus,
+    _ip_plus_addr,
+    _split_half_network_addresses,
     add_common_benchmark_arguments,
     process_common_benchmark_arguments,
 )
 from remote import InsufficientCoresError, Server, ServerInfo, run_tasks, servers_from_toml
 
 KATCP_PORT_BASE = 7140
-
-
-def _ip_plus(
-    network: ipaddress.IPv4Network | ipaddress.IPv6Network, offset: int
-) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-    """Return the IPv4 address at network_address + offset, validated to be inside the network."""
-    if offset < 0:
-        raise ValueError("offset must be non-negative")
-    addr_int = int(network.network_address) + offset
-    addr = ipaddress.IPv4Address(addr_int)
-    if addr not in network:
-        raise ValueError(f"computed address {addr} is outside multicast_group {network}")
-    return addr
-
-
-def _ip_plus_addr(
-    network: ipaddress.IPv4Network | ipaddress.IPv6Network,
-    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
-    offset: int,
-) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-    """Return the IPv4 address at network_address + offset, validated to be inside the network."""
-    if offset < 0:
-        raise ValueError("offset must be non-negative")
-    addr_int = int(address) + offset
-    addr = ipaddress.IPv4Address(addr_int)
-    if addr not in network:
-        raise ValueError(f"computed address {addr} is outside multicast_group {network}")
-    return addr
 
 
 def dsim_factory(
@@ -82,6 +57,7 @@ def dsim_factory(
     single_pol: bool,
     sync_time: int,
     args: argparse.Namespace,
+    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> str:
     """Generate command to run dsim."""
     # Use as many CPUs as we can to speed up startup. We need at least 3
@@ -105,11 +81,11 @@ def dsim_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"feng-dsim-{index}"
     if single_pol:
-        addresses = f"{str(_ip_plus(server.multicast_group, index * 8))}+7:7148"
+        addresses = f"{str(_ip_plus(multicast_group, index * 8))}+7:7148"
     else:
         addresses = (
-            f"{str(_ip_plus(server.multicast_group, index * 16))}+7:7148 "
-            f"{str(_ip_plus(server.multicast_group, index * 16 + 8))}+7:7148"
+            f"{str(_ip_plus(multicast_group, index * 16))}+7:7148 "
+            f"{str(_ip_plus(multicast_group, index * 16 + 8))}+7:7148"
         )
     command = (
         "docker run "
@@ -146,6 +122,7 @@ def fgpu_factory(
     sync_time: int,
     args: argparse.Namespace,
     dsim_multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> str:
     """Generate command to run fgpu."""
     n = args.n
@@ -172,17 +149,17 @@ def fgpu_factory(
     other_affinity = str(cores[-1])
     gpu = server.gpus[index % len(server.gpus)]
     # Split the CIDR in half: first half used for wideband, second half for narrowband.
-    half = server.multicast_group.num_addresses // 2
-    if half == 0:
-        raise ValueError(f"multicast_group {server.multicast_group} is too small to split")
-    narrowband_address_start = _ip_plus(server.multicast_group, half + index * narrowband_addresses_per_fgpu)
+    _, narrowband_net = _split_half_network_addresses(multicast_group)
+    narrowband_address_start = _ip_plus_addr(
+        multicast_group, narrowband_net.network_address, index * narrowband_addresses_per_fgpu
+    )
     katcp_port = KATCP_PORT_BASE + index
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fgpu-{index}"
     wideband_kwargs = {
         "name": "wideband",
         "channels": args.channels,
-        "dst": f"{str(_ip_plus(server.multicast_group, index * args.xb))}+{args.xb - 1}:7148",
+        "dst": f"{str(_ip_plus(multicast_group, index * args.xb))}+{args.xb - 1}:7148",
     }
 
     if args.jones_per_batch is not None:
@@ -212,7 +189,7 @@ def fgpu_factory(
     )
     for i in range(args.narrowband):
         narrowband_address = str(
-            _ip_plus_addr(server.multicast_group, narrowband_address_start, i * narrowband_addresses_per_fgpu)
+            _ip_plus_addr(multicast_group, narrowband_address_start, i * narrowband_addresses_per_fgpu)
         )
         narrowband_kwargs = {
             "name": f"narrowband{i}",
@@ -271,6 +248,7 @@ class FgpuBenchmark(Benchmark):
             dsim_factory,
             adc_sample_rate=adc_sample_rate,
             n=n,
+            multicast_group=self.producer_multicast_group,
             single_pol=single_pol,
             sync_time=sync_time,
             args=self.args,
@@ -300,7 +278,8 @@ class FgpuBenchmark(Benchmark):
         factory = functools.partial(
             fgpu_factory,
             adc_sample_rate=adc_sample_rate,
-            dsim_multicast_group=self.generator_server.multicast_group,
+            dsim_multicast_group=self.producer_multicast_group,
+            multicast_group=self.consumer_multicast_group,
             sync_time=sync_time,
             args=self.args,
         )

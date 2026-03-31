@@ -18,6 +18,7 @@
 
 import argparse
 import asyncio
+import ipaddress
 import logging
 import sys
 import time
@@ -48,6 +49,47 @@ PROMETHEUS_PORT_BASE = 7250
 UNSTABLE_RETRIES = 3  #: Maximum number of times to retry a throttled trial
 MAXIMUM_RANGES = 2**20
 logger = logging.getLogger(__name__)
+
+
+def _ip_plus(
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network, offset: int
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Return the IPv4 address at network_address + offset, validated to be inside the network."""
+    if offset < 0:
+        raise ValueError("offset must be non-negative")
+    addr_int = int(network.network_address) + offset
+    addr = ipaddress.IPv4Address(addr_int)
+    if addr not in network:
+        raise ValueError(f"computed address {addr} is outside multicast_group {network}")
+    return addr
+
+
+def _ip_plus_addr(
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    offset: int,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Return the IPv4 address at network_address + offset, validated to be inside the network."""
+    if offset < 0:
+        raise ValueError("offset must be non-negative")
+    addr_int = int(address) + offset
+    addr = ipaddress.IPv4Address(addr_int)
+    if addr not in network:
+        raise ValueError(f"computed address {addr} is outside multicast_group {network}")
+    return addr
+
+
+def _split_half_network_addresses(
+    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    """Split a CIDR in half and return the two subnets."""
+    if multicast_group.prefixlen >= multicast_group.max_prefixlen:
+        raise ValueError(f"multicast_group {multicast_group} is too small to split")
+    half_prefixlen = multicast_group.prefixlen + 1
+    first = ipaddress.ip_network(f"{multicast_group.network_address}/{half_prefixlen}")
+    second_base = _ip_plus_addr(multicast_group, multicast_group.network_address, first.num_addresses)
+    second = ipaddress.ip_network(f"{second_base}/{half_prefixlen}")
+    return first, second
 
 
 def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
@@ -115,6 +157,12 @@ def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
+    )
+    parser.add_argument(
+        "--multicast-group",
+        type=ipaddress.ip_network,
+        default=ipaddress.ip_network("239.192.128.0/20"),
+        help="Multicast group [%(default)s]",
     )
 
 
@@ -272,6 +320,9 @@ class Benchmark(ABC):
         self.slope = slope
         logging.basicConfig(
             level=logging.DEBUG if args.verbose >= 3 else logging.INFO if args.verbose >= 2 else logging.WARNING
+        )
+        self.producer_multicast_group, self.consumer_multicast_group = _split_half_network_addresses(
+            args.multicast_group
         )
 
     def verbose_results(self) -> bool:

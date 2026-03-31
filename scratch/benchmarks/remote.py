@@ -17,7 +17,6 @@
 """Launch and manage remote tasks over SSH."""
 
 import asyncio
-import ipaddress
 import logging
 import tomllib
 from collections.abc import Callable
@@ -41,7 +40,6 @@ class Server:
     interfaces: list[str] = field(default_factory=list)
     gpus: list[str] = field(default_factory=lambda: ["0"])
     cpus: list[list[int]] = field(default_factory=list)
-    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network = ipaddress.ip_network("239.192.128.0/18")
 
 
 def servers_from_toml(filename: str) -> dict[str, "Server"]:
@@ -58,13 +56,6 @@ def servers_from_toml(filename: str) -> dict[str, "Server"]:
         toml = tomllib.load(f)
     servers = {}
     for key, value in toml.items():
-        if value.get("multicast_group") is not None:
-            if not isinstance(value["multicast_group"], str):
-                raise ValueError(f"{key}.multicast_group must be a CIDR string, e.g. '239.192.128.0/18'")
-            multicast_group = ipaddress.ip_network(value["multicast_group"], strict=False)
-            if not isinstance(multicast_group, ipaddress.IPv4Network | ipaddress.IPv6Network):
-                raise ValueError(f"{key}.multicast_group must be an IPv4 CIDR, got {value['multicast_group']!r}")
-            value["multicast_group"] = multicast_group
         servers[key] = Server(**value)
     return servers
 
