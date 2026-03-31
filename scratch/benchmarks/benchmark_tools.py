@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 def _ip_plus(
     network: ipaddress.IPv4Network | ipaddress.IPv6Network, offset: int
 ) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-    """Return the IPv4 address at network_address + offset, validated to be inside the network."""
+    """Return the IP address at the first address in the network + offset, validated to be inside of the network."""
     if offset < 0:
         raise ValueError("offset must be non-negative")
     addr_int = int(network.network_address) + offset
@@ -69,7 +69,7 @@ def _ip_plus_addr(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address,
     offset: int,
 ) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-    """Return the IPv4 address at network_address + offset, validated to be inside the network."""
+    """Return the IP address at the given address + offset, validated to be inside of the network."""
     if offset < 0:
         raise ValueError("offset must be non-negative")
     addr_int = int(address) + offset
