@@ -56,6 +56,21 @@ def _ip_plus(
     return addr
 
 
+def _ip_plus_addr(
+    network: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    offset: int,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Return the IPv4 address at network_address + offset, validated to be inside the network."""
+    if offset < 0:
+        raise ValueError("offset must be non-negative")
+    addr_int = int(address) + offset
+    addr = ipaddress.IPv4Address(addr_int)
+    if addr not in network:
+        raise ValueError(f"computed address {addr} is outside multicast_group {network}")
+    return addr
+
+
 def dsim_factory(
     server: Server,
     server_info: ServerInfo,
@@ -149,6 +164,8 @@ def fgpu_factory(
     else:
         interface = server.interfaces[index % len(server.interfaces)]
         recv_cores = 2
+
+    narrowband_addresses_per_fgpu = args.xb // args.narrowband_decimation
     cores = server_info.allocate_cores(n, recv_cores + 2)[index]
     recv_affinity = ",".join(str(core) for core in cores[:-2])
     send_affinity = str(cores[-2])
@@ -158,7 +175,7 @@ def fgpu_factory(
     half = server.multicast_group.num_addresses // 2
     if half == 0:
         raise ValueError(f"multicast_group {server.multicast_group} is too small to split")
-    narrowband_address = str(_ip_plus(server.multicast_group, half + index * (args.xb // args.narrowband_decimation)))
+    narrowband_address_start = _ip_plus(server.multicast_group, half + index * narrowband_addresses_per_fgpu)
     katcp_port = KATCP_PORT_BASE + index
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fgpu-{index}"
@@ -194,12 +211,15 @@ def fgpu_factory(
         f"{str(_ip_plus(dsim_multicast_group, index * 16))}+15:7148 "
     )
     for i in range(args.narrowband):
+        narrowband_address = str(
+            _ip_plus_addr(server.multicast_group, narrowband_address_start, i * narrowband_addresses_per_fgpu)
+        )
         narrowband_kwargs = {
             "name": f"narrowband{i}",
             "channels": args.narrowband_channels,
             "decimation": args.narrowband_decimation,
             "centre_frequency": adc_sample_rate / 4,
-            "dst": f"{narrowband_address}+{(args.xb // args.narrowband_decimation - 1)}:7148",
+            "dst": f"{narrowband_address}+{narrowband_addresses_per_fgpu - 1}:7148",
         }
         if args.jones_per_batch is not None:
             narrowband_kwargs["jones_per_batch"] = args.jones_per_batch

@@ -17,8 +17,8 @@
 """Launch and manage remote tasks over SSH."""
 
 import asyncio
-import logging
 import ipaddress
+import logging
 import tomllib
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -41,9 +41,7 @@ class Server:
     interfaces: list[str] = field(default_factory=list)
     gpus: list[str] = field(default_factory=lambda: ["0"])
     cpus: list[list[int]] = field(default_factory=list)
-    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network = field(
-        default_factory=lambda: ipaddress.ip_network("239.192.128.0/18")
-    )
+    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network = ipaddress.ip_network("239.192.128.0/18")
 
 
 def servers_from_toml(filename: str) -> dict[str, "Server"]:
