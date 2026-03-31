@@ -92,7 +92,7 @@ def fsim_factory(
         f"--channels-per-substream={info.channels_per_substream} "
         f"--samples-between-spectra={info.samples_between_spectra} "
         f"--jones-per-batch={args.jones_per_batch} "
-        f"{str(_address_at_index(multicast_group, index))}:7148 "
+        f"{_address_at_index(multicast_group, index)}:7148 "
     )
     return command
 
@@ -155,18 +155,18 @@ def xbgpu_factory(
         f"--send-interface={interface} "
         f"--send-ibv "
         f"--send-enabled "
-        f"{str(_address_at_index(fsim_multicast_group, index))}:7148 "
+        f"{_address_at_index(fsim_multicast_group, index)}:7148 "
     )
     for i in range(args.beams):
         for j in range(N_POLS):
             idx = N_POLS * i + j
             beam_number = index * args.beams * N_POLS + idx
-            command += f"--beam=name=beam{idx},dst={str(_address_at_index(beam_multicast_group, beam_number))},pol={j} "
+            command += f"--beam=name=beam{idx},dst={_address_at_index(beam_multicast_group, beam_number)},pol={j} "
 
     for i in range(args.corrprods):
         corrprod_number = index * args.corrprods + i
         command += f"--corrprod=name=corrprod{corrprod_number},"
-        command += f"dst={str(_address_at_index(corrprod_multicast_group, corrprod_number))},"
+        command += f"dst={_address_at_index(corrprod_multicast_group, corrprod_number)},"
         command += f"heap_accumulation_threshold={threshold} "
     return command
 

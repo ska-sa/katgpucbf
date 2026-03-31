@@ -80,11 +80,11 @@ def dsim_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"feng-dsim-{index}"
     if single_pol:
-        addresses = f"{str(_address_at_index(multicast_group, index * 8))}+7:7148"
+        addresses = f"{_address_at_index(multicast_group, index * 8)}+7:7148"
     else:
         addresses = (
-            f"{str(_address_at_index(multicast_group, index * 16))}+7:7148 "
-            f"{str(_address_at_index(multicast_group, index * 16 + 8))}+7:7148"
+            f"{_address_at_index(multicast_group, index * 16)}+7:7148 "
+            f"{_address_at_index(multicast_group, index * 16 + 8)}+7:7148"
         )
     command = (
         "docker run "
@@ -156,7 +156,7 @@ def fgpu_factory(
     wideband_kwargs = {
         "name": "wideband",
         "channels": args.channels,
-        "dst": f"{str(_address_at_index(wideband_net, index * args.xb))}+{args.xb - 1}:7148",
+        "dst": f"{_address_at_index(wideband_net, index * args.xb)}+{args.xb - 1}:7148",
     }
 
     if args.jones_per_batch is not None:
@@ -182,7 +182,7 @@ def fgpu_factory(
         f"--feng-id={index} "
         f"{'--use-vkgdr' if args.use_vkgdr else ''} "
         f"--wideband={wideband_arg} "
-        f"{str(_address_at_index(dsim_multicast_group, index * 16))}+15:7148 "
+        f"{_address_at_index(dsim_multicast_group, index * 16)}+15:7148 "
     )
     for i in range(args.narrowband):
         narrowband_kwargs = {
@@ -190,9 +190,8 @@ def fgpu_factory(
             "channels": args.narrowband_channels,
             "decimation": args.narrowband_decimation,
             "centre_frequency": adc_sample_rate / 4,
-            "dst": f"{
-                str(_address_at_index(narrowband_net, narrowband_address_offset + i * narrowband_addresses_per_fgpu))
-            } + {narrowband_addresses_per_fgpu - 1}: 7148",
+            "dst": f"{_address_at_index(narrowband_net, narrowband_address_offset + i * narrowband_addresses_per_fgpu)}"
+            + f"+{narrowband_addresses_per_fgpu - 1}:7148",
         }
         if args.jones_per_batch is not None:
             narrowband_kwargs["jones_per_batch"] = args.jones_per_batch
