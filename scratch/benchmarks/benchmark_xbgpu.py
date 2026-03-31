@@ -29,7 +29,6 @@ import math
 from contextlib import AsyncExitStack
 from typing import override
 
-from benchmark_tools import _ip_plus, _split_half_network_addresses
 import asyncssh
 
 from katgpucbf import COMPLEX, N_POLS
@@ -37,6 +36,8 @@ from katgpucbf import COMPLEX, N_POLS
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
+    _ip_plus,
+    _split_half_network_addresses,
     add_common_benchmark_arguments,
     process_common_benchmark_arguments,
 )
