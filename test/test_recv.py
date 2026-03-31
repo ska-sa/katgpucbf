@@ -85,6 +85,19 @@ def stats_collector(registry: CollectorRegistry) -> StatsCollector:
     )
 
 
+@pytest.fixture
+def stats_collector_no_labels(registry: CollectorRegistry) -> StatsCollector:
+    """Empty stats collector, with nolabels."""
+    return StatsCollector(
+        {
+            "incomplete_heaps_evicted": ("input_incomplete_heaps", "help text 1"),
+            "too_old_heaps": ("input_too_old_heaps", "help text 2"),
+        },
+        namespace="test",
+        registry=registry,
+    )
+
+
 class TestStatsCollector:
     """Tests for :class:`~katgpucbf.recv.StatsCollector`."""
 
@@ -97,6 +110,16 @@ class TestStatsCollector:
         assert metrics[1].name == "test_input_too_old_heaps"
         assert metrics[1].documentation == "help text 2"
         assert not metrics[1].samples
+
+    def test_initial_no_labels(self, registry: CollectorRegistry, stats_collector_no_labels: StatsCollector) -> None:
+        """Test state before adding any streams, when there are no label axes."""
+        metrics = list(registry.collect())
+        assert metrics[0].name == "test_input_incomplete_heaps"
+        assert metrics[0].documentation == "help text 1"
+        assert registry.get_sample_value("test_input_incomplete_heaps_total") == 0
+        assert metrics[1].name == "test_input_too_old_heaps"
+        assert metrics[1].documentation == "help text 2"
+        assert registry.get_sample_value("test_input_too_old_heaps_total") == 0
 
     def test_add_stream_bad_labels_length(self, stats_collector: StatsCollector) -> None:
         """Test exception when adding a stream with the wrong number of labels."""

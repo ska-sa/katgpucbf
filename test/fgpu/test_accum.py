@@ -16,6 +16,8 @@
 
 """Unit test :mod:`katgpucbf.fgpu.accum."""
 
+import re
+
 import pytest
 
 from katgpucbf.fgpu.accum import Accum, Measurement
@@ -44,17 +46,17 @@ def invalid_accum() -> Accum:
 
 
 @pytest.mark.parametrize(
-    "start_timestamp, stop_timestamp",
+    "start_timestamp, stop_timestamp, error_message",
     [
-        (0, 100),  # Before existing data
-        (210, 230),  # Overlaps existing data
-        (250, 249),  # Negative length
-        (220, 301),  # Overlaps window boundary
+        (0, 100, "new data starts before end of previous data"),
+        (210, 230, "new data starts before end of previous data"),
+        (250, 249, "start_timestamp (250) > end_timestamp (249)"),
+        (220, 301, "new data crosses a window boundary"),
     ],
 )
-def test_bad_add(valid_accum: Accum, start_timestamp: int, stop_timestamp: int) -> None:
+def test_bad_add(valid_accum: Accum, start_timestamp: int, stop_timestamp: int, error_message: str) -> None:
     """Bad calls to :meth:`.Accum.add` raise :exc:`ValueError`."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=re.escape(error_message)):
         valid_accum.add(start_timestamp, stop_timestamp, 1)
 
 
