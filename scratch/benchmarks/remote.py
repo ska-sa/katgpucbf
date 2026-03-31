@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+import ipaddress
 import tomllib
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -25,7 +26,6 @@ from dataclasses import dataclass, field
 from typing import Self
 
 import asyncssh
-import netaddr
 
 VERBOSE_PASS_OUTPUT = 2  #: Verbosity level at which process output is passed through
 
@@ -41,8 +41,8 @@ class Server:
     interfaces: list[str] = field(default_factory=list)
     gpus: list[str] = field(default_factory=lambda: ["0"])
     cpus: list[list[int]] = field(default_factory=list)
-    multicast_group: netaddr.IPRange = field(
-        default_factory=lambda: netaddr.IPRange("239.102.200.0", "239.102.232.255")
+    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network = field(
+        default_factory=lambda: ipaddress.ip_network("239.192.128.0/18")
     )
 
 
@@ -61,12 +61,12 @@ def servers_from_toml(filename: str) -> dict[str, "Server"]:
     servers = {}
     for key, value in toml.items():
         if value.get("multicast_group") is not None:
-            if len(value["multicast_group"]) == 1:
-                value["multicast_group"] = netaddr.IPRange(value["multicast_group"][0])  # ex: 192.168.8.0/24
-            else:
-                value["multicast_group"] = netaddr.IPRange(
-                    value["multicast_group"][0], value["multicast_group"][1]
-                )  # ex: 192.168.8.0, 192.168.8.255
+            if not isinstance(value["multicast_group"], str):
+                raise ValueError(f"{key}.multicast_group must be a CIDR string, e.g. '239.192.128.0/18'")
+            multicast_group = ipaddress.ip_network(value["multicast_group"], strict=False)
+            if not isinstance(multicast_group, ipaddress.IPv4Network | ipaddress.IPv6Network):
+                raise ValueError(f"{key}.multicast_group must be an IPv4 CIDR, got {value['multicast_group']!r}")
+            value["multicast_group"] = multicast_group
         servers[key] = Server(**value)
     return servers
 

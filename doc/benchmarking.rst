@@ -44,20 +44,19 @@ A typical file looks like this:
    hostname = 'server01.domain'
    username = 'myusername'
    interfaces = ['enp193s0f0np0', 'enp193s0f1np1']
-   multicast_group = ['239.102.0.64', '239.102.200.255']
+   multicast_group = '239.192.128.0/20'
 
    [fgpu]
    hostname = 'server02.domain'
    username = 'myusername'
    interfaces = ['enp193s0f0np0', 'enp193s0f1np1']
-   multicast_group = ['239.102.200.64', '239.102.236.255']
+   multicast_group = '239.192.144.0/20'
 
 .. _TOML: https://toml.io/
 
 The `interfaces` arrays list the names of the ibverbs-capable network
 interfaces that can be used for sending or receiving the data.
-The `multicast_group` list can be in either a start and end ip list or a
-subnet format (ex `239.102.0.0/16`)
+The `multicast_group` must be a single CIDR string (e.g. `239.192.128.0/18`).
 
 By default the servers are loaded from :file:`servers.toml` in the current
 directory, although the :option:`--servers` command-line option can override
@@ -133,7 +132,7 @@ Multicast groups
 ----------------
 The benchmark code currently hard-codes a number of multicast groups. Thus,
 **two instances cannot be run on the same network at the same time**. The
-groups are all in the 239.102.0.0/16 subnet.
+groups are all in the 239.192.128.0/18 subnet.
 
 Algorithm
 ---------
