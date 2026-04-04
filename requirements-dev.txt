@@ -306,7 +306,7 @@ pygelf==0.4.3
     # via
     #   -c requirements.txt
     #   katsdpservices
-pygments==2.19.2
+pygments==2.20.0
     # via
     #   ipython
     #   ipython-pygments-lexers
