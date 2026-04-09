@@ -80,7 +80,7 @@ class TestRateLimiter:
             # Some more back-to-back for which we will be catching up
             for _ in range(5):
                 tg.create_task(limiter.send(2))
-        await limiter.join()
+        await limiter.stop()
         assert limiter.times == pytest.approx(
             [
                 0.0,
@@ -114,8 +114,9 @@ class TestVDIFSender:
             interfaces=["127.0.0.1", "127.0.0.2"],
         )
 
+    # This has to be async because the constructor for RateLimiter expects an event loop
     @pytest.fixture
-    def sender(self) -> VDIFSender:
+    async def sender(self) -> VDIFSender:
         """A sender with mocked sockets."""
 
         def make_socket(*args, **kwargs):

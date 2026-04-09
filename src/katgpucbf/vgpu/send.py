@@ -72,8 +72,8 @@ class RateLimiter[T](ABC):
         self._per_unit = 1 / rate if rate else 0.0
         # Seconds per unit for `burst_rate`
         self._per_unit_burst = 1 / burst_rate if burst_rate else 0.0
-        self._queue: asyncio.Queue[T] = asyncio.Queue(capacity)
-        self._run_task: asyncio.Task | None = None
+        self._queue: asyncio.Queue[T | None] = asyncio.Queue(capacity)
+        self._run_task: asyncio.Task = asyncio.create_task(self._run(), name="RateLimiter")
 
     @abstractmethod
     def item_size(self, item: T) -> int:
@@ -89,37 +89,32 @@ class RateLimiter[T](ABC):
     async def _run(self) -> None:
         """Process queue items.
 
-        This is scheduled as an asyncio task, only when the queue is non-empty.
+        This is scheduled as an asyncio task.
         """
         loop = asyncio.get_running_loop()
-        try:
-            while True:
-                try:
-                    item = self._queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+        while True:
+            item = await self._queue.get()
+            if item is None:
+                break
 
-                now = loop.time()
-                target = max(self._next, self._next_burst)
-                # Don't try to sleep for short times. We tend to oversleep and
-                # then are unable to catch up.
-                if target - now > 1e-3:
-                    future = loop.create_future()
-                    loop.call_at(target, _set_result, future)
-                    await future
-                else:
-                    await asyncio.sleep(0)  # Give other asyncio tasks a chance to run
-                now = loop.time()
-                size = self.item_size(item)
-                self._next += self._per_unit * size
-                self._next_burst = max(self._next_burst, max(target, now)) + self._per_unit_burst * size
-                try:
-                    await self._process_item(item)
-                except Exception:
-                    logger.exception("Exception in processing rate-limited item")
-
-        finally:
-            self._run_task = None
+            now = loop.time()
+            target = max(self._next, self._next_burst)
+            # Don't try to sleep for short times. We tend to oversleep and
+            # then are unable to catch up.
+            if target - now > 1e-3:
+                future = loop.create_future()
+                loop.call_at(target, _set_result, future)
+                await future
+            else:
+                await asyncio.sleep(0)  # Give other asyncio tasks a chance to run
+            now = loop.time()
+            size = self.item_size(item)
+            self._next += self._per_unit * size
+            self._next_burst = max(self._next_burst, max(target, now)) + self._per_unit_burst * size
+            try:
+                await self._process_item(item)
+            except Exception:
+                logger.exception("Exception in processing rate-limited item")
 
     async def send(self, item: T) -> None:
         """Add an item to the queue.
@@ -128,17 +123,18 @@ class RateLimiter[T](ABC):
         queue, rather than when it is processed. The item should thus not be
         modified after submitting it.
         """
+        was_empty = self._queue.empty()
         await self._queue.put(item)
-        if not self._queue.empty() and self._run_task is None:
+        if was_empty:
             now = asyncio.get_running_loop().time()
             self._next = max(self._next, now)
             self._next_burst = max(self._next_burst, now)
-            self._run_task = asyncio.create_task(self._run(), name="RateLimiter")
 
-    async def join(self) -> None:
+    async def stop(self) -> None:
         """Wait until all queued items have been processed."""
-        while self._run_task is not None:
-            await self._run_task
+        if not self._run_task.done():
+            await self._queue.put(None)  # Signals run task to stop
+        await self._run_task
 
 
 class VDIFSender(RateLimiter[list[VDIFFrame]]):

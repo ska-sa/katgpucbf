@@ -403,6 +403,7 @@ class VEngine(Engine):
     async def on_stop(self) -> None:  # noqa: D102
         if self._capture is not None:
             await self._stop_capture()
+        await self._sender.stop()
         await super().on_stop()
 
     async def request_vlbi_delay(self, ctx: aiokatcp.RequestContext, delay: float) -> None:
