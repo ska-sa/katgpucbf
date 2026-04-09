@@ -122,7 +122,7 @@ may need:
 
    Override the server names to find in the servers file.
 
-.. option:: --multicast-group <group>
+.. option:: --multicast-groups <group>
 
    Override the multicast group to use. The default is 239.192.128.0/20.
 

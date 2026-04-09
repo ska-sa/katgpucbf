@@ -36,10 +36,10 @@ from katgpucbf import COMPLEX, N_POLS
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
-    _address_at_index,
-    _split_network,
     add_common_benchmark_arguments,
+    address_at_index,
     process_common_benchmark_arguments,
+    split_network,
 )
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
 
@@ -66,7 +66,7 @@ def fsim_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
-    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> str:
     """Generate command to run fsim."""
     cores = server_info.allocate_cores(args.n, 2)[index]
@@ -92,7 +92,7 @@ def fsim_factory(
         f"--channels-per-substream={info.channels_per_substream} "
         f"--samples-between-spectra={info.samples_between_spectra} "
         f"--jones-per-batch={args.jones_per_batch} "
-        f"{_address_at_index(multicast_group, index)}:7148 "
+        f"{address_at_index(multicast_groups, index)}:7148 "
     )
     return command
 
@@ -106,8 +106,8 @@ def xbgpu_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
-    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
-    fsim_multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    fsim_multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> str:
     """Generate command to run xbgpu."""
     cores = server_info.allocate_cores(args.n, 2)[index]
@@ -126,7 +126,7 @@ def xbgpu_factory(
     )
     target_chunk_size = 64 * 1024**2
     batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
-    beam_multicast_group, corrprod_multicast_group = _split_network(multicast_group)
+    beam_multicast_groups, corrprod_multicast_groups = split_network(multicast_groups)
 
     command = (
         "docker run "
@@ -155,18 +155,18 @@ def xbgpu_factory(
         f"--send-interface={interface} "
         f"--send-ibv "
         f"--send-enabled "
-        f"{_address_at_index(fsim_multicast_group, index)}:7148 "
+        f"{address_at_index(fsim_multicast_groups, index)}:7148 "
     )
     for i in range(args.beams):
         for j in range(N_POLS):
             idx = N_POLS * i + j
             beam_number = index * args.beams * N_POLS + idx
-            command += f"--beam=name=beam{idx},dst={_address_at_index(beam_multicast_group, beam_number)},pol={j} "
+            command += f"--beam=name=beam{idx},dst={address_at_index(beam_multicast_groups, beam_number)},pol={j} "
 
     for i in range(args.corrprods):
         corrprod_number = index * args.corrprods + i
         command += f"--corrprod=name=corrprod{corrprod_number},"
-        command += f"dst={_address_at_index(corrprod_multicast_group, corrprod_number)},"
+        command += f"dst={address_at_index(corrprod_multicast_groups, corrprod_number)},"
         command += f"heap_accumulation_threshold={threshold} "
     return command
 
@@ -193,7 +193,7 @@ class XbgpuBenchmark(Benchmark):
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             fsim_factory,
-            multicast_group=self.producer_multicast_group,
+            multicast_groups=self.producer_multicast_groups,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,
@@ -213,8 +213,8 @@ class XbgpuBenchmark(Benchmark):
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             xbgpu_factory,
-            multicast_group=self.consumer_multicast_group,
-            fsim_multicast_group=self.producer_multicast_group,
+            fsim_multicast_groups=self.producer_multicast_groups,
+            multicast_groups=self.consumer_multicast_groups,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,

@@ -66,7 +66,7 @@ fi
 
 set -x
 
-exec schedrr spead2_net_raw numactl -C $other_affinity xbgpu \
+exec schedrr numactl -C $other_affinity xbgpu \
     --recv-affinity $rx_affinity \
     --recv-comp-vector $rx_comp \
     --send-affinity $tx_affinity \

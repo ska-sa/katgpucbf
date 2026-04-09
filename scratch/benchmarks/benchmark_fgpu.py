@@ -35,10 +35,10 @@ from katgpucbf import N_POLS
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
-    _address_at_index,
-    _split_network,
     add_common_benchmark_arguments,
+    address_at_index,
     process_common_benchmark_arguments,
+    split_network,
 )
 from remote import InsufficientCoresError, Server, ServerInfo, run_tasks, servers_from_toml
 
@@ -56,7 +56,7 @@ def dsim_factory(
     single_pol: bool,
     sync_time: int,
     args: argparse.Namespace,
-    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> str:
     """Generate command to run dsim."""
     # Use as many CPUs as we can to speed up startup. We need at least 3
@@ -80,11 +80,11 @@ def dsim_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"feng-dsim-{index}"
     if single_pol:
-        addresses = f"{_address_at_index(multicast_group, index * 8)}+7:7148"
+        addresses = f"{address_at_index(multicast_groups, index * 8)}+7:7148"
     else:
         addresses = (
-            f"{_address_at_index(multicast_group, index * 16)}+7:7148 "
-            f"{_address_at_index(multicast_group, index * 16 + 8)}+7:7148"
+            f"{address_at_index(multicast_groups, index * 16)}+7:7148 "
+            f"{address_at_index(multicast_groups, index * 16 + 8)}+7:7148"
         )
     command = (
         "docker run "
@@ -120,8 +120,8 @@ def fgpu_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
-    dsim_multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
-    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    dsim_multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> str:
     """Generate command to run fgpu."""
     n = args.n
@@ -141,22 +141,22 @@ def fgpu_factory(
         interface = server.interfaces[index % len(server.interfaces)]
         recv_cores = 2
 
-    narrowband_addresses_per_fgpu = args.xb // args.narrowband_decimation
+    narrowband_addresses_per_fgpu_dst = args.xb // args.narrowband_decimation
     cores = server_info.allocate_cores(n, recv_cores + 2)[index]
     recv_affinity = ",".join(str(core) for core in cores[:-2])
     send_affinity = str(cores[-2])
     other_affinity = str(cores[-1])
     gpu = server.gpus[index % len(server.gpus)]
     # Split the CIDR in half: first half used for wideband, second half for narrowband.
-    wideband_net, narrowband_net = _split_network(multicast_group)
-    narrowband_address_offset = index * narrowband_addresses_per_fgpu
+    wideband_net, narrowband_net = split_network(multicast_groups)
+    narrowband_address_offset = index * narrowband_addresses_per_fgpu_dst
     katcp_port = KATCP_PORT_BASE + index
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fgpu-{index}"
     wideband_kwargs = {
         "name": "wideband",
         "channels": args.channels,
-        "dst": f"{_address_at_index(wideband_net, index * args.xb)}+{args.xb - 1}:7148",
+        "dst": f"{address_at_index(wideband_net, index * args.xb)}+{args.xb - 1}:7148",
     }
 
     if args.jones_per_batch is not None:
@@ -182,7 +182,7 @@ def fgpu_factory(
         f"--feng-id={index} "
         f"{'--use-vkgdr' if args.use_vkgdr else ''} "
         f"--wideband={wideband_arg} "
-        f"{_address_at_index(dsim_multicast_group, index * 16)}+15:7148 "
+        f"{address_at_index(dsim_multicast_groups, index * 16)}+15:7148 "
     )
     for i in range(args.narrowband):
         narrowband_kwargs = {
@@ -190,8 +190,10 @@ def fgpu_factory(
             "channels": args.narrowband_channels,
             "decimation": args.narrowband_decimation,
             "centre_frequency": adc_sample_rate / 4,
-            "dst": f"{_address_at_index(narrowband_net, narrowband_address_offset + i * narrowband_addresses_per_fgpu)}"
-            + f"+{narrowband_addresses_per_fgpu - 1}:7148",
+            "dst": f"{
+                address_at_index(narrowband_net, narrowband_address_offset + i * narrowband_addresses_per_fgpu_dst)
+            }"
+            + f"+{narrowband_addresses_per_fgpu_dst - 1}:7148",
         }
         if args.jones_per_batch is not None:
             narrowband_kwargs["jones_per_batch"] = args.jones_per_batch
@@ -243,7 +245,7 @@ class FgpuBenchmark(Benchmark):
             dsim_factory,
             adc_sample_rate=adc_sample_rate,
             n=n,
-            multicast_group=self.producer_multicast_group,
+            multicast_groups=self.producer_multicast_groups,
             single_pol=single_pol,
             sync_time=sync_time,
             args=self.args,
@@ -273,8 +275,8 @@ class FgpuBenchmark(Benchmark):
         factory = functools.partial(
             fgpu_factory,
             adc_sample_rate=adc_sample_rate,
-            dsim_multicast_group=self.producer_multicast_group,
-            multicast_group=self.consumer_multicast_group,
+            dsim_multicast_groups=self.producer_multicast_groups,
+            multicast_groups=self.consumer_multicast_groups,
             sync_time=sync_time,
             args=self.args,
         )

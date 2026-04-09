@@ -51,7 +51,7 @@ MAXIMUM_RANGES = 2**20
 logger = logging.getLogger(__name__)
 
 
-def _address_at_index(
+def address_at_index(
     network: ipaddress.IPv4Network | ipaddress.IPv6Network, index: int
 ) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     """Return the IP address at the given index in the network, validated to be inside of the network."""
@@ -62,15 +62,15 @@ def _address_at_index(
     return ipaddress.ip_address(int(network.network_address) + index)
 
 
-def _split_network(
-    multicast_group: ipaddress.IPv4Network | ipaddress.IPv6Network,
+def split_network(
+    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ipaddress.IPv4Network | ipaddress.IPv6Network]:
     """Split a CIDR in half and return the two subnets."""
-    if multicast_group.prefixlen >= multicast_group.max_prefixlen:
-        raise ValueError(f"multicast_group {multicast_group} is too small to split")
-    half_prefixlen = multicast_group.prefixlen + 1
-    first = ipaddress.ip_network(f"{multicast_group.network_address}/{half_prefixlen}")
-    second_base = _address_at_index(multicast_group, first.num_addresses)
+    if multicast_groups.prefixlen >= multicast_groups.max_prefixlen:
+        raise ValueError(f"multicast_groups {multicast_groups} is too small to split")
+    half_prefixlen = multicast_groups.prefixlen + 1
+    first = ipaddress.ip_network(f"{multicast_groups.network_address}/{half_prefixlen}")
+    second_base = address_at_index(multicast_groups, first.num_addresses)
     second = ipaddress.ip_network(f"{second_base}/{half_prefixlen}")
     return first, second
 
@@ -142,7 +142,7 @@ def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
         "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
     )
     parser.add_argument(
-        "--multicast-group",
+        "--multicast-groups",
         type=ipaddress.ip_network,
         default=ipaddress.ip_network("239.192.128.0/20"),
         help="Multicast group [%(default)s]",
@@ -304,7 +304,7 @@ class Benchmark(ABC):
         logging.basicConfig(
             level=logging.DEBUG if args.verbose >= 3 else logging.INFO if args.verbose >= 2 else logging.WARNING
         )
-        self.producer_multicast_group, self.consumer_multicast_group = _split_network(args.multicast_group)
+        self.producer_multicast_groups, self.consumer_multicast_groups = split_network(args.multicast_groups)
 
     def verbose_results(self) -> bool:
         return self.args.verbose >= VERBOSE_RESULTS
