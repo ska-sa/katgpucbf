@@ -51,10 +51,9 @@ are a few changes to specialise things to the use case:
    combined with the point above the actual number of bytes between bursts can
    be quite large.
 3. The burst (catch-up) rate is set significantly higher than the default in
-   spead2, to compensate for potentially long pauses due to both Python's
-   stop-the-world garbage collector and to asyncio multiplexing work onto a
-   single kernel thread rather than having a dedicated thread for
-   transmission.
+   spead2 to compensate for potentially long pauses. This can be due to Python's
+   stop-the-world garbage collector, and asyncio multiplexing work onto a single
+   kernel thread (rather than having a dedicated thread for transmission).
 
 Initially we tried to perform transmission serially with the iterator over the
 processed frames, on the assumption that the asynchronous buffering in
