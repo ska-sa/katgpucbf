@@ -155,7 +155,7 @@ class VDIFSender(RateLimiter[list[VDIFFrame]]):
         capacity: int,
         *,
         ttl: int,
-        buffer: int,
+        buffer_size: int,
         interfaces: list[str],
     ) -> None:
         super().__init__(rate, burst_rate, capacity)
@@ -174,12 +174,12 @@ class VDIFSender(RateLimiter[list[VDIFFrame]]):
             # IP_MULTICAST_IF only uses the latter.
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, b"\0\0\0\0" + if_addr.packed)
             try:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, buffer)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, buffer_size)
             except OSError as exc:
-                logger.warning("Failed to set socket buffer size to %d: %s", buffer, exc)
+                logger.warning("Failed to set socket buffer size to %d: %s", buffer_size, exc)
             actual_buffer = sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
-            if actual_buffer < buffer:
-                logger.warning("Requested socket buffer size %d but actual size is %d", buffer, actual_buffer)
+            if actual_buffer < buffer_size:
+                logger.warning("Requested socket buffer size %d but actual size is %d", buffer_size, actual_buffer)
             sock.connect(dst)
             self._socks.append(sock)
         self._next_sock = 0

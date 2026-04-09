@@ -110,7 +110,7 @@ class TestVDIFSender:
             burst_rate=0.0,
             capacity=2,
             ttl=self.TTL,
-            buffer=self.BUFFER,
+            buffer_size=self.BUFFER,
             interfaces=["127.0.0.1", "127.0.0.2"],
         )
 

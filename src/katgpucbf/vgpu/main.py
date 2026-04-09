@@ -188,7 +188,7 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         ibv=args.recv_ibv,
         affinity=args.recv_affinity,
         comp_vector=args.recv_comp_vector,
-        buffer=args.recv_buffer,
+        buffer_size=args.recv_buffer,
         pols=tuple(args.recv_pols),
     )
     send_config = SendConfig(
@@ -199,7 +199,7 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         rate_factor=args.send_rate_factor,
         dsts=args.dst,
         interfaces=args.send_interface,
-        buffer=args.send_buffer,
+        buffer_size=args.send_buffer,
         ttl=args.send_ttl,
     )
     config = CaptureConfig(

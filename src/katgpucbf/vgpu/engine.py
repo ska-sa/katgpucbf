@@ -163,7 +163,7 @@ class RecvConfig:
     ibv: bool
     affinity: int
     comp_vector: int
-    buffer: int
+    buffer_size: int
     pols: tuple[str, str]
 
     @property
@@ -194,7 +194,7 @@ class SendConfig:
     station: str
     dsts: list[tuple[str, int]]
     interfaces: list[str]
-    buffer: int
+    buffer_size: int
     ttl: int
 
 
@@ -258,7 +258,7 @@ class _CaptureSession:
                 interface=config.recv_config.interface,
                 ibv=config.recv_config.ibv,
                 comp_vector=config.recv_config.comp_vector,
-                buffer_size=config.recv_config.buffer // len(recv_group),
+                buffer_size=config.recv_config.buffer_size // len(recv_group),
             )
 
         self.config = config
@@ -362,7 +362,7 @@ class VEngine(Engine):
             queue_size,
             interfaces=send_config.interfaces,
             ttl=send_config.ttl,
-            buffer=send_config.buffer,
+            buffer_size=send_config.buffer_size,
         )
         # Reference counters to make the labels exist before the first scrape
         for pol in recv_config.pol_labels:
