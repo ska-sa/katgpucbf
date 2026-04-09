@@ -361,9 +361,9 @@ class VEngine(Engine):
             send_rate,
             send_rate * 2.0,  # Python can introduce large pauses, so catch up aggressively
             queue_size,
-            interfaces=send_config.interfaces,
             ttl=send_config.ttl,
             buffer_size=send_config.buffer_size,
+            interfaces=send_config.interfaces,
         )
         # Reference counters to make the labels exist before the first scrape
         for pol in recv_config.pol_labels:
