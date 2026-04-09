@@ -309,8 +309,7 @@ class _CaptureSession:
         it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(
             it, samples_per_frame=send_config.n_samples_per_frame, threshold=config.threshold
         )
-        # TODO: the queue_depth probably needs further tuning (1 might be enough)
-        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it, queue_depth=2)
+        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
         frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
             it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
         )
