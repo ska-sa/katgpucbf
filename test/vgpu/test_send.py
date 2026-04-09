@@ -130,7 +130,9 @@ class TestVDIFSender:
     async def test_settings(self, sender: VDIFSender) -> None:
         """Test that the sockets are correctly initialised."""
         assert len(sender._socks) == 4
-        multicast_if = [b"\0\0\0\0\x7f\x00\x00\x01", b"\0\0\0\0\x7f\x00\x00\x02"]
+        # The first four bytes in each case are unused; the second four encode IP addresses
+        # 127.0.0.1 and 127.0.0.2 (in big endian).
+        multicast_if = [b"\x00\x00\x00\x00\x7f\x00\x00\x01", b"\x00\x00\x00\x00\x7f\x00\x00\x02"]
         for i, sock in enumerate(sender._socks):
             sock.setsockopt.assert_any_call(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, self.TTL)  # type: ignore
             sock.setsockopt.assert_any_call(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, multicast_if[i % 2])  # type: ignore
