@@ -18,7 +18,6 @@
 
 import asyncio
 import logging
-import os
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -39,9 +38,6 @@ import katcbf_vlbi_resample.vdif_writer
 import numpy as np
 import spead2.recv.asyncio
 import xarray as xr
-
-os.environ["XDG_CONFIG_HOME"] = os.path.dirname(__file__) + "/.."
-
 from astropy.time import Time
 
 from .. import COMPLEX, N_POLS
