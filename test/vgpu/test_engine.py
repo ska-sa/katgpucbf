@@ -28,6 +28,7 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.utils import TimeConverter
 from katgpucbf.vgpu.engine import VEngine, _CaptureSession
 from katgpucbf.vgpu.recv import Layout
+from katgpucbf.vgpu.send import VDIFSender
 
 from .test_recv import gen_heaps
 
@@ -71,18 +72,18 @@ class TestVEngine:
     """Test :class:`.VEngine`."""
 
     @pytest.fixture
-    def process_frameset_count(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
-        """Monkeypatch :meth:`._CaptureSession._process_frameset` on the `engine` to count the number of calls.
+    def frameset_count(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        """Monkeypatch :meth:`.VDIFSender.send` on the `engine` to count the number of calls.
 
         The fixture value is a list with a single integer, which will be
         incremented each time the method is called.
         """
         value = [0]
 
-        def process_frameset(self, frameset):
+        async def send(self, frameset):
             value[0] += 1
 
-        monkeypatch.setattr(_CaptureSession, "_process_frameset", process_frameset)
+        monkeypatch.setattr(VDIFSender, "send", send)
         return value
 
     @pytest.fixture
@@ -115,6 +116,7 @@ class TestVEngine:
             f"--fir-taps={FIR_TAPS}",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--sync-time={SYNC_TIME}",
+            "--send-rate-factor=0",  # Make it send infinitely fast, to avoid slowing the test
             f"239.10.0.0+{RECV_SUBSTREAMS - 1}:7148",
             f"239.10.1.0+{RECV_SUBSTREAMS - 1}:7148",
             "239.10.2.0",
@@ -125,7 +127,7 @@ class TestVEngine:
         engine: VEngine,
         engine_client: aiokatcp.Client,
         mock_recv_streams: list[spead2.InprocQueue],
-        process_frameset_count: list[int],
+        frameset_count: list[int],
         capture_complete_event: asyncio.Event,
     ) -> None:
         """Test that an engine can be started and receives some data.
@@ -138,7 +140,7 @@ class TestVEngine:
         for queue in mock_recv_streams:
             queue.stop()
         await capture_complete_event.wait()
-        assert process_frameset_count[0] > 0
+        assert frameset_count[0] > 0
         await engine_client.request("capture-stop")
 
     async def test_min_timestamp(
@@ -146,7 +148,7 @@ class TestVEngine:
         engine: VEngine,
         engine_client: aiokatcp.Client,
         mock_recv_streams: list[spead2.InprocQueue],
-        process_frameset_count: list[int],
+        frameset_count: list[int],
         capture_complete_event: asyncio.Event,
     ) -> None:
         """Test ``?capture-start`` with a non-trivial minimum timestamp."""
@@ -159,7 +161,7 @@ class TestVEngine:
         for queue in mock_recv_streams:
             queue.stop()
         await capture_complete_event.wait()
-        assert process_frameset_count[0] == 0
+        assert frameset_count[0] == 0
         await engine_client.request("capture-stop")
 
     async def test_capture_start_while_capturing(self, engine_client: aiokatcp.Client) -> None:

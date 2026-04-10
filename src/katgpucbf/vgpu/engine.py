@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 import aiokatcp
-import baseband
 import cupy as cp
 import cupyx
 import katcbf_vlbi_resample.cupy_bridge
@@ -46,7 +45,7 @@ from ..monitor import Monitor
 from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
 from ..utils import Engine, TimeConverter
-from . import N_SIDEBANDS, recv
+from . import N_SIDEBANDS, recv, send
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +163,7 @@ class RecvConfig:
     ibv: bool
     affinity: int
     comp_vector: int
-    buffer: int
+    buffer_size: int
     pols: tuple[str, str]
 
     @property
@@ -191,7 +190,12 @@ class SendConfig:
     pols: tuple[str, str]
     bandwidth: float
     n_samples_per_frame: int
+    rate_factor: float
     station: str
+    dsts: list[tuple[str, int]]
+    interfaces: list[str]
+    buffer_size: int
+    ttl: int
 
 
 @dataclass
@@ -222,7 +226,9 @@ class CaptureConfig:
 class _CaptureSession:
     """Manage the lifetime of actions between ``?capture-start`` and ``?capture-stop``."""
 
-    def __init__(self, config: CaptureConfig, engine: Engine, monitor: Monitor, min_timestamp: int) -> None:
+    def __init__(
+        self, config: CaptureConfig, engine: Engine, monitor: Monitor, min_timestamp: int, sender: send.VDIFSender
+    ) -> None:
         recv_chunks = 4  # TODO: may need tuning?
         data_ringbuffer = ChunkRingbuffer(recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=monitor)
         free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
@@ -252,26 +258,16 @@ class _CaptureSession:
                 interface=config.recv_config.interface,
                 ibv=config.recv_config.ibv,
                 comp_vector=config.recv_config.comp_vector,
-                buffer_size=config.recv_config.buffer // len(recv_group),
+                buffer_size=config.recv_config.buffer_size // len(recv_group),
             )
 
         self.config = config
         self._recv_group = recv_group
         self._sensors = engine.sensors
         self._min_timestamp = min_timestamp
+        self._sender = sender
         self._capture_task = asyncio.create_task(self._capture(), name="Capture Loop")
         engine.add_service_task(self._capture_task, wait_on_stop=True)
-
-    def _process_frameset(self, frameset: baseband.vdif.VDIFFrameSet) -> None:
-        """Handle a received frameset.
-
-        This function is only here temporarily so that it can be mocked out
-        by unit tests to intercept the framesets. It can be removed once
-        the infrastructure for transmitting framesets is in place.
-
-        .. todo:: Remove this method once no longer needed by unit tests.
-        """
-        logger.debug("Received frameset: %s +%s", frameset["seconds"], frameset["frame_nr"])
 
     def _capture_complete(self) -> None:
         """Handle the end of all processing.
@@ -309,16 +305,16 @@ class _CaptureSession:
         it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
         it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
         it_rms = RecordPower(it_rms, sensors=self._sensors)
-        it = katcbf_vlbi_resample.power.NormalisePower(
-            it_rms, baseband.base.encoding.TWO_BIT_1_SIGMA / config.threshold
+        it = katcbf_vlbi_resample.power.NormalisePower(it_rms, 1.0)
+        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(
+            it, samples_per_frame=send_config.n_samples_per_frame, threshold=config.threshold
         )
-        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(it, samples_per_frame=send_config.n_samples_per_frame)
         it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
         frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
             it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
         )
         async for frameset in frameset_it:
-            self._process_frameset(frameset)
+            await self._sender.send(frameset)
         self._capture_complete()
 
     async def stop(self) -> None:
@@ -353,6 +349,21 @@ class VEngine(Engine):
         )
         self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
         self._capture: _CaptureSession | None = None
+        send_rate = send_config.bandwidth * send_config.rate_factor
+        # Data comes out of the processing chain in chunks of size
+        # power_int_time. We need to smooth that out, so we use a send
+        # queue that is deeper than that (2 is the number of chunks to
+        # buffer).
+        queue_size = round(2 * config.power_int_time * send_config.bandwidth / send_config.n_samples_per_frame)
+        self._sender = send.VDIFSender(
+            send_config.dsts,
+            send_rate,
+            send_rate * 2.0,  # Python can introduce large pauses, so catch up aggressively
+            queue_size,
+            ttl=send_config.ttl,
+            buffer_size=send_config.buffer_size,
+            interfaces=send_config.interfaces,
+        )
         # Reference counters to make the labels exist before the first scrape
         for pol in recv_config.pol_labels:
             recv.counters.labels(str(pol))
@@ -391,6 +402,7 @@ class VEngine(Engine):
     async def on_stop(self) -> None:  # noqa: D102
         if self._capture is not None:
             await self._stop_capture()
+        await self._sender.stop()
         await super().on_stop()
 
     async def request_vlbi_delay(self, ctx: aiokatcp.RequestContext, delay: float) -> None:
@@ -409,7 +421,7 @@ class VEngine(Engine):
         if self._capture is not None:
             raise aiokatcp.FailReply("a capture is already in progress")
         # TODO: use delay
-        self._capture = _CaptureSession(self.config, self, self.monitor, timestamp)
+        self._capture = _CaptureSession(self.config, self, self.monitor, timestamp, self._sender)
 
     async def _stop_capture(self) -> None:
         assert self._capture is not None
