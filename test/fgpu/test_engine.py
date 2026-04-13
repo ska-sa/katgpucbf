@@ -1135,7 +1135,7 @@ class TestFEngine:
     # It's easier to use a constant voltage. Also need to check the case were
     # the input power is zero.
     @pytest.mark.parametrize(
-        "input_voltage,output_power_dbfs", [(0, np.finfo(np.float64).min), (100, pytest.approx(-11.158118046054))]
+        "input_voltage,output_power_dbfs", [(0, np.finfo(np.float64).min), (200, pytest.approx(-5.137518132774))]
     )
     async def test_dig_rms_dbfs_sensors(
         self,
@@ -1168,7 +1168,7 @@ class TestFEngine:
         assert len(expected_timestamps) > 0
         for pol in range(N_POLS):
             assert sensor_update_dict[sensors[pol].name] == [
-                aiokatcp.Reading(t, aiokatcp.Sensor.Status.WARN, output_power_dbfs) for t in expected_timestamps
+                aiokatcp.Reading(t, aiokatcp.Sensor.Status.ERROR, output_power_dbfs) for t in expected_timestamps
             ]
 
     @pytest.mark.parametrize("tone_pol", [0, 1])
@@ -1380,7 +1380,7 @@ class TestDigRmsDbfsStatus:
             pytest.param(-7.0, aiokatcp.Sensor.Status.ERROR, id="high-error"),
         ],
     )
-    def test_value(self, sensor: aiokatcp.Sensor, value: float, status: aiokatcp.Sensor.Status) -> None:
+    def test_status(self, sensor: aiokatcp.Sensor, value: float, status: aiokatcp.Sensor.Status) -> None:
         """Test that the status is set correctly for a given value."""
         sensor.set_value(value, timestamp=2345678901.0)
         assert sensor.reading == aiokatcp.Reading(2345678901.0, status, value)
