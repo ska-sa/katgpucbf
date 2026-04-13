@@ -59,7 +59,16 @@ from ..utils import (
     gaussian_dtype,
     make_rate_limited_sensor,
 )
-from . import DIG_RMS_DBFS_HIGH, DIG_RMS_DBFS_LOW, DIG_RMS_DBFS_WINDOW, INPUT_CHUNK_PADDING, recv, send
+from . import (
+    DIG_RMS_DBFS_HIGH,
+    DIG_RMS_DBFS_HIGH_ERROR,
+    DIG_RMS_DBFS_LOW,
+    DIG_RMS_DBFS_LOW_ERROR,
+    DIG_RMS_DBFS_WINDOW,
+    INPUT_CHUNK_PADDING,
+    recv,
+    send,
+)
 from .accum import Accum
 from .compute import Compute, ComputeTemplate, NarrowbandConfig
 from .delay import AbstractDelayModel, AlignedDelayModel, LinearDelayModel, MultiDelayModel, wrap_angle
@@ -471,8 +480,10 @@ def dig_rms_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
     """Compute status for dig-rms-dbfs sensor."""
     if DIG_RMS_DBFS_LOW <= value <= DIG_RMS_DBFS_HIGH:
         return aiokatcp.Sensor.Status.NOMINAL
-    else:
+    elif DIG_RMS_DBFS_LOW_ERROR < value < DIG_RMS_DBFS_HIGH_ERROR:
         return aiokatcp.Sensor.Status.WARN
+    else:
+        return aiokatcp.Sensor.Status.ERROR
 
 
 def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> np.ndarray:

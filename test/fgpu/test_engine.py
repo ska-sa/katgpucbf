@@ -1368,27 +1368,19 @@ class TestDigRmsDbfsStatus:
         """Test that the status is NOMINAL when no value has been set."""
         assert sensor.reading == aiokatcp.Reading(1234567890.0, aiokatcp.Sensor.Status.UNKNOWN, 0)
 
-    def test_nominal_value(self, sensor: aiokatcp.Sensor) -> None:
-        """Test that the status is NOMINAL for a value in the range."""
-        sensor.set_value(-22.0, timestamp=2345678901.0)
-        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.NOMINAL, -22.0)
-
-    def test_low_nominal_value(self, sensor: aiokatcp.Sensor) -> None:
-        """Update a sensor with a low value, and check that the status is WARN."""
-        sensor.set_value(-32.0, timestamp=2345678901.0)
-        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.NOMINAL, -32.0)
-
-    def test_high_nominal_value(self, sensor: aiokatcp.Sensor) -> None:
-        """Update a sensor with a high value, and check that the status is WARN."""
-        sensor.set_value(-12.0, timestamp=2345678901.0)
-        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.NOMINAL, -12.0)
-
-    def test_low_warn_value(self, sensor: aiokatcp.Sensor) -> None:
-        """Update a sensor with a low value, and check that the status is WARN."""
-        sensor.set_value(-32.0 - self.EPSILON, timestamp=2345678901.0)
-        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.WARN, -32.0 - self.EPSILON)
-
-    def test_high_warn_value(self, sensor: aiokatcp.Sensor) -> None:
-        """Update a sensor with a high value, and check that the status is WARN."""
-        sensor.set_value(-12.0 + self.EPSILON, timestamp=2345678901.0)
-        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.WARN, -12.0 + self.EPSILON)
+    @pytest.mark.parametrize(
+        ("value", "status"),
+        [
+            (-10.0, aiokatcp.Sensor.Status.NOMINAL),
+            (-30.0, aiokatcp.Sensor.Status.NOMINAL),
+            (-12.0, aiokatcp.Sensor.Status.NOMINAL),
+            pytest.param(-30.0 - EPSILON, aiokatcp.Sensor.Status.WARN, id="low-warn"),
+            pytest.param(-10.0 + EPSILON, aiokatcp.Sensor.Status.WARN, id="high-warn"),
+            pytest.param(-33.0, aiokatcp.Sensor.Status.ERROR, id="low-error"),
+            pytest.param(-7.0, aiokatcp.Sensor.Status.ERROR, id="high-error"),
+        ],
+    )
+    def test_value(self, sensor: aiokatcp.Sensor, value: float, status: aiokatcp.Sensor.Status) -> None:
+        """Test that the status is set correctly for a given value."""
+        sensor.set_value(value, timestamp=2345678901.0)
+        assert sensor.reading == aiokatcp.Reading(2345678901.0, status, value)
