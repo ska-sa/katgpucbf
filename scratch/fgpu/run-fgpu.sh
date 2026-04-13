@@ -48,7 +48,7 @@ esac
 shift
 
 set -x
-exec fgpu \
+exec spead2_net_raw taskset -c $other_affinity fgpu \
     --recv-interface $iface --recv-ibv \
     --send-interface $iface --send-ibv \
     --recv-affinity $recv_affinity --recv-comp-vector=$recv_comp \
