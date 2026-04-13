@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 from ipaddress import IPv4Network
+from unittest import mock
 
 import aiokatcp
 import numpy as np
@@ -35,7 +36,14 @@ from numpy.typing import ArrayLike
 from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
-from katgpucbf.fgpu.engine import FEngine, InQueueItem, Pipeline, generate_ddc_weights, generate_pfb_weights
+from katgpucbf.fgpu.engine import (
+    FEngine,
+    InQueueItem,
+    Pipeline,
+    dig_rms_dbfs_status,
+    generate_ddc_weights,
+    generate_pfb_weights,
+)
 from katgpucbf.fgpu.main import parse_narrowband, parse_wideband
 from katgpucbf.fgpu.output import NarrowbandOutput, NarrowbandOutputNoDiscard, Output
 from katgpucbf.utils import TimeConverter
@@ -1339,3 +1347,48 @@ class TestFEngine:
         # (both from the random input data and from quantisation), and we're
         # mostly worried about major errors like a missing factor of sqrt(2).
         assert out_sigma == pytest.approx(sigma, rel=0.01)
+
+
+class TestDigRmsDbfsStatus:
+    """Test :func:`katgpucbf.fgpu.engine.dig_rms_dbfs_status`."""
+
+    EPSILON = 1e-6
+
+    @pytest.fixture
+    def mock_time(self, mocker) -> mock.Mock:
+        """Mock out time so that timestamps are predictable."""
+        return mocker.patch("time.time", return_value=1234567890.0)
+
+    @pytest.fixture
+    def sensor(self, mock_time: mock.Mock) -> aiokatcp.Sensor[float]:
+        """Create a sensor using dig_rms_dbfs_status."""
+        return aiokatcp.Sensor(float, "sensor2", "", status_func=dig_rms_dbfs_status)
+
+    def test_initial_value(self, sensor: aiokatcp.Sensor) -> None:
+        """Test that the status is NOMINAL when no value has been set."""
+        assert sensor.reading == aiokatcp.Reading(1234567890.0, aiokatcp.Sensor.Status.UNKNOWN, 0)
+
+    def test_nominal_value(self, sensor: aiokatcp.Sensor) -> None:
+        """Test that the status is NOMINAL for a value in the range."""
+        sensor.set_value(-22.0, timestamp=2345678901.0)
+        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.NOMINAL, -22.0)
+
+    def test_low_nominal_value(self, sensor: aiokatcp.Sensor) -> None:
+        """Update a sensor with a low value, and check that the status is WARN."""
+        sensor.set_value(-32.0, timestamp=2345678901.0)
+        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.NOMINAL, -32.0)
+
+    def test_high_nominal_value(self, sensor: aiokatcp.Sensor) -> None:
+        """Update a sensor with a high value, and check that the status is WARN."""
+        sensor.set_value(-12.0, timestamp=2345678901.0)
+        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.NOMINAL, -12.0)
+
+    def test_low_warn_value(self, sensor: aiokatcp.Sensor) -> None:
+        """Update a sensor with a low value, and check that the status is WARN."""
+        sensor.set_value(-32.0 - self.EPSILON, timestamp=2345678901.0)
+        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.WARN, -32.0 - self.EPSILON)
+
+    def test_high_warn_value(self, sensor: aiokatcp.Sensor) -> None:
+        """Update a sensor with a high value, and check that the status is WARN."""
+        sensor.set_value(-12.0 + self.EPSILON, timestamp=2345678901.0)
+        assert sensor.reading == aiokatcp.Reading(2345678901.0, aiokatcp.Sensor.Status.WARN, -12.0 + self.EPSILON)
