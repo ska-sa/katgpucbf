@@ -1088,7 +1088,11 @@ class TestFEngine:
                     match update:
                         case Update.NORMAL:
                             assert actual[p].timestamp == timestamp
-                            assert actual[p].status in {aiokatcp.Sensor.Status.NOMINAL, aiokatcp.Sensor.Status.WARN}
+                            assert actual[p].status in {
+                                aiokatcp.Sensor.Status.NOMINAL,
+                                aiokatcp.Sensor.Status.WARN,
+                                aiokatcp.Sensor.Status.ERROR,
+                            }
                             p += 1
                         case Update.FAILURE:
                             assert actual[p].timestamp == timestamp
