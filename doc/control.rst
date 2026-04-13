@@ -207,8 +207,6 @@ the Astropy config file.
 
     [utils.iers.iers]
     auto_download = False
-    auto_max_age = 15
-    iers_auto_url =
 
 Set ``auto_download = False`` in the astropy.cfg resouce file as illustrated above.
 Use the environment variable `XDG_CONFIG_HOME` to point to the folder containing
