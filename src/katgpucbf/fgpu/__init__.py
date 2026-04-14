@@ -21,7 +21,7 @@ from typing import Final
 METRIC_NAMESPACE: Final = "fgpu"
 
 # Range in which the dig-rms-dbfs sensor is NOMINAL
-# TODO these thresholds are probably only appropriate for 10-bit input
+# TODO these thresholds are probably only appropriate for 8-bit+ input
 DIG_RMS_DBFS_LOW: Final = -30.0
 DIG_RMS_DBFS_HIGH: Final = -10.0
 DIG_RMS_DBFS_LOW_ERROR: Final = -33.0
