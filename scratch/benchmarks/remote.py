@@ -186,7 +186,7 @@ async def wait_port(server: Server, port: int) -> None:
 async def run_tasks(
     server: Server,
     n: int,
-    factory: Callable[[Server, ServerInfo, asyncssh.SSHClientConnection, int], str],
+    factory: Callable[[Server, ServerInfo, int], str],
     image: str,
     port_base: int | None,
     *,
@@ -237,7 +237,7 @@ async def run_tasks(
             await conn.run(f"docker pull {image}", check=True)
         procs: list[asyncssh.SSHClientProcess] = []
         for i in range(n):
-            command = factory(server, server_info, conn, i)
+            command = factory(server, server_info, i)
             procs.append(
                 await conn.create_process(
                     command=command,
