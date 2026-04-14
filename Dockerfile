@@ -182,8 +182,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-instal
 
 ENV PATH=/venv/bin:$PATH KATSDPSIGPROC_TUNE_MATCH=nearest
 
-COPY --link --from=build-c /tmp/tools/schedrr /usr/local/bin
+COPY --from=build-c /tmp/tools/schedrr /usr/local/bin
 RUN setcap cap_sys_nice+ep /usr/local/bin/schedrr
 COPY --link --from=build-py-requirements /venv /venv
 COPY --link docker/tuning.db /root/.cache/katsdpsigproc/tuning.db
 COPY --link --from=build-py /install-root/venv /venv
+RUN mkdir -p /root/.astropy/config
+COPY --link docker/astropy/astropy.cfg /root/.astropy/config/astropy.cfg

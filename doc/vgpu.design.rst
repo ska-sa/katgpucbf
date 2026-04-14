@@ -31,3 +31,37 @@ upstream before they are requested.
 .. [#] There is no need to do so, because the data rates are quite low and so
    blocking GPU work during transfers does not significantly impact
    performance.
+
+Transmission
+------------
+While the other engines use spead2 to send SPEAD data, the output of the
+V-Engine is `VDIF`_ and so we are not able to use the high-speed kernel bypass
+and packet pacing capabilities of spead2. Instead, packet pacing is
+re-implemented in Python, following essentially the same
+:external+spead2:doc:`design <dev-send-rate-limit>` as used by spead2. There
+are a few changes to specialise things to the use case:
+
+1. When the time to sleep is less than a threshold (1ms at the time of
+   writing), we omit the sleep, as the wakeup overheads can be quite high in
+   Python and cause significant overhead.
+2. Instead of buffering up packets to a given burst size, we treat each
+   frameset (group of frames with the same timestamp but different thread IDs)
+   as a burst that is transmitted without intervening sleeps. This will
+   typically create smaller such bursts than the default in spead2, but
+   combined with the point above the actual number of bytes between bursts can
+   be quite large.
+3. The burst (catch-up) rate is set significantly higher than the default in
+   spead2 to compensate for potentially long pauses. This can be due to Python's
+   stop-the-world garbage collector, and asyncio multiplexing work onto a single
+   kernel thread (rather than having a dedicated thread for transmission).
+
+Initially we tried to perform transmission serially with the iterator over the
+processed frames, on the assumption that the asynchronous buffering in
+:class:`~katcbf_vlbi_resample.cupy_bridge.AsNumpy` would allow GPU work to
+proceed in parallel with data transmission. However, we found that this did
+not work well, as some requests for the next frame would block for hundreds of
+milliseconds, during which no packets were being transmitted. Instead,
+:class:`.VDIFSender` uses a queue of packets and a background task to service
+them concurrently with data processing.
+
+.. _VDIF: https://vlbi.org/vlbi-standards/vdif/

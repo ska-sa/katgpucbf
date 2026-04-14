@@ -19,7 +19,6 @@ appdirs==1.4.4
 astropy==7.2.0
     # via
     #   katgpucbf (pyproject.toml)
-    #   baseband
     #   katcbf-vlbi-resample
 astropy-iers-data==0.2026.1.12.0.42.13
     # via astropy
@@ -29,8 +28,6 @@ attrs==25.4.0
     # via
     #   aiohttp
     #   aiomonitor
-baseband==4.3.0
-    # via katcbf-vlbi-resample
 cffi==2.0.0
     # via vkgdr
 click==8.3.1
@@ -63,7 +60,7 @@ janus==2.0.0
     # via aiomonitor
 jinja2==3.1.6
     # via aiomonitor
-katcbf-vlbi-resample==0.4
+katcbf-vlbi-resample==0.5
     # via katgpucbf (pyproject.toml)
 katcp-codec==0.2.0
     # via aiokatcp

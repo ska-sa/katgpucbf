@@ -35,7 +35,6 @@ astropy==7.2.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
-    #   baseband
     #   katcbf-vlbi-resample
 astropy-iers-data==0.2026.1.12.0.42.13
     # via
@@ -56,10 +55,6 @@ attrs==25.4.0
     #   aiomonitor
 babel==2.17.0
     # via sphinx
-baseband==4.3.0
-    # via
-    #   -c requirements.txt
-    #   katcbf-vlbi-resample
 certifi==2026.1.4
     # via requests
 cfgv==3.5.0
@@ -146,7 +141,7 @@ jinja2==3.1.6
     #   -c requirements.txt
     #   aiomonitor
     #   sphinx
-katcbf-vlbi-resample==0.4
+katcbf-vlbi-resample==0.5
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
@@ -306,7 +301,7 @@ pygelf==0.4.3
     # via
     #   -c requirements.txt
     #   katsdpservices
-pygments==2.19.2
+pygments==2.20.0
     # via
     #   ipython
     #   ipython-pygments-lexers
