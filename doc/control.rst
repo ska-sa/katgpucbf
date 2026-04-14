@@ -210,9 +210,9 @@ the Astropy config file.
 
 Set ``auto_download = False`` in the astropy.cfg resouce file as illustrated above.
 Use the environment variable `XDG_CONFIG_HOME` to point to the folder containing
-the astropy config directory. If the environment variable `XDG_CONFIG_HOME` is not
-set, Astropy will use the configuration found at `~/.astropy/config/` in the home
-directory of the user running the process.
+the astropy config directory. If the environment variable :envvar:`XDG_CONFIG_HOME`
+is not set, Astropy will use the configuration found at `~/.astropy/config/` in the
+home directory of the user running the process.
 
 .. _ASTROPY: https://docs.astropy.org/en/stable/api/astropy.config.get_config_dir.html
 
