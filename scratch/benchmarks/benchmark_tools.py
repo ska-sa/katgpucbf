@@ -51,28 +51,38 @@ MAXIMUM_RANGES = 2**20
 logger = logging.getLogger(__name__)
 
 
-def address_at_index(
-    network: ipaddress.IPv4Network | ipaddress.IPv6Network, index: int
-) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-    """Return the IP address at the given index in the network, validated to be inside of the network."""
-    if index < 0:
-        raise ValueError("offset must be non-negative")
-    if index >= network.num_addresses:
-        raise ValueError(f"offset {index} is greater than the number of addresses in the network {network}")
-    return ipaddress.ip_address(int(network.network_address) + index)
+def compress(addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address]) -> str:
+    """Convert a list of contiguous IP addresses to a string of the form <addr>[+n].
+
+    Raises
+    ------
+    ValueError
+        If `addresses` is empty or non-contiguous
+    """
+    if not addresses:
+        raise ValueError("addresses is empty")
+    for i, addr in enumerate(addresses):
+        if addr != addresses[0] + i:
+            raise ValueError("addresses is not contiguous")
+    if len(addresses) == 1:
+        return f"{addresses[0]}"
+    else:
+        return f"{addresses[0]}+{len(addresses) - 1}"
 
 
-def split_network(
-    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
-) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ipaddress.IPv4Network | ipaddress.IPv6Network]:
-    """Split a CIDR in half and return the two subnets."""
-    if multicast_groups.prefixlen >= multicast_groups.max_prefixlen:
-        raise ValueError(f"multicast_groups {multicast_groups} is too small to split")
-    half_prefixlen = multicast_groups.prefixlen + 1
-    first = ipaddress.ip_network(f"{multicast_groups.network_address}/{half_prefixlen}")
-    second_base = address_at_index(multicast_groups, first.num_addresses)
-    second = ipaddress.ip_network(f"{second_base}/{half_prefixlen}")
-    return first, second
+class MulticastGroupAllocator:
+    def __init__(self, groups: ipaddress.IPv4Network | ipaddress.IPv6Network) -> None:
+        self._iter = groups.hosts()
+
+    def as_list(self, n: int = 1) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+        try:
+            # mypy thinks next returns _BaseAddress
+            return [next(self._iter) for _ in range(n)]  # type: ignore
+        except StopIteration:
+            raise RuntimeError("ran out of multicast addresses") from None
+
+    def __call__(self, n: int = 1) -> str:
+        return compress(self.as_list(n))
 
 
 def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
@@ -304,7 +314,7 @@ class Benchmark(ABC):
         logging.basicConfig(
             level=logging.DEBUG if args.verbose >= 3 else logging.INFO if args.verbose >= 2 else logging.WARNING
         )
-        self.producer_multicast_groups, self.consumer_multicast_groups = split_network(args.multicast_groups)
+        self.multicast_allocator = MulticastGroupAllocator(args.multicast_groups)
 
     def verbose_results(self) -> bool:
         return self.args.verbose >= VERBOSE_RESULTS

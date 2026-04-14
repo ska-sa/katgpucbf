@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import functools
 import ipaddress
+from collections.abc import Iterator
 from contextlib import AsyncExitStack
 from typing import override
 
@@ -35,10 +36,10 @@ from katgpucbf import N_POLS
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
+    MulticastGroupAllocator,
     add_common_benchmark_arguments,
-    address_at_index,
+    compress,
     process_common_benchmark_arguments,
-    split_network,
 )
 from remote import InsufficientCoresError, Server, ServerInfo, run_tasks, servers_from_toml
 
@@ -56,9 +57,13 @@ def dsim_factory(
     single_pol: bool,
     sync_time: int,
     args: argparse.Namespace,
-    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_allocator: MulticastGroupAllocator,
+    dsim_addresses: list[list[ipaddress.IPv4Address | ipaddress.IPv6Address]],
 ) -> str:
-    """Generate command to run dsim."""
+    """Generate command to run dsim.
+
+    The multicast address(es) used for the dsims are appended to `dsim_addresses`.
+    """
     # Use as many CPUs as we can to speed up startup. We need at least 3
     # (main thread, network thread and worker thread).
     cores_per_task = 3
@@ -80,12 +85,11 @@ def dsim_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"feng-dsim-{index}"
     if single_pol:
-        addresses = f"{address_at_index(multicast_groups, index * 8)}+7:7148"
+        addresses = [multicast_allocator.as_list(8)]
     else:
-        addresses = (
-            f"{address_at_index(multicast_groups, index * 16)}+7:7148 "
-            f"{address_at_index(multicast_groups, index * 16 + 8)}+7:7148"
-        )
+        addresses = [multicast_allocator.as_list(8), multicast_allocator.as_list(8)]
+    dsim_addresses.extend(addresses)
+    addresses_str = " ".join(f"{compress(addrs)}:7148" for addrs in addresses)
     command = (
         "docker run "
         f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
@@ -104,7 +108,7 @@ def dsim_factory(
         f"--prometheus-port={prometheus_port} "
         f"--sync-time={sync_time} "
         f"--first-id={index if single_pol else 2 * index} "
-        f"{addresses} "
+        f"{addresses_str} "
     )
     if args.dig_sample_bits is not None:
         command += f"--sample-bits={args.dig_sample_bits} "
@@ -120,8 +124,8 @@ def fgpu_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
-    dsim_multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
-    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_allocator: MulticastGroupAllocator,
+    dsim_addresses: Iterator[list[ipaddress.IPv4Address | ipaddress.IPv6Address]],
 ) -> str:
     """Generate command to run fgpu."""
     n = args.n
@@ -147,21 +151,20 @@ def fgpu_factory(
     send_affinity = str(cores[-2])
     other_affinity = str(cores[-1])
     gpu = server.gpus[index % len(server.gpus)]
-    # Split the CIDR in half: first half used for wideband, second half for narrowband.
-    wideband_net, narrowband_net = split_network(multicast_groups)
-    narrowband_address_offset = index * narrowband_addresses_per_fgpu_dst
     katcp_port = KATCP_PORT_BASE + index
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fgpu-{index}"
     wideband_kwargs = {
         "name": "wideband",
         "channels": args.channels,
-        "dst": f"{address_at_index(wideband_net, index * args.xb)}+{args.xb - 1}:7148",
+        "dst": f"{multicast_allocator(args.xb)}:7148",
     }
 
     if args.jones_per_batch is not None:
         wideband_kwargs["jones_per_batch"] = args.jones_per_batch
     wideband_arg = ",".join(f"{key}={value}" for key, value in wideband_kwargs.items())
+    # Grab two polarisations of dsim addresses
+    dsim = compress(next(dsim_addresses) + next(dsim_addresses))
     command = (
         "docker run "
         f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host --stop-timeout=2 "
@@ -182,7 +185,7 @@ def fgpu_factory(
         f"--feng-id={index} "
         f"{'--use-vkgdr' if args.use_vkgdr else ''} "
         f"--wideband={wideband_arg} "
-        f"{address_at_index(dsim_multicast_groups, index * 16)}+15:7148 "
+        f"{dsim}:7148 "
     )
     for i in range(args.narrowband):
         narrowband_kwargs = {
@@ -190,10 +193,7 @@ def fgpu_factory(
             "channels": args.narrowband_channels,
             "decimation": args.narrowband_decimation,
             "centre_frequency": adc_sample_rate / 4,
-            "dst": f"{
-                address_at_index(narrowband_net, narrowband_address_offset + i * narrowband_addresses_per_fgpu_dst)
-            }"
-            + f"+{narrowband_addresses_per_fgpu_dst - 1}:7148",
+            "dst": multicast_allocator(narrowband_addresses_per_fgpu_dst) + ":7148",
         }
         if args.jones_per_batch is not None:
             narrowband_kwargs["jones_per_batch"] = args.jones_per_batch
@@ -241,11 +241,13 @@ class FgpuBenchmark(Benchmark):
         if n <= 2:
             n *= 2
             single_pol = True
+        self.dsim_addresses: list[list[ipaddress.IPv4Address | ipaddress.IPv6Address]] = []
         factory = functools.partial(
             dsim_factory,
             adc_sample_rate=adc_sample_rate,
             n=n,
-            multicast_groups=self.producer_multicast_groups,
+            multicast_allocator=self.multicast_allocator,
+            dsim_addresses=self.dsim_addresses,
             single_pol=single_pol,
             sync_time=sync_time,
             args=self.args,
@@ -275,8 +277,8 @@ class FgpuBenchmark(Benchmark):
         factory = functools.partial(
             fgpu_factory,
             adc_sample_rate=adc_sample_rate,
-            dsim_multicast_groups=self.producer_multicast_groups,
-            multicast_groups=self.consumer_multicast_groups,
+            multicast_allocator=self.multicast_allocator,
+            dsim_addresses=iter(self.dsim_addresses),
             sync_time=sync_time,
             args=self.args,
         )

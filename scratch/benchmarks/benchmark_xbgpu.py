@@ -24,8 +24,8 @@ See :doc:`benchmarking`.
 import argparse
 import asyncio
 import functools
-import ipaddress
 import math
+from collections.abc import Iterator
 from contextlib import AsyncExitStack
 from typing import override
 
@@ -36,10 +36,9 @@ from katgpucbf import COMPLEX, N_POLS
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
     Benchmark,
+    MulticastGroupAllocator,
     add_common_benchmark_arguments,
-    address_at_index,
     process_common_benchmark_arguments,
-    split_network,
 )
 from remote import Server, ServerInfo, run_tasks, servers_from_toml
 
@@ -66,7 +65,8 @@ def fsim_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
-    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_allocator: MulticastGroupAllocator,
+    fsim_addresses: list[str],
 ) -> str:
     """Generate command to run fsim."""
     cores = server_info.allocate_cores(args.n, 2)[index]
@@ -74,6 +74,8 @@ def fsim_factory(
     prometheus_port = PROMETHEUS_PORT_BASE + index
     name = f"fsim-{index}"
     info = StreamInfo(args, adc_sample_rate)
+    address = multicast_allocator()
+    fsim_addresses.append(address)
     command = (
         "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
         f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
@@ -92,7 +94,7 @@ def fsim_factory(
         f"--channels-per-substream={info.channels_per_substream} "
         f"--samples-between-spectra={info.samples_between_spectra} "
         f"--jones-per-batch={args.jones_per_batch} "
-        f"{address_at_index(multicast_groups, index)}:7148 "
+        f"{address}:7148 "
     )
     return command
 
@@ -106,8 +108,8 @@ def xbgpu_factory(
     adc_sample_rate: float,
     sync_time: int,
     args: argparse.Namespace,
-    fsim_multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
-    multicast_groups: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    multicast_allocator: MulticastGroupAllocator,
+    fsim_addresses: Iterator[str],
 ) -> str:
     """Generate command to run xbgpu."""
     cores = server_info.allocate_cores(args.n, 2)[index]
@@ -126,7 +128,6 @@ def xbgpu_factory(
     )
     target_chunk_size = 64 * 1024**2
     batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
-    beam_multicast_groups, corrprod_multicast_groups = split_network(multicast_groups)
 
     command = (
         "docker run "
@@ -155,18 +156,17 @@ def xbgpu_factory(
         f"--send-interface={interface} "
         f"--send-ibv "
         f"--send-enabled "
-        f"{address_at_index(fsim_multicast_groups, index)}:7148 "
+        f"{next(fsim_addresses)}:7148 "
     )
     for i in range(args.beams):
         for j in range(N_POLS):
             idx = N_POLS * i + j
-            beam_number = index * args.beams * N_POLS + idx
-            command += f"--beam=name=beam{idx},dst={address_at_index(beam_multicast_groups, beam_number)},pol={j} "
+            command += f"--beam=name=beam{idx},dst={multicast_allocator()},pol={j} "
 
     for i in range(args.corrprods):
         corrprod_number = index * args.corrprods + i
         command += f"--corrprod=name=corrprod{corrprod_number},"
-        command += f"dst={address_at_index(corrprod_multicast_groups, corrprod_number)},"
+        command += f"dst={multicast_allocator()},"
         command += f"heap_accumulation_threshold={threshold} "
     return command
 
@@ -191,9 +191,11 @@ class XbgpuBenchmark(Benchmark):
 
     @override
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
+        self.fsim_addresses: list[str] = []
         factory = functools.partial(
             fsim_factory,
-            multicast_groups=self.producer_multicast_groups,
+            multicast_allocator=self.multicast_allocator,
+            fsim_addresses=self.fsim_addresses,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,
@@ -213,8 +215,8 @@ class XbgpuBenchmark(Benchmark):
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             xbgpu_factory,
-            fsim_multicast_groups=self.producer_multicast_groups,
-            multicast_groups=self.consumer_multicast_groups,
+            multicast_allocator=self.multicast_allocator,
+            fsim_addresses=iter(self.fsim_addresses),
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
             args=self.args,
