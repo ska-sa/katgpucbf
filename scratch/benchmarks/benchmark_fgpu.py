@@ -69,6 +69,7 @@ class FgpuBenchmark(Benchmark):
         *,
         adc_sample_rate: float,
         sync_time: int,
+        single_pol: bool,
     ) -> str:
         """Generate command to run dsim.
 
@@ -76,11 +77,10 @@ class FgpuBenchmark(Benchmark):
         """
         # Use as many CPUs as we can to speed up startup. We need at least 3
         # (main thread, network thread and worker thread).
-        single_pol = False
         n = self.args.n
-        if n <= 2:
+        if single_pol:
             n *= 2
-            single_pol = True
+
         cores_per_task = 3
         while True:
             try:
@@ -231,14 +231,21 @@ class FgpuBenchmark(Benchmark):
         will shut down the tasks.
         """
 
+        single_pol = False
+        n = self.args.n
+        if n <= 2:
+            n *= 2
+            single_pol = True
+
         factory = functools.partial(
             self.dsim_factory,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
+            single_pol=single_pol,
         )
         return await run_tasks(
             self.generator_server,
-            self.args.n,
+            n,
             factory,
             self.args.image,
             port_base=KATCP_PORT_BASE,
