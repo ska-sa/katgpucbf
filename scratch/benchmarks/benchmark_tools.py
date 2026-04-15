@@ -474,7 +474,12 @@ class Benchmark(ABC):
         elif self.args.oneshot is not None:
             result = (await self.measure(self.args.oneshot)).message()
         else:
-            slope = self.slope[min(self.args.n, max(self.slope.keys()))]
+            if self.slope.get(self.args.n) is None:
+                array = self.slope.keys()
+                nearest_n = int((np.abs([a - self.args.n for a in array])).argmin())
+            else:
+                nearest_n = self.args.n
+            slope = self.slope[nearest_n]
             low, high = await self.search(
                 low=self.args.low,
                 high=self.args.high,
