@@ -122,9 +122,9 @@ may need:
 
    Override the server names to find in the servers file.
 
-.. option:: --multicast-groups <group>
+.. option:: --multicast-groups <network>
 
-   Override the multicast group to use. The default is 239.192.128.0/20.
+   Override the multicast groups to use. The default is 239.192.128.0/20.
 
 This is not a complete list of options; run the command with :option:`!--help`
 to see others.

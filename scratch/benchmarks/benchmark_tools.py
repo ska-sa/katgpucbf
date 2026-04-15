@@ -155,7 +155,7 @@ def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
         "--multicast-groups",
         type=ipaddress.ip_network,
         default=ipaddress.ip_network("239.192.128.0/20"),
-        help="Multicast group [%(default)s]",
+        help="Multicast groups [%(default)s]",
     )
 
 
