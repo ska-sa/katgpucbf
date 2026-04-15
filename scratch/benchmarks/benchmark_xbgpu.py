@@ -187,6 +187,11 @@ class XbgpuBenchmark(Benchmark):
         return command
 
     @override
+    def reset(self) -> None:
+        super().reset()
+        self.fsim_addresses = iter([])
+
+    @override
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
             self.fsim_factory,

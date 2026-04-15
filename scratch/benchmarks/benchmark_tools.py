@@ -353,6 +353,9 @@ class Benchmark(ABC):
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
         pass
 
+    def reset(self) -> None:
+        self.multicast_allocator = MulticastGroupAllocator(self.args.multicast_groups)
+
     async def process(self, adc_sample_rate: float) -> TrialResult:
         """Perform a single trial on running engines."""
         async with aiohttp.client.ClientSession() as session:
@@ -381,7 +384,9 @@ class Benchmark(ABC):
         sync_time = int(time.time())
         async with await self.run_producers(adc_sample_rate, sync_time):
             async with await self.run_consumers(adc_sample_rate, sync_time):
-                return await self.process(adc_sample_rate)
+                result = await self.process(adc_sample_rate)
+                self.reset()
+                return result
 
     async def measure(self, adc_sample_rate: float) -> MeasuredTrials:
         """Perform a single trial.

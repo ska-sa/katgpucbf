@@ -221,6 +221,11 @@ class FgpuBenchmark(Benchmark):
         return command
 
     @override
+    def reset(self) -> None:
+        super().reset()
+        self.dsim_addresses = iter([])
+
+    @override
     async def run_producers(
         self,
         adc_sample_rate: float,
