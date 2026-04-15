@@ -48,6 +48,8 @@ class FgpuBenchmark(Benchmark):
     def __init__(self, args: argparse.Namespace) -> None:
         servers = servers_from_toml(args.servers)
         self.dsim_addresses: Iterator[list[ipaddress.IPv4Address | ipaddress.IPv6Address]] = iter([])
+        self.single_pol = False
+
         super().__init__(
             args,
             generator_server=servers[args.dsim_server],
@@ -60,6 +62,8 @@ class FgpuBenchmark(Benchmark):
                 4: -582.668296,
             },
         )
+        if self.args.n <= 2:
+            self.single_pol = True
 
     def dsim_factory(
         self,
@@ -69,7 +73,6 @@ class FgpuBenchmark(Benchmark):
         *,
         adc_sample_rate: float,
         sync_time: int,
-        single_pol: bool,
     ) -> str:
         """Generate command to run dsim.
 
@@ -77,9 +80,7 @@ class FgpuBenchmark(Benchmark):
         """
         # Use as many CPUs as we can to speed up startup. We need at least 3
         # (main thread, network thread and worker thread).
-        n = self.args.n
-        if single_pol:
-            n *= 2
+        n = self.args.n if not self.single_pol else self.args.n * 2
 
         cores_per_task = 3
         while True:
@@ -90,7 +91,7 @@ class FgpuBenchmark(Benchmark):
             else:
                 cores_per_task += 1
         cores = server_info.allocate_cores(n, cores_per_task)[index]
-        if self.args.n == 1 or not single_pol:
+        if self.args.n == 1 or not self.single_pol:
             interface = server.interfaces[index % len(server.interfaces)]
         else:
             # For larger n, send the two pols over the same interface
@@ -99,7 +100,7 @@ class FgpuBenchmark(Benchmark):
         katcp_port = KATCP_PORT_BASE + index
         prometheus_port = PROMETHEUS_PORT_BASE + index
         name = f"feng-dsim-{index}"
-        if single_pol:
+        if self.single_pol:
             addresses = [self.multicast_allocator.as_list(8)]
         else:
             addresses = [self.multicast_allocator.as_list(8), self.multicast_allocator.as_list(8)]
@@ -122,7 +123,7 @@ class FgpuBenchmark(Benchmark):
             f"--katcp-port={katcp_port} "
             f"--prometheus-port={prometheus_port} "
             f"--sync-time={sync_time} "
-            f"--first-id={index if single_pol else 2 * index} "
+            f"--first-id={index if self.single_pol else 2 * index} "
             f"{addresses_str} "
         )
         if self.args.dig_sample_bits is not None:
@@ -231,21 +232,14 @@ class FgpuBenchmark(Benchmark):
         will shut down the tasks.
         """
 
-        single_pol = False
-        n = self.args.n
-        if n <= 2:
-            n *= 2
-            single_pol = True
-
         factory = functools.partial(
             self.dsim_factory,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
-            single_pol=single_pol,
         )
         return await run_tasks(
             self.generator_server,
-            n,
+            self.args.n if not self.single_pol else self.args.n * 2,
             factory,
             self.args.image,
             port_base=KATCP_PORT_BASE,
