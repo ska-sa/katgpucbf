@@ -196,6 +196,26 @@ data on a machine that doesn't support ibverbs, you could use
     by e.g. a factor of ten as this value greatly affects the engine's data
     transmission rate.
 
+Testing without astropy downloading the leap seconds table
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+If you need `ASTROPY`_ to run offline, set the IERS auto-download settings in
+the Astropy config file.
+
+.. code-block:: ini
+   :caption: astropy/astropy.cfg
+   :linenos:
+
+    [utils.iers.iers]
+    auto_download = False
+
+Set ``auto_download = False`` in the astropy.cfg resouce file as illustrated above.
+Use the environment variable `XDG_CONFIG_HOME` to point to the folder containing
+the astropy config directory. If the environment variable :envvar:`XDG_CONFIG_HOME`
+is not set, Astropy will use the configuration found at `~/.astropy/config/` in the
+home directory of the user running the process.
+
+.. _ASTROPY: https://docs.astropy.org/en/stable/api/astropy.config.get_config_dir.html
+
 Controlling the correlator
 --------------------------
 The correlator components are controlled using `katcp`_. A user can connect to
