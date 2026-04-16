@@ -25,9 +25,8 @@ import argparse
 import asyncio
 import functools
 import ipaddress
-from collections.abc import Iterator
+from collections import deque
 from contextlib import AsyncExitStack
-from itertools import chain
 from typing import override
 
 from katgpucbf import N_POLS
@@ -47,7 +46,7 @@ KATCP_PORT_BASE = 7140
 class FgpuBenchmark(Benchmark):
     def __init__(self, args: argparse.Namespace) -> None:
         servers = servers_from_toml(args.servers)
-        self.dsim_addresses: Iterator[list[ipaddress.IPv4Address | ipaddress.IPv6Address]] = iter([])
+        self.dsim_addresses_queue: deque[list[ipaddress.IPv4Address | ipaddress.IPv6Address]] = deque()
         self.single_pol = False
 
         super().__init__(
@@ -102,9 +101,11 @@ class FgpuBenchmark(Benchmark):
         name = f"feng-dsim-{index}"
         if self.single_pol:
             addresses = [self.multicast_allocator.as_list(8)]
+            self.dsim_addresses_queue.append(addresses[0])
         else:
             addresses = [self.multicast_allocator.as_list(8), self.multicast_allocator.as_list(8)]
-        self.dsim_addresses = chain(self.dsim_addresses, iter(addresses))
+            self.dsim_addresses_queue.append(addresses[0])
+            self.dsim_addresses_queue.append(addresses[1])
         addresses_str = " ".join(f"{compress(addrs)}:7148" for addrs in addresses)
         command = (
             "docker run "
@@ -176,7 +177,7 @@ class FgpuBenchmark(Benchmark):
             wideband_kwargs["jones_per_batch"] = self.args.jones_per_batch
         wideband_arg = ",".join(f"{key}={value}" for key, value in wideband_kwargs.items())
         # Grab two polarisations of dsim addresses
-        dsim = compress(next(self.dsim_addresses) + next(self.dsim_addresses))
+        dsim = compress(self.dsim_addresses_queue.popleft() + self.dsim_addresses_queue.popleft())
         command = (
             "docker run "
             f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host --stop-timeout=2 "
@@ -223,7 +224,7 @@ class FgpuBenchmark(Benchmark):
     @override
     def reset(self) -> None:
         super().reset()
-        self.dsim_addresses = iter([])
+        self.dsim_addresses_queue = deque()
 
     @override
     async def run_producers(

@@ -382,11 +382,10 @@ class Benchmark(ABC):
         """Perform a single trial."""
 
         sync_time = int(time.time())
+        self.reset()
         async with await self.run_producers(adc_sample_rate, sync_time):
             async with await self.run_consumers(adc_sample_rate, sync_time):
-                result = await self.process(adc_sample_rate)
-                self.reset()
-                return result
+                return await self.process(adc_sample_rate)
 
     async def measure(self, adc_sample_rate: float) -> MeasuredTrials:
         """Perform a single trial.
