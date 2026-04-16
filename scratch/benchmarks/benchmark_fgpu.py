@@ -103,11 +103,9 @@ class FgpuBenchmark(Benchmark):
         name = f"feng-dsim-{index}"
         if self.single_pol:
             addresses = [self.multicast_allocator.as_list(8)]
-            self.dsim_addresses_queue.append(addresses[0])
         else:
             addresses = [self.multicast_allocator.as_list(8), self.multicast_allocator.as_list(8)]
-            self.dsim_addresses_queue.append(addresses[0])
-            self.dsim_addresses_queue.append(addresses[1])
+        self.dsim_addresses_queue.extend(addresses)
         addresses_str = " ".join(f"{compress(addrs)}:7148" for addrs in addresses)
         command = (
             "docker run "
