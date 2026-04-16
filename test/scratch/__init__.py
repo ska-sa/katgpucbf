@@ -1,5 +1,8 @@
+# noqa: D104
+
+
 ################################################################################
-# Copyright (c) 2026, National Research Foundation (SARAO)
+# Copyright (c) 2020-2021, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -13,3 +16,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scratch" / "benchmarks"))

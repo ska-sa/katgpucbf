@@ -16,7 +16,6 @@
 
 """Perform a noisy binary search."""
 
-import bisect
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
@@ -27,28 +26,6 @@ from numpy.typing import ArrayLike
 def _entropy(a: ArrayLike, axis: int | tuple[int, ...] | None = None) -> np.floating:
     array = np.asarray(a)
     return np.sum(-array * np.log(array), axis=axis)
-
-
-def get_nearest_slope(n: int, slope: dict[int, float]) -> float:
-    """Get the slope for the given number of engines.
-    If the slope is not defined for the given number of engines, find the nearest
-    defined (higher, when available) slope and use it.
-
-    Raises
-    ------
-    IndexError
-        if the slope dictionary is empty.
-    """
-
-    array = sorted(list(slope.keys()))
-    mid = bisect.bisect_left(array, n)
-    if mid == len(array):
-        # all distances are negative, so use the largest negative distance
-        nearest_n = array[-1]
-    else:
-        # some distances are positive, so use the smallest positive distance
-        nearest_n = array[mid]
-    return slope[nearest_n]
 
 
 @dataclass

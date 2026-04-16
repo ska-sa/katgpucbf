@@ -18,6 +18,7 @@
 
 import argparse
 import asyncio
+import bisect
 import logging
 import sys
 import time
@@ -34,7 +35,7 @@ from scipy.special import expit
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH
 
-from noisy_search import NoisySearchResult, get_nearest_slope, noisy_search
+from noisy_search import NoisySearchResult, noisy_search
 from remote import Server
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
@@ -139,6 +140,28 @@ def process_common_benchmark_arguments(args: argparse.Namespace, parser: argpars
             + f" maximum total steps: {MAXIMUM_RANGES}, reduce number of steps by increasing --step"
             + " or decrease the range by adjusting --low and --high."
         )
+
+
+def get_nearest_slope(n: int, slope: dict[int, float]) -> float:
+    """Get the slope for the given number of engines.
+    If the slope is not defined for the given number of engines, find the nearest
+    defined (higher, when available) slope and use it.
+
+    Raises
+    ------
+    IndexError
+        if the slope dictionary is empty.
+    """
+
+    array = sorted(list(slope.keys()))
+    mid = bisect.bisect_left(array, n)
+    if mid == len(array):
+        # all distances are negative, so use the largest negative distance
+        nearest_n = array[-1]
+    else:
+        # some distances are positive, so use the smallest positive distance
+        nearest_n = array[mid]
+    return slope[nearest_n]
 
 
 class ResultState(Enum):

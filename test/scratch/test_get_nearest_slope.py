@@ -14,11 +14,11 @@
 # limitations under the License.
 ################################################################################
 
-from __future__ import annotations
+"""Test the get_nearest_slope function."""
 
 import pytest
 
-from benchmarks.noisy_search import get_nearest_slope
+from benchmark_tools import get_nearest_slope
 
 
 @pytest.mark.parametrize(
@@ -34,13 +34,15 @@ from benchmarks.noisy_search import get_nearest_slope
     ],
 )
 def test_get_slope_parameterized(n: int, expected: float) -> None:
+    """Test that the get_nearest_slope function returns the next highest value for the given number of engines."""
     slope_map = {4: 0.4, 8: 0.8, 16: 1.6}
     assert get_nearest_slope(n, slope_map) == expected
 
 
 def test_get_slope_edge_cases() -> None:
+    """Test the get_nearest_slope function behaviour at the edges of the slope map."""
     with pytest.raises(IndexError):
-        get_nearest_slope(1, {})
-    assert get_nearest_slope(0, {1: 0.4}) == 0.4
-    assert get_nearest_slope(2, {1: 0.4}) == 0.4
-    assert get_nearest_slope(1, {0: 0.2, 1: 0.4}) == 0.4
+        get_nearest_slope(1, {})  # Empty slope map
+    assert get_nearest_slope(0, {1: 0.4}) == 0.4  # Below only key
+    assert get_nearest_slope(2, {1: 0.4}) == 0.4  # Above only key
+    assert get_nearest_slope(2, {3: 0.2, 1: 0.4}) == 0.2  # Unsorted uses higher still
