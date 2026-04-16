@@ -137,6 +137,13 @@ pipeline {
                 sh 'pytest -n 4 -v -ra --all-combinations --junitxml=reports/result.xml --cov=test --cov=katgpucbf --cov-report=xml --cov-branch --suppress-tests-failed-exit-code'
               }
             }
+            stage('Run scratch tests') {
+              when { anyOf { changeRequest target: 'main'; branch 'main' } }
+              options { timeout(time: 60, unit: 'MINUTES') }
+              steps {
+                sh 'cd scratch/ && pytest -c ./ --junitxml=reports/result.xml --suppress-tests-failed-exit-code'
+              }
+            }
 
             stage('Build documentation') {
               options { timeout(time: 5, unit: 'MINUTES') }

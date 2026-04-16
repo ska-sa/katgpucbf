@@ -34,7 +34,7 @@ from scipy.special import expit
 
 from katgpucbf import DEFAULT_JONES_PER_BATCH
 
-from noisy_search import NoisySearchResult, noisy_search
+from noisy_search import NoisySearchResult, get_nearest_slope, noisy_search
 from remote import Server
 
 HEAPS_TOL = 0.05  #: Relative tolerance for number of heaps received
@@ -474,19 +474,13 @@ class Benchmark(ABC):
         elif self.args.oneshot is not None:
             result = (await self.measure(self.args.oneshot)).message()
         else:
-            if self.slope.get(self.args.n) is None:
-                array = self.slope.keys()
-                nearest_n = int((np.abs([a - self.args.n for a in array])).argmin())
-            else:
-                nearest_n = self.args.n
-            slope = self.slope[nearest_n]
             low, high = await self.search(
                 low=self.args.low,
                 high=self.args.high,
                 step=self.args.step,
                 interval=self.args.interval,
                 max_comparisons=self.args.max_comparisons,
-                slope=slope,
+                slope=get_nearest_slope(self.args.n, self.slope),
             )
             result = f"\n{low / 1e6} MHz - {high / 1e6} MHz"
         print(result)
