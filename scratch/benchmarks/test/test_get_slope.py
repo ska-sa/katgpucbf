@@ -28,3 +28,4 @@ def test_get_slope_edge_cases() -> None:
         get_nearest_slope(1, {})
     assert get_nearest_slope(0, {1: 0.4}) == 0.4
     assert get_nearest_slope(2, {1: 0.4}) == 0.4
+    assert get_nearest_slope(1, {0: 0.2, 1: 0.4}) == 0.4

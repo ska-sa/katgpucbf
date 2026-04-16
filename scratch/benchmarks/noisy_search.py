@@ -38,17 +38,14 @@ def get_nearest_slope(n: int, slope: dict[int, float]) -> float:
     Raises IndexError if the slope is empty.
     """
 
-    if slope.get(n) is None:
-        array = sorted(list(slope.keys()))
-        mid = bisect.bisect_left(array, n)
-        if mid == len(array):
-            # all distances are negative, so use the largest negative distance
-            nearest_n = array[-1]
-        else:
-            # some distances are positive, so use the smallest positive distance
-            nearest_n = array[mid]
+    array = sorted(list(slope.keys()))
+    mid = bisect.bisect_left(array, n)
+    if mid == len(array):
+        # all distances are negative, so use the largest negative distance
+        nearest_n = array[-1]
     else:
-        nearest_n = n
+        # some distances are positive, so use the smallest positive distance
+        nearest_n = array[mid]
     return slope[nearest_n]
 
 
