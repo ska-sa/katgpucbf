@@ -34,8 +34,10 @@ def get_nearest_slope(n: int, slope: dict[int, float]) -> float:
     If the slope is not defined for the given number of engines, find the nearest
     defined (higher, when available) slope and use it.
 
-    -------
-    Raises IndexError if the slope is empty.
+    Raises
+    ------
+    IndexError
+        if the slope dictionary is empty.
     """
 
     array = sorted(list(slope.keys()))
