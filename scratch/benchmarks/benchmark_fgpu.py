@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import functools
 import ipaddress
+import math
 from collections import deque
 from contextlib import AsyncExitStack
 from typing import override
@@ -41,6 +42,7 @@ from benchmark_tools import (
 from remote import InsufficientCoresError, Server, ServerInfo, run_tasks, servers_from_toml
 
 KATCP_PORT_BASE = 7140
+TARGET_PACKET_PAYLOAD_BYTES = 8192
 
 
 class FgpuBenchmark(Benchmark):
@@ -125,10 +127,9 @@ class FgpuBenchmark(Benchmark):
             f"--prometheus-port={prometheus_port} "
             f"--sync-time={sync_time} "
             f"--first-id={index if self.single_pol else 2 * index} "
+            f"--sample-bits={self.args.dig_sample_bits} "
             f"{addresses_str} "
         )
-        if self.args.dig_sample_bits is not None:
-            command += f"--sample-bits={self.args.dig_sample_bits} "
         return command
 
     def fgpu_factory(
@@ -198,6 +199,7 @@ class FgpuBenchmark(Benchmark):
             f"--feng-id={index} "
             f"{'--use-vkgdr' if self.args.use_vkgdr else ''} "
             f"--wideband={wideband_arg} "
+            f"--dig-sample-bits={self.args.dig_sample_bits} "
             f"{dsim}:7148 "
         )
         for i in range(self.args.narrowband):
@@ -212,11 +214,8 @@ class FgpuBenchmark(Benchmark):
                 narrowband_kwargs["jones_per_batch"] = self.args.jones_per_batch
             narrowband_arg = ",".join(f"{key}={value}" for key, value in narrowband_kwargs.items())
             command += f"--narrowband={narrowband_arg} "
-        for arg in ["array_size", "dig_sample_bits"]:
-            value = getattr(self.args, arg)
-            if value is not None:
-                dashed = arg.replace("_", "-")
-                command += f"--{dashed}={value} "
+        if self.args.array_size is not None:
+            command += f"--array-size={self.args.array_size} "
         for extra in self.args.extra:
             command += f"{extra} "
         return command
@@ -293,12 +292,12 @@ async def main():
         "--dig-heap-samples",
         type=int,
         metavar="SAMPLES",
-        default=4096,
         help="Number of samples in each digitiser heap",
     )
     parser.add_argument(
         "--dig-sample-bits",
         type=int,
+        default=10,
         metavar="BITS",
         help="Number of bits per digitised sample",
     )
@@ -312,6 +311,10 @@ async def main():
     args = parser.parse_args()
 
     process_common_benchmark_arguments(args, parser)
+
+    if args.dig_heap_samples is None:
+        # automatically calculate the number of samples per heap based to fit the UDP payload size
+        args.dig_heap_samples = 2 ** math.floor(math.log2((TARGET_PACKET_PAYLOAD_BYTES * 8) // args.dig_sample_bits))
 
     await FgpuBenchmark(args).run()
 
