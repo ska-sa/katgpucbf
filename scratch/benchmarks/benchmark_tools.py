@@ -23,6 +23,7 @@ import logging
 import sys
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from enum import Enum
@@ -142,8 +143,9 @@ def process_common_benchmark_arguments(args: argparse.Namespace, parser: argpars
         )
 
 
-def get_nearest_slope(n: int, slope: dict[int, float]) -> float:
+def get_nearest_slope(n: int, slope: Mapping[int, float]) -> float:
     """Get the slope for the given number of engines.
+
     If the slope is not defined for the given number of engines, find the nearest
     defined (higher, when available) slope and use it.
 
@@ -153,7 +155,7 @@ def get_nearest_slope(n: int, slope: dict[int, float]) -> float:
         if the slope dictionary is empty.
     """
 
-    array = sorted(list(slope.keys()))
+    array = sorted(slope.keys())
     mid = bisect.bisect_left(array, n)
     if mid == len(array):
         # all distances are negative, so use the largest negative distance
