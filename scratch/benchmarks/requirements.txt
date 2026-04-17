@@ -19,7 +19,9 @@ aiosignal==1.4.0
     #   -c scratch/benchmarks/../../requirements.txt
     #   aiohttp
 asyncssh==2.22.0
-    # via -r scratch/benchmarks/requirements.in
+    # via
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   -r scratch/benchmarks/requirements.in
 attrs==25.4.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
@@ -28,10 +30,13 @@ attrs==25.4.0
     #   aiohttp
 cffi==2.0.0
     # via
+    #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   cryptography
-cryptography==46.0.6
-    # via asyncssh
+cryptography==46.0.7
+    # via
+    #   -c scratch/benchmarks/../../requirements-dev.txt
+    #   asyncssh
 frozenlist==1.8.0
     # via
     #   -c scratch/benchmarks/../../qualification/requirements.txt
@@ -92,6 +97,7 @@ propcache==0.4.1
     #   yarl
 pycparser==2.23
     # via
+    #   -c scratch/benchmarks/../../requirements-dev.txt
     #   -c scratch/benchmarks/../../requirements.txt
     #   cffi
 python-dateutil==2.9.0.post0

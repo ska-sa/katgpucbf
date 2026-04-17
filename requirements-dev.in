@@ -1,4 +1,5 @@
 -c requirements.txt
+asyncssh
 ipython
 uv
 pre-commit
