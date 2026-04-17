@@ -8,7 +8,7 @@ aiohappyeyeballs==2.6.1
     # via
     #   -c requirements.txt
     #   aiohttp
-aiohttp==3.13.3
+aiohttp==3.13.4
     # via
     #   -c requirements.txt
     #   aiomonitor
@@ -173,7 +173,7 @@ locket==1.0.0
     # via
     #   -c requirements.txt
     #   partd
-mako==1.3.10
+mako==1.3.11
     # via
     #   -c requirements.txt
     #   katsdpsigproc
