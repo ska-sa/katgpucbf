@@ -127,7 +127,8 @@ property-decorators = ["pytest.fixture"]
 known-local-folder = ["benchmark_tools", "noisy_search", "remote", "sighandler"]
 
 [tool.pytest.ini_options]
-testpaths = "test"
+testpaths = "test scratch/benchmarks/test"
+pythonpath = "scratch/benchmarks"
 pytester_example_dir = "test/pytest_plugins/demo"
 # The --ignore is because the demo has its own conftest.py which loads plugins,
 # and only the top-level conftest.py is allowed to load plugins. See
