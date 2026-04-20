@@ -122,14 +122,12 @@ may need:
 
    Override the server names to find in the servers file.
 
+.. option:: --multicast-groups <network>
+
+   Override the multicast groups to use. The default is 239.192.128.0/20.
+
 This is not a complete list of options; run the command with :option:`!--help`
 to see others.
-
-Multicast groups
-----------------
-The benchmark code currently hard-codes a number of multicast groups. Thus,
-**two instances cannot be run on the same network at the same time**. The
-groups are all in the 239.102.0.0/16 subnet.
 
 Algorithm
 ---------

@@ -25,10 +25,10 @@ import argparse
 import asyncio
 import functools
 import math
+from collections.abc import Iterator
 from contextlib import AsyncExitStack
+from itertools import chain
 from typing import override
-
-import asyncssh
 
 from katgpucbf import COMPLEX, N_POLS
 
@@ -54,122 +54,13 @@ class StreamInfo:
         self.spectra_per_heap = args.jones_per_batch // args.channels
 
 
-def fsim_factory(
-    server: Server,
-    server_info: ServerInfo,
-    conn: asyncssh.SSHClientConnection,
-    index: int,
-    *,
-    adc_sample_rate: float,
-    sync_time: int,
-    args: argparse.Namespace,
-) -> str:
-    """Generate command to run fsim."""
-    cores = server_info.allocate_cores(args.n, 2)[index]
-    interface = server.interfaces[index % len(server.interfaces)]
-    prometheus_port = PROMETHEUS_PORT_BASE + index
-    name = f"fsim-{index}"
-    info = StreamInfo(args, adc_sample_rate)
-    command = (
-        "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
-        f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
-        + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
-        + f"--ulimit=memlock=-1 --rm {args.image} "
-        f"schedrr taskset -c {cores[1]} fsim "
-        "--ibv "
-        f"--interface={interface} "
-        f"--sync-time={sync_time} "
-        f"--affinity={cores[0]} "
-        f"--main-affinity={cores[1]} "
-        f"--prometheus-port={prometheus_port} "
-        f"--adc-sample-rate={adc_sample_rate} "
-        f"--array-size={args.array_size} "
-        f"--channels={args.channels} "
-        f"--channels-per-substream={info.channels_per_substream} "
-        f"--samples-between-spectra={info.samples_between_spectra} "
-        f"--jones-per-batch={args.jones_per_batch} "
-        f"239.102.199.{index}:7148 "
-    )
-    return command
-
-
-def xbgpu_factory(
-    server: Server,
-    server_info: ServerInfo,
-    conn: asyncssh.SSHClientConnection,
-    index: int,
-    *,
-    adc_sample_rate: float,
-    sync_time: int,
-    args: argparse.Namespace,
-) -> str:
-    """Generate command to run xbgpu."""
-    cores = server_info.allocate_cores(args.n, 2)[index]
-    interface = server.interfaces[index % len(server.interfaces)]
-    gpu = server.gpus[index % len(server.gpus)]
-    katcp_port = KATCP_PORT_BASE + index
-    prometheus_port = PROMETHEUS_PORT_BASE + index
-    name = f"xbgpu-{index}"
-
-    info = StreamInfo(args, adc_sample_rate)
-    heap_time = info.samples_between_spectra * info.spectra_per_heap / adc_sample_rate
-    threshold = max(1, round(args.int_time / heap_time))
-    # Duplicate logic from katsdpcontroller's generator.py
-    batch_size = (
-        args.array_size * N_POLS * info.spectra_per_heap * info.channels_per_substream * COMPLEX * SAMPLE_BITS // 8
-    )
-    target_chunk_size = 64 * 1024**2
-    batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
-
-    command = (
-        "docker run "
-        "--stop-timeout=2 "
-        f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host "
-        f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {args.image} "
-        f"schedrr taskset -c {cores[1]} xbgpu "
-        f"--katcp-port={katcp_port} "
-        f"--prometheus-port={prometheus_port} "
-        f"--adc-sample-rate={adc_sample_rate} "
-        f"--bandwidth={info.bandwidth} "
-        f"--array-size={args.array_size} "
-        f"--channels={args.channels} "
-        f"--channels-per-substream={info.channels_per_substream} "
-        f"--samples-between-spectra={info.samples_between_spectra} "
-        f"--jones-per-batch={args.jones_per_batch} "
-        f"--sample-bits={SAMPLE_BITS} "
-        f"--heaps-per-fengine-per-chunk={batches_per_chunk} "
-        f"--sync-time={sync_time} "
-        f"--recv-affinity={cores[0]} "
-        f"--recv-comp-vector={cores[0]} "
-        f"--recv-interface={interface} "
-        f"--recv-ibv "
-        f"--send-affinity={cores[1]} "
-        f"--send-comp-vector={cores[1]} "
-        f"--send-interface={interface} "
-        f"--send-ibv "
-        f"--send-enabled "
-        f"239.102.199.{index}:7148 "
-    )
-    for i in range(args.beams):
-        for j in range(N_POLS):
-            idx = N_POLS * i + j
-            beam_number = index * args.beams * N_POLS + idx
-            command += f"--beam=name=beam{idx},dst=239.102.197.{beam_number},pol={j} "
-
-    for i in range(args.corrprods):
-        corrprod_number = index * args.corrprods + i
-        command += f"--corrprod=name=corrprod{corrprod_number},"
-        command += f"dst=239.102.198.{corrprod_number},"
-        command += f"heap_accumulation_threshold={threshold} "
-    return command
-
-
 class XbgpuBenchmark(Benchmark):
     def __init__(self, args: argparse.Namespace) -> None:
         servers = servers_from_toml(args.servers)
         samples_between_spectra = 2 * args.channels * args.narrowband_decimation
         spectra_per_heap = args.jones_per_batch // args.channels
         heap_samples = samples_between_spectra * spectra_per_heap
+        self.fsim_addresses: Iterator[str] = iter([])
         super().__init__(
             args,
             generator_server=servers[args.fsim_server],
@@ -182,13 +73,130 @@ class XbgpuBenchmark(Benchmark):
             },
         )
 
+    def fsim_factory(
+        self,
+        server: Server,
+        server_info: ServerInfo,
+        index: int,
+        *,
+        adc_sample_rate: float,
+        sync_time: int,
+    ) -> str:
+        """Generate command to run fsim."""
+        cores = server_info.allocate_cores(self.args.n, 2)[index]
+        interface = server.interfaces[index % len(server.interfaces)]
+        prometheus_port = PROMETHEUS_PORT_BASE + index
+        name = f"fsim-{index}"
+        info = StreamInfo(self.args, adc_sample_rate)
+        address = self.multicast_allocator()
+        self.fsim_addresses = chain(self.fsim_addresses, iter([address]))
+        command = (
+            "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
+            f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
+            + "".join(f"--device={dev}:{dev} " for dev in server_info.infiniband_devices)
+            + f"--ulimit=memlock=-1 --rm {self.args.image} "
+            f"schedrr taskset -c {cores[1]} fsim "
+            "--ibv "
+            f"--interface={interface} "
+            f"--sync-time={sync_time} "
+            f"--affinity={cores[0]} "
+            f"--main-affinity={cores[1]} "
+            f"--prometheus-port={prometheus_port} "
+            f"--adc-sample-rate={adc_sample_rate} "
+            f"--array-size={self.args.array_size} "
+            f"--channels={self.args.channels} "
+            f"--channels-per-substream={info.channels_per_substream} "
+            f"--samples-between-spectra={info.samples_between_spectra} "
+            f"--jones-per-batch={self.args.jones_per_batch} "
+            f"{address}:7148 "
+        )
+        return command
+
+    def xbgpu_factory(
+        self,
+        server: Server,
+        server_info: ServerInfo,
+        index: int,
+        *,
+        adc_sample_rate: float,
+        sync_time: int,
+    ) -> str:
+        """Generate command to run xbgpu."""
+        cores = server_info.allocate_cores(self.args.n, 2)[index]
+        interface = server.interfaces[index % len(server.interfaces)]
+        gpu = server.gpus[index % len(server.gpus)]
+        katcp_port = KATCP_PORT_BASE + index
+        prometheus_port = PROMETHEUS_PORT_BASE + index
+        name = f"xbgpu-{index}"
+
+        info = StreamInfo(self.args, adc_sample_rate)
+        heap_time = info.samples_between_spectra * info.spectra_per_heap / adc_sample_rate
+        threshold = max(1, round(self.args.int_time / heap_time))
+        # Duplicate logic from katsdpcontroller's generator.py
+        batch_size = (
+            self.args.array_size
+            * N_POLS
+            * info.spectra_per_heap
+            * info.channels_per_substream
+            * COMPLEX
+            * SAMPLE_BITS
+            // 8
+        )
+        target_chunk_size = 64 * 1024**2
+        batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
+
+        command = (
+            "docker run "
+            "--stop-timeout=2 "
+            f"--name={name} --cap-add=SYS_NICE --runtime=nvidia --gpus=device={gpu} --net=host "
+            f"-e NVIDIA_MOFED=enabled --ulimit=memlock=-1 --rm {self.args.image} "
+            f"schedrr taskset -c {cores[1]} xbgpu "
+            f"--katcp-port={katcp_port} "
+            f"--prometheus-port={prometheus_port} "
+            f"--adc-sample-rate={adc_sample_rate} "
+            f"--bandwidth={info.bandwidth} "
+            f"--array-size={self.args.array_size} "
+            f"--channels={self.args.channels} "
+            f"--channels-per-substream={info.channels_per_substream} "
+            f"--samples-between-spectra={info.samples_between_spectra} "
+            f"--jones-per-batch={self.args.jones_per_batch} "
+            f"--sample-bits={SAMPLE_BITS} "
+            f"--heaps-per-fengine-per-chunk={batches_per_chunk} "
+            f"--sync-time={sync_time} "
+            f"--recv-affinity={cores[0]} "
+            f"--recv-comp-vector={cores[0]} "
+            f"--recv-interface={interface} "
+            f"--recv-ibv "
+            f"--send-affinity={cores[1]} "
+            f"--send-comp-vector={cores[1]} "
+            f"--send-interface={interface} "
+            f"--send-ibv "
+            f"--send-enabled "
+            f"{next(self.fsim_addresses)}:7148 "
+        )
+        for i in range(self.args.beams):
+            for j in range(N_POLS):
+                idx = N_POLS * i + j
+                command += f"--beam=name=beam{idx},dst={self.multicast_allocator()},pol={j} "
+
+        for i in range(self.args.corrprods):
+            corrprod_number = index * self.args.corrprods + i
+            command += f"--corrprod=name=corrprod{corrprod_number},"
+            command += f"dst={self.multicast_allocator()},"
+            command += f"heap_accumulation_threshold={threshold} "
+        return command
+
+    @override
+    def reset(self) -> None:
+        super().reset()
+        self.fsim_addresses = iter([])
+
     @override
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
-            fsim_factory,
+            self.fsim_factory,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
-            args=self.args,
         )
         return await run_tasks(
             self.generator_server,
@@ -204,10 +212,9 @@ class XbgpuBenchmark(Benchmark):
     @override
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
         factory = functools.partial(
-            xbgpu_factory,
+            self.xbgpu_factory,
             adc_sample_rate=adc_sample_rate,
             sync_time=sync_time,
-            args=self.args,
         )
         return await run_tasks(
             self.consumer_server,
