@@ -18,6 +18,7 @@
 
 import argparse
 import asyncio
+import ipaddress
 import logging
 import sys
 import time
@@ -48,6 +49,40 @@ PROMETHEUS_PORT_BASE = 7250
 UNSTABLE_RETRIES = 3  #: Maximum number of times to retry a throttled trial
 MAXIMUM_RANGES = 2**20
 logger = logging.getLogger(__name__)
+
+
+def compress(addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address]) -> str:
+    """Convert a list of contiguous IP addresses to a string of the form <addr>[+n].
+
+    Raises
+    ------
+    ValueError
+        If `addresses` is empty or non-contiguous
+    """
+    if not addresses:
+        raise ValueError("addresses is empty")
+    for i, addr in enumerate(addresses):
+        if addr != addresses[0] + i:
+            raise ValueError("addresses is not contiguous")
+    if len(addresses) == 1:
+        return f"{addresses[0]}"
+    else:
+        return f"{addresses[0]}+{len(addresses) - 1}"
+
+
+class MulticastGroupAllocator:
+    def __init__(self, groups: ipaddress.IPv4Network | ipaddress.IPv6Network) -> None:
+        self._iter = groups.hosts()
+
+    def as_list(self, n: int = 1) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+        try:
+            # mypy thinks next returns _BaseAddress
+            return [next(self._iter) for _ in range(n)]  # type: ignore
+        except StopIteration:
+            raise RuntimeError("ran out of multicast addresses") from None
+
+    def __call__(self, n: int = 1) -> str:
+        return compress(self.as_list(n))
 
 
 def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
@@ -115,6 +150,12 @@ def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--calibrate-repeat", type=int, default=100, help="Number of times to run at each rate [%(default)s]"
+    )
+    parser.add_argument(
+        "--multicast-groups",
+        type=ipaddress.ip_network,
+        default=ipaddress.ip_network("239.192.128.0/20"),
+        help="Multicast groups [%(default)s]",
     )
 
 
@@ -273,6 +314,7 @@ class Benchmark(ABC):
         logging.basicConfig(
             level=logging.DEBUG if args.verbose >= 3 else logging.INFO if args.verbose >= 2 else logging.WARNING
         )
+        self.multicast_allocator = MulticastGroupAllocator(args.multicast_groups)
 
     def verbose_results(self) -> bool:
         return self.args.verbose >= VERBOSE_RESULTS
@@ -311,6 +353,9 @@ class Benchmark(ABC):
     async def run_consumers(self, adc_sample_rate: float, sync_time: int) -> AbstractAsyncContextManager:
         pass
 
+    def reset(self) -> None:
+        self.multicast_allocator = MulticastGroupAllocator(self.args.multicast_groups)
+
     async def process(self, adc_sample_rate: float) -> TrialResult:
         """Perform a single trial on running engines."""
         async with aiohttp.client.ClientSession() as session:
@@ -337,6 +382,7 @@ class Benchmark(ABC):
         """Perform a single trial."""
 
         sync_time = int(time.time())
+        self.reset()
         async with await self.run_producers(adc_sample_rate, sync_time):
             async with await self.run_consumers(adc_sample_rate, sync_time):
                 return await self.process(adc_sample_rate)
