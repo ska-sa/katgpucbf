@@ -48,7 +48,7 @@ repos:
             'pandas-stubs==2.3.3.251219',
             'prometheus-client==0.24.0',
             'pyparsing==3.3.1',
-            'pytest==9.0.2',
+            'pytest==9.0.3',
             'redis==7.1.0',  # Indirect dependency of katsdptelstate
             'spead2==4.4.1',
             'types-decorator==5.2.0.20251101',
