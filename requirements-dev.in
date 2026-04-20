@@ -1,7 +1,9 @@
 -c requirements.txt
 asyncssh
 ipython
-uv
+pandas        # Only needed for scratch/benchmarks/fit.py
 pre-commit
 pytest-cov
 pytest-xdist  # Allows for pytest to launch multiple threads
+statsmodels   # Only needed for scratch/benchmarks/fit.py
+uv

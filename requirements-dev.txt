@@ -227,9 +227,11 @@ numpy==2.3.5
     #   matplotlib
     #   numba
     #   pandas
+    #   patsy
     #   pyerfa
     #   scipy
     #   spead2
+    #   statsmodels
     #   xarray
 packaging==25.0
     # via
@@ -240,11 +242,14 @@ packaging==25.0
     #   matplotlib
     #   pytest
     #   sphinx
+    #   statsmodels
     #   xarray
 pandas==2.3.3
     # via
     #   -c requirements.txt
+    #   -r requirements-dev.in
     #   katsdpsigproc
+    #   statsmodels
     #   xarray
 parso==0.8.5
     # via jedi
@@ -252,6 +257,8 @@ partd==1.4.2
     # via
     #   -c requirements.txt
     #   dask
+patsy==1.0.2
+    # via statsmodels
 pexpect==4.9.0
     # via ipython
 pillow==12.1.1
@@ -384,6 +391,7 @@ scipy==1.17.0
     #   katgpucbf (pyproject.toml)
     #   katcbf-vlbi-resample
     #   katsdpsigproc
+    #   statsmodels
 siphash24==1.8
     # via
     #   -c requirements.txt
@@ -431,6 +439,8 @@ sphinxcontrib-tikz==0.4.20
     # via katgpucbf (pyproject.toml)
 stack-data==0.6.3
     # via ipython
+statsmodels==0.14.6
+    # via -r requirements-dev.in
 telnetlib3==2.0.8
     # via
     #   -c requirements.txt
