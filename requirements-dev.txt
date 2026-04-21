@@ -11,8 +11,8 @@ aiohappyeyeballs==2.6.1
 aiohttp==3.13.4
     # via
     #   -c requirements.txt
+    #   katgpucbf (pyproject.toml)
     #   aiomonitor
-    #   prometheus-async
 aiokatcp==2.2.0
     # via
     #   -c requirements.txt
@@ -260,7 +260,7 @@ pluggy==1.6.0
     #   pytest-cov
 pre-commit==4.5.1
     # via -r requirements-dev.in
-prometheus-async==25.1.0
+prometheus-async==26.1.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
