@@ -14,8 +14,8 @@ aiohttp==3.13.4
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
+    #   katgpucbf (pyproject.toml)
     #   aiomonitor
-    #   prometheus-async
 aiokatcp==2.2.0
     # via
     #   -c qualification/../requirements-dev.txt
@@ -269,7 +269,7 @@ pluggy==1.6.0
     #   pytest
 prometheus-api-client==0.7.0
     # via katgpucbf (pyproject.toml)
-prometheus-async==25.1.0
+prometheus-async==26.1.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt

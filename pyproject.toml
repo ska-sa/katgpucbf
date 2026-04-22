@@ -20,6 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 dependencies = [
+    "aiohttp",  # Needed for prometheus-async to serve metrics
     "aiokatcp>=1.9.0",
     "astropy",
     "dask",
@@ -29,7 +30,7 @@ dependencies = [
     "katsdptelstate",
     "numba",
     "numpy",
-    "prometheus-async[aiohttp]",
+    "prometheus-async",
     "prometheus-client>=0.4",  # First version to auto-append _total to counter names
     "pyparsing>=3.0.0",
     "scipy",

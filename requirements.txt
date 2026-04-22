@@ -6,8 +6,8 @@ aiohappyeyeballs==2.6.1
     # via aiohttp
 aiohttp==3.13.4
     # via
+    #   katgpucbf (pyproject.toml)
     #   aiomonitor
-    #   prometheus-async
 aiokatcp==2.2.0
     # via katgpucbf (pyproject.toml)
 aiomonitor==0.7.1
@@ -124,7 +124,7 @@ platformdirs==4.5.1
     # via
     #   pycuda
     #   pytools
-prometheus-async==25.1.0
+prometheus-async==26.1.0
     # via katgpucbf (pyproject.toml)
 prometheus-client==0.24.0
     # via
