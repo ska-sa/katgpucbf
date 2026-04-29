@@ -26,3 +26,5 @@ DEFAULT_BPIPELINE_NAME: Final = "bpipeline"
 # NOTE: Too high means too much GPU memory gets allocated
 DEFAULT_N_IN_ITEMS: Final = 3
 DEFAULT_N_OUT_ITEMS: Final = 2
+
+DEFAULT_RECV_REORDER_TOL: Final = 2**29  #: Default value of --recv-reorder-tol argument

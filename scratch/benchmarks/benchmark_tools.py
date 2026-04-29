@@ -124,7 +124,7 @@ def add_common_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--startup-time",
         type=float,
-        default=1.0,
+        default=2.0,
         metavar="SECONDS",
         help="Time to run before starting measurement [%(default)s]",
     )
