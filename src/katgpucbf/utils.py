@@ -26,7 +26,7 @@ from collections import Counter
 import aiokatcp
 import numpy as np
 
-from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME, __version__
+from . import MIN_SENSOR_UPDATE_PERIOD, TIME_SYNC_SENSOR_UPDATE_PERIOD, TIME_SYNC_TASK_NAME, __version__
 
 # Sensor status threshold. These are mostly thumb-sucks.
 TIME_ESTERROR_WARN = 1e-3
@@ -259,7 +259,7 @@ def add_time_sync_sensors(sensors: aiokatcp.SensorSet) -> asyncio.Task:
                 status=aiokatcp.Sensor.Status.NOMINAL if good else aiokatcp.Sensor.Status.ERROR,
                 timestamp=mapping["state"].timestamp,
             )
-            await asyncio.sleep(MIN_SENSOR_UPDATE_PERIOD)
+            await asyncio.sleep(TIME_SYNC_SENSOR_UPDATE_PERIOD)
 
     return asyncio.create_task(run(), name=TIME_SYNC_TASK_NAME)
 
