@@ -31,6 +31,7 @@ from itertools import chain
 from typing import override
 
 from katgpucbf import COMPLEX, N_POLS
+from katgpucbf.xbgpu import DEFAULT_RECV_REORDER_TOL
 
 from benchmark_tools import (
     PROMETHEUS_PORT_BASE,
@@ -145,6 +146,13 @@ class XbgpuBenchmark(Benchmark):
         target_chunk_size = 64 * 1024**2
         batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
 
+        # At low adc_sample_rates, the reordering buffer can take a long time
+        # to fill, and adds latency. If the latency is too large it can cause
+        # packets that were lost during startup to only show up after the
+        # startup_time has passed. Limit this latency to 1/4 of startup time.
+        max_recv_reorder_tol = int(adc_sample_rate * self.args.startup_time / 4)
+        recv_reorder_tol = min(max_recv_reorder_tol, DEFAULT_RECV_REORDER_TOL)
+
         command = (
             "docker run "
             "--stop-timeout=2 "
@@ -166,7 +174,8 @@ class XbgpuBenchmark(Benchmark):
             f"--recv-affinity={cores[0]} "
             f"--recv-comp-vector={cores[0]} "
             f"--recv-interface={interface} "
-            f"--recv-ibv "
+            "--recv-ibv "
+            f"--recv-reorder-tol={recv_reorder_tol} "
             f"--send-affinity={cores[1]} "
             f"--send-comp-vector={cores[1]} "
             f"--send-interface={interface} "

@@ -61,6 +61,7 @@ from ..mapped_array import make_vkgdr
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from ..spead import DEFAULT_PORT
 from ..utils import DitherType
+from . import DEFAULT_RECV_REORDER_TOL
 from .correlation import device_filter
 from .output import BOutput, XOutput
 
@@ -198,7 +199,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--recv-reorder-tol",
         type=int,
-        default=2**29,
+        default=DEFAULT_RECV_REORDER_TOL,
         help="Maximum time (in ADC ticks) that packets can be delayed relative to others "
         "and still be accepted. [%(default)s]",
     )
