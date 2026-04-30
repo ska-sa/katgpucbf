@@ -147,7 +147,7 @@ class XbgpuBenchmark(Benchmark):
         batches_per_chunk = math.ceil(max(128 / info.spectra_per_heap, target_chunk_size / batch_size))
 
         # At low adc_sample_rates, the reordering buffer can take a long time
-        # to fill and add latency. If the latency is too large it can causes
+        # to fill, and adds latency. If the latency is too large it can cause
         # packets that were lost during startup to only show up after the
         # startup_time has passed. Limit this latency to 1/4 of startup time.
         max_recv_reorder_tol = int(adc_sample_rate * self.args.startup_time / 4)
