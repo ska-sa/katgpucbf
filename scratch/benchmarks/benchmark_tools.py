@@ -203,7 +203,7 @@ class TrialResult:
 
     @property
     def state(self) -> ResultState:
-        if self.missing_heaps > 0:
+        if self.missing_heaps > 0 and self.heaps > 0:
             return ResultState.FAILED
         elif (1.0 - HEAPS_TOL) * self.expected_heaps <= self.heaps <= (1.0 + HEAPS_TOL) * self.expected_heaps:
             return ResultState.SUCCESS
