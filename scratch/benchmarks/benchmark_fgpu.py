@@ -77,7 +77,7 @@ class FgpuBenchmark(Benchmark):
     ) -> str:
         """Generate command to run dsim.
 
-        The multicast address(es) used for the dsims are appended to `self.dsim_addresses`.
+        The multicast address(es) used for the dsims are appended to `self.dsim_addresses_queue`.
         """
         # Use as many CPUs as we can to speed up startup. We need at least 3
         # (main thread, network thread and worker thread).
