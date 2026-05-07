@@ -25,9 +25,8 @@ import argparse
 import asyncio
 import functools
 import math
-from collections.abc import Iterator
+from collections import deque
 from contextlib import AsyncExitStack
-from itertools import chain
 from typing import override
 
 from katgpucbf import COMPLEX, N_POLS
@@ -61,7 +60,7 @@ class XbgpuBenchmark(Benchmark):
         samples_between_spectra = 2 * args.channels * args.narrowband_decimation
         spectra_per_heap = args.jones_per_batch // args.channels
         heap_samples = samples_between_spectra * spectra_per_heap
-        self.fsim_addresses: Iterator[str] = iter([])
+        self.fsim_addresses_queue: deque[str] = deque()
         super().__init__(
             args,
             generator_server=servers[args.fsim_server],
@@ -90,7 +89,7 @@ class XbgpuBenchmark(Benchmark):
         name = f"fsim-{index}"
         info = StreamInfo(self.args, adc_sample_rate)
         address = self.multicast_allocator()
-        self.fsim_addresses = chain(self.fsim_addresses, iter([address]))
+        self.fsim_addresses_queue.append(address)
         command = (
             "docker run --init "  # --init is needed because fsim doesn't catch SIGTERM itself
             f"--name={name} --cap-add=SYS_NICE --net=host --stop-timeout=2 "
@@ -181,7 +180,7 @@ class XbgpuBenchmark(Benchmark):
             f"--send-interface={interface} "
             f"--send-ibv "
             f"--send-enabled "
-            f"{next(self.fsim_addresses)}:7148 "
+            f"{self.fsim_addresses_queue.popleft()}:7148 "
         )
         for i in range(self.args.beams):
             for j in range(N_POLS):
@@ -198,7 +197,7 @@ class XbgpuBenchmark(Benchmark):
     @override
     def reset(self) -> None:
         super().reset()
-        self.fsim_addresses = iter([])
+        self.fsim_addresses_queue = deque()
 
     @override
     async def run_producers(self, adc_sample_rate: float, sync_time: int) -> AsyncExitStack:
