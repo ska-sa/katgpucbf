@@ -87,10 +87,3 @@ repos:
           - pyproject.toml
           - qualification/requirements.in
         files: '(.*requirements(-dev)?\.(in|txt)|pyproject\.toml)$'
-      - id: pip-compile
-        name: pip-compile scratch/benchmarks/requirements.txt
-        args:
-          - --output-file=scratch/benchmarks/requirements.txt
-          - --python-version=3.12
-          - scratch/benchmarks/requirements.in
-        files: '(.*requirements(-dev)?\.(in|txt))$'

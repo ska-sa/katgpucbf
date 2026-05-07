@@ -18,11 +18,13 @@
 
 import argparse
 import asyncio
+import bisect
 import ipaddress
 import logging
 import sys
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from enum import Enum
@@ -180,6 +182,29 @@ def process_common_benchmark_arguments(args: argparse.Namespace, parser: argpars
             + f" maximum total steps: {MAXIMUM_RANGES}, reduce number of steps by increasing --step"
             + " or decrease the range by adjusting --low and --high."
         )
+
+
+def get_nearest_slope(n: int, slope: Mapping[int, float]) -> float:
+    """Get the slope for the given number of engines.
+
+    If the slope is not defined for the given number of engines, find the nearest
+    defined (higher, when available) slope and use it.
+
+    Raises
+    ------
+    IndexError
+        if the slope dictionary is empty.
+    """
+
+    array = sorted(slope.keys())
+    mid = bisect.bisect_left(array, n)
+    if mid == len(array):
+        # all distances are negative, so use the largest negative distance
+        nearest_n = array[-1]
+    else:
+        # some distances are positive, so use the smallest positive distance
+        nearest_n = array[mid]
+    return slope[nearest_n]
 
 
 class ResultState(Enum):
@@ -520,14 +545,13 @@ class Benchmark(ABC):
         elif self.args.oneshot is not None:
             result = (await self.measure(self.args.oneshot)).message()
         else:
-            slope = self.slope[min(self.args.n, max(self.slope.keys()))]
             low, high = await self.search(
                 low=self.args.low,
                 high=self.args.high,
                 step=self.args.step,
                 interval=self.args.interval,
                 max_comparisons=self.args.max_comparisons,
-                slope=slope,
+                slope=get_nearest_slope(self.args.n, self.slope),
             )
             result = f"\n{low / 1e6} MHz - {high / 1e6} MHz"
         print(result)
