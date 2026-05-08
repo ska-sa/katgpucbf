@@ -801,7 +801,7 @@ async def test_group_delay(
     delay2, period2, std2 = await measure_once((-steps * dsim_resolution, steps * dsim_resolution))
 
     pdf_report.step("Analyse results.")
-    assert 6 * std1 < period2  # Ensure the first test localised things sufficiently
+    assert tolerance * std1 < period2  # Ensure the first test localised things sufficiently
     # Solve (approximately) delay1 = delay2 + k * period2
     k = round((delay1 - delay2) / period2)
     delay = delay2 + k * period2
