@@ -624,6 +624,10 @@ async def test_group_delay(
     """
     receiver = receive_tied_array_channelised_voltage
     pcc = cbf.product_controller_client
+    # Nominally in sigma, but the test has lots of non-Gaussian things going on,
+    # channel leakages and so, so the measured value tends to exceeed 5 sigma
+    # every now and then.
+    tolerance = 7.0
 
     pdf_report.step("Choose channels.")
     # In VLBI mode we don't have a PFB, and there is too much leakage
@@ -797,7 +801,7 @@ async def test_group_delay(
     delay2, period2, std2 = await measure_once((-steps * dsim_resolution, steps * dsim_resolution))
 
     pdf_report.step("Analyse results.")
-    assert 5 * std1 < period2  # Ensure the first test localised things sufficiently
+    assert tolerance * std1 < period2  # Ensure the first test localised things sufficiently
     # Solve (approximately) delay1 = delay2 + k * period2
     k = round((delay1 - delay2) / period2)
     delay = delay2 + k * period2
@@ -808,5 +812,5 @@ async def test_group_delay(
 
     reported_delay = await pcc.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
     pdf_report.detail(f"Reported delay is {reported_delay}.")
-    assert abs(reported_delay - delay) < 5 * std
-    pdf_report.detail("Measured value agrees with reported value to within 5 sigma.")
+    assert abs(reported_delay - delay) < tolerance * std
+    pdf_report.detail(f"Measured value agrees with reported value to within {tolerance} sigma.")
