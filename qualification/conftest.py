@@ -122,6 +122,11 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "no_capture_start([stream, ...]): do not issue capture-start (on all streams if none specified)"
     )
+    config.addinivalue_line("markers", "override_parameters(**kwargs): override the default parameters for the test")
+    config.addinivalue_line(
+        "markers",
+        "smoke_test: Smoke test are run to confirm that the CBF is working correctly before running the full tests.",
+    )
     for option in ini_options:
         assert config.getini(option.name) is not None, f"{option.name} missing from pytest.ini"
 
@@ -149,6 +154,18 @@ def pytest_report_collectionfinish(config: pytest.Config) -> None:  # noqa: D103
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Dynamically parametrize number of antennas etc based on command line arguments."""
+    for parameter in metafunc.definition.iter_markers("override_parameters"):
+        if "n_antennas" in metafunc.fixturenames:
+            metafunc.parametrize("n_antennas", parameter.kwargs["n_antennas"])
+        if "band" in metafunc.fixturenames:
+            metafunc.parametrize("band", parameter.kwargs["band"])
+        if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
+            metafunc.parametrize("n_channels", parameter.kwargs["n_channels"])
+            metafunc.parametrize("narrowband_decimation", parameter.kwargs["narrowband_decimation"])
+            metafunc.parametrize("narrowband_vlbi", parameter.kwargs["narrowband_vlbi"])
+            metafunc.parametrize("narrowband_centre_frequency", parameter.kwargs["narrowband_centre_frequency"])
+        return
+
     if "n_antennas" in metafunc.fixturenames:
         rel_path = metafunc.definition.path.relative_to(metafunc.config.rootpath)
         max_antennas = int(metafunc.config.getini("max_antennas"))
@@ -165,14 +182,14 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         # NOTE: Each config tuple is in the format (n_channels, decimation, vlbi_mode).
         # The VLBI mode configs are constructed separately as it does not use the same
         # decimation factors as 'normal' narrowband.
-        configs = [(int(n_channels), 1, False) for n_channels in metafunc.config.getini("wideband_channels")]
+        configs = [(int(n_channels), 1, False, None) for n_channels in metafunc.config.getini("wideband_channels")]
         configs.extend(
-            (int(n_channels), int(nb_decimation), False)
+            (int(n_channels), int(nb_decimation), False, None)
             for nb_decimation in metafunc.config.getini("narrowband_decimation")
             for n_channels in metafunc.config.getini("narrowband_channels")
         )
         configs.extend(
-            (int(n_channels), int(vlbi_decimation), True)
+            (int(n_channels), int(vlbi_decimation), True, None)
             for vlbi_decimation in metafunc.config.getini("vlbi_decimation")
             for n_channels in metafunc.config.getini("narrowband_channels")
         )
@@ -184,7 +201,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             configs = [config for config in configs if config[2]]
         if not configs:
             raise RuntimeError(f"Contradictory markers on test {metafunc.function.originalname}")
-        metafunc.parametrize("n_channels, narrowband_decimation, narrowband_vlbi", configs)
+        metafunc.parametrize("n_channels, narrowband_decimation, narrowband_vlbi, narrowband_centre_frequency", configs)
 
 
 @pytest.hookimpl(trylast=True)
@@ -201,7 +218,14 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         ans: list = [rel_path.parts[0] != "antenna_channelised_voltage"]
         callspec = getattr(item, "callspec", None)
         if callspec is not None:
-            for name in ["n_antennas", "narrowband_decimation", "narrowband_vlbi", "n_channels", "band"]:
+            for name in [
+                "n_antennas",
+                "narrowband_decimation",
+                "narrowband_vlbi",
+                "n_channels",
+                "band",
+                "narrowband_centre_frequency",
+            ]:
                 ans.append((name, callspec.params.get(name)))
         return tuple(ans)
 
@@ -268,6 +292,7 @@ async def _cbf_config_and_description(
     narrowband_decimation: int,
     narrowband_vlbi: bool,
     pass_bandwidth: float,
+    narrowband_centre_frequency: float | None,
 ) -> tuple[dict, dict]:
     # shutdown_delay is set to zero to speed up the test. We don't care
     # that Prometheus might not get to scrape the final metric updates.
@@ -293,7 +318,7 @@ async def _cbf_config_and_description(
     dig_names = []
 
     adc_sample_rate = BANDS[band].adc_sample_rate
-    centre_frequency = BANDS[band].centre_frequency
+    wideband_centre_frequency = BANDS[band].centre_frequency
 
     for i in range(n_dsims):
         dsim_name = f"dsim{i:03}"
@@ -304,7 +329,7 @@ async def _cbf_config_and_description(
                 "type": "sim.dig.baseband_voltage",
                 "band": band,
                 "adc_sample_rate": adc_sample_rate,
-                "centre_frequency": centre_frequency,
+                "centre_frequency": wideband_centre_frequency,
                 "antenna": f"{dsim_name}, 0:0:0, 0:0:0, 0, 0",
             }
     config["outputs"]["antenna-channelised-voltage"] = {
@@ -335,10 +360,10 @@ async def _cbf_config_and_description(
         # frequency resolution is 1/2**27 samples, while the largest
         # narrowband heap rate is 1/2**24 (jones-per-batch=2**20 and
         # narrowband factor 8).
-        centre_frequency = adc_sample_rate * (3456789 / 2**24)
+        narrowband_centre_frequency = narrowband_centre_frequency or adc_sample_rate * (3456789 / 2**24)
         nb_config: dict[str, Any] = {
             "decimation_factor": narrowband_decimation,
-            "centre_frequency": centre_frequency,
+            "centre_frequency": narrowband_centre_frequency,
         }
         if narrowband_vlbi:
             nb_config["vlbi"] = {"pass_bandwidth": pass_bandwidth}

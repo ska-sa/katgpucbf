@@ -100,6 +100,16 @@ pipeline {
      */
     stage('Run qualification tests') {
       steps {
+	/* Run a smoke test to confirm that everything is working before running all tests */
+        sh '''
+          spead2_net_raw pytest -vv -c ${ini} qualification \
+          --image-override katgpucbf:${katgpucbf_image} \
+          --image-override katsdpcontroller:${katsdpcontroller_image} \
+          --junitxml=result.xml \
+          -m smoke_test \
+          ${extra_args}
+        '''
+
         /* Run the actual pytest.
          * Jenkins will not run subsequent steps if pytest returns a non-zero
          * exit code. Passing --suppress-tests-failed-exit-code causes the

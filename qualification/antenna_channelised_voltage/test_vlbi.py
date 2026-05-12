@@ -121,3 +121,34 @@ async def test_filter_response(
     ax.set_ylabel("dB")
     ax.xaxis.set_major_locator(POTLocator())
     pdf_report.figure(fig)
+
+
+@pytest.mark.override_parameters(
+    n_antennas=[32],
+    n_channels=[4096],
+    narrowband_decimation=[8],
+    narrowband_vlbi=[True],
+    band=["l"],
+    narrowband_centre_frequency=[1626.49e6],
+)
+@pytest.mark.smoke_test
+async def test_l_band_filter_response(
+    cbf: CBFRemoteControl,
+    receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
+    pdf_report: Reporter,
+) -> None:
+    """
+    Test VLBI narrowband in sane configuration.
+
+    Verification method
+    -------------------
+    Verify that the CBF configures for VLBI narrowband settings.
+
+    The only paramters we run are for 4K channels L-band, 32K channels narrowband at a centre frequency of 1626.49 MHz.
+    """
+    pdf_report.step("Verify that the CBF configures for VLBI narrowband settings.")
+
+    with check:
+        assert receive_baseline_correlation_products.n_chans == 4096
+        assert receive_baseline_correlation_products.decimation_factor == 8
+        assert receive_baseline_correlation_products.n_ants == 32

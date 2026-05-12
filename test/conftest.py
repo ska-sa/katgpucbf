@@ -83,7 +83,7 @@ class _CombinationsCandidate:
     by_name: dict[str, Any]  # Lookup by argument name (for filtering)
 
 
-def pytest_generate_tests(metafunc) -> None:
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Apply "combinations" marker."""
     all_combinations = metafunc.config.option.all_combinations
     for marker in metafunc.definition.iter_markers("combinations"):
