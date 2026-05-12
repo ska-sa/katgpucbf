@@ -129,7 +129,7 @@ async def test_filter_response(
     narrowband_decimation=[8],
     narrowband_vlbi=[True],
     band=["l"],
-    narrowband_centre_frequency=[1626.49e6],
+    narrowband_centre_frequency=[342.49e6],
 )
 @pytest.mark.smoke_test
 async def test_l_band_filter_response(
@@ -144,7 +144,8 @@ async def test_l_band_filter_response(
     -------------------
     Verify that the CBF configures for VLBI narrowband settings.
 
-    The only paramters we run are for 4K channels L-band, 32K channels narrowband at a centre frequency of 1626.49 MHz.
+    The only paramters we run are for 4K channels L-band, 32K channels narrowband at a centre frequency of 1626.49 MHz
+    (342.49 MHz baseband).
     """
     pdf_report.step("Verify that the CBF configures for VLBI narrowband settings.")
 
