@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2021-2025, National Research Foundation (SARAO)
+ * Copyright (c) 2021-2026, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -87,8 +87,7 @@ pipeline {
         sh 'echo "pylatex" | uv pip compile - -c qualification/requirements.txt -o constrain-setuptools.txt'
         // Pin setuptools to a version that is known to work (it still warns)
         sh 'echo "setuptools<78" >> constrain-setuptools.txt'
-        // Using PIP_CONSTRAINT pins the version used for the build environment too
-        sh 'PIP_CONSTRAINT="constrain-setuptools.txt" pip install pylatex'
+        sh 'pip install --build-constraint constrain-setuptools.txt pylatex'
         sh 'pip install -r qualification/requirements.txt'
         sh 'pip install --no-deps ".[qualification]" && pip check'
       }

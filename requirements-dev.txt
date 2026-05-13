@@ -477,7 +477,7 @@ tzdata==2025.3
     # via
     #   -c requirements.txt
     #   pandas
-urllib3==2.6.3
+urllib3==2.7.0
     # via requests
 uv==0.11.6
     # via -r requirements-dev.in
