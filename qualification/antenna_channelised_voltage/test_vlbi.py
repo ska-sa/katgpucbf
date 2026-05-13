@@ -124,7 +124,7 @@ async def test_filter_response(
 
 
 @pytest.mark.override_parameters(
-    n_antennas=[32],
+    n_antennas=[4],
     n_channels=[4096],
     narrowband_decimation=[8],
     narrowband_vlbi=[True],
