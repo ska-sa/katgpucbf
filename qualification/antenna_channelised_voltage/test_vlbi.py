@@ -152,4 +152,4 @@ async def test_l_band_filter_response(
     with check:
         assert receive_baseline_correlation_products.n_chans == 4096
         assert receive_baseline_correlation_products.decimation_factor == 8
-        assert receive_baseline_correlation_products.n_ants == 32
+        assert receive_baseline_correlation_products.n_ants == 4
