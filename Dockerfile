@@ -76,7 +76,7 @@ RUN python3 -m venv /venv
 ENV PATH=/venv/bin:$PATH
 # Install up-to-date versions of installation tools, for the benefits of
 # packages not using PEP 517/518.
-RUN pip install pip==25.2 setuptools==80.9.0 wheel==0.45.1
+RUN pip install pip==25.3 setuptools==82.0.1 wheel==0.47.0
 
 # Install and immediately uninstall pycuda. This causes pip to cache the
 # wheel it built, making it fast to install later (we uninstall so that the
