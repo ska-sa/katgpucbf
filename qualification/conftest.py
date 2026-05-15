@@ -369,6 +369,7 @@ async def _cbf_config_and_description(
                 "src_pol": pol_idx,
             }
 
+    n_vengines = 0
     if start_vengine:
         config["outputs"]["tied-array-resampled-voltage-0"] = {
             "type": "gpucbf.tied_array_resampled_voltage",
@@ -377,6 +378,7 @@ async def _cbf_config_and_description(
             "n_chans": 2,
             "station_id": "ME",
         }
+        n_vengines = 1
 
     # The first three key/values are used for the traditional MeerKAT
     # CBF mode string, while the rest are used for a more complete
@@ -392,10 +394,11 @@ async def _cbf_config_and_description(
         "narrowband_vlbi": str(narrowband_vlbi),
         "dsims": str(n_dsims),
         "beams": str(n_beams),
+        "vengines": str(n_vengines),
     }
     long_description = (
         f"{n_antennas} antennas, {n_channels} channels, {n_beams} beams, "
-        f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
+        f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims, {n_vengines} vengines"
     )
     if narrowband_decimation > 1:
         long_description += f", 1/{narrowband_decimation} narrowband"
