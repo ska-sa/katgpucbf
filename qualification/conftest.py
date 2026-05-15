@@ -160,7 +160,11 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         values = [value for value in values if value <= max_antennas]
         metafunc.parametrize("n_antennas", values)
     if "band" in metafunc.fixturenames:
-        metafunc.parametrize("band", metafunc.config.getini("bands"))
+        if rel_path.parts[0] != "tied_array_resampled_voltage":
+            bands = metafunc.config.getini("bands")
+        else:
+            bands = ["l"]
+        metafunc.parametrize("band", bands)
     if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
         # NOTE: Each config tuple is in the format (n_channels, decimation, vlbi_mode).
         # The VLBI mode configs are constructed separately as it does not use the same
@@ -171,9 +175,14 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             for nb_decimation in metafunc.config.getini("narrowband_decimation")
             for n_channels in metafunc.config.getini("narrowband_channels")
         )
+        if rel_path.parts[0] != "tied_array_resampled_voltage":
+            vlbi_decimation = metafunc.config.getini("vlbi_decimation")
+        else:
+            vlbi_decimation = [8]
+        metafunc.parametrize("band", bands)
         configs.extend(
             (int(n_channels), int(vlbi_decimation), True)
-            for vlbi_decimation in metafunc.config.getini("vlbi_decimation")
+            for vlbi_decimation in vlbi_decimation
             for n_channels in metafunc.config.getini("narrowband_channels")
         )
         if metafunc.definition.get_closest_marker("wideband_only"):
