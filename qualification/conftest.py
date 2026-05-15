@@ -376,7 +376,7 @@ async def _cbf_config_and_description(
             "src_streams": [f"tied-array-channelised-voltage-0{pol_name}" for pol_name in "xy"],
             "n_chans": 2,
             "pols": ["x", "y"],
-            "statipol_nameon_id": "me",
+            "station_id": "me",
         }
         n_vengines = 1
 
