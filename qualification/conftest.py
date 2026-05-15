@@ -169,18 +169,20 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         # NOTE: Each config tuple is in the format (n_channels, decimation, vlbi_mode).
         # The VLBI mode configs are constructed separately as it does not use the same
         # decimation factors as 'normal' narrowband.
-        configs = [(int(n_channels), 1, False) for n_channels in metafunc.config.getini("wideband_channels")]
+        configs = [(int(n_channels), 1, False, False) for n_channels in metafunc.config.getini("wideband_channels")]
         configs.extend(
-            (int(n_channels), int(nb_decimation), False)
+            (int(n_channels), int(nb_decimation), False, False)
             for nb_decimation in metafunc.config.getini("narrowband_decimation")
             for n_channels in metafunc.config.getini("narrowband_channels")
         )
         if rel_path.parts[0] != "tied_array_resampled_voltage":
             vlbi_decimation = metafunc.config.getini("vlbi_decimation")
+            start_vengine = False
         else:
             vlbi_decimation = [8]
+            start_vengine = True
         configs.extend(
-            (int(n_channels), int(vlbi_decimation), True)
+            (int(n_channels), int(vlbi_decimation), True, start_vengine)
             for vlbi_decimation in vlbi_decimation
             for n_channels in metafunc.config.getini("narrowband_channels")
         )
@@ -192,7 +194,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             configs = [config for config in configs if config[2]]
         if not configs:
             raise RuntimeError(f"Contradictory markers on test {metafunc.function.originalname}")
-        metafunc.parametrize("n_channels, narrowband_decimation, narrowband_vlbi", configs)
+        metafunc.parametrize("n_channels, narrowband_decimation, narrowband_vlbi, start_vengine", configs)
 
 
 @pytest.hookimpl(trylast=True)
@@ -276,6 +278,7 @@ async def _cbf_config_and_description(
     narrowband_decimation: int,
     narrowband_vlbi: bool,
     pass_bandwidth: float,
+    start_vengine: bool,
 ) -> tuple[dict, dict]:
     # shutdown_delay is set to zero to speed up the test. We don't care
     # that Prometheus might not get to scrape the final metric updates.
@@ -366,7 +369,7 @@ async def _cbf_config_and_description(
                 "src_pol": pol_idx,
             }
 
-        if narrowband_vlbi:
+        if start_vengine:
             config["outputs"][f"tied-array-resampled-voltage-{beam}"] = {
                 "type": "gpucbf.tied_array_resampled_voltage",
                 "src_streams": [f"tied-array-channelised-voltage-{beam}x", f"tied-array-channelised-voltage-{beam}y"],
