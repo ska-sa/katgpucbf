@@ -359,7 +359,7 @@ async def _cbf_config_and_description(
             }
 
         if narrowband_vlbi:
-            config["outputs"]["tied-array-resampled-voltage"] = {
+            config["outputs"][f"tied-array-resampled-voltage-{beam}"] = {
                 "type": "gpucbf.tied_array_resampled_voltage",
                 "src_streams": [f"tied-array-channelised-voltage-{beam}x", f"tied-array-channelised-voltage-{beam}y"],
                 "pols": ["x", "y"],
