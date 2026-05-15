@@ -274,7 +274,7 @@ async def _cbf_config_and_description(
     # Using data_timeout ensures that any major issues with the network
     # fail early rather than during a test.
     config: dict = {
-        "version": "4.6",
+        "version": "4.7",
         "config": {
             "shutdown_delay": 0.0,
             "develop": {"data_timeout": 30.0},
