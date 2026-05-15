@@ -179,7 +179,6 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             vlbi_decimation = metafunc.config.getini("vlbi_decimation")
         else:
             vlbi_decimation = [8]
-        metafunc.parametrize("band", bands)
         configs.extend(
             (int(n_channels), int(vlbi_decimation), True)
             for vlbi_decimation in vlbi_decimation
