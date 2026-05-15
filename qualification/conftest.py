@@ -358,14 +358,14 @@ async def _cbf_config_and_description(
                 "src_pol": pol_idx,
             }
 
-    if narrowband_vlbi:
-        config["outputs"]["tied-array-resampled-voltage"] = {
-            "type": "gpucbf.tied_array_resampled_voltage",
-            "src_streams": ["tied-array-channelised-voltage-0x", "tied-array-channelised-voltage-0y"],
-            "pols": ["x", "y"],
-            "n_chans": 2,
-            "station_id": "MEERKAT+",
-        }
+        if narrowband_vlbi:
+            config["outputs"]["tied-array-resampled-voltage"] = {
+                "type": "gpucbf.tied_array_resampled_voltage",
+                "src_streams": [f"tied-array-channelised-voltage-{beam}x", f"tied-array-channelised-voltage-{beam}y"],
+                "pols": ["x", "y"],
+                "n_chans": 2,
+                "station_id": "MEERKAT+",
+            }
 
     # The first three key/values are used for the traditional MeerKAT
     # CBF mode string, while the rest are used for a more complete
