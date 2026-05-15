@@ -364,7 +364,7 @@ async def _cbf_config_and_description(
                 "src_streams": [f"tied-array-channelised-voltage-{beam}x", f"tied-array-channelised-voltage-{beam}y"],
                 "pols": ["x", "y"],
                 "n_chans": 2,
-                "station_id": "MEERKAT+",
+                "station_id": "ME",
             }
 
     # The first three key/values are used for the traditional MeerKAT
