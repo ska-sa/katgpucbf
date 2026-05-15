@@ -371,12 +371,12 @@ async def _cbf_config_and_description(
 
     n_vengines = 0
     if start_vengine:
-        config["outputs"]["tied-array-resampled-voltage-0"] = {
+        config["outputs"]["tied-array-resampled-voltage"] = {
             "type": "gpucbf.tied_array_resampled_voltage",
-            "src_streams": ["tied-array-channelised-voltage-0x", "tied-array-channelised-voltage-0y"],
-            "pols": ["x", "y"],
+            "src_streams": [f"tied-array-channelised-voltage-0{pol_name}" for pol_name in "xy"],
             "n_chans": 2,
-            "station_id": "ME",
+            "pols": ["x", "y"],
+            "statipol_nameon_id": "me",
         }
         n_vengines = 1
 
