@@ -642,3 +642,10 @@ def create_tied_array_channelised_voltage_receive_stream_group(
             sink=stream_group,
         ),
     )
+
+
+class TiedArrayResampledVoltageReceiver:
+    """Wrap a tied-array-resampled-voltage stream with helper functions."""
+
+    def __init__(self, xb_recv: XBReceiver) -> None:
+        self.xb_recv = xb_recv

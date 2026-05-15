@@ -358,6 +358,15 @@ async def _cbf_config_and_description(
                 "src_pol": pol_idx,
             }
 
+    if narrowband_vlbi:
+        config["outputs"]["tied-array-resampled-voltage"] = {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": ["tied-array-channelised-voltage-0x", "tied-array-channelised-voltage-0y"],
+            "pols": ["x", "y"],
+            "n_chans": 2,
+            "station_id": "MEERKAT+",
+        }
+
     # The first three key/values are used for the traditional MeerKAT
     # CBF mode string, while the rest are used for a more complete
     # CBF description in the final report.
@@ -629,3 +638,16 @@ async def receive_tied_array_channelised_voltage(
     ):
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver
+
+
+@pytest.fixture
+async def start_tied_array_resampled_voltage_stream(
+    cbf: CBFRemoteControl,
+    capture_start_streams: list[str],
+) -> bool:
+    """Get the spead2 receive stream for ingesting the tied-array-channelised-voltage streams."""
+    return any(
+        name in capture_start_streams
+        for name, config in cbf.config["outputs"].items()
+        if config["type"] == "gpucbf.tied_array_resampled_voltage"
+    )
