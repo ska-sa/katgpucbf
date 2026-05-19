@@ -160,20 +160,30 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         values = [value for value in values if value <= max_antennas]
         metafunc.parametrize("n_antennas", values)
     if "band" in metafunc.fixturenames:
-        metafunc.parametrize("band", metafunc.config.getini("bands"))
+        if rel_path.parts[0] != "tied_array_resampled_voltage":
+            bands = metafunc.config.getini("bands")
+        else:
+            bands = ["l"]
+        metafunc.parametrize("band", bands)
     if "n_channels" in metafunc.fixturenames or "narrowband_decimation" in metafunc.fixturenames:
         # NOTE: Each config tuple is in the format (n_channels, decimation, vlbi_mode).
         # The VLBI mode configs are constructed separately as it does not use the same
         # decimation factors as 'normal' narrowband.
-        configs = [(int(n_channels), 1, False) for n_channels in metafunc.config.getini("wideband_channels")]
+        configs = [(int(n_channels), 1, False, False) for n_channels in metafunc.config.getini("wideband_channels")]
         configs.extend(
-            (int(n_channels), int(nb_decimation), False)
+            (int(n_channels), int(nb_decimation), False, False)
             for nb_decimation in metafunc.config.getini("narrowband_decimation")
             for n_channels in metafunc.config.getini("narrowband_channels")
         )
+        if rel_path.parts[0] != "tied_array_resampled_voltage":
+            vlbi_decimation = metafunc.config.getini("vlbi_decimation")
+            start_vengine = False
+        else:
+            vlbi_decimation = [8]
+            start_vengine = True
         configs.extend(
-            (int(n_channels), int(vlbi_decimation), True)
-            for vlbi_decimation in metafunc.config.getini("vlbi_decimation")
+            (int(n_channels), int(vlbi_decimation), True, start_vengine)
+            for vlbi_decimation in vlbi_decimation
             for n_channels in metafunc.config.getini("narrowband_channels")
         )
         if metafunc.definition.get_closest_marker("wideband_only"):
@@ -184,7 +194,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             configs = [config for config in configs if config[2]]
         if not configs:
             raise RuntimeError(f"Contradictory markers on test {metafunc.function.originalname}")
-        metafunc.parametrize("n_channels, narrowband_decimation, narrowband_vlbi", configs)
+        metafunc.parametrize("n_channels, narrowband_decimation, narrowband_vlbi, start_vengine", configs)
 
 
 @pytest.hookimpl(trylast=True)
@@ -268,13 +278,14 @@ async def _cbf_config_and_description(
     narrowband_decimation: int,
     narrowband_vlbi: bool,
     pass_bandwidth: float,
+    start_vengine: bool,
 ) -> tuple[dict, dict]:
     # shutdown_delay is set to zero to speed up the test. We don't care
     # that Prometheus might not get to scrape the final metric updates.
     # Using data_timeout ensures that any major issues with the network
     # fail early rather than during a test.
     config: dict = {
-        "version": "4.6",
+        "version": "4.7",
         "config": {
             "shutdown_delay": 0.0,
             "develop": {"data_timeout": 30.0},
@@ -358,6 +369,17 @@ async def _cbf_config_and_description(
                 "src_pol": pol_idx,
             }
 
+    n_vengines = 0
+    if start_vengine:
+        config["outputs"]["tied-array-resampled-voltage"] = {
+            "type": "gpucbf.tied_array_resampled_voltage",
+            "src_streams": [f"tied-array-channelised-voltage-0{pol_name}" for pol_name in "xy"],
+            "n_chans": 2,
+            "pols": ["x", "y"],
+            "station_id": "me",
+        }
+        n_vengines = 1
+
     # The first three key/values are used for the traditional MeerKAT
     # CBF mode string, while the rest are used for a more complete
     # CBF description in the final report.
@@ -372,10 +394,11 @@ async def _cbf_config_and_description(
         "narrowband_vlbi": str(narrowband_vlbi),
         "dsims": str(n_dsims),
         "beams": str(n_beams),
+        "vengines": str(n_vengines),
     }
     long_description = (
         f"{n_antennas} antennas, {n_channels} channels, {n_beams} beams, "
-        f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
+        f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims, {n_vengines} vengines"
     )
     if narrowband_decimation > 1:
         long_description += f", 1/{narrowband_decimation} narrowband"
