@@ -652,16 +652,3 @@ async def receive_tied_array_channelised_voltage(
     ):
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver
-
-
-@pytest.fixture
-async def start_tied_array_resampled_voltage_stream(
-    cbf: CBFRemoteControl,
-    capture_start_streams: list[str],
-) -> bool:
-    """Get the spead2 receive stream for ingesting the tied-array-channelised-voltage streams."""
-    return any(
-        name in capture_start_streams
-        for name, config in cbf.config["outputs"].items()
-        if config["type"] == "gpucbf.tied_array_resampled_voltage"
-    )

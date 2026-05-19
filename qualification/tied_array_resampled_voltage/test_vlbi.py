@@ -26,9 +26,7 @@ from ..cbf import CBFRemoteControl
 @pytest.mark.vlbi_only
 @pytest.mark.name("VLBI configuration")
 async def test_configuration(
-    cbf_mode_config: dict,
     cbf: CBFRemoteControl,
-    start_tied_array_resampled_voltage_stream: bool,
     pdf_report: Reporter,
 ) -> None:
     """Test configuration of tied-array-resampled-voltage stream.
@@ -39,10 +37,8 @@ async def test_configuration(
     """
     pdf_report.step("Verify configuration of tied-array-resampled-voltage stream.")
 
-    assert start_tied_array_resampled_voltage_stream
-    for beam in range(cbf_mode_config["beams"]):
-        assert cbf.init_sensors[f"tied-array-resampled-voltage-{beam}.n-chans"].value == 2
-        pdf_report.detail(
-            f"Tied-array-resampled-voltage-{beam} has "
-            + f"{cbf.init_sensors[f'tied-array-resampled-voltage-{beam}.n-chans'].value} channels."
-        )
+    assert cbf.init_sensors["tied-array-resampled-voltage.n-chans"].value == 2
+    pdf_report.detail(
+        "Tied-array-resampled-voltage has "
+        + f"{cbf.init_sensors['tied-array-resampled-voltage.n-chans'].value} channels."
+    )
