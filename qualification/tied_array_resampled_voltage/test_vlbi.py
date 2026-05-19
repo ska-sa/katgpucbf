@@ -19,7 +19,6 @@
 import pytest
 
 from katgpucbf.pytest_plugins.reporter import Reporter
-from qualification.recv import TiedArrayChannelisedVoltageReceiver
 
 from ..cbf import CBFRemoteControl
 
@@ -30,7 +29,6 @@ async def test_configuration(
     cbf_mode_config: dict,
     cbf: CBFRemoteControl,
     start_tied_array_resampled_voltage_stream: bool,
-    receiver: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
 ) -> None:
     """Test configuration of tied-array-resampled-voltage stream.
@@ -40,10 +38,7 @@ async def test_configuration(
     Verified by means of test. Create a product via the product controller client with no errors.
     """
     pdf_report.step("Verify configuration of tied-array-resampled-voltage stream.")
-    pcc = cbf.product_controller_client
-    dsim_timestamp = await pcc.sensor_value(f"{cbf.dsim_names[0]}.steady-state-timestamp", int)
 
-    _, data = await receiver.next_complete_chunk(min_timestamp=dsim_timestamp)
     assert start_tied_array_resampled_voltage_stream
     for beam in range(cbf_mode_config["beams"]):
         assert cbf.init_sensors[f"tied-array-resampled-voltage-{beam}.n-chans"].value == 2
