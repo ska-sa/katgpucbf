@@ -54,7 +54,7 @@ fsspec==2026.1.0
     # via dask
 hiredis==3.3.0
     # via katsdptelstate
-idna==3.11
+idna==3.16
     # via yarl
 janus==2.0.0
     # via aiomonitor
