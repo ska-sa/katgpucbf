@@ -297,7 +297,7 @@ async def async_main(args: argparse.Namespace) -> None:
             for i, idx in enumerate(bls_subset):
                 # We're just plotting the magnitude for now. Phase is easy enough,
                 # and is left as an exercise to the reader.
-                data = chunk.data[:, idx, 0] + 1j * chunk.data[:, idx, 0]
+                data = chunk.data[:, idx, 0] + 1j * chunk.data[:, idx, 1]
                 if args.phase:
                     data = np.angle(data)
                 else:
