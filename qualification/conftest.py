@@ -177,10 +177,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             for n_channels in metafunc.config.getini("narrowband_channels")
             for band in bands
         )
-        if rel_path.parts[0] != "tied_array_resampled_voltage":
-            vlbi_decimation = metafunc.config.getini("vlbi_decimation")
-        else:
-            vlbi_decimation = [8]
+        vlbi_decimation = metafunc.config.getini("vlbi_decimation")
         configs.extend(
             (int(n_channels), int(vlbi_decimation), "l", True)
             for vlbi_decimation in vlbi_decimation
@@ -195,10 +192,9 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         if not configs:
             raise RuntimeError(f"Contradictory markers on test {metafunc.function.originalname}")
         metafunc.parametrize("n_channels, narrowband_decimation, band, vlbi", configs)
-    else:
-        if "band" in metafunc.fixturenames:
-            bands = metafunc.config.getini("bands")
-            metafunc.parametrize("band", bands)
+    elif "band" in metafunc.fixturenames:
+        bands = metafunc.config.getini("bands")
+        metafunc.parametrize("band", bands)
 
 
 @pytest.hookimpl(trylast=True)
@@ -372,7 +368,7 @@ async def _cbf_config_and_description(
                 "src_pol": pol_idx,
             }
 
-    n_vengines = 0
+    vlbi_beams = 0
     if vlbi:
         config["outputs"]["tied-array-resampled-voltage"] = {
             "type": "gpucbf.tied_array_resampled_voltage",
@@ -381,7 +377,7 @@ async def _cbf_config_and_description(
             "pols": ["x", "y"],
             "station_id": "me",
         }
-        n_vengines = 1
+        vlbi_beams = 1
 
     # The first three key/values are used for the traditional MeerKAT
     # CBF mode string, while the rest are used for a more complete
@@ -397,12 +393,14 @@ async def _cbf_config_and_description(
         "vlbi": str(vlbi),
         "dsims": str(n_dsims),
         "beams": str(n_beams),
-        "vengines": str(n_vengines),
+        "vengines": str(vlbi_beams),
     }
     long_description = (
         f"{n_antennas} antennas, {n_channels} channels, {n_beams} beams, "
-        f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims, {n_vengines} vengines"
+        f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
     )
+    if vlbi:
+        long_description += f", {vlbi_beams} vlbi-beams"
     if narrowband_decimation > 1:
         long_description += f", 1/{narrowband_decimation} narrowband"
         if vlbi:
