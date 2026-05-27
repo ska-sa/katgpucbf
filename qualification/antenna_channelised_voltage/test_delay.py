@@ -590,7 +590,7 @@ async def test_group_delay(
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
-    narrowband_vlbi: bool,
+    vlbi: bool,
 ) -> None:
     r"""Test the ``filter-group-delay`` sensor.
 
@@ -634,7 +634,7 @@ async def test_group_delay(
     # between channels to be able to multiplex multiple channels onto
     # one signal.
     n_dsims = len(cbf.dsim_names)
-    if narrowband_vlbi:
+    if vlbi:
         channel_step = 1
         channels_slice = slice(
             pass_channels.start,
@@ -689,7 +689,7 @@ async def test_group_delay(
     # would take far too long because we're only able to test one channel per
     # antenna. It's a trade-off between test time and the strength of the
     # test.
-    if narrowband_vlbi:
+    if vlbi:
         n_spectra = 2**23 // n_channels
     else:
         n_spectra = 2**27 // n_channels

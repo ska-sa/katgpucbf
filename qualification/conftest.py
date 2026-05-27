@@ -215,7 +215,7 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         ans: list = [rel_path.parts[0] != "antenna_channelised_voltage"]
         callspec = getattr(item, "callspec", None)
         if callspec is not None:
-            for name in ["n_antennas", "narrowband_decimation", "narrowband_vlbi", "n_channels", "band"]:
+            for name in ["n_antennas", "narrowband_decimation", "vlbi", "n_channels", "band"]:
                 ans.append((name, callspec.params.get(name)))
         return tuple(ans)
 
@@ -599,15 +599,13 @@ async def cbf(
 
 
 @pytest.fixture
-def pass_channels(
-    band: str, narrowband_decimation: int, narrowband_vlbi: bool, pass_bandwidth: float, n_channels: int
-) -> slice:
+def pass_channels(band: str, narrowband_decimation: int, vlbi: bool, pass_bandwidth: float, n_channels: int) -> slice:
     """Range of channels which form the passband.
 
     Channels outside of this range will be attenuated by the narrowband
     DDC filter. For modes other than VLBI, this will be the full channel range.
     """
-    if narrowband_vlbi:
+    if vlbi:
         bandwidth = BANDS[band].adc_sample_rate * 0.5 / narrowband_decimation
         pass_fraction = pass_bandwidth / bandwidth
         lo = math.ceil(n_channels * 0.5 * (1.0 - pass_fraction))
