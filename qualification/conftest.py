@@ -390,21 +390,18 @@ async def _cbf_config_and_description(
         "band": f"{BANDS[band].long_name}",
         "integration_time": str(int_time),
         "narrowband_decimation": str(narrowband_decimation),
-        "vlbi": str(vlbi),
         "dsims": str(n_dsims),
         "beams": str(n_beams),
-        "vengines": str(vlbi_beams),
+        "vlbi_beams": str(vlbi_beams),
     }
     long_description = (
         f"{n_antennas} antennas, {n_channels} channels, {n_beams} beams, "
         f"{BANDS[band].long_name}-band, {int_time}s integrations, {n_dsims} dsims"
     )
     if vlbi:
-        long_description += f", {vlbi_beams} vlbi-beams"
+        long_description += f", {vlbi_beams} VLBI beams"
     if narrowband_decimation > 1:
         long_description += f", 1/{narrowband_decimation} narrowband"
-        if vlbi:
-            long_description += " (VLBI)"
     logger.info("Config for CBF generation: %s.", long_description)
 
     return config, cbf_mode_config
