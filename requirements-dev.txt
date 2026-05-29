@@ -125,7 +125,7 @@ hiredis==3.3.0
     #   katsdptelstate
 identify==2.6.16
     # via pre-commit
-idna==3.11
+idna==3.16
     # via
     #   -c requirements.txt
     #   requests
