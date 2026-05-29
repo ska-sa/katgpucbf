@@ -96,7 +96,8 @@ def cbf_sort_key(config: dict) -> tuple:
         float(config["integration_time"]),
         int(config["dsims"]),
         int(config["narrowband_decimation"]),
-        str_to_bool(config.get("vlbi_beams", "0")),
+        str_to_bool(config.get("narrowband_vlbi", False)),
+        int(config.get("vlbi_beams", "0")),
     )
 
 
@@ -302,8 +303,14 @@ class CBFConfiguration:
         Short or long description of CBF mode.
         """
         narrowband_decimation = int(self.mode_config["narrowband_decimation"])
+
         # Older report files won't contain the vlbi_beams key
         vlbi_beams = int(self.mode_config.get("vlbi_beams", "0"))
+        if vlbi_beams == 0:
+            # Some older report files might contain the narrowband_vlbi key instead
+            narrowband_vlbi = str_to_bool(self.mode_config.get("narrowband_vlbi", "False"))
+            if narrowband_vlbi:
+                vlbi_beams = 1
         if expand:
             # Long description required
             parts = [
