@@ -96,7 +96,7 @@ def cbf_sort_key(config: dict) -> tuple:
         float(config["integration_time"]),
         int(config["dsims"]),
         int(config["narrowband_decimation"]),
-        str_to_bool(config.get("narrowband_vlbi", False)),
+        str_to_bool(config.get("narrowband_vlbi", "False")),
         int(config.get("vlbi_beams", "0")),
     )
 
