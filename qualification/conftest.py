@@ -533,6 +533,7 @@ async def cbf(
     core_allocator: CoreAllocator,
     capture_start_streams: list[str],
     tied_array_channelised_voltage_receive_streams: list[str],
+    vlbi: bool,
     pdf_report: Reporter,
 ) -> AsyncGenerator[CBFRemoteControl, None]:
     """Set up a CBF for a single test.
@@ -566,6 +567,13 @@ async def cbf(
             cbf=cbf,
             stream_names=tied_array_channelised_voltage_receive_streams,
             cores=core_allocator.allocate(len(tied_array_channelised_voltage_receive_streams)),
+            interface_address=interface_address,
+            use_ibv=use_ibv,
+        )
+    if cbf.tied_array_resampled_voltage_receiver is None and vlbi:
+        logger.info("Subscribing to tied-array-resampled-voltage")
+        cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
+            cbf=cbf,
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
