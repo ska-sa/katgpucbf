@@ -44,7 +44,9 @@ from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DIG_SAMPLE_BITS
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
-from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
+from .cbf import CBFRemoteControl
+
+DEFAULT_MAX_DELAY = 1000000
 
 DEFAULT_TIMEOUT = 10.0
 logger = logging.getLogger(__name__)

@@ -31,14 +31,17 @@ import pytest
 
 from katgpucbf import DIG_SAMPLE_BITS
 from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
-from qualification.recv import TiedArrayResampledVoltageReceiver
 
 from .host_config import HostConfigQuerier
 
 if TYPE_CHECKING:
     # This is only imported for type checkers, because importing at runtime
     # would create a cyclic dependency.
-    from .recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+    from .recv import (
+        BaselineCorrelationProductsReceiver,
+        TiedArrayChannelisedVoltageReceiver,
+        TiedArrayResampledVoltageReceiver,
+    )
 
 logger = logging.getLogger(__name__)
 DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
