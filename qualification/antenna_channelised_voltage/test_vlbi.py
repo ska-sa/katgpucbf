@@ -24,7 +24,7 @@ from pytest_check import check
 from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter
 
 from ..cbf import CBFRemoteControl
-from ..recv import BaselineCorrelationProductsReceiver
+from ..recv import BaselineCorrelationProductsReceiver, TiedArrayResampledVoltageReceiver
 from . import sample_tone_response_hdr
 
 
@@ -36,6 +36,7 @@ async def test_filter_response(
     pdf_report: Reporter,
     pass_bandwidth: float,
     pass_channels: slice,
+    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
 ) -> None:
     """Test frequency response of VLBI narrowband DDC filter.
 
