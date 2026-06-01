@@ -658,7 +658,7 @@ class TiedArrayResampledVoltageReceiver:
         use_ibv: bool = False,
     ) -> None:
         self.source_addresses: list[tuple[str, int]] = ast.literal_eval(
-            cbf.init_sensors["tied-array-resampled-voltage.dst-address"].value.decode()
+            cbf.init_sensors["tied-array-resampled-voltage.destination"].value.decode()
         )
         # self.n_vengs = cbf.init_sensors["somestreamname.n-vengs"].value
 
