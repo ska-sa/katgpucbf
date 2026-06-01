@@ -31,6 +31,7 @@ import pytest
 
 from katgpucbf import DIG_SAMPLE_BITS
 from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
+from qualification.recv import TiedArrayResampledVoltageReceiver
 
 from .host_config import HostConfigQuerier
 
@@ -75,6 +76,7 @@ class CBFRemoteControl(CBFBase):
     # These are filled in by conftest.py.
     baseline_correlation_products_receiver: "BaselineCorrelationProductsReceiver | None" = None
     tied_array_channelised_voltage_receiver: "TiedArrayChannelisedVoltageReceiver | None" = None
+    tied_array_resampled_voltage_receiver: "TiedArrayResampledVoltageReceiver | None" = None
 
     @property
     def init_sensors(self) -> aiokatcp.SensorSet:

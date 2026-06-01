@@ -35,7 +35,12 @@ from katgpucbf.meerkat import BANDS
 from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
 
 from .cbf import CBFCache, CBFRemoteControl, FailedCBF
-from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+from .recv import (
+    DEFAULT_TIMEOUT,
+    BaselineCorrelationProductsReceiver,
+    TiedArrayChannelisedVoltageReceiver,
+    TiedArrayResampledVoltageReceiver,
+)
 
 pytest_plugins = ["katgpucbf.pytest_plugins.numpy_dump", "katgpucbf.pytest_plugins.reporter_plugin"]
 logger = logging.getLogger(__name__)
@@ -647,4 +652,21 @@ async def receive_tied_array_channelised_voltage(
         if config["type"] == "gpucbf.tied_array_channelised_voltage"
     ):
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
+    return receiver
+
+
+@pytest.fixture
+async def receive_tied_array_resampled_voltage(
+    cbf: CBFRemoteControl,
+) -> TiedArrayResampledVoltageReceiver:
+    """Get the receive stream for ingesting the tied-array-resampled-voltage streams."""
+    receiver = cbf.tied_array_resampled_voltage_receiver
+    assert receiver is not None
+    # Ensure that the data is flowing, and that we throw away any data that
+    # predates the start of this test (to prevent any state leaks from previous
+    # tests). The timeout is increased since it may take some time to get the
+    # data flowing at the start.
+
+    # streams from v engine is not spead2
+    await receiver.wait_complete_frame()
     return receiver

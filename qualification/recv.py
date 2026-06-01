@@ -22,6 +22,8 @@ import ctypes
 import logging
 import math
 import os
+import socket
+import struct
 from collections.abc import AsyncGenerator, Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -642,3 +644,30 @@ def create_tied_array_channelised_voltage_receive_stream_group(
             sink=stream_group,
         ),
     )
+
+
+class TiedArrayResampledVoltageReceiver:
+    """Receive tied-array-resampled-voltage streams from the v engines."""
+
+    def __init__(
+        self,
+        cbf: CBFRemoteControl,
+        interface_address: str,
+        use_ibv: bool = False,
+    ) -> None:
+        self.source_addresses: list[tuple[str, int]] = ast.literal_eval(
+            cbf.init_sensors["tied-array-resampled-voltage.dst-address"].value.decode()
+        )
+        # self.n_vengs = cbf.init_sensors["somestreamname.n-vengs"].value
+
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind(self.source_addresses[0])
+        mreq = struct.pack("4sl", socket.inet_aton(interface_address), socket.INADDR_ANY)
+        self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+    async def wait_complete_frame(self) -> bytes:
+        """Wait for a complete frame from the v engine, and return the frame as a string."""
+        data = self.socket.recv(10240)
+        print(f"Received {len(data)} bytes")
+        return data
