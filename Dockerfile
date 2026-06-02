@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1
 
 ################################################################################
-# Copyright (c) 2021-2025, National Research Foundation (SARAO)
+# Copyright (c) 2021-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -20,7 +20,7 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:12.9.1-base-ubuntu24.04 AS base
+FROM nvidia/cuda:13.2.0-base-ubuntu24.04 AS base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
@@ -35,12 +35,12 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 RUN sed -i 's!http://!https://!' /etc/apt/sources.list.d/ubuntu.sources
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cuda-nvcc-12-9 \
-    cuda-nvrtc-12-9 \
-    cuda-profiler-api-12-9 \
-    libcurand-dev-12-9 \
-    libcublas-12-9 \
-    libcufft-12-9 \
+    cuda-nvcc-13-2 \
+    cuda-nvrtc-13-2 \
+    cuda-profiler-api-13-2 \
+    libcurand-dev-13-2 \
+    libcublas-13-2 \
+    libcufft-13-2 \
     libvulkan1 \
     libegl1 \
     libxext6
