@@ -315,6 +315,7 @@ class _CaptureSession:
         )
         async for frameset in frameset_it:
             await self._sender.send(frameset)
+        await self._sender.flush()
         self._capture_complete()
 
     async def stop(self) -> None:

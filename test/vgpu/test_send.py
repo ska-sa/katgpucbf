@@ -43,8 +43,8 @@ def event_loop_policy() -> async_solipsism.EventLoopPolicy:
 class DummyRateLimiter(RateLimiter[int]):
     """Process integers and store the times they were processed."""
 
-    def __init__(self, rate: float, burst_rate: float) -> None:
-        super().__init__(rate, burst_rate, 2)
+    def __init__(self, rate: float, burst_rate: float, capacity: int) -> None:
+        super().__init__(rate, burst_rate, capacity)
         self.times: list[float] = []
 
     @override
@@ -66,7 +66,7 @@ class TestRateLimiter:
         # Use a TaskGroup so that we can schedule items to be sent at
         # precisely-controlled times, regardless of any sleeping that
         # the tasks do.
-        limiter = DummyRateLimiter(10, 20)
+        limiter = DummyRateLimiter(10, 20, 2)
         async with asyncio.TaskGroup() as tg:
             # Two back-to-back
             tg.create_task(limiter.send(1))
@@ -95,6 +95,27 @@ class TestRateLimiter:
                 2.5,  # All caught up now, revert to standard rate
             ]
         )
+
+    async def test_flush(self) -> None:
+        """Test :meth:`.RateLimiter.flush`."""
+        # We use a large capacity so that limiter.send will always be instant
+        loop = asyncio.get_running_loop()
+        start_time = loop.time()
+        limiter = DummyRateLimiter(10, 20, 100)
+        for _ in range(5):
+            await limiter.send(1)
+        # Start a flush, and asynchronously also add more data
+        async with asyncio.TaskGroup() as tg:
+            flush_task = tg.create_task(limiter.flush())
+            await asyncio.sleep(0.1)  # Give flush_task time to start
+            for _ in range(5):
+                await limiter.send(1)
+            print(loop.time() - start_time)
+            await flush_task
+            assert len(limiter.times) == 5
+            assert loop.time() - start_time == pytest.approx(0.4)
+        await limiter.stop()
+        assert len(limiter.times) == 10
 
 
 class TestVDIFSender:

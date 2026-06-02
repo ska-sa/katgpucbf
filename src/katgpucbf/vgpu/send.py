@@ -72,7 +72,7 @@ class RateLimiter[T](ABC):
         self._per_unit = 1 / rate if rate else 0.0
         # Seconds per unit for `burst_rate`
         self._per_unit_burst = 1 / burst_rate if burst_rate else 0.0
-        self._queue: asyncio.Queue[T | None] = asyncio.Queue(capacity)
+        self._queue: asyncio.Queue[T | asyncio.Future[None] | None] = asyncio.Queue(capacity)
         self._run_task: asyncio.Task = asyncio.create_task(self._run(), name="RateLimiter")
 
     @abstractmethod
@@ -96,6 +96,10 @@ class RateLimiter[T](ABC):
             item = await self._queue.get()
             if item is None:
                 break
+            elif isinstance(item, asyncio.Future):
+                if not item.done():
+                    item.set_result(None)
+                continue
 
             now = loop.time()
             target = max(self._next, self._next_burst)
@@ -130,8 +134,18 @@ class RateLimiter[T](ABC):
             self._next = max(self._next, now)
             self._next_burst = max(self._next_burst, now)
 
-    async def stop(self) -> None:
+    async def flush(self) -> None:
         """Wait until all queued items have been processed."""
+        future = asyncio.Future[None]()
+        await self._queue.put(future)
+        await future
+
+    async def stop(self) -> None:
+        """Shut down the rate limiter.
+
+        This blocks until all queued items have been processed. No other
+        methods should be called after this one, as they may deadlock.
+        """
         if not self._run_task.done():
             await self._queue.put(None)  # Signals run task to stop
         await self._run_task
