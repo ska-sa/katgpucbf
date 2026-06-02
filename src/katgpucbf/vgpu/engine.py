@@ -124,6 +124,7 @@ class RecvStream:
                     zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
                     yield zero_arr
                 last_chunk_id = chunk.chunk_id
+                print(chunk.timestamp)
                 yield arr
 
 
