@@ -17,12 +17,18 @@
 """Unit tests for :mod:`katgpucbf.vgpu.engine`."""
 
 import asyncio
+import io
+import math
+import struct
 from typing import Final
 
 import aiokatcp
+import astropy.units as u
 import numpy as np
 import pytest
 import spead2.send.asyncio
+from astropy.time import Time
+from baseband.vdif import VDIFFrame
 
 from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.utils import TimeConverter
@@ -44,7 +50,9 @@ NB_DECIMATION: Final = 8
 SEND_BANDWIDTH: Final = 64e3
 FIR_TAPS: Final = 7201
 STATION: Final = "me"
-FIRST_TIMESTAMP = 0x30000000  # must be a multiple of chunk_timestamp_step
+SAMPLES_PER_FRAME: Final = 4000  # Reduced to keep the tests small
+FIRST_TIMESTAMP: Final = 0x30000000  # must be a multiple of chunk_timestamp_step
+N_THREADS: Final = 4
 
 
 @pytest.fixture
@@ -57,12 +65,12 @@ def _make_beng(queues: list[spead2.InprocQueue]) -> "spead2.send.asyncio.AsyncSt
     return spead2.send.asyncio.InprocStream(spead2.ThreadPool(), queues, config)
 
 
-async def _send_data(layout: Layout, mock_recv_streams: list[spead2.InprocQueue]) -> None:
+async def _send_data(layout: Layout, chunks: int, mock_recv_streams: list[spead2.InprocQueue]) -> None:
     """Send data to the engine."""
     assert FIRST_TIMESTAMP % layout.chunk_timestamp_step == 0
     beng = _make_beng(mock_recv_streams)
     data = np.zeros(
-        (N_POLS, 4 * layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8
+        (N_POLS, chunks * layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8
     )
     for heap in gen_heaps(layout, data, FIRST_TIMESTAMP):
         await beng.async_send_heap(heap.heap, substream_index=heap.substream_index)
@@ -112,7 +120,7 @@ class TestVEngine:
             f"--send-bandwidth={SEND_BANDWIDTH}",
             "--send-pols=x,y",
             f"--send-station={STATION}",
-            "--send-samples-per-frame=4000",  # Reduced to keep the test small
+            f"--send-samples-per-frame={SAMPLES_PER_FRAME}",
             f"--fir-taps={FIR_TAPS}",
             f"--adc-sample-rate={ADC_SAMPLE_RATE}",
             f"--sync-time={SYNC_TIME}",
@@ -127,7 +135,7 @@ class TestVEngine:
         engine: VEngine,
         engine_client: aiokatcp.Client,
         mock_recv_streams: list[spead2.InprocQueue],
-        frameset_count: list[int],
+        mock_sendmsg: list[bytes],
         capture_complete_event: asyncio.Event,
     ) -> None:
         """Test that an engine can be started and receives some data.
@@ -135,13 +143,48 @@ class TestVEngine:
         This is a weak test that will need to be filled out later to ensure
         that the framesets contain the right headers and data.
         """
+        chunks = 4
         await engine_client.request("capture-start", 0)
-        await _send_data(engine.config.recv_config.layout, mock_recv_streams)
+        await _send_data(engine.config.recv_config.layout, chunks, mock_recv_streams)
         for queue in mock_recv_streams:
             queue.stop()
         await capture_complete_event.wait()
-        assert frameset_count[0] > 0
         await engine_client.request("capture-stop")
+        frame_rate = round(SEND_BANDWIDTH / SAMPLES_PER_FRAME) * u.Hz
+        # The pipeline rounds things to a 1s boundary, so we should see the
+        # data start at the next second boundary after FIRST_TIMESTAMP. Note
+        # that this only holds if FIRST_TIMESTAMP is not too close to a 1s
+        # boundary, because the filters have a group delay that is compensated
+        # for.
+        start_time_unix = math.ceil(TIME_CONVERTER.adc_to_unix(FIRST_TIMESTAMP))
+        start_time = Time(start_time_unix, format="unix")
+        # The first second of data is incomplete because of the footprint of the
+        # filters. We then align the start to a second boundary, so we expect
+        # data to start 1s after SYNC_TIME.
+        for i, packet in enumerate(mock_sendmsg):
+            assert len(packet) > 40  # Must have at least 8-byte VTP header and 32-byte VDIF header
+            fh = io.BytesIO(packet)
+            seq = struct.unpack("<Q", fh.read(8))[0]
+            frame = VDIFFrame.fromfile(fh)
+            header = frame.header
+            frame_time = frame.get_time(frame_rate=frame_rate)
+            expected_time = start_time + i // N_THREADS / frame_rate
+            assert seq == i
+            assert not header.complex_data
+            assert not header["invalid_data"]
+            assert header.bps == 2
+            assert header.nchan == 1
+            assert header.samples_per_frame == SAMPLES_PER_FRAME
+            assert header.station == STATION
+            assert header["thread_id"] == i % N_THREADS
+            assert (frame_time - expected_time).sec == pytest.approx(0, abs=1e-9)
+        data_timestamps = engine.config.recv_config.layout.chunk_timestamp_step * chunks
+        # Again, this calculation only works if the exact value is
+        # sufficiently far from a 1s boundary that the filter footprint
+        # doesn't mess things up.
+        stop_time_unix = math.floor(TIME_CONVERTER.adc_to_unix(FIRST_TIMESTAMP + data_timestamps))
+        assert stop_time_unix > start_time_unix, "Test did not send enough data to produce output"
+        assert len(mock_sendmsg) == (stop_time_unix - start_time_unix) * frame_rate.value * N_THREADS
 
     async def test_min_timestamp(
         self,
@@ -156,8 +199,9 @@ class TestVEngine:
         # min_timestamp and checks that no data gets through. Once we have
         # more precise tests that model the delays involved, this should be
         # improved.
+        chunks = 4
         await engine_client.request("capture-start", 0xF00000000000)
-        await _send_data(engine.config.recv_config.layout, mock_recv_streams)
+        await _send_data(engine.config.recv_config.layout, chunks, mock_recv_streams)
         for queue in mock_recv_streams:
             queue.stop()
         await capture_complete_event.wait()
