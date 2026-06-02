@@ -35,7 +35,6 @@ from katgpucbf import COMPLEX, N_POLS
 from katgpucbf.utils import TimeConverter
 from katgpucbf.vgpu.engine import VEngine, _CaptureSession
 from katgpucbf.vgpu.recv import Layout
-from katgpucbf.vgpu.send import VDIFSender
 
 from .test_recv import gen_heaps
 
@@ -90,21 +89,6 @@ async def _send_data(
 
 class TestVEngine:
     """Test :class:`.VEngine`."""
-
-    @pytest.fixture
-    def frameset_count(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
-        """Monkeypatch :meth:`.VDIFSender.send` on the `engine` to count the number of calls.
-
-        The fixture value is a list with a single integer, which will be
-        incremented each time the method is called.
-        """
-        value = [0]
-
-        async def send(self, frameset):
-            value[0] += 1
-
-        monkeypatch.setattr(VDIFSender, "send", send)
-        return value
 
     @pytest.fixture
     def capture_complete_event(self, engine: VEngine, monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
