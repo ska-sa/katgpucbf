@@ -44,7 +44,7 @@ async def test_vlbi_vdif(
     """
     pdf_report.step("Collect a valid VDIF frame.")
     frame = await receive_tied_array_resampled_voltage.get_frame()
-    assert frame.header.nchan == 2
+    assert frame.header.nchan == 1
     pdf_report.detail(f"VDIF frame max value: {np.max(frame.payload.words)}")
     pdf_report.detail(f"VDIF frame min value: {np.min(frame.payload.words)}")
     pdf_report.detail(f"VDIF frame mean value: {np.mean(frame.payload.words)}")
