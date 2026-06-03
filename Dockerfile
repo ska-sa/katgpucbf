@@ -41,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurand-dev-13-2 \
     libcublas-13-2 \
     libcufft-13-2 \
+    libcusparse-13-2 \
+    libnvjitlink-13-2 \
     libvulkan1 \
     libegl1 \
     libxext6
