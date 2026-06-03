@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1
 
 ################################################################################
-# Copyright (c) 2021-2026, National Research Foundation (SARAO)
+# Copyright (c) 2021-2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -20,7 +20,7 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:13.2.0-base-ubuntu24.04 AS base
+FROM nvidia/cuda:13.2.1-base-ubuntu24.04 AS base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
