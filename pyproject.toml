@@ -30,6 +30,7 @@ dependencies = [
     "katsdptelstate",
     "numba",
     "numpy",
+    "nvidia-nvjitlink",
     "prometheus-async",
     "prometheus-client>=0.4",  # First version to auto-append _total to counter names
     "pyparsing>=3.0.0",

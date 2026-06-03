@@ -108,6 +108,8 @@ numpy==2.3.5
     #   scipy
     #   spead2
     #   xarray
+nvidia-nvjitlink==13.3.33
+    # via katgpucbf (pyproject.toml)
 packaging==25.0
     # via
     #   astropy
