@@ -72,6 +72,11 @@ class RateLimiter[T](ABC):
         self._per_unit = 1 / rate if rate else 0.0
         # Seconds per unit for `burst_rate`
         self._per_unit_burst = 1 / burst_rate if burst_rate else 0.0
+        # Each item in the queue is either:
+        # - an item to send;
+        # - a future corresponding to a call to `flush`, which will be completed
+        #   once it reaches the front of the queue; or
+        # - None to indicate that `stop` has been called and that `_run` should shut down.
         self._queue: asyncio.Queue[T | asyncio.Future[None] | None] = asyncio.Queue(capacity)
         self._run_task: asyncio.Task = asyncio.create_task(self._run(), name="RateLimiter")
 

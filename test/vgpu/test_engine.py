@@ -140,13 +140,14 @@ class TestVEngine:
         engine: VEngine,
         engine_client: aiokatcp.Client,
         mock_recv_streams: list[spead2.InprocQueue],
-        mock_sendmsg: list[bytes],
+        sendmsg_packets: list[bytes],
         capture_complete_event: asyncio.Event,
         min_timestamp: int,
     ) -> None:
-        """Test that an engine can be started and receives some data.
+        """Test that an engine can be started, receives and transmits some data.
 
-        This is a weak test that considers only the headers and not the data.
+        This is a weak test that considers only the VDIF headers of the output
+        and not the payload.
         """
         assert min_timestamp % engine.config.recv_config.layout.chunk_timestamp_step == 0, (
             "min_timestamp is not on a chunk boundary"
@@ -170,7 +171,7 @@ class TestVEngine:
         # The first second of data is incomplete because of the footprint of the
         # filters. We then align the start to a second boundary, so we expect
         # data to start 1s after SYNC_TIME.
-        for i, packet in enumerate(mock_sendmsg):
+        for i, packet in enumerate(sendmsg_packets):
             assert len(packet) > 40  # Must have at least 8-byte VTP header and 32-byte VDIF header
             fh = io.BytesIO(packet)
             seq = struct.unpack("<Q", fh.read(8))[0]
@@ -193,7 +194,7 @@ class TestVEngine:
         # doesn't mess things up.
         stop_time_unix = math.floor(TIME_CONVERTER.adc_to_unix(FIRST_TIMESTAMP + data_timestamps))
         assert stop_time_unix > start_time_unix, "Test did not send enough data to produce output"
-        assert len(mock_sendmsg) == (stop_time_unix - start_time_unix) * frame_rate.value * N_THREADS
+        assert len(sendmsg_packets) == (stop_time_unix - start_time_unix) * frame_rate.value * N_THREADS
 
     async def test_capture_start_while_capturing(self, engine_client: aiokatcp.Client) -> None:
         """Test that ``?capture-start`` while already capturing fails."""

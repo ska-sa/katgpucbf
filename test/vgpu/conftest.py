@@ -45,9 +45,10 @@ async def engine(
 
 
 @pytest.fixture
-def mock_sendmsg(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
+def sendmsg_packets(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
     """Mock out socket.sendmsg to append packets to a list.
 
+    The value of this fixture is the list to which packets are appended.
     This does not capture all features of sendmsg; it is intended only
     for use with :mod:`katgpucbf.vgpu.send`.
     """
