@@ -19,6 +19,7 @@
 import ast
 import asyncio
 import ctypes
+import io
 import logging
 import math
 import os
@@ -33,8 +34,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from baseband.vdif import VDIFFrame, VDIFHeader, VDIFPayload
-from baseband.vdif.header import eight_word_struct
+from baseband.vdif import VDIFFrame
 from katsdptelstate.endpoint import endpoint_list_parser, endpoint_parser
 from numba import types
 from numpy.typing import NDArray
@@ -673,10 +673,10 @@ class TiedArrayResampledVoltageReceiver:
     async def get_frame(self) -> VDIFFrame:
         """Wait for a complete frame from the v engine."""
         packet = self.socket.recv(self.max_packet_size)
-        _ = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
-        vdif_header = VDIFHeader(eight_word_struct.unpack(packet[8:40]), None, verify=True)
-        words = np.frombuffer(packet[40 : vdif_header.payload_nbytes + 40], dtype=np.dtype("<u4"))
-        vdif_frame = VDIFFrame(header=vdif_header, payload=VDIFPayload(words=words, header=vdif_header))
+        fh = io.BytesIO(packet)
+        _ = struct.unpack("<Q", fh.read(8))[0]  # vtp_header unused for now
+        vdif_frame = VDIFFrame.fromfile(fh)
+        vdif_frame.verify()
         return vdif_frame
 
     def close(self) -> None:
