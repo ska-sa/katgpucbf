@@ -187,7 +187,7 @@ pipeline {
           steps {
             // Workaround for https://github.com/JelteF/PyLaTeX/issues/391
             // See NGC-1657
-            sh 'pip install uv==0.9.8'
+            sh 'pip install uv==0.11.18'
             // Extract the pinned versions of pylatex and its dependencies
             sh 'echo "pylatex" | uv pip compile - -c qualification/requirements.txt -o constrain-setuptools.txt'
             // Pin setuptools to a version that is known to work (it still warns)

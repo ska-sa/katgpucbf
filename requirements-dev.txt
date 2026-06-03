@@ -48,7 +48,7 @@ async-timeout==5.0.1
     # via
     #   -c requirements.txt
     #   aiokatcp
-asyncssh==2.22.0
+asyncssh==2.23.0
     # via -r requirements-dev.in
 attrs==25.4.0
     # via
@@ -479,7 +479,7 @@ tzdata==2025.3
     #   pandas
 urllib3==2.7.0
     # via requests
-uv==0.11.6
+uv==0.11.18
     # via -r requirements-dev.in
 virtualenv==20.36.1
     # via pre-commit
