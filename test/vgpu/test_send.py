@@ -110,7 +110,6 @@ class TestRateLimiter:
             await asyncio.sleep(0.1)  # Give flush_task time to start
             for _ in range(5):
                 await limiter.send(1)
-            print(loop.time() - start_time)
             await flush_task
             assert len(limiter.times) == 5
             assert loop.time() - start_time == pytest.approx(0.4)
