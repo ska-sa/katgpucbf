@@ -233,10 +233,6 @@ numpy==2.3.5
     #   spead2
     #   statsmodels
     #   xarray
-nvidia-nvjitlink==13.3.33
-    # via
-    #   -c requirements.txt
-    #   katgpucbf (pyproject.toml)
 packaging==25.0
     # via
     #   -c requirements.txt

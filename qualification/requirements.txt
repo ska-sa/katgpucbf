@@ -236,11 +236,6 @@ numpy==2.3.5
     #   scipy
     #   spead2
     #   xarray
-nvidia-nvjitlink==13.3.33
-    # via
-    #   -c qualification/../requirements-dev.txt
-    #   -c qualification/../requirements.txt
-    #   katgpucbf (pyproject.toml)
 ordered-set==4.1.0
     # via pylatex
 packaging==25.0
