@@ -130,7 +130,10 @@ class TestVEngine:
 
     @pytest.mark.parametrize(
         "min_timestamp",
-        [0, FIRST_TIMESTAMP + 0x400000],
+        [
+            0,
+            FIRST_TIMESTAMP + 0x400000,
+        ],
     )
     async def test_smoke(
         self,
