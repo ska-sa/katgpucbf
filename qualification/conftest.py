@@ -46,7 +46,11 @@ pytest_plugins = ["katgpucbf.pytest_plugins.numpy_dump", "katgpucbf.pytest_plugi
 logger = logging.getLogger(__name__)
 FULL_ANTENNAS = [1, 4, 8, 20, 32, 40, 64, 80]
 MAX_PASS_FRACTION = 0.7  # Maximum fraction of total narrowband bandwidth to use as pass_bandwidth
-_CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
+_CAPTURE_TYPES = {
+    "gpucbf.baseline_correlation_products",
+    "gpucbf.tied_array_channelised_voltage",
+    "gpucbf.tied_array_resampled_voltage",
+}
 
 # Storing ini options this way makes pytest.ini easier to validate up-front.
 IniOption = namedtuple("IniOption", ["name", "help", "type", "default"], defaults=[None])
@@ -575,7 +579,6 @@ async def cbf(
         cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
             cbf=cbf,
             interface_address=interface_address,
-            use_ibv=use_ibv,
         )
 
     # Reset the CBF to default state
@@ -595,6 +598,8 @@ async def cbf(
             await pcc.request("beam-quant-gains", name, 1.0)
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
             await pcc.request("beam-weights", name, *((1.0,) * n_inputs))
+        elif conf["type"] == "gpucbf.tied_array_resampled_voltage":
+            pass  # fill in later
 
     for name in capture_start_streams:
         await pcc.request("capture-start", name)
@@ -604,6 +609,8 @@ async def cbf(
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] in _CAPTURE_TYPES:
             await pcc.request("capture-stop", name)
+    if cbf.tied_array_resampled_voltage_receiver is not None:
+        cbf.tied_array_resampled_voltage_receiver.close()
 
 
 @pytest.fixture
@@ -676,5 +683,4 @@ async def receive_tied_array_resampled_voltage(
     # data flowing at the start.
 
     # streams from v engine is not spead2
-    await receiver.wait_complete_frame()
     return receiver

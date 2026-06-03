@@ -29,6 +29,30 @@ from . import sample_tone_response_hdr
 
 
 @pytest.mark.vlbi_only
+@pytest.mark.name("VLBI VDIF output")
+async def test_vlbi_vdif(
+    cbf: CBFRemoteControl,
+    pdf_report: Reporter,
+    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
+) -> None:
+    """Test VDIF frame output.
+
+    Verification method
+    -------------------
+    Verified by means of test. Collect a valid VDIF frame and verify that the
+    frame is valid.
+    """
+    pdf_report.step("Collect a valid VDIF frame.")
+    frame = await receive_tied_array_resampled_voltage.get_frame()
+    assert frame.header.lg2_nchan == 2
+    pdf_report.detail(f"VDIF frame max value: {np.max(frame.payload.words)}")
+    pdf_report.detail(f"VDIF frame min value: {np.min(frame.payload.words)}")
+    pdf_report.detail(f"VDIF frame mean value: {np.mean(frame.payload.words)}")
+    pdf_report.detail(f"VDIF frame std value: {np.std(frame.payload.words)}")
+    pdf_report.detail(f"VDIF frame shape: {frame.payload.words.shape}")
+
+
+@pytest.mark.vlbi_only
 @pytest.mark.name("VLBI filter response")
 async def test_filter_response(
     cbf: CBFRemoteControl,
@@ -36,7 +60,6 @@ async def test_filter_response(
     pdf_report: Reporter,
     pass_bandwidth: float,
     pass_channels: slice,
-    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
 ) -> None:
     """Test frequency response of VLBI narrowband DDC filter.
 

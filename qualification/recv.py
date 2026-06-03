@@ -33,7 +33,9 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from katsdptelstate.endpoint import endpoint_list_parser
+from baseband.vdif import VDIFFrame, VDIFHeader, VDIFPayload
+from baseband.vdif.header import eight_word_struct
+from katsdptelstate.endpoint import endpoint_list_parser, endpoint_parser
 from numba import types
 from numpy.typing import NDArray
 from spead2.numba import intp_to_voidptr
@@ -651,25 +653,32 @@ def create_tied_array_channelised_voltage_receive_stream_group(
 class TiedArrayResampledVoltageReceiver:
     """Receive tied-array-resampled-voltage streams from the v engines."""
 
+    max_packet_size = 65535
+
     def __init__(
         self,
         cbf: CBFRemoteControl,
         interface_address: str,
-        use_ibv: bool = False,
     ) -> None:
-        self.source_addresses: list[tuple[str, int]] = ast.literal_eval(
+        self.multicast_group = endpoint_parser(DEFAULT_PORT)(
             cbf.init_sensors["tied-array-resampled-voltage.destination"].value.decode()
         )
-        # self.n_vengs = cbf.init_sensors["somestreamname.n-vengs"].value
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind(self.source_addresses[0])
-        mreq = struct.pack("4sl", socket.inet_aton(interface_address), socket.INADDR_ANY)
+        self.socket.bind((self.multicast_group.host, self.multicast_group.port))
+        mreq = struct.pack("=4s4s", socket.inet_aton(self.multicast_group.host), socket.inet_aton(interface_address))
         self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
-    async def wait_complete_frame(self) -> bytes:
-        """Wait for a complete frame from the v engine, and return the frame as a string."""
-        data = self.socket.recv(10240)
-        print(f"Received {len(data)} bytes")
-        return data
+    async def get_frame(self) -> VDIFFrame:
+        """Wait for a complete frame from the v engine."""
+        packet = self.socket.recv(self.max_packet_size)
+        _ = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
+        vdif_header = VDIFHeader(eight_word_struct.unpack(packet[8:40]), None, verify=True)
+        words = np.frombuffer(packet[40 : vdif_header.payload_nbytes + 40], dtype=np.dtype("<u4"))
+        vdif_frame = VDIFFrame(header=vdif_header, payload=VDIFPayload(words=words, header=vdif_header))
+        return vdif_frame
+
+    def close(self) -> None:
+        """Close the socket."""
+        self.socket.close()
