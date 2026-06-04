@@ -98,14 +98,11 @@ async def consume_v_chunks(receiver: TiedArrayResampledVoltageReceiver, timestam
     The timestamps of the complete chunks are appended to `timestamps`.
     """
     max_delay = math.ceil(MAX_DELAY * receiver.scale_factor_timestamp)
-    samples = round(receiver.bandwidth / 1250 * max_delay)
-    while True:
-        try:
-            frameset = await receiver.get_frameset(samples=samples)
-            for frame in frameset.data:
-                timestamps.append(int(frame.header.time.to_value(astropy.time.Time.FORMATS["unix"])))
-        except asyncio.CancelledError:
-            break
+    samples = round(receiver.bandwidth / 1250 * max_delay)  # TODO use the sample rate here instead (1/8 of narrowband?)
+    samples = min(samples, 1024)
+    async for frameset in receiver.framesets(samples=samples):
+        for frame in frameset.frames:
+            timestamps.append(int(frame.header.time.to_value(astropy.time.Time.FORMATS["unix"])))
 
 
 async def control_acv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pdf_report: Reporter, name: str) -> None:
@@ -192,15 +189,11 @@ async def control_tarv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, p
         If it takes more than 1s to set the delays
     """
     pcc = cbf.product_controller_client
-    src_stream = cbf.config["outputs"][name]["src_streams"][0]
-    n_inputs: int = len(cbf.config["outputs"][src_stream]["input_labels"]) // 2
     all_elapsed = []
     try:
         async for _ in periodically(rng, BEAM_DELAY_INTERVAL):
-            delay = rng.uniform(-BEAM_MAX_DELAY, BEAM_MAX_DELAY, n_inputs)
-            phase = rng.uniform(-np.pi, np.pi, n_inputs)
-            coeff = [f"{d}:{p}" for d, p in zip(delay, phase, strict=True)]
-            elapsed = await measure(pcc.request("vlbi-delays", name, *coeff))
+            delay = rng.uniform(-BEAM_MAX_DELAY, BEAM_MAX_DELAY)
+            elapsed = await measure(pcc.request("vlbi-delay", name, delay))
             pdf_report.detail(f"Set delays for {name} in {elapsed:.3f} s.")
             with check:
                 assert elapsed < 1.0
@@ -295,6 +288,7 @@ async def test_control(  # noqa: D103
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
     pdf_report: Reporter,
     sensor_watcher: aiokatcp.SensorWatcher,
+    vlbi: bool,
 ) -> None:
     # The docstring is re-assigned after the function so that it can use an
     # f-string.
@@ -316,14 +310,13 @@ async def test_control(  # noqa: D103
                     tasks.append(tg.create_task(control_acv_delays(rng, cbf, pdf_report, name)))
                 case "gpucbf.tied_array_channelised_voltage":
                     tasks.append(tg.create_task(control_tacv_delays(rng, cbf, pdf_report, name)))
-                case "gpucbf.tied_array_resampled_voltage":
-                    tasks.append(tg.create_task(control_tarv_delays(rng, cbf, pdf_report, name)))
         timestamps_bcp: list[int] = []
         timestamps_tacv: list[int] = []
         timestamps_tarv: list[int] = []
         tasks.append(tg.create_task(consume_chunks(receive_baseline_correlation_products, timestamps_bcp)))
         tasks.append(tg.create_task(consume_chunks(receive_tied_array_channelised_voltage, timestamps_tacv)))
-        tasks.append(tg.create_task(consume_v_chunks(receive_tied_array_resampled_voltage, timestamps_tarv)))
+        if vlbi:
+            tasks.append(tg.create_task(consume_v_chunks(receive_tied_array_resampled_voltage, timestamps_tarv)))
         pdf_report.step(f"Run correlator for {TEST_TIME}s.")
         await asyncio.sleep(TEST_TIME)
         pdf_report.detail("Stop asynchronous tasks.")

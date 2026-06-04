@@ -676,26 +676,34 @@ class TiedArrayResampledVoltageReceiver:
         self.socket.bind((self.multicast_group.host, self.multicast_group.port))
         mreq = struct.pack("=4s4s", socket.inet_aton(self.multicast_group.host), socket.inet_aton(interface_address))
         self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-
-    async def get_frameset(self, samples: int = 1024) -> VDIFFrameSet:
-        """Wait for a complete frame from the v engine."""
-        packets = dict[int, bytes]()
-        for _ in range(samples):
-            packet = await self._read()
-            new_seq_id = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
-            packets[new_seq_id] = packet[8:]
-
-        seq_id = None
-        for new_seq_id in sorted(packets.keys()):
-            if seq_id is not None and new_seq_id != seq_id + 1:
-                raise ValueError(f"sequences missed between {seq_id} and {new_seq_id}")
-            seq_id = new_seq_id
-
-        fh = io.BytesIO(b"".join(packets.values()))
-        return VDIFFrameSet.fromfile(fh)
+        self.socket.setblocking(False)
 
     async def _read(self) -> bytes:
-        return self.socket.recv(self.max_packet_size)
+        loop = asyncio.get_running_loop()
+        return await loop.sock_recv(self.socket, self.max_packet_size)
+
+    async def packets(self, count: int) -> AsyncGenerator[tuple[int, bytes], None]:
+        """Yield up to `count` packets from the v engine."""
+        for _ in range(count):
+            packet = await self._read()
+            new_seq_id = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
+            yield new_seq_id, packet[8:]
+
+    async def framesets(self, samples: int = 1024) -> AsyncGenerator[VDIFFrameSet, None]:
+        """Iterate over VDIF framesets assembled from `samples` packets each."""
+        while True:
+            packets = dict[int, bytes]()
+            async for new_seq_id, payload in self.packets(samples):
+                packets[new_seq_id] = payload
+
+            seq_id = None
+            for new_seq_id in sorted(packets.keys()):
+                if seq_id is not None and new_seq_id != seq_id + 1:
+                    raise ValueError(f"sequences missed between {seq_id} and {new_seq_id}")
+                seq_id = new_seq_id
+
+            fh = io.BytesIO(b"".join(packets.values()))
+            yield VDIFFrameSet.fromfile(fh)
 
     def close(self) -> None:
         """Close the socket."""

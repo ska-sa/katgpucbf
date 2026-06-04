@@ -574,7 +574,7 @@ async def cbf(
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
-    if cbf.tied_array_resampled_voltage_receiver is None and vlbi:
+    if cbf.tied_array_resampled_voltage_receiver is None:
         logger.info("Subscribing to tied-array-resampled-voltage")
         cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
             cbf=cbf,
