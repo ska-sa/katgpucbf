@@ -61,7 +61,9 @@ attrs==25.4.0
     #   aiohttp
     #   aiomonitor
 baseband==4.3.0
-    # via katgpucbf (pyproject.toml)
+    # via
+    #   -c qualification/../requirements-dev.txt
+    #   katgpucbf (pyproject.toml)
 certifi==2026.1.4
     # via
     #   -c qualification/../requirements-dev.txt

@@ -22,6 +22,7 @@ import logging
 import socket
 import struct
 from collections.abc import Buffer
+from dataclasses import dataclass
 from typing import override
 from unittest import mock
 
@@ -40,22 +41,29 @@ def event_loop_policy() -> async_solipsism.EventLoopPolicy:
     return async_solipsism.EventLoopPolicy()
 
 
-class DummyRateLimiter(RateLimiter[int]):
-    """Process integers and store the times they were processed."""
+@dataclass(frozen=True)
+class DummyItem:
+    """Item type for :class:`DummyRateLimiter`."""
 
-    def __init__(self, rate: float, burst_rate: float) -> None:
-        super().__init__(rate, burst_rate, 2)
+    size: int  #: Size of the item for the rate-limiting algorithm
+    sleep: float = 0.0  #: Time that processing the item will sleep
+
+
+class DummyRateLimiter(RateLimiter[DummyItem]):
+    """Process items and store the times they were processed."""
+
+    def __init__(self, rate: float, burst_rate: float, capacity: int) -> None:
+        super().__init__(rate, burst_rate, capacity)
         self.times: list[float] = []
 
     @override
-    def item_size(self, item: int) -> int:
-        return item
+    def item_size(self, item: DummyItem) -> int:
+        return item.size
 
     @override
-    async def _process_item(self, item: int) -> None:
+    async def _process_item(self, item: DummyItem) -> None:
         self.times.append(asyncio.get_running_loop().time())
-        if item == 4:
-            await asyncio.sleep(0.5)
+        await asyncio.sleep(item.sleep)
 
 
 class TestRateLimiter:
@@ -66,20 +74,19 @@ class TestRateLimiter:
         # Use a TaskGroup so that we can schedule items to be sent at
         # precisely-controlled times, regardless of any sleeping that
         # the tasks do.
-        limiter = DummyRateLimiter(10, 20)
+        limiter = DummyRateLimiter(10, 20, 2)
         async with asyncio.TaskGroup() as tg:
             # Two back-to-back
-            tg.create_task(limiter.send(1))
-            tg.create_task(limiter.send(1))
+            tg.create_task(limiter.send(DummyItem(size=1)))
+            tg.create_task(limiter.send(DummyItem(size=1)))
             # Long gap so that we reset the reference point
             await asyncio.sleep(0.5)
-            # More back-to-back, for which processing causes delays
-            # (special case in DummyRateLimiter for item=4).
+            # More back-to-back, for which processing causes delays.
             for _ in range(3):
-                tg.create_task(limiter.send(4))
+                tg.create_task(limiter.send(DummyItem(size=4, sleep=0.5)))
             # Some more back-to-back for which we will be catching up
             for _ in range(5):
-                tg.create_task(limiter.send(2))
+                tg.create_task(limiter.send(DummyItem(size=2)))
         await limiter.stop()
         assert limiter.times == pytest.approx(
             [
@@ -95,6 +102,26 @@ class TestRateLimiter:
                 2.5,  # All caught up now, revert to standard rate
             ]
         )
+
+    async def test_flush(self) -> None:
+        """Test :meth:`.RateLimiter.flush`."""
+        # We use a large capacity so that limiter.send will always be instant
+        loop = asyncio.get_running_loop()
+        start_time = loop.time()
+        limiter = DummyRateLimiter(10, 20, 100)
+        for _ in range(5):
+            await limiter.send(DummyItem(size=1))
+        # Start a flush, and asynchronously also add more data
+        async with asyncio.TaskGroup() as tg:
+            flush_task = tg.create_task(limiter.flush())
+            await asyncio.sleep(0.1)  # Give flush_task time to start
+            for _ in range(5):
+                await limiter.send(DummyItem(size=1))
+            await flush_task
+            assert len(limiter.times) == 5
+            assert loop.time() - start_time == pytest.approx(0.4)
+        await limiter.stop()
+        assert len(limiter.times) == 10
 
 
 class TestVDIFSender:

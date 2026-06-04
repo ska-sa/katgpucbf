@@ -62,8 +62,9 @@ doc = [
 ]
 
 test = [
-    "katsdpsigproc[CUDA]",
     "async-solipsism>=0.6",
+    "baseband",
+    "katsdpsigproc[CUDA]",
     "matplotlib",
     "pytest>=8",
     "pytest-asyncio>=0.24",
