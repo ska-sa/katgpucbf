@@ -158,6 +158,21 @@ async def control_tacv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, p
         raise
 
 
+async def control_tarv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pdf_report: Reporter, name: str) -> None:
+    """Periodically change the delays of a tied-array-resampled-voltage stream.
+
+    Unlike :func:`control_tacv_delays`, there is no attempt to smooth the
+    delays.
+
+    Raises
+    ------
+    AssertionError
+        If it takes more than 1s to set the delays
+    """
+    tacv_stream = cbf.config["outputs"][name]["src_streams"][0]
+    await control_tacv_delays(rng, cbf, pdf_report, tacv_stream)
+
+
 @pytest.fixture
 async def sensor_watcher(cbf: CBFRemoteControl) -> AsyncGenerator[aiokatcp.SensorWatcher, None]:
     """Establish a secondary connection to the product controller with a sensor watcher.
@@ -241,6 +256,8 @@ async def test_control(  # noqa: D103
                     tasks.append(tg.create_task(control_acv_delays(rng, cbf, pdf_report, name)))
                 case "gpucbf.tied_array_channelised_voltage":
                     tasks.append(tg.create_task(control_tacv_delays(rng, cbf, pdf_report, name)))
+                case "gpucbf.tied_array_resampled_voltage":
+                    tasks.append(tg.create_task(control_tarv_delays(rng, cbf, pdf_report, name)))
         timestamps_bcp: list[int] = []
         timestamps_tacv: list[int] = []
         tasks.append(tg.create_task(consume_chunks(receive_baseline_correlation_products, timestamps_bcp)))

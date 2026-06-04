@@ -34,7 +34,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from baseband.vdif import VDIFFrame
+from baseband.vdif import VDIFFrameSet
 from katsdptelstate.endpoint import endpoint_list_parser, endpoint_parser
 from numba import types
 from numpy.typing import NDArray
@@ -660,8 +660,13 @@ class TiedArrayResampledVoltageReceiver:
         cbf: CBFRemoteControl,
         interface_address: str,
     ) -> None:
+        self.stream_names = list(["tied-array-resampled-voltage"])
+        acv_name: str = cbf.config["outputs"][self.stream_names[0]]["src_streams"][0]
+        tacv_config: dict[str, Any] = cbf.config["outputs"][acv_name]
+        acv_config: dict[str, Any] = cbf.config["outputs"][tacv_config["src_streams"][0]]
+        self.n_inputs = len(acv_config["src_streams"])
         self.multicast_group = endpoint_parser(DEFAULT_PORT)(
-            cbf.init_sensors["tied-array-resampled-voltage.destination"].value.decode()
+            cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
         )
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -670,14 +675,22 @@ class TiedArrayResampledVoltageReceiver:
         mreq = struct.pack("=4s4s", socket.inet_aton(self.multicast_group.host), socket.inet_aton(interface_address))
         self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
-    async def get_frame(self) -> VDIFFrame:
+    async def get_frameset(self, samples: int = 1024) -> VDIFFrameSet:
         """Wait for a complete frame from the v engine."""
-        packet = self.socket.recv(self.max_packet_size)
-        fh = io.BytesIO(packet)
-        _ = struct.unpack("<Q", fh.read(8))[0]  # vtp_header unused for now
-        vdif_frame = VDIFFrame.fromfile(fh)
-        vdif_frame.verify()
-        return vdif_frame
+        packets = dict[int, bytes]()
+        for _ in range(samples):
+            packet = self.socket.recv(self.max_packet_size)
+            new_seq_id = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
+            packets[new_seq_id] = packet[8:]
+
+        seq_id = None
+        for new_seq_id in sorted(packets.keys()):
+            if seq_id is not None and new_seq_id != seq_id + 1:
+                raise ValueError(f"sequences missed between {seq_id} and {new_seq_id}")
+            seq_id = new_seq_id
+
+        fh = io.BytesIO(b"".join(packets.values()))
+        return VDIFFrameSet.fromfile(fh)
 
     def close(self) -> None:
         """Close the socket."""

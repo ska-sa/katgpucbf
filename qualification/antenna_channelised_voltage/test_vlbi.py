@@ -42,14 +42,20 @@ async def test_vlbi_vdif(
     Verified by means of test. Collect a valid VDIF frame and verify that the
     frame is valid.
     """
+    receiver = receive_tied_array_resampled_voltage
+    pdf_report.step("Set delays so we have nonzero data.")
+    now = await cbf.dsim_time()
+    await cbf.product_controller_client.request(
+        "delays", "tied-array-resampled-voltage", now, "0,0:0,1" * receiver.n_inputs
+    )
     pdf_report.step("Collect a valid VDIF frame.")
-    frame = await receive_tied_array_resampled_voltage.get_frame()
-    assert frame.header.nchan == 1
-    pdf_report.detail(f"VDIF frame max value: {np.max(frame.payload.words)}")
-    pdf_report.detail(f"VDIF frame min value: {np.min(frame.payload.words)}")
-    pdf_report.detail(f"VDIF frame mean value: {np.mean(frame.payload.words)}")
-    pdf_report.detail(f"VDIF frame std value: {np.std(frame.payload.words)}")
-    pdf_report.detail(f"VDIF frame shape: {frame.payload.words.shape}")
+    frameset = await receiver.get_frameset()
+    assert frameset.header0.nchan == 1
+    pdf_report.detail(f"VDIF frame max value: {np.max(frameset.data)}")
+    pdf_report.detail(f"VDIF frame min value: {np.min(frameset.data)}")
+    pdf_report.detail(f"VDIF frame mean value: {np.mean(frameset.data)}")
+    pdf_report.detail(f"VDIF frame std value: {np.std(frameset.data)}")
+    pdf_report.detail(f"VDIF frame shape: {frameset.data.shape}")
 
 
 @pytest.mark.vlbi_only
