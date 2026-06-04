@@ -96,7 +96,10 @@ def cbf_sort_key(config: dict) -> tuple:
         float(config["integration_time"]),
         int(config["dsims"]),
         int(config["narrowband_decimation"]),
-        str_to_bool(config.get("narrowband_vlbi", "False")),
+        str_to_bool(
+            config.get("narrowband_vlbi", "False")
+        ),  # for compatibility with old test runs that pre-date vlbi_beams
+        int(config.get("vlbi_beams", "0")),
     )
 
 
@@ -278,7 +281,7 @@ class CBFConfiguration:
                 "dsims": "4",
                 "beams": "4",
                 "narrowband_decimation": "8",
-                "narrowband_vlbi": "False"
+                "vlbi_beams": "1"
             }
 
         If `expand` is True, it will return a 'long description' as a sentence:
@@ -287,7 +290,7 @@ class CBFConfiguration:
 
         If `expand` is False, it will return a MeerKAT config mode string of:
 
-        - bc8n856M8k
+        - bcv8n856M8k
 
         Parameters
         ----------
@@ -302,8 +305,14 @@ class CBFConfiguration:
         Short or long description of CBF mode.
         """
         narrowband_decimation = int(self.mode_config["narrowband_decimation"])
-        # Older report files won't contain the narrowband_vlbi key
-        narrowband_vlbi = str_to_bool(self.mode_config.get("narrowband_vlbi", "False"))
+
+        # Older report files won't contain the vlbi_beams key
+        vlbi_beams = int(self.mode_config.get("vlbi_beams", "0"))
+        if vlbi_beams == 0:
+            # Some older report files might contain the narrowband_vlbi key instead
+            narrowband_vlbi = str_to_bool(self.mode_config.get("narrowband_vlbi", "False"))
+            if narrowband_vlbi:
+                vlbi_beams = 1
         if expand:
             # Long description required
             parts = [
@@ -316,15 +325,12 @@ class CBFConfiguration:
             ]
             if narrowband_decimation > 1:
                 parts.append(f"1/{narrowband_decimation} narrowband")
-                if narrowband_vlbi:
-                    parts[-1] += " (VLBI)"
             config_mode = ", ".join(parts) + "."
         else:
             antpols = int(self.mode_config["antennas"]) * 2
             chans = int(self.mode_config["channels"]) // 1000
             mode = "bc" if int(self.mode_config["beams"]) > 0 else "c"
-            if narrowband_decimation > 1 and narrowband_vlbi:
-                mode += "v"
+            mode += "v" if vlbi_beams > 0 else ""
             config_mode = f"{mode}{antpols}n{self.mode_config['bandwidth']}M{chans}k"
 
         return config_mode
