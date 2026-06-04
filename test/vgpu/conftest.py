@@ -16,7 +16,8 @@
 
 """Fixtures for use in vgpu unit tests."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Buffer, Iterable
+from typing import Any
 
 import pytest
 import spead2
@@ -41,3 +42,22 @@ async def engine(
     await server.start()
     yield server
     await server.stop()
+
+
+@pytest.fixture
+def sendmsg_packets(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
+    """Mock out socket.sendmsg to append packets to a list.
+
+    The value of this fixture is the list to which packets are appended.
+    This does not capture all features of sendmsg; it is intended only
+    for use with :mod:`katgpucbf.vgpu.send`.
+    """
+
+    def my_sendmsg(self, buffers: Iterable[Buffer], ancdata: Iterable, flags: int = 0, address: Any = None) -> int:
+        packet = b"".join(buffers)
+        packets.append(packet)
+        return len(packet)
+
+    packets: list[bytes] = []
+    monkeypatch.setattr("socket.socket.sendmsg", my_sendmsg)
+    return packets
