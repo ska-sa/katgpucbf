@@ -46,7 +46,7 @@ async def test_vlbi_vdif(
     pdf_report.step("Set delays so we have nonzero data.")
     now = await cbf.dsim_time()
     await cbf.product_controller_client.request(
-        "delays", "tied-array-resampled-voltage", now, "0,0:0,1" * receiver.n_inputs
+        "vlbi-delays", "tied-array-resampled-voltage", now, "0,0:0,1" * receiver.n_inputs
     )
     pdf_report.step("Collect a valid VDIF frame.")
     frameset = await receiver.get_frameset()

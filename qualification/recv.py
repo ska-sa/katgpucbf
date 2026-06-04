@@ -661,14 +661,16 @@ class TiedArrayResampledVoltageReceiver:
         interface_address: str,
     ) -> None:
         self.stream_names = list(["tied-array-resampled-voltage"])
-        acv_name: str = cbf.config["outputs"][self.stream_names[0]]["src_streams"][0]
-        tacv_config: dict[str, Any] = cbf.config["outputs"][acv_name]
-        acv_config: dict[str, Any] = cbf.config["outputs"][tacv_config["src_streams"][0]]
-        self.n_inputs = len(acv_config["src_streams"])
         self.multicast_group = endpoint_parser(DEFAULT_PORT)(
             cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
         )
-
+        self.scale_factor_timestamp = cbf.init_sensors[f"{self.stream_names[0]}.scale-factor-timestamp"].value
+        self.int_time = cbf.init_sensors[f"{self.stream_names[0]}.int-time"].value
+        self.bandwidth = cbf.init_sensors[f"{self.stream_names[0]}.bandwidth"].value
+        tacv_name: str = cbf.config["outputs"][self.stream_names[0]]["src_streams"][0]
+        acv_name: str = cbf.config["outputs"][tacv_name]["src_streams"][0]
+        acv_config: dict[str, Any] = cbf.config["outputs"][acv_name]
+        self.n_inputs = len(acv_config["src_streams"])
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((self.multicast_group.host, self.multicast_group.port))
@@ -679,7 +681,7 @@ class TiedArrayResampledVoltageReceiver:
         """Wait for a complete frame from the v engine."""
         packets = dict[int, bytes]()
         for _ in range(samples):
-            packet = self.socket.recv(self.max_packet_size)
+            packet = await self._read()
             new_seq_id = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
             packets[new_seq_id] = packet[8:]
 
@@ -691,6 +693,9 @@ class TiedArrayResampledVoltageReceiver:
 
         fh = io.BytesIO(b"".join(packets.values()))
         return VDIFFrameSet.fromfile(fh)
+
+    async def _read(self) -> bytes:
+        return self.socket.recv(self.max_packet_size)
 
     def close(self) -> None:
         """Close the socket."""
