@@ -45,7 +45,9 @@ async def test_vlbi_vdif(
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frame.")
     _, frameset = await anext(receiver.read_vtp_frameset())
-    assert frameset.header0.nchan == 1
+    pdf_report.step("Verify we have log_2(1) channels.")
+    with check:
+        assert frameset.header0.nchan == 1
     pdf_report.detail(f"VDIF frame max value: {np.max(frameset.data)}")
     pdf_report.detail(f"VDIF frame min value: {np.min(frameset.frameset.data)}")
     pdf_report.detail(f"VDIF frame mean value: {np.mean(frameset.frameset.data)}")
