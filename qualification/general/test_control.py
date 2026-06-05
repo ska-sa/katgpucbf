@@ -184,7 +184,7 @@ async def control_tacv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, p
 
 
 async def control_tarv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pdf_report: Reporter, name: str) -> None:
-    # TODO: Because capture start is immediate for vgpucbf we can't set delays normally.
+    # TODO: Because vgpu returns an error when setting delays, we can't use the normal delay setting mechanism yet.
     """Periodically change the delays of a tied-array-resampled-voltage stream.
 
     Unlike :func:`control_tacv_delays`, there is no attempt to smooth the
