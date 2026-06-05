@@ -574,7 +574,7 @@ async def cbf(
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
-    if cbf.tied_array_resampled_voltage_receiver is None:
+    if cbf.tied_array_resampled_voltage_receiver is None and vlbi:
         logger.info("Subscribing to tied-array-resampled-voltage")
         cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
             cbf=cbf,
@@ -673,14 +673,13 @@ async def receive_tied_array_channelised_voltage(
 @pytest.fixture
 async def receive_tied_array_resampled_voltage(
     cbf: CBFRemoteControl,
-) -> TiedArrayResampledVoltageReceiver:
+    vlbi: bool,
+) -> TiedArrayResampledVoltageReceiver | None:
     """Get the receive stream for ingesting the tied-array-resampled-voltage streams."""
     receiver = cbf.tied_array_resampled_voltage_receiver
-    assert receiver is not None
-    # Ensure that the data is flowing, and that we throw away any data that
-    # predates the start of this test (to prevent any state leaks from previous
-    # tests). The timeout is increased since it may take some time to get the
-    # data flowing at the start.
+    # we don't have a stream for vlbi for all cases.
+    if vlbi:
+        assert receiver is not None
 
     # streams from v engine is not spead2
     return receiver

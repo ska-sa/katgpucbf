@@ -665,7 +665,7 @@ class TiedArrayResampledVoltageReceiver:
             cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
         )
         self.scale_factor_timestamp = cbf.init_sensors[f"{self.stream_names[0]}.scale-factor-timestamp"].value
-        self.int_time = cbf.init_sensors[f"{self.stream_names[0]}.int-time"].value
+        self.int_time = cbf.init_sensors[f"{self.stream_names[0]}.power-int-time"].value
         self.bandwidth = cbf.init_sensors[f"{self.stream_names[0]}.bandwidth"].value
         tacv_name: str = cbf.config["outputs"][self.stream_names[0]]["src_streams"][0]
         acv_name: str = cbf.config["outputs"][tacv_name]["src_streams"][0]
