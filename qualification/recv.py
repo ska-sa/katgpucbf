@@ -689,21 +689,17 @@ class TiedArrayResampledVoltageReceiver:
             new_seq_id = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
             yield new_seq_id, packet[8:]
 
-    async def framesets(self, samples: int = 1024) -> AsyncGenerator[VDIFFrameSet, None]:
+    async def read_vtp_frameset(self, samples: int = 1024) -> AsyncGenerator[VDIFFrameSet, None]:
         """Iterate over VDIF framesets assembled from `samples` packets each."""
         while True:
-            packets = dict[int, bytes]()
-            async for new_seq_id, payload in self.packets(samples):
-                packets[new_seq_id] = payload
+            packets = list[bytes]()
+            seq_ids = list[int]()
+            async for seq_id, payload in self.packets(samples):
+                packets.append(payload)
+                seq_ids.append(seq_id)
 
-            seq_id = None
-            for new_seq_id in sorted(packets.keys()):
-                if seq_id is not None and new_seq_id != seq_id + 1:
-                    raise ValueError(f"sequences missed between {seq_id} and {new_seq_id}")
-                seq_id = new_seq_id
-
-            fh = io.BytesIO(b"".join(packets.values()))
-            yield VDIFFrameSet.fromfile(fh)
+            fh = io.BytesIO(b"".join(packets))
+            yield seq_ids, VDIFFrameSet.fromfile(fh)
 
     def close(self) -> None:
         """Close the socket."""
