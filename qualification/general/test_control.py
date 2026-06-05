@@ -106,7 +106,7 @@ async def consume_v_chunks(
     samples = min(samples, 1024)
     async for seq_ids, frameset in receiver.read_vtp_frameset(samples=samples):
         for frame in frameset.frames:
-            timestamps.append(int(frame.header.time(framerate).to_value("unix")))
+            timestamps.append(int(frame.header.get_time(framerate).to_value("unix")))
         sequence_ids.extend(seq_ids)
 
 
