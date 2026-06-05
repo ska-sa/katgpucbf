@@ -22,7 +22,6 @@ import time
 from collections.abc import AsyncGenerator, Awaitable
 
 import aiokatcp
-import astropy
 import numpy as np
 import pytest
 from pytest_check import check
@@ -102,7 +101,7 @@ async def consume_v_chunks(receiver: TiedArrayResampledVoltageReceiver, timestam
     samples = min(samples, 1024)
     async for frameset in receiver.framesets(samples=samples):
         for frame in frameset.frames:
-            timestamps.append(int(frame.header.time.to_value(astropy.time.Time.FORMATS["unix"])))
+            timestamps.append(int(frame.header.time.to_value("unix")))
 
 
 async def control_acv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pdf_report: Reporter, name: str) -> None:
