@@ -97,11 +97,13 @@ async def consume_v_chunks(receiver: TiedArrayResampledVoltageReceiver, timestam
     The timestamps of the complete chunks are appended to `timestamps`.
     """
     max_delay = math.ceil(MAX_DELAY * receiver.scale_factor_timestamp)
-    samples = round(receiver.bandwidth / 1250 * max_delay)  # TODO use the sample rate here instead (1/8 of narrowband?)
+    samples_per_frame = (await anext(receiver.framesets(samples=1))).header0.samples_per_frame
+    framerate = samples_per_frame / 1250  # TODO use the correct framerate here instead
+    samples = round(framerate * max_delay)
     samples = min(samples, 1024)
     async for frameset in receiver.framesets(samples=samples):
         for frame in frameset.frames:
-            timestamps.append(int(frame.header.time.to_value("unix")))
+            timestamps.append(int(frame.header.time(framerate).to_value("unix")))
 
 
 async def control_acv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pdf_report: Reporter, name: str) -> None:
@@ -331,12 +333,13 @@ async def test_control(  # noqa: D103
         pdf_report,
         timestamps_tacv,
     )
-    check_v_timestamps(
-        "tied_array_resampled_voltage",
-        receive_tied_array_resampled_voltage,
-        pdf_report,
-        timestamps_tarv,
-    )
+    if vlbi:
+        check_v_timestamps(
+            "tied_array_resampled_voltage",
+            receive_tied_array_resampled_voltage,
+            pdf_report,
+            timestamps_tarv,
+        )
 
 
 test_control.__doc__ = f"""Test that controlling a correlator doesn't cause data to be lost.
