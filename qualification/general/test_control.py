@@ -292,6 +292,8 @@ def check_v_timestamps(
         assert missed_sequences < len(sequence_ids) * 0.05, (
             f"{missed_sequences} sequence IDs missed for {name} outside of tolerance"
         )
+        if missed_sequences > 0:
+            pdf_report.detail(f"{name}: missed {missed_sequences} frames.")
 
         assert elapsed >= min_time, f"Less than {min_time}s of data received for {name}"
 
