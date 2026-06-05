@@ -665,7 +665,7 @@ class TiedArrayResampledVoltageReceiver:
             cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
         )
         self.scale_factor_timestamp = cbf.init_sensors[f"{self.stream_names[0]}.scale-factor-timestamp"].value
-        self.int_time = cbf.init_sensors[f"{self.stream_names[0]}.power-int-time"].value
+        self.power_int_time = cbf.init_sensors[f"{self.stream_names[0]}.power-int-time"].value
         self.bandwidth = cbf.init_sensors[f"{self.stream_names[0]}.bandwidth"].value
         tacv_name: str = cbf.config["outputs"][self.stream_names[0]]["src_streams"][0]
         acv_name: str = cbf.config["outputs"][tacv_name]["src_streams"][0]
@@ -689,12 +689,12 @@ class TiedArrayResampledVoltageReceiver:
             new_seq_id = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
             yield new_seq_id, packet[8:]
 
-    async def read_vtp_frameset(self, samples: int = 1024) -> AsyncGenerator[VDIFFrameSet, None]:
-        """Iterate over VDIF framesets assembled from `samples` packets each."""
+    async def read_vtp_frameset(self, frames: int = 1024) -> AsyncGenerator[VDIFFrameSet, None]:
+        """Iterate over VDIF framesets assembled from `frames` packets each."""
         while True:
             packets = list[bytes]()
             seq_ids = list[int]()
-            async for seq_id, payload in self.packets(samples):
+            async for seq_id, payload in self.packets(frames):
                 packets.append(payload)
                 seq_ids.append(seq_id)
 
