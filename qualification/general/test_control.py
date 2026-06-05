@@ -281,6 +281,7 @@ def check_v_timestamps(
     elapsed = timestamps[-1] - timestamps[0]
     pdf_report.detail(f"{name}: received data over {elapsed:.3f}s.")
     min_time = TEST_TIME - TEST_TIME_TOL
+    total_frames = sequence_ids[-1] - sequence_ids[0] + 1
     with check:
         missed_sequences = 0
         prev_seq_id = sequence_ids[0]
@@ -289,7 +290,7 @@ def check_v_timestamps(
                 missed_sequences += seq_id - prev_seq_id
             prev_seq_id = seq_id
 
-        assert missed_sequences < len(sequence_ids) * 0.05, (
+        assert missed_sequences < total_frames * 0.05, (
             f"{missed_sequences} sequence IDs missed for {name} outside of tolerance"
         )
         if missed_sequences > 0:
