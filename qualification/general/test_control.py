@@ -22,6 +22,7 @@ import time
 from collections.abc import AsyncGenerator, Awaitable
 
 import aiokatcp
+import astropy
 import numpy as np
 import pytest
 from pytest_check import check
@@ -101,12 +102,13 @@ async def consume_v_chunks(
     max_delay = math.ceil(MAX_DELAY * receiver.scale_factor_timestamp)
     seq_ids, frameset = await anext(receiver.read_vtp_frameset(samples=1))
     samples_per_frame = frameset.header0.samples_per_frame
-    framerate = samples_per_frame / 1250  # TODO use the correct framerate here instead
+    framerate = round(receiver.bandwidth / samples_per_frame)
     samples = round(framerate * max_delay)
-    samples = min(samples, 1024)
     async for seq_ids, frameset in receiver.read_vtp_frameset(samples=samples):
         for frame in frameset.frames:
-            timestamps.append(int(frame.header.get_time(framerate).to_value("unix")))
+            atime = frame.header.get_time(framerate * astropy.units.Hz)
+            timestamps.append(atime.to_value("unix"))
+
         sequence_ids.extend(seq_ids)
 
 
