@@ -50,6 +50,10 @@ ENGINE_DITHER_SEED_BITS: Final = 64
 MIN_SENSOR_UPDATE_PERIOD: Final = 1.0
 #: Update period (in seconds) for time synchronisation sensors.
 TIME_SYNC_SENSOR_UPDATE_PERIOD: Final = 10.0
+#: Update period (in seconds) for sensors related to receiving data
+RX_SENSOR_UPDATE_PERIOD: Final = 1.0
+#: Update period (in seconds) for sensors related to transmitting data
+TX_SENSOR_UPDATE_PERIOD: Final = 1.0
 
 GPU_PROC_TASK_NAME: Final[str] = "GPU Processing Loop"
 RECV_TASK_NAME: Final[str] = "Receiver Loop"

@@ -49,6 +49,7 @@ from .. import (
     RECV_TASK_NAME,
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
+    TX_SENSOR_UPDATE_PERIOD,
 )
 from .. import recv as base_recv
 from ..mapped_array import MappedArray
@@ -489,6 +490,7 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                     "following capture.",
                     default=0,
                     initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                    period=TX_SENSOR_UPDATE_PERIOD,
                 )
             )
 

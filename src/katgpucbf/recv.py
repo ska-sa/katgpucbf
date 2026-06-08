@@ -37,6 +37,7 @@ from prometheus_client import REGISTRY, CollectorRegistry, Counter, Metric
 from prometheus_client.core import CounterMetricFamily
 from prometheus_client.registry import Collector
 
+from . import RX_SENSOR_UPDATE_PERIOD
 from .utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
 
 logger = logging.getLogger(__name__)
@@ -537,6 +538,7 @@ def make_sensors(sensor_timeout: float, prefixes: Sequence[str] = ("",)) -> aiok
                 "The timestamp (in samples) of the last chunk of data received",
                 default=-1,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
+                period=RX_SENSOR_UPDATE_PERIOD,
             ),
             make_rate_limited_sensor(
                 aiokatcp.core.Timestamp,
@@ -544,6 +546,7 @@ def make_sensors(sensor_timeout: float, prefixes: Sequence[str] = ("",)) -> aiok
                 "The timestamp (in UNIX time) of the last chunk of data received",
                 default=aiokatcp.core.Timestamp(-1.0),
                 initial_status=aiokatcp.Sensor.Status.ERROR,
+                period=RX_SENSOR_UPDATE_PERIOD,
             ),
         ]
         for sensor in timestamp_sensors:
@@ -557,6 +560,7 @@ def make_sensors(sensor_timeout: float, prefixes: Sequence[str] = ("",)) -> aiok
                 "The timestamp (in UNIX time) when missing data was last detected",
                 default=aiokatcp.core.Timestamp(-1.0),
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                period=RX_SENSOR_UPDATE_PERIOD,
             )
         ]
         for sensor in missing_sensors:

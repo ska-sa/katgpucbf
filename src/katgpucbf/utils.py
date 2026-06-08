@@ -60,6 +60,7 @@ def make_rate_limited_sensor[T](
     default: T | None = None,
     initial_status: aiokatcp.Sensor.Status = aiokatcp.Sensor.Status.UNKNOWN,
     *args,
+    period: float = MIN_SENSOR_UPDATE_PERIOD,
     **kwargs,
 ) -> aiokatcp.Sensor[T]:
     """Create a sensor whose auto strategy has a minimum update interval of MIN_SENSOR_UPDATE_PERIOD."""
@@ -72,7 +73,7 @@ def make_rate_limited_sensor[T](
         initial_status,
         *args,
         auto_strategy=aiokatcp.SensorSampler.Strategy.EVENT_RATE,
-        auto_strategy_parameters=(MIN_SENSOR_UPDATE_PERIOD, math.inf),
+        auto_strategy_parameters=(period, math.inf),
         **kwargs,
     )
 
