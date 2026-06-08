@@ -47,6 +47,7 @@ from .. import (
     GPU_PROC_TASK_NAME,
     N_POLS,
     RECV_TASK_NAME,
+    RX_SENSOR_UPDATE_PERIOD,
     SEND_TASK_NAME,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     TX_SENSOR_UPDATE_PERIOD,
@@ -763,13 +764,14 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         )
         # Dynamic sensors
         sensors.add(
-            aiokatcp.Sensor(
+            make_rate_limited_sensor(
                 bool,
                 f"{self.output.name}.rx.synchronised",
                 "For the latest accumulation, was data present from all F-Engines.",
                 default=False,
                 initial_status=aiokatcp.Sensor.Status.ERROR,
                 status_func=lambda value: aiokatcp.Sensor.Status.NOMINAL if value else aiokatcp.Sensor.Status.ERROR,
+                period=RX_SENSOR_UPDATE_PERIOD,
             )
         )
         sensors.add(
@@ -782,7 +784,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
             )
         )
         sensors.add(
-            aiokatcp.Sensor(
+            make_rate_limited_sensor(
                 int,
                 f"{self.output.name}.tx.next-timestamp",
                 "Timestamp (in samples) that has not yet been sent. This "
@@ -791,6 +793,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                 "following capture.",
                 default=0,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                period=TX_SENSOR_UPDATE_PERIOD,
             )
         )
 
