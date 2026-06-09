@@ -22,6 +22,8 @@ import logging
 import math
 import weakref
 from collections import Counter
+from collections.abc import AsyncIterable, AsyncIterator
+from typing import Self
 
 import aiokatcp
 import numpy as np
@@ -40,6 +42,77 @@ TIME_MAXERROR_WARN = 10e-3
 TIME_MAXERROR_ERROR = 0.1
 
 logger = logging.getLogger(__name__)
+
+
+class DiscardingIterator[T](AsyncIterator[T]):
+    def __init__(self, base: AsyncIterable[T]) -> None:
+        self._base = aiter(base)
+        self._ready = asyncio.Event()
+        self._future: asyncio.Future[T] | None = None
+        self._discarding = True
+        self._finished = False
+        self._run_task = asyncio.create_task(self._run())
+        self._run_task.add_done_callback(self._cleanup)
+
+    async def _run(self) -> None:
+        item: T | None = None
+        try:
+            async for item in self._base:
+                while True:
+                    if self._discarding:
+                        self.discard(item)
+                        item = None
+                        break
+                    elif self._future is not None and not self._future.done():
+                        self._future.set_result(item)
+                        item = None
+                        break
+                    else:
+                        self._ready.clear()
+                        await self._ready.wait()
+        finally:
+            if item is not None:
+                self.discard(item)
+                item = None
+
+    def _cleanup(self, _task: asyncio.Task) -> None:
+        if self._future is not None and not self._future.done():
+            self._future.set_exception(StopAsyncIteration())
+        self._future = None
+
+    async def __anext__(self) -> T:
+        assert not self._future, "DiscardableIterator is not reentrant"
+        assert not self._discarding, "Cannot iterate when in discarding mode"
+        if self._run_task.done():
+            raise StopAsyncIteration
+        future = asyncio.Future[T]()
+        self._future = future
+        self._ready.set()  # Wake up run, if it's waiting for us to be ready
+        try:
+            return await future
+        finally:
+            self._future = None
+            self._ready.clear()
+
+    def discard(self, item: T) -> None:
+        pass
+
+    def stop_discarding(self) -> None:
+        self._discarding = False
+        self._ready.clear()
+
+    def start_discarding(self) -> None:
+        if self._future is not None and not self._future.done():
+            self._future.set_exception(StopAsyncIteration())
+        self._discarding = True
+        self._ready.set()  # Will wake up run to make it discard current item if any
+
+    def __enter__(self) -> Self:
+        self.stop_discarding()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.start_discarding()
 
 
 class DitherType(enum.Enum):

@@ -44,10 +44,15 @@ from .. import recv as base_recv
 from ..monitor import Monitor
 from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
 from ..ringbuffer import ChunkRingbuffer
-from ..utils import Engine, TimeConverter
+from ..utils import DiscardingIterator, Engine, TimeConverter
 from . import N_SIDEBANDS, recv, send
 
 logger = logging.getLogger(__name__)
+
+
+class DiscardingChunkIterator(DiscardingIterator[recv.Chunk]):
+    def discard(self, item: recv.Chunk) -> None:
+        item.recycle()
 
 
 class RecvStream:
@@ -57,14 +62,14 @@ class RecvStream:
         self,
         layout: recv.Layout,
         time_converter: TimeConverter,
-        stream_group: spead2.recv.ChunkStreamRingGroup,
+        recv_iter: DiscardingChunkIterator,
         sensors: aiokatcp.SensorSet,
         pol_labels: tuple[str, str],
         min_timestamp: int,
     ) -> None:
         self._layout = layout
         self._time_converter = time_converter
-        self._stream_group = stream_group
+        self._recv_iter = recv_iter
         self._sensors = sensors
         self._pol_labels = pol_labels
         self._samples_between_spectra = layout.heap_timestamp_step // layout.n_spectra_per_heap
@@ -76,55 +81,46 @@ class RecvStream:
         self.time_scale = Fraction(self._samples_between_spectra) / Fraction(time_converter.adc_sample_rate)
 
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
-        for stream in self._stream_group:
-            stream.start()
-        data_ringbuffer = self._stream_group.data_ringbuffer
-        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         last_chunk_id: int | None = None
-        async for chunk in recv.iter_chunks(
-            data_ringbuffer,
-            self._layout,
-            self._sensors,
-            self._time_converter,
-            [label[-1] for label in self._pol_labels],
-        ):
-            with chunk:
-                if chunk.timestamp < self._min_timestamp:
-                    continue
-                # TODO: need to do something with the presence flags
-                # TODO: pipeline these transfers (but keeping in mind
-                # that we need to recycle the chunk only when the transfer
-                # is complete).
-                data = cp.asarray(chunk.data, blocking=False)
-                await katcbf_vlbi_resample.utils.stream_future(None)
-                # There are two time axes. Transpose to place them together, then flatten
-                # over them. The current shape is
-                # (N_POLS, n_batches_per_chunk, channels, n_spectra_per_heap, COMPLEX)
-                data = data.transpose(0, 1, 3, 2, 4)
-                # Now it is
-                # (N_POLS, n_batches_per_chunk, n_spectra_per_heap, channels, COMPLEX)
-                data = data.reshape(N_POLS, -1, self.channels, COMPLEX)
-                # Now it is
-                # (N_POLS, n_spectra_per_chunk, channels, COMPLEX)
-                # Convert Gaussian integers to complex
-                data = cp.ascontiguousarray(data.astype(np.float32)).view(np.complex64)[..., 0]
-                arr = xr.DataArray(
-                    data,
-                    dims=("pol", "time", "channel"),
-                    coords={"pol": list(self._pol_labels)},
-                    attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
-                )
-                # TODO (NGC-1689): need to properly handle missing data in
-                # katcbf-vlbi-resample. This is a quick hack to keep things
-                # running by injecting zero data into the stream.
-                while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
-                    last_chunk_id += 1
-                    zero_arr = xr.zeros_like(arr)
-                    timestamp = last_chunk_id * self._layout.chunk_timestamp_step
-                    zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
-                    yield zero_arr
-                last_chunk_id = chunk.chunk_id
-                yield arr
+        with self._recv_iter:
+            async for chunk in self._recv_iter:
+                with chunk:
+                    if chunk.timestamp < self._min_timestamp:
+                        continue
+                    # TODO: need to do something with the presence flags
+                    # TODO: pipeline these transfers (but keeping in mind
+                    # that we need to recycle the chunk only when the transfer
+                    # is complete).
+                    data = cp.asarray(chunk.data, blocking=False)
+                    await katcbf_vlbi_resample.utils.stream_future(None)
+                    # There are two time axes. Transpose to place them together, then flatten
+                    # over them. The current shape is
+                    # (N_POLS, n_batches_per_chunk, channels, n_spectra_per_heap, COMPLEX)
+                    data = data.transpose(0, 1, 3, 2, 4)
+                    # Now it is
+                    # (N_POLS, n_batches_per_chunk, n_spectra_per_heap, channels, COMPLEX)
+                    data = data.reshape(N_POLS, -1, self.channels, COMPLEX)
+                    # Now it is
+                    # (N_POLS, n_spectra_per_chunk, channels, COMPLEX)
+                    # Convert Gaussian integers to complex
+                    data = cp.ascontiguousarray(data.astype(np.float32)).view(np.complex64)[..., 0]
+                    arr = xr.DataArray(
+                        data,
+                        dims=("pol", "time", "channel"),
+                        coords={"pol": list(self._pol_labels)},
+                        attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
+                    )
+                    # TODO (NGC-1689): need to properly handle missing data in
+                    # katcbf-vlbi-resample. This is a quick hack to keep things
+                    # running by injecting zero data into the stream.
+                    while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
+                        last_chunk_id += 1
+                        zero_arr = xr.zeros_like(arr)
+                        timestamp = last_chunk_id * self._layout.chunk_timestamp_step
+                        zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
+                        yield zero_arr
+                    last_chunk_id = chunk.chunk_id
+                    yield arr
 
 
 class RecordPower(katcbf_vlbi_resample.power.RecordPower):
@@ -227,10 +223,130 @@ class _CaptureSession:
     """Manage the lifetime of actions between ``?capture-start`` and ``?capture-stop``."""
 
     def __init__(
-        self, config: CaptureConfig, engine: Engine, monitor: Monitor, min_timestamp: int, sender: send.VDIFSender
+        self,
+        config: CaptureConfig,
+        engine: Engine,
+        monitor: Monitor,
+        min_timestamp: int,
+        recv_iter: DiscardingChunkIterator,
+        sender: send.VDIFSender,
     ) -> None:
+        self.config = config
+        self._recv_iter = recv_iter
+        self._sensors = engine.sensors
+        self._min_timestamp = min_timestamp
+        self._sender = sender
+        self._capture_task = asyncio.create_task(self._capture(), name="Capture Loop")
+        engine.add_service_task(self._capture_task, wait_on_stop=True)
+
+    def _capture_complete(self) -> None:
+        """Handle the end of all processing.
+
+        This method exists only to mock from unit tests.
+
+        .. todo:: Remove this method once no longer needed by unit tests.
+        """
+        pass
+
+    async def _capture(self) -> None:
+        """Do all the primary work of the engine.
+
+        This is an asyncio task that runs as a service task of the device server.
+        """
+        # Copy some references just to make the code shorter
+        config = self.config
+        recv_config = config.recv_config
+        send_config = config.send_config
+
+        it: katcbf_vlbi_resample.stream.Stream[xr.DataArray] = RecvStream(
+            recv_config.layout,
+            recv_config.time_converter,
+            self._recv_iter,
+            self._sensors,
+            recv_config.pols,
+            self._min_timestamp,
+        )
+        it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
+        it = katcbf_vlbi_resample.resample.IFFT(it)
+        it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(
+            it, config.pol_matrix, recv_config.pols, send_config.pols
+        )
+        it = katcbf_vlbi_resample.resample.Resample(send_config.bandwidth, 0.0, config.resample_parameters, it)
+        it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
+        it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
+        it_rms = RecordPower(it_rms, sensors=self._sensors)
+        it = katcbf_vlbi_resample.power.NormalisePower(it_rms, 1.0)
+        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(
+            it, samples_per_frame=send_config.n_samples_per_frame, threshold=config.threshold
+        )
+        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
+        frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
+            it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
+        )
+        async for frameset in frameset_it:
+            await self._sender.send(frameset)
+        await self._sender.flush()
+        self._capture_complete()
+
+    async def stop(self) -> None:
+        """Stop the capture."""
+        self._recv_iter.start_discarding()
+        await self._capture_task
+
+
+class VEngine(Engine):
+    """Top-level class running the whole thing."""
+
+    VERSION = "katgpucbf-vgpu-1.0"
+
+    def __init__(
+        self,
+        *,
+        katcp_host: str,
+        katcp_port: int,
+        config: CaptureConfig,
+        monitor: Monitor,
+    ) -> None:
+        super().__init__(katcp_host, katcp_port)
+
+        self.config = config
+        self.monitor = monitor
+
+        recv_config = config.recv_config
+        send_config = config.send_config
+        recv_sensor_timeout = max(
+            RECV_SENSOR_TIMEOUT_MIN,
+            RECV_SENSOR_TIMEOUT_CHUNKS * recv_config.layout.chunk_timestamp_step / recv_config.adc_sample_rate,
+        )
+        self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
+        self._init_recv()
+        self._capture: _CaptureSession | None = None
+        send_rate = send_config.bandwidth * send_config.rate_factor
+        # Data comes out of the processing chain in chunks of size
+        # power_int_time. We need to smooth that out, so we use a send
+        # queue that is deeper than that (2 is the number of chunks to
+        # buffer).
+        queue_size = round(2 * config.power_int_time * send_config.bandwidth / send_config.n_samples_per_frame)
+        self._sender = send.VDIFSender(
+            send_config.dsts,
+            send_rate,
+            send_rate * 2.0,  # Python can introduce large pauses, so catch up aggressively
+            queue_size,
+            ttl=send_config.ttl,
+            buffer_size=send_config.buffer_size,
+            interfaces=send_config.interfaces,
+        )
+        # Reference counters to make the labels exist before the first scrape
+        for pol in recv_config.pol_labels:
+            recv.counters.labels(str(pol))
+
+    def _init_recv(self) -> None:
+        """Initialise the receiver state."""
+        config = self.config
         recv_chunks = 4  # TODO: may need tuning?
-        data_ringbuffer = ChunkRingbuffer(recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=monitor)
+        data_ringbuffer = ChunkRingbuffer(
+            recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
+        )
         free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
         layout = config.recv_config.layout
         dtype = np.dtype(f"int{layout.sample_bits}")
@@ -261,113 +377,19 @@ class _CaptureSession:
                 buffer_size=config.recv_config.buffer_size // len(recv_group),
             )
 
-        self.config = config
         self._recv_group = recv_group
-        self._sensors = engine.sensors
-        self._min_timestamp = min_timestamp
-        self._sender = sender
-        self._capture_task = asyncio.create_task(self._capture(), name="Capture Loop")
-        engine.add_service_task(self._capture_task, wait_on_stop=True)
-
-    def _capture_complete(self) -> None:
-        """Handle the end of all processing.
-
-        This method exists only to mock from unit tests.
-
-        .. todo:: Remove this method once no longer needed by unit tests.
-        """
-        pass
-
-    async def _capture(self) -> None:
-        """Do all the primary work of the engine.
-
-        This is an asyncio task that runs as a service task of the device server.
-        """
-        # Copy some references just to make the code shorter
-        config = self.config
-        recv_config = config.recv_config
-        send_config = config.send_config
-
-        it: katcbf_vlbi_resample.stream.Stream[xr.DataArray] = RecvStream(
-            recv_config.layout,
-            recv_config.time_converter,
-            self._recv_group,
-            self._sensors,
-            recv_config.pols,
-            self._min_timestamp,
+        self._recv_iter = DiscardingChunkIterator(
+            recv.iter_chunks(
+                data_ringbuffer,
+                layout,
+                self.sensors,
+                config.recv_config.time_converter,
+                config.recv_config.pol_labels,
+            )
         )
-        it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
-        it = katcbf_vlbi_resample.resample.IFFT(it)
-        it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(
-            it, config.pol_matrix, recv_config.pols, send_config.pols
-        )
-        it = katcbf_vlbi_resample.resample.Resample(send_config.bandwidth, 0.0, config.resample_parameters, it)
-        it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
-        it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
-        it_rms = RecordPower(it_rms, sensors=self._sensors)
-        it = katcbf_vlbi_resample.power.NormalisePower(it_rms, 1.0)
-        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(
-            it, samples_per_frame=send_config.n_samples_per_frame, threshold=config.threshold
-        )
-        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
-        frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
-            it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
-        )
-        async for frameset in frameset_it:
-            await self._sender.send(frameset)
-        await self._sender.flush()
-        self._capture_complete()
 
-    async def stop(self) -> None:
-        """Stop the capture."""
-        self._recv_group.stop()
-        await self._capture_task
-
-
-class VEngine(Engine):
-    """Top-level class running the whole thing."""
-
-    VERSION = "katgpucbf-vgpu-1.0"
-
-    def __init__(
-        self,
-        *,
-        katcp_host: str,
-        katcp_port: int,
-        config: CaptureConfig,
-        monitor: Monitor,
-    ) -> None:
-        super().__init__(katcp_host, katcp_port)
-
-        self.config = config
-        self.monitor = monitor
-
-        recv_config = config.recv_config
-        send_config = config.send_config
-        recv_sensor_timeout = max(
-            RECV_SENSOR_TIMEOUT_MIN,
-            RECV_SENSOR_TIMEOUT_CHUNKS * recv_config.layout.chunk_timestamp_step / recv_config.adc_sample_rate,
-        )
-        self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
-        self._capture: _CaptureSession | None = None
-        send_rate = send_config.bandwidth * send_config.rate_factor
-        # Data comes out of the processing chain in chunks of size
-        # power_int_time. We need to smooth that out, so we use a send
-        # queue that is deeper than that (2 is the number of chunks to
-        # buffer).
-        queue_size = round(2 * config.power_int_time * send_config.bandwidth / send_config.n_samples_per_frame)
-        self._sender = send.VDIFSender(
-            send_config.dsts,
-            send_rate,
-            send_rate * 2.0,  # Python can introduce large pauses, so catch up aggressively
-            queue_size,
-            ttl=send_config.ttl,
-            buffer_size=send_config.buffer_size,
-            interfaces=send_config.interfaces,
-        )
-        # Reference counters to make the labels exist before the first scrape
-        for pol in recv_config.pol_labels:
-            recv.counters.labels(str(pol))
+        for stream in recv_group:
+            stream.start()
 
     def _populate_sensors(
         self,
@@ -403,6 +425,11 @@ class VEngine(Engine):
     async def on_stop(self) -> None:  # noqa: D102
         if self._capture is not None:
             await self._stop_capture()
+        self._recv_group.stop()
+        # Drain the receiver of any pending chunks
+        with self._recv_iter:
+            async for chunk in self._recv_iter:
+                chunk.recycle()
         await self._sender.stop()
         await super().on_stop()
 
@@ -422,7 +449,7 @@ class VEngine(Engine):
         if self._capture is not None:
             raise aiokatcp.FailReply("a capture is already in progress")
         # TODO: use delay
-        self._capture = _CaptureSession(self.config, self, self.monitor, timestamp, self._sender)
+        self._capture = _CaptureSession(self.config, self, self.monitor, timestamp, self._recv_iter, self._sender)
 
     async def _stop_capture(self) -> None:
         assert self._capture is not None
