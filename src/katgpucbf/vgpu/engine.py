@@ -21,6 +21,7 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
+from typing import override
 
 import aiokatcp
 import cupy as cp
@@ -51,6 +52,9 @@ logger = logging.getLogger(__name__)
 
 
 class DiscardingChunkIterator(DiscardingIterator[recv.Chunk]):
+    """Specialise :class:`.DiscardingIterator` to discard chunks by recycling them."""
+
+    @override
     def discard(self, item: recv.Chunk) -> None:
         item.recycle()
 
