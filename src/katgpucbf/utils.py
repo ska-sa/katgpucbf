@@ -54,7 +54,8 @@ class DiscardingIterator[T](AsyncIterator[T]):
       by overriding :meth:`discard`). Attempting to iterate will immediately
       raise :exc:`StopAsyncIteration`.
 
-    - In capturing mode, it simply wraps the underlying iterator.
+    - In capturing mode, it simply wraps the underlying iterator. However, it
+      will pre-emptively fetch one item ahead.
 
     Mode switching is best done by using the context manager protocol:
     entering the context switches to capturing mode, and leaving it returns
@@ -87,32 +88,29 @@ class DiscardingIterator[T](AsyncIterator[T]):
         self._run_task.add_done_callback(self._cleanup)
 
     async def _run(self) -> None:
+        # We set item to None whenever we no longer need it, to allow it to
+        # be garbage collected ASAP.
         item: T | None = None
-        try:
-            async for item in self._base:
-                while True:
-                    self._ready.clear()
-                    if self._discarding:
-                        # State 1
-                        self.discard(item)
-                        item = None
-                        break
-                    elif self._future is not None and not self._future.done():
-                        # State 2
-                        self._future.set_result(item)
-                        item = None
-                        break
-                    else:
-                        self._future = None  # Just to avoid keeping a reference we don't need
-                        # Wait until we transition into another state. Note
-                        # that by the time this task is re-scheduled, the
-                        # state could have changed again; in that case we'll
-                        # just end up back here.
-                        await self._ready.wait()
-        finally:
-            if item is not None:
-                self.discard(item)
-                item = None
+        async for item in self._base:
+            while True:
+                self._ready.clear()
+                if self._discarding:
+                    # State 1
+                    self.discard(item)
+                    item = None
+                    break
+                elif self._future is not None and not self._future.done():
+                    # State 2
+                    self._future.set_result(item)
+                    item = None
+                    break
+                else:
+                    self._future = None  # Just to avoid keeping a reference we don't need
+                    # Wait until we transition into another state. Note
+                    # that by the time this task is re-scheduled, the
+                    # state could have changed again; in that case we'll
+                    # just end up back here.
+                    await self._ready.wait()
 
     def _cleanup(self, task: asyncio.Task) -> None:
         exc = task.exception()
