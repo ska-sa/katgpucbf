@@ -44,15 +44,15 @@ async def test_vlbi_vdif(
     """
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frame.")
-    _, frameset = await anext(receiver.read_vtp_frameset())
+    _, frameset = await receiver.get_vdif_frameset()
     pdf_report.step("Verify we have log_2(1) channels.")
     with check:
         assert frameset.header0.nchan == 1
     pdf_report.detail(f"VDIF frame max value: {np.max(frameset.data)}")
-    pdf_report.detail(f"VDIF frame min value: {np.min(frameset.frameset.data)}")
-    pdf_report.detail(f"VDIF frame mean value: {np.mean(frameset.frameset.data)}")
-    pdf_report.detail(f"VDIF frame std value: {np.std(frameset.frameset.data)}")
-    pdf_report.detail(f"VDIF frame shape: {frameset.frameset.data.shape}")
+    pdf_report.detail(f"VDIF frame min value: {np.min(frameset.data)}")
+    pdf_report.detail(f"VDIF frame mean value: {np.mean(frameset.data)}")
+    pdf_report.detail(f"VDIF frame std value: {np.std(frameset.data)}")
+    pdf_report.detail(f"VDIF frame shape: {frameset.data.shape}")
 
 
 @pytest.mark.vlbi_only

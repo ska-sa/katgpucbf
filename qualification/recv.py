@@ -19,7 +19,6 @@
 import ast
 import asyncio
 import ctypes
-import io
 import logging
 import math
 import os
@@ -34,7 +33,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from baseband.vdif import VDIFFrameSet
+from baseband.vdif import VDIFFrame, VDIFFrameSet
 from katsdptelstate.endpoint import endpoint_list_parser, endpoint_parser
 from numba import types
 from numpy.typing import NDArray
@@ -650,6 +649,63 @@ def create_tied_array_channelised_voltage_receive_stream_group(
     )
 
 
+class VTPBuffer:
+    """Buffer for storing VTP packets, and decoding them into VDIF framesets."""
+
+    def __init__(self, n_threads: int) -> None:
+        self.data = list[bytes]()
+        self.incomplete_framesets = list[VDIFFrameSet]()
+        self.n_threads = n_threads
+
+    def add_packet(self, packet: bytes) -> None:
+        """Add a packet to the buffer without decoding it."""
+        self.data.append(packet)
+
+    async def decode_vtp(self) -> AsyncGenerator[tuple[int, bytes], None]:
+        """Decode the VTP packets in the buffer."""
+        for packet in self.data:
+            new_seq_id = struct.unpack("<Q", packet[:8])[0]
+            yield new_seq_id, packet[8:]
+
+    async def decode_vdif_framesets(self) -> AsyncGenerator[tuple[list[int], VDIFFrameSet], None]:
+        """Slow computation: order and decode all the data captured so far.
+
+        The seq_ids might include frames whose complete set is not present.
+        These frames will be ignored.
+        """
+        vtp_packets = dict[int, bytes]()
+        async for seq_id, packet in self.decode_vtp():
+            vtp_packets[seq_id] = packet
+
+        seq_ids = sorted(vtp_packets.keys())
+        previous_frames = list[VDIFFrame]()
+        set_seq_ids = list[int]()
+        for seq_id in seq_ids:
+            frame = VDIFFrame.frombytes(vtp_packets[seq_id])
+            if frame.header.frame_nr == 0:
+                if len(previous_frames) > 0:
+                    frameset = VDIFFrameSet(previous_frames, previous_frames[0].header)
+                    if frameset.get_thread_ids() != self.n_threads:
+                        self.incomplete_framesets.append(frameset)
+                    else:
+                        yield set_seq_ids, frameset
+                previous_frames = [frame]
+                set_seq_ids.clear()
+            previous_frames.append(frame)
+            set_seq_ids.append(seq_id)
+
+        if len(previous_frames) > 0:
+            frameset = VDIFFrameSet(previous_frames, previous_frames[0].header)
+            if frameset.get_thread_ids() != self.n_threads:
+                self.incomplete_framesets.append(frameset)
+            else:
+                yield set_seq_ids, frameset
+
+    def close(self) -> None:
+        """Close the buffer."""
+        self.data.clear()
+
+
 class TiedArrayResampledVoltageReceiver:
     """Receive tied-array-resampled-voltage streams from the v engines."""
 
@@ -677,30 +733,37 @@ class TiedArrayResampledVoltageReceiver:
         mreq = struct.pack("=4s4s", socket.inet_aton(self.multicast_group.host), socket.inet_aton(interface_address))
         self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
         self.socket.setblocking(False)
+        self.vtp_buffer = VTPBuffer(4)  # TODO: calculate number of threads
 
     async def _read(self) -> bytes:
         loop = asyncio.get_running_loop()
         return await loop.sock_recv(self.socket, self.max_packet_size)
 
-    async def packets(self, count: int) -> AsyncGenerator[tuple[int, bytes], None]:
-        """Yield up to `count` packets from the v engine."""
-        for _ in range(count):
-            packet = await self._read()
-            new_seq_id = struct.unpack("<Q", packet[:8])[0]  # vtp_header unused for now
-            yield new_seq_id, packet[8:]
-
-    async def read_vtp_frameset(self, frames: int = 1024) -> AsyncGenerator[VDIFFrameSet, None]:
-        """Iterate over VDIF framesets assembled from `frames` packets each."""
+    async def listen(self) -> AsyncGenerator[tuple[int, bytes], None]:
+        """Listen for packets from the v engine and store them in the VTPBuffer."""
         while True:
-            packets = list[bytes]()
-            seq_ids = list[int]()
-            async for seq_id, payload in self.packets(frames):
-                packets.append(payload)
-                seq_ids.append(seq_id)
+            self.vtp_buffer.add_packet(await self._read())
 
-            fh = io.BytesIO(b"".join(packets))
-            yield seq_ids, VDIFFrameSet.fromfile(fh)
+    async def decode_vdif_framesets(self) -> AsyncGenerator[tuple[list[int], VDIFFrameSet], None]:
+        """Decode the VDIF framesets in the buffer."""
+        async for seq_ids, frameset in self.vtp_buffer.decode_vdif_framesets():
+            yield seq_ids, frameset
+
+    async def get_vdif_frameset(self) -> tuple[list[int], VDIFFrameSet]:
+        """Listen until a single complete VDIF frameset is available, then return it."""
+        while True:
+            self.vtp_buffer.add_packet(await self._read())
+            try:
+                seq_ids, frameset = await anext(self.vtp_buffer.decode_vdif_framesets())
+            except StopAsyncIteration:
+                continue
+            return seq_ids, frameset
+
+    def get_incomplete_framesets(self) -> list[VDIFFrameSet]:
+        """Get the incomplete VDIF framesets in the buffer."""
+        return self.vtp_buffer.incomplete_framesets
 
     def close(self) -> None:
         """Close the socket."""
         self.socket.close()
+        self.vtp_buffer.close()
