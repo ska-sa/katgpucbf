@@ -19,6 +19,7 @@
 import ast
 import asyncio
 import ctypes
+import io
 import logging
 import math
 import os
@@ -681,7 +682,7 @@ class VTPBuffer:
         previous_frames = list[VDIFFrame]()
         set_seq_ids = list[int]()
         for seq_id in seq_ids:
-            frame = VDIFFrame.frombytes(vtp_packets[seq_id])
+            frame = VDIFFrame.fromfile(io.BytesIO(vtp_packets[seq_id]))
             if frame.header.frame_nr == 0:
                 if len(previous_frames) > 0:
                     frameset = VDIFFrameSet(previous_frames, previous_frames[0].header)
