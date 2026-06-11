@@ -23,6 +23,7 @@ from collections.abc import AsyncGenerator, Awaitable
 from typing import TYPE_CHECKING
 
 import aiokatcp
+import astropy
 import numpy as np
 import pytest
 from baseband.vdif import VDIFHeader
@@ -276,7 +277,7 @@ async def check_v_timestamps(
         for frame in frameset.frames:
             if TYPE_CHECKING:
                 assert isinstance(frame.header, VDIFHeader)
-            timestamps.append(frame.header.get_time(frame_rate=framerate))
+            timestamps.append(frame.header.get_time(frame_rate=framerate * astropy.units.Hz).to_value("unix"))
 
     with check:
         assert timestamps, f"No V frames received on stream {name}"
