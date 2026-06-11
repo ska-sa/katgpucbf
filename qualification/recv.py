@@ -683,10 +683,10 @@ class VTPBuffer:
         set_seq_ids = list[int]()
         for seq_id in seq_ids:
             frame = VDIFFrame.fromfile(io.BytesIO(vtp_packets[seq_id]))
-            if frame.header.frame_nr == 0:
+            if frame.header["frame_nr"] == 0:
                 if len(previous_frames) > 0:
                     frameset = VDIFFrameSet(previous_frames, previous_frames[0].header)
-                    if frameset.get_thread_ids() != self.n_threads:
+                    if len(self.get_thread_ids(frameset)) != self.n_threads:
                         self.incomplete_framesets.append(frameset)
                     else:
                         yield set_seq_ids, frameset
@@ -697,10 +697,14 @@ class VTPBuffer:
 
         if len(previous_frames) > 0:
             frameset = VDIFFrameSet(previous_frames, previous_frames[0].header)
-            if frameset.get_thread_ids() != self.n_threads:
+            if len(self.get_thread_ids(frameset)) != self.n_threads:
                 self.incomplete_framesets.append(frameset)
             else:
                 yield set_seq_ids, frameset
+
+    def get_thread_ids(self, frameset: VDIFFrameSet) -> list[int]:
+        """Count the number of unique thread IDs in the frameset."""
+        return list(set([frame.header["thread_id"] for frame in frameset.frames]))
 
     def close(self) -> None:
         """Close the buffer."""

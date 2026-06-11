@@ -20,10 +20,12 @@ import asyncio
 import math
 import time
 from collections.abc import AsyncGenerator, Awaitable
+from typing import TYPE_CHECKING
 
 import aiokatcp
 import numpy as np
 import pytest
+from baseband.vdif import VDIFHeader
 from pytest_check import check
 
 from katgpucbf.fgpu.delay import wrap_angle
@@ -269,9 +271,12 @@ async def check_v_timestamps(
     async for seq_ids, frameset in receiver.decode_vdif_framesets():
         sequence_ids.extend(seq_ids)
         samples_per_frame = frameset.header0.samples_per_frame
-        framerate = round(receiver.bandwidth / samples_per_frame)
+        framerate = round(receiver.bandwidth / samples_per_frame)  # TODO: get framerate from VDIFFileReader instead
         timestamps.extend(seq_ids)
-        timestamps.append(frameset.header.get_time(frame_rate=framerate))
+        for frame in frameset.frames:
+            if TYPE_CHECKING:
+                assert isinstance(frame.header, VDIFHeader)
+            timestamps.append(frame.header.get_time(frame_rate=framerate))
 
     with check:
         assert timestamps, f"No V frames received on stream {name}"
