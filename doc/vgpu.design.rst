@@ -34,7 +34,7 @@ upstream before they are requested.
 
 Reception
 ---------
-A difference from the F- and XB-engines is that ``capture-start`` and
+One difference from the F- and XB-engines is that ``capture-start`` and
 ``capture-stop`` gate the entire processing chain rather than just
 transmission. This approach was chosen because changing the VLBI delay can
 make samples non-contiguous in time, which interacts poorly with rechunking
@@ -46,7 +46,7 @@ retrospect this may have been a better approach.
 Initially we also gated the receiver on ``capture-start`` and
 ``capture-stop``, but this meant that when not capturing there was no way to
 tell whether the V-engine had a healthy network connection capable of
-receiving the full incoming bandwidth. To address that, a somewhat complicated
+receiving the full incoming bandwidth. To address this, a somewhat complicated
 :class:`.DiscardingIterator` wrapper is used to allow data to still be
 received but discarding when not capturing.
 
