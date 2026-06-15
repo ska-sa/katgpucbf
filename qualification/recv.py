@@ -35,7 +35,7 @@ import spead2
 import spead2.recv
 import spead2.recv.asyncio
 from baseband.vdif import VDIFFrame, VDIFFrameSet
-from katsdptelstate.endpoint import endpoint_list_parser, endpoint_parser
+from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from numpy.typing import NDArray
 from spead2.numba import intp_to_voidptr
@@ -45,6 +45,7 @@ import katgpucbf.recv
 from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DIG_SAMPLE_BITS
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
+from katgpucbf.vgpu.main import VTP_DEFAULT_PORT
 
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
@@ -723,9 +724,16 @@ class TiedArrayResampledVoltageReceiver:
         interface_address: str,
     ) -> None:
         self.stream_names = ["tied-array-resampled-voltage"]
-        self.multicast_group = endpoint_parser(DEFAULT_PORT)(
+        self.multicast_groups = endpoint_list_parser(VTP_DEFAULT_PORT)(
             cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
         )
+
+        # all multicast groups must use the same port
+        port = self.multicast_groups[0].port
+        for multicast_group in self.multicast_groups:
+            if multicast_group.port != port:
+                raise ValueError("All multicast groups must use the same port")
+
         self.scale_factor_timestamp = cbf.init_sensors[f"{self.stream_names[0]}.scale-factor-timestamp"].value
         self.power_int_time = cbf.init_sensors[f"{self.stream_names[0]}.power-int-time"].value
         self.bandwidth = cbf.init_sensors[f"{self.stream_names[0]}.bandwidth"].value
@@ -735,10 +743,12 @@ class TiedArrayResampledVoltageReceiver:
         self.n_inputs = len(acv_config["src_streams"])
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind((self.multicast_group.host, self.multicast_group.port))
-        mreq = struct.pack("=4s4s", socket.inet_aton(self.multicast_group.host), socket.inet_aton(interface_address))
-        self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        self.socket.setblocking(False)
+        self.socket.setsockopt(socket.SOL_SOCKET, 49, 0)
+        self.socket.bind(("", port))
+        for multicast_group in self.multicast_groups:
+            mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
+            self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            self.socket.setblocking(False)
         self.vtp_buffer = VTPBuffer(4)  # TODO: calculate number of threads
 
     async def _read(self) -> bytes:
