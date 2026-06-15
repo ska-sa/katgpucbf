@@ -652,8 +652,8 @@ class VTPBuffer:
     """Buffer for storing VTP packets, and decoding them into VDIF framesets."""
 
     def __init__(self, n_threads: int) -> None:
-        self.data = list[bytes]()
-        self.incomplete_framesets = list[VDIFFrameSet]()
+        self.data: list[bytes] = []
+        self.incomplete_framesets: list[VDIFFrameSet] = []
         self.n_threads = n_threads
 
     def add_packet(self, packet: bytes) -> None:
@@ -672,7 +672,7 @@ class VTPBuffer:
         The seq_ids might include frames whose complete set is not present.
         These frames will be ignored.
         """
-        vtp_packets = dict[int, bytes]()
+        vtp_packets: dict[int, bytes] = {}
         async for seq_id, packet in self.decode_vtp():
             if vtp_packets.get(seq_id) is not None:
                 logger.warning("Duplicate VTP packet with seq_id %d", seq_id)
