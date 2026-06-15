@@ -22,6 +22,8 @@ import logging
 import math
 import weakref
 from collections import Counter
+from collections.abc import AsyncIterable, AsyncIterator
+from typing import Self
 
 import aiokatcp
 import numpy as np
@@ -40,6 +42,128 @@ TIME_MAXERROR_WARN = 10e-3
 TIME_MAXERROR_ERROR = 0.1
 
 logger = logging.getLogger(__name__)
+
+
+class DiscardingIterator[T](AsyncIterator[T]):
+    """Iterator wrapper that can optionally direct items to the bin.
+
+    This iterator is in one of two modes:
+
+    - In discarding mode, it actively pulls items from the underlying iterator
+      and then throws them away (the "throw away" behaviour can be customised
+      by overriding :meth:`discard`). Attempting to iterate will immediately
+      raise :exc:`StopAsyncIteration`.
+
+    - In capturing mode, it simply wraps the underlying iterator. However, it
+      will pre-emptively fetch one item ahead.
+
+    Mode switching is best done by using the context manager protocol:
+    entering the context switches to capturing mode, and leaving it returns
+    to discarding mode.
+
+    It is safe to switch from capturing to discarding mode at the same time as
+    iterating; this will cause the iteration to be interrupted (although it
+    may iterate one more item if it is ready).
+
+    The implementation is currently not robust against the base iterator
+    raising exceptions. The exception will be logged by it will terminate
+    iteration.
+    """
+
+    def __init__(self, base: AsyncIterable[T]) -> None:
+        self._base = aiter(base)
+        # This class is a state machine with several states:
+        # 1. Discarding: _discarding is True, _future is None
+        # 2. Capturing, being iterated: _discarding is False, _future is not None and is not done
+        # 3. Capturing, not being iterated: _discarding is False, _future is either None or is done
+        # 4. Finished: the underlying iterator completed.
+        #
+        # In state 3, the future is usually not done, but it could have a
+        # CancelledError if the task iterating us got cancelled.
+        self._future: asyncio.Future[T] | None = None
+        self._discarding = True
+        # Set when we need to wake up _run, namely when we switch to state 1 or 2.
+        self._ready = asyncio.Event()
+        self._run_task = asyncio.create_task(self._run())
+        self._run_task.add_done_callback(self._cleanup)
+
+    async def _run(self) -> None:
+        # We set item to None whenever we no longer need it, to allow it to
+        # be garbage collected ASAP.
+        item: T | None = None
+        async for item in self._base:
+            while True:
+                self._ready.clear()
+                if self._discarding:
+                    # State 1
+                    self.discard(item)
+                    item = None
+                    break
+                elif self._future is not None and not self._future.done():
+                    # State 2
+                    self._future.set_result(item)
+                    item = None
+                    break
+                else:
+                    self._future = None  # Just to avoid keeping a reference we don't need
+                    # Wait until we transition into another state. Note
+                    # that by the time this task is re-scheduled, the
+                    # state could have changed again; in that case we'll
+                    # just end up back here.
+                    await self._ready.wait()
+
+    def _cleanup(self, task: asyncio.Task) -> None:
+        exc = task.exception()
+        if exc is not None and not isinstance(exc, asyncio.CancelledError):
+            logger.exception("DiscardingIterator.run raised an exception", exc_info=exc)
+        if self._future is not None and not self._future.done():
+            self._future.set_exception(StopAsyncIteration())
+        self._future = None
+
+    async def __anext__(self) -> T:
+        assert not self._future, "DiscardableIterator is not reentrant"
+        if self._discarding or self._run_task.done():
+            raise StopAsyncIteration
+        future = asyncio.Future[T]()
+        self._future = future
+        self._ready.set()  # Wake up _run, if it's waiting for us to be ready
+        try:
+            return await future
+        finally:
+            # This is probably not necessary, since if we get here the future is
+            # done, and if _ready is still set it will only wake up _run once.
+            # But it may be slightly more efficient.
+            self._future = None
+            self._ready.clear()
+
+    def discard(self, item: T) -> None:
+        """Discard an item.
+
+        This can be overridden to customise cleanup of unwanted items.
+        """
+
+    def stop_discarding(self) -> None:
+        """Switch to capturing mode."""
+        self._discarding = False
+
+    def start_discarding(self) -> None:
+        """Switch to discarding mode.
+
+        If there is an active call to :meth:`__anext__`, it will raise
+        :exc:`StopAsyncIteration` (it could also iterate one more item if it
+        is already available).
+        """
+        if self._future is not None and not self._future.done():
+            self._future.set_exception(StopAsyncIteration())
+        self._discarding = True
+        self._ready.set()  # Wake up _run
+
+    def __enter__(self) -> Self:
+        self.stop_discarding()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.start_discarding()
 
 
 class DitherType(enum.Enum):
