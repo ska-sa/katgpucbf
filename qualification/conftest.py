@@ -609,8 +609,6 @@ async def cbf(
     for name, conf in cbf.config["outputs"].items():
         if conf["type"] in _CAPTURE_TYPES:
             await pcc.request("capture-stop", name)
-    if cbf.tied_array_resampled_voltage_receiver is not None:
-        cbf.tied_array_resampled_voltage_receiver.close()
 
 
 @pytest.fixture

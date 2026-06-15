@@ -46,9 +46,7 @@ from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DIG_SAMPLE_BITS
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
-from .cbf import CBFRemoteControl
-
-DEFAULT_MAX_DELAY = 1000000
+from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
 DEFAULT_TIMEOUT = 10.0
 logger = logging.getLogger(__name__)
@@ -676,6 +674,9 @@ class VTPBuffer:
         """
         vtp_packets = dict[int, bytes]()
         async for seq_id, packet in self.decode_vtp():
+            if vtp_packets.get(seq_id) is not None:
+                logger.warning("Duplicate VTP packet with seq_id %d", seq_id)
+                continue
             vtp_packets[seq_id] = packet
 
         seq_ids = sorted(vtp_packets.keys())
@@ -712,7 +713,7 @@ class VTPBuffer:
 
 
 class TiedArrayResampledVoltageReceiver:
-    """Receive tied-array-resampled-voltage streams from the v engines."""
+    """Receive tied-array-resampled-voltage streams from the V-engines."""
 
     max_packet_size = 65535
 
@@ -721,7 +722,7 @@ class TiedArrayResampledVoltageReceiver:
         cbf: CBFRemoteControl,
         interface_address: str,
     ) -> None:
-        self.stream_names = list(["tied-array-resampled-voltage"])
+        self.stream_names = ["tied-array-resampled-voltage"]
         self.multicast_group = endpoint_parser(DEFAULT_PORT)(
             cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
         )
@@ -749,12 +750,12 @@ class TiedArrayResampledVoltageReceiver:
         while True:
             self.vtp_buffer.add_packet(await self._read())
 
-    async def decode_vdif_framesets(self) -> AsyncGenerator[tuple[list[int], VDIFFrameSet], None]:
+    async def framesets(self) -> AsyncGenerator[tuple[list[int], VDIFFrameSet], None]:
         """Decode the VDIF framesets in the buffer."""
         async for seq_ids, frameset in self.vtp_buffer.decode_vdif_framesets():
             yield seq_ids, frameset
 
-    async def get_vdif_frameset(self) -> tuple[list[int], VDIFFrameSet]:
+    async def get_frameset(self) -> tuple[list[int], VDIFFrameSet]:
         """Listen until a single complete VDIF frameset is available, then return it."""
         while True:
             self.vtp_buffer.add_packet(await self._read())

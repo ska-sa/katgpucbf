@@ -174,34 +174,6 @@ async def control_tacv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, p
         raise
 
 
-async def control_tarv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pdf_report: Reporter, name: str) -> None:
-    # TODO: Because vgpu returns an error when setting delays, we can't use the normal delay setting mechanism yet.
-    """Periodically change the delays of a tied-array-resampled-voltage stream.
-
-    Unlike :func:`control_tacv_delays`, there is no attempt to smooth the
-    delays.
-
-    Raises
-    ------
-    AssertionError
-        If it takes more than 1s to set the delays
-    """
-    pcc = cbf.product_controller_client
-    all_elapsed = []
-    try:
-        async for _ in periodically(rng, BEAM_DELAY_INTERVAL):
-            delay = rng.uniform(-BEAM_MAX_DELAY, BEAM_MAX_DELAY)
-            elapsed = await measure(pcc.request("vlbi-delay", name, delay))
-            pdf_report.detail(f"Set delays for {name} in {elapsed:.3f} s.")
-            with check:
-                assert elapsed < 1.0
-            all_elapsed.append(elapsed)
-    except asyncio.CancelledError:
-        mean_elapsed = np.mean(all_elapsed)
-        pdf_report.detail(f"Average delay-setting time for {name}: {mean_elapsed:.3f} s.")
-        raise
-
-
 @pytest.fixture
 async def sensor_watcher(cbf: CBFRemoteControl) -> AsyncGenerator[aiokatcp.SensorWatcher, None]:
     """Establish a secondary connection to the product controller with a sensor watcher.
@@ -270,7 +242,7 @@ async def check_v_timestamps(
     complete_framesets = 0
 
     pdf_report.step(f"Check validity of received frames for {name}.")
-    async for seq_ids, frameset in receiver.decode_vdif_framesets():
+    async for seq_ids, frameset in receiver.framesets():
         sequence_ids.extend(seq_ids)
         samples_per_frame = frameset.header0.samples_per_frame
         framerate = round(receiver.bandwidth / samples_per_frame)  # TODO: get framerate from VDIFFileReader instead

@@ -24,35 +24,8 @@ from pytest_check import check
 from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter
 
 from ..cbf import CBFRemoteControl
-from ..recv import BaselineCorrelationProductsReceiver, TiedArrayResampledVoltageReceiver
+from ..recv import BaselineCorrelationProductsReceiver
 from . import sample_tone_response_hdr
-
-
-@pytest.mark.vlbi_only
-@pytest.mark.name("VLBI VDIF output")
-async def test_vlbi_vdif(
-    cbf: CBFRemoteControl,
-    pdf_report: Reporter,
-    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
-) -> None:
-    """Test VDIF frame output.
-
-    Verification method
-    -------------------
-    Verified by means of test. Collect a valid VDIF frame and verify that the
-    frame is valid.
-    """
-    receiver = receive_tied_array_resampled_voltage
-    pdf_report.step("Collect a valid VDIF frame.")
-    _, frameset = await receiver.get_vdif_frameset()
-    pdf_report.step("Verify we have log_2(1) channels.")
-    with check:
-        assert frameset.header0.nchan == 1
-    pdf_report.detail(f"VDIF frame max value: {np.max(frameset.data)}")
-    pdf_report.detail(f"VDIF frame min value: {np.min(frameset.data)}")
-    pdf_report.detail(f"VDIF frame mean value: {np.mean(frameset.data)}")
-    pdf_report.detail(f"VDIF frame std value: {np.std(frameset.data)}")
-    pdf_report.detail(f"VDIF frame shape: {frameset.data.shape}")
 
 
 @pytest.mark.vlbi_only

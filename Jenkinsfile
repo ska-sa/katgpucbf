@@ -269,7 +269,6 @@ pipeline {
     }
 
     // This stage runs directly on the host
-
     stage('Build and push Docker image') {
       when {
         not { changeRequest() }
