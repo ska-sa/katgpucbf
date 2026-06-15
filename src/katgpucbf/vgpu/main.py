@@ -26,7 +26,7 @@ from collections.abc import MutableMapping, Sequence
 import aiokatcp
 import katcbf_vlbi_resample.polarisation
 
-from .. import DEFAULT_JONES_PER_BATCH
+from .. import DEFAULT_JONES_PER_BATCH, VTP_DEFAULT_PORT
 from ..main import (
     add_common_arguments,
     add_recv_arguments,
@@ -39,7 +39,6 @@ from ..main import (
 from ..monitor import FileMonitor, Monitor, NullMonitor
 from .engine import CaptureConfig, RecvConfig, SendConfig, VEngine
 
-VTP_DEFAULT_PORT = 52030
 _ARGUMENT_PARSER = argparse.ArgumentParser  # Modified by unit tests
 
 
