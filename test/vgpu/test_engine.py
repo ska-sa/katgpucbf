@@ -210,3 +210,28 @@ class TestVEngine:
         await engine_client.request("capture-stop")
         with pytest.raises(aiokatcp.FailReply, match="no capture in progress"):
             await engine_client.request("capture-stop")
+
+    async def test_vlbi_delay(
+        self,
+        engine: VEngine,
+        engine_client: aiokatcp.Client,
+        mock_recv_streams: list[spead2.InprocQueue],
+        sendmsg_packets: list[bytes],
+        capture_complete_event: asyncio.Event,
+    ) -> None:
+        """Test ``?vlbi-delay``."""
+        # Try to set a delay equating to 33.25 samples, to ensure it gets rounded
+        # to a sample boundary properly.
+        delay_samples = 33
+        delay = (delay_samples + 0.25) / SEND_BANDWIDTH
+        await engine_client.request("vlbi-delay", delay)
+        actual_delay = await engine_client.sensor_value("delay", float)
+        assert actual_delay * SEND_BANDWIDTH == pytest.approx(delay_samples)
+        # TODO: check the signal path
+
+    async def test_vlbi_delay_while_capturing(self, engine_client: aiokatcp.Client) -> None:
+        """Test that ``vlbi-delay`` fails if used during capture."""
+        await engine_client.request("capture-start", 0)
+        with pytest.raises(aiokatcp.FailReply, match="cannot set vlbi-delay while capturing"):
+            await engine_client.request("vlbi-delay", 0.1)
+        await engine_client.request("capture-stop")
