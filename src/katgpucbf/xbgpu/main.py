@@ -71,6 +71,7 @@ logger = logging.getLogger(__name__)
 def _add_stream_args(parser: SubParser) -> None:
     parser.add_argument("name", type=str, required=True)
     parser.add_argument("dst", type=endpoint_parser(DEFAULT_PORT), required=True)
+    parser.add_argument("send_enabled", type=_parse_send_enabled, default=False)
 
 
 def _parse_pol(value: str) -> int:
@@ -78,6 +79,15 @@ def _parse_pol(value: str) -> int:
     if pol not in {0, 1}:
         raise argparse.ArgumentTypeError("pol must be either 0 or 1")
     return pol
+
+
+def _parse_send_enabled(value: str) -> bool:
+    if value.lower() in {"true", "1", "yes"}:
+        return True
+    elif value.lower() in {"false", "0", "no"}:
+        return False
+    else:
+        raise argparse.ArgumentTypeError("send_enabled must be a boolean value (true/false, 1/0, yes/no)")
 
 
 def parse_beam(value: str) -> BOutput:
@@ -211,11 +221,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         help="Size in bytes for output packets (payload only) [%(default)s]",
     )
-    parser.add_argument(
-        "--send-enabled",
-        action="store_true",
-        help="Start with correlator output transmission enabled, without having to issue a katcp command.",
-    )
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("src", type=parse_source_ipv4, help="Multicast address data is received from.")
 
@@ -290,7 +295,6 @@ def make_engine(
         send_comp_vector=args.send_comp_vector,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         recv_reorder_tol=args.recv_reorder_tol,
-        send_enabled=args.send_enabled,
         monitor=monitor,
         context=context,
         vkgdr_handle=vkgdr_handle,

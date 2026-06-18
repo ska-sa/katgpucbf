@@ -36,6 +36,7 @@ class TestParseBeam:
             dst=Endpoint("239.1.2.3", 7148),
             pol=1,
             dither=DitherType.NONE,
+            send_enabled=False,
         )
 
     def test_minimal(self) -> None:
@@ -45,6 +46,7 @@ class TestParseBeam:
             dst=Endpoint("239.1.2.3", 7148),
             pol=1,
             dither=DitherType.DEFAULT,
+            send_enabled=False,
         )
 
     def test_bad_pol(self) -> None:
@@ -62,4 +64,5 @@ class TestParseCorrprod:
             name="foo",
             heap_accumulation_threshold=52,
             dst=Endpoint("239.2.3.4", 7148),
+            send_enabled=False,
         )

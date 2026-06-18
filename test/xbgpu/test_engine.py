@@ -649,8 +649,8 @@ class TestXBEngine:
     def beam_args(self) -> list[str]:
         """Arguments to pass to the command-line parser for multiple beams."""
         return [
-            "name=beam_0x,dst=239.10.12.0:7148,pol=0",
-            "name=beam_0y,dst=239.10.12.1:7148,pol=1",
+            "name=beam_0x,dst=239.10.12.0:7148,pol=0,send_enabled=False",
+            "name=beam_0y,dst=239.10.12.1:7148,pol=1,send_enabled=True",
         ]
 
     @pytest.fixture
@@ -1022,7 +1022,6 @@ class TestXBEngine:
             f"--sync-time={SYNC_TIME}",
             "--recv-interface=lo",
             "--send-interface=lo",
-            "--send-enabled",
             "239.10.11.4:7149",  # src
         ]
         for corrprod in corrprod_args:
@@ -1527,6 +1526,7 @@ class TestXBEngine:
     ) -> None:
         """Test capture-start and capture-stop requests.
 
+        TODO: Update below docstring
         First issue a capture-stop as `engine` is initialised with --send-enabled.
         """
 

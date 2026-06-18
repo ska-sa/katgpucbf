@@ -343,7 +343,6 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
         engine: "XBEngine",
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
-        init_send_enabled: bool,
         name: str = DEFAULT_BPIPELINE_NAME,
     ) -> None:
         super().__init__(outputs, name, engine, context)
@@ -410,7 +409,6 @@ class BPipeline(Pipeline[BOutput, BOutQueueItem]):
                 stream_config=stream_config,
                 buffers=buffers,
             ),
-            send_enabled=init_send_enabled,
         )
 
         self._populate_sensors(seed)
@@ -678,7 +676,6 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
         engine: "XBEngine",
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
-        init_send_enabled: bool,
         name: str = DEFAULT_XPIPELINE_NAME,
     ) -> None:
         super().__init__([output], name, engine, context)
@@ -736,7 +733,7 @@ class XPipeline(Pipeline[XOutput, XOutQueueItem]):
                 stream_config=stream_config,
                 buffers=buffers,
             ),
-            send_enabled=init_send_enabled,
+            send_enabled=output.send_enabled,
         )
 
         self._populate_sensors()
@@ -1095,9 +1092,6 @@ class XBEngine(Engine):
     send_comp_vector
         Completion vector for transmission, or -1 for polling.
         See :class:`spead2.send.UdpIbvConfig` for further information.
-    send_enabled
-        Start with correlator output transmission enabled, without having to
-        issue a katcp command.
     monitor
         :class:`Monitor` to use for generating multiple :class:`~asyncio.Queue`
         objects needed to communicate between functions, and handling basic
@@ -1142,7 +1136,6 @@ class XBEngine(Engine):
         send_comp_vector: int,
         heaps_per_fengine_per_chunk: int,  # Used for GPU memory tuning
         recv_reorder_tol: int,
-        send_enabled: bool,
         monitor: Monitor,
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
@@ -1237,9 +1230,9 @@ class XBEngine(Engine):
         self._pipelines: list[Pipeline] = []
         x_outputs = [output for output in outputs if isinstance(output, XOutput)]
         b_outputs = [output for output in outputs if isinstance(output, BOutput)]
-        self._pipelines = [XPipeline(x_output, self, context, vkgdr_handle, send_enabled) for x_output in x_outputs]
+        self._pipelines = [XPipeline(x_output, self, context, vkgdr_handle) for x_output in x_outputs]
         if b_outputs:
-            self._pipelines.append(BPipeline(b_outputs, self, context, vkgdr_handle, send_enabled))
+            self._pipelines.append(BPipeline(b_outputs, self, context, vkgdr_handle))
         self._upload_command_queue = context.create_command_queue()
 
         # This queue is extended in the monitor class, allowing for the

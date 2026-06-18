@@ -30,6 +30,7 @@ class Output(ABC):
 
     name: str
     dst: Endpoint
+    send_enabled: bool
 
 
 @dataclass
