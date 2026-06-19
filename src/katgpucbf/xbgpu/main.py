@@ -82,12 +82,12 @@ def _parse_pol(value: str) -> int:
 
 
 def _parse_send_enabled(value: str) -> bool:
-    if value.lower() in {"true", "1", "yes"}:
+    if value.lower() in {"true", "1"}:
         return True
-    elif value.lower() in {"false", "0", "no"}:
+    elif value.lower() in {"false", "0"}:
         return False
     else:
-        raise argparse.ArgumentTypeError("send_enabled must be a boolean value (true/false, 1/0, yes/no)")
+        raise argparse.ArgumentTypeError("send_enabled must be a boolean value (true/false, 1/0)")
 
 
 def parse_beam(value: str) -> BOutput:
