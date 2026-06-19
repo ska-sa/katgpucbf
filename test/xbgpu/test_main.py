@@ -31,12 +31,12 @@ class TestParseBeam:
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1,dither=none") == BOutput(
+        assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1,dither=none,send_enabled=True") == BOutput(
             name="beam1",
             dst=Endpoint("239.1.2.3", 7148),
             pol=1,
             dither=DitherType.NONE,
-            send_enabled=False,
+            send_enabled=True,
         )
 
     def test_minimal(self) -> None:
@@ -60,9 +60,11 @@ class TestParseCorrprod:
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_corrprod("name=foo,heap_accumulation_threshold=52,dst=239.2.3.4:7148") == XOutput(
+        assert parse_corrprod(
+            "name=foo,heap_accumulation_threshold=52,dst=239.2.3.4:7148,send_enabled=True"
+        ) == XOutput(
             name="foo",
             heap_accumulation_threshold=52,
             dst=Endpoint("239.2.3.4", 7148),
-            send_enabled=False,
+            send_enabled=True,
         )
