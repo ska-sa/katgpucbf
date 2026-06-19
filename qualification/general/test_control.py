@@ -20,13 +20,10 @@ import asyncio
 import math
 import time
 from collections.abc import AsyncGenerator, Awaitable
-from typing import TYPE_CHECKING
 
 import aiokatcp
-import astropy
 import numpy as np
 import pytest
-from baseband.vdif import VDIFHeader
 from pytest_check import check
 
 from katgpucbf.fgpu.delay import wrap_angle
@@ -228,7 +225,7 @@ def check_timestamps(
         assert missing <= 2, f"{missing} of {expected} chunks missing for {name}"
 
 
-# TODO: just use another interface instead so these can be reused.
+# TODO: just use another interface instead so these can be reused.f
 
 
 async def check_v_timestamps(
@@ -242,25 +239,21 @@ async def check_v_timestamps(
     complete_framesets = 0
 
     pdf_report.step(f"Check validity of received frames for {name}.")
-    async for seq_ids, frameset in receiver.framesets():
+    async for seq_id, seq_ids, frameset_timestamps in receiver.framesets():
+        if seq_id not in receiver.vtp_buffer.incomplete_framesets:
+            timestamps.extend(frameset_timestamps)
         sequence_ids.extend(seq_ids)
-        samples_per_frame = frameset.header0.samples_per_frame
-        framerate = round(receiver.bandwidth / samples_per_frame)  # TODO: get framerate from VDIFFileReader instead
-        complete_framesets += 1
-        for frame in frameset.frames:
-            if TYPE_CHECKING:
-                assert isinstance(frame.header, VDIFHeader)
-            timestamps.append(frame.header.get_time(frame_rate=framerate * astropy.units.Hz).to_value("unix"))
 
     with check:
-        assert timestamps, f"No V frames received on stream {name}"
-    pdf_report.detail(f"{name}: Received {len(timestamps)} V frames.")
+        assert len(receiver.vtp_buffer.incomplete_framesets) <= 2, (
+            f"Incomplete framesets: {receiver.vtp_buffer.incomplete_framesets}"
+        )
+        assert len(timestamps) > 0, f"No valid V framesets received on stream {name}"
+    pdf_report.detail(f"{name}: Received {len(timestamps)} V-Framesets.")
     elapsed = timestamps[-1] - timestamps[0]
     pdf_report.detail(f"{name}: received data over {elapsed:.3f}s.")
     min_time = TEST_TIME - TEST_TIME_TOL
-    total_expected_frames = sequence_ids[-1] - sequence_ids[0] + 1
     with check:
-        assert complete_framesets >= min_time, f"Less than {min_time} framesets received for {name}"
         missed_sequences = 0
         prev_seq_id = sequence_ids[0]
         for seq_id in sequence_ids[1:]:
@@ -268,13 +261,12 @@ async def check_v_timestamps(
                 missed_sequences += seq_id - prev_seq_id - 1
             prev_seq_id = seq_id
 
-        assert missed_sequences < total_expected_frames * 0.05, (
-            f"{missed_sequences} sequence IDs missed for {name} outside of tolerance"
-        )
+        assert missed_sequences <= 2, f"Missed {missed_sequences} sequence IDs"
         if missed_sequences > 0:
             pdf_report.detail(f"{name}: missed {missed_sequences} frames.")
 
         assert elapsed >= min_time, f"Less than {min_time}s of data received for {name}"
+        assert complete_framesets >= min_time, f"Less than {min_time} framesets received for {name}"
 
 
 async def test_control(  # noqa: D103
