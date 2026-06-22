@@ -82,7 +82,7 @@ markupsafe==3.0.3
     # via
     #   jinja2
     #   mako
-msgpack==1.1.2
+msgpack==1.2.1
     # via katsdptelstate
 multidict==6.7.0
     # via
