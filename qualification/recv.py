@@ -28,7 +28,6 @@ import struct
 from collections.abc import AsyncGenerator, Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-import astropy
 import numba
 import numpy as np
 import scipy
@@ -649,82 +648,103 @@ def create_tied_array_channelised_voltage_receive_stream_group(
     )
 
 
-class VTPBuffer:
-    """Buffer for storing VTP packets, and decoding them into VDIF framesets."""
+class VTPDecoder:
+    """Decoder for storing VTP and VDIF stream statistics and validating framesets."""
 
     def __init__(self, n_threads: int, bandwidth: float) -> None:
         self.seq_ids: list[int] = []
         self.thread_ids: list[int] = []
-        self.incomplete_framesets: list[int] = []
-        self.frameset_timestamps: list[int] = []
+        self.seconds: list[int] = []
         self.n_threads = n_threads
         self.samples_per_frame = None
         self.bandwidth = bandwidth
-        self.zero_seq_id = list[int]()
+        self.zero_seq_ids = list[int]()
         self.framerate = None
+        self.invalid_framesets = list[list[int]]()
 
     def add_packet(self, packet: bytes) -> None:
-        """Add a packet to the buffer without decoding it."""
+        """Add packet statistics to the buffer."""
         new_seq_id = struct.unpack("<Q", packet[:8])[0]
         frame = VDIFFrame.fromfile(io.BytesIO(packet[8:]))
         if self.framerate is not None:
             self.seq_ids.append(new_seq_id)
-            # self.thread_ids.append(frame.header["thread_id"])
-            # self.frameset_timestamps.append(frame.header.get_time(frame_rate=self.framerate))
-            self.frameset_timestamps.append(0)
+            self.seconds.append(frame.header["seconds"])
+            self.thread_ids.append(frame.header["thread_id"])
 
-        if frame.header["frame_nr"] == 0:
-            if self.samples_per_frame is None:
-                self.samples_per_frame = frame.header.samples_per_frame
-                if TYPE_CHECKING:
-                    assert self.samples_per_frame is not None
-                self.framerate = round(self.bandwidth / self.samples_per_frame) * astropy.units.Hz
-            self.zero_seq_id.append(new_seq_id)
+        if frame.header["frame_nr"] == 0 and self.framerate is not None:
+            self.zero_seq_ids.append(new_seq_id)
 
-    async def decode_vdif_framesets(self) -> AsyncGenerator[tuple[int, list[int], list[int]], None]:
+        if frame.header["frame_nr"] == 0 and self.framerate is None:
+            self.samples_per_frame = frame.header.samples_per_frame
+            if TYPE_CHECKING:
+                assert self.samples_per_frame is not None
+            self.framerate = round(self.bandwidth / self.samples_per_frame)
+            self.seq_ids.append(new_seq_id)
+            self.seconds.append(frame.header["seconds"])
+            self.thread_ids.append(frame.header["thread_id"])
+            self.zero_seq_ids.append(new_seq_id)
+
+    async def decode_vdif_framesets(self) -> AsyncGenerator[tuple[list[int], int, int], None]:
         """Slow computation: order and decode all the data captured so far.
 
         The seq_ids might include frames whose complete set is not present.
         These frames will be ignored.
         """
-        # data_dict = dict(zip(
-        #  self.seq_ids,
-        #  tuple(zip(self.thread_ids, self.frameset_timestamps, strict=True)
-        # ), strict=True))
-        seq_ids = sorted(self.seq_ids)
-        set_seq_ids = list[int]()
-        # set_thread_ids = list[int]()
-        # set_frameset_timestamps = list[int]()
-        for _i, seq_id in enumerate(seq_ids):
-            if seq_id in self.zero_seq_id:
-                for _t_id in range(self.n_threads):
-                    all_threads_present = True
-                    # if t_id not in set_thread_ids:
-                    #    all_threads_present = False
-                if not all_threads_present:
-                    self.incomplete_framesets.append(seq_id)
-                    set_seq_ids.clear()
-                    # set_thread_ids.clear()
-                    # set_frameset_timestamps.clear()
-                    continue
+        seconds_dict = dict[int, int](zip(self.seq_ids, self.seconds, strict=True))
+        thread_ids_dict = dict[int, int](zip(self.seq_ids, self.thread_ids, strict=True))
 
-                yield seq_id, set_seq_ids.copy(), list()  # set_frameset_timestamps.copy()
-                set_seq_ids.clear()
-                # set_thread_ids.clear()
-                # set_frameset_timestamps.clear()
-            set_seq_ids.append(seq_id)
-            # set_thread_ids.append(data_dict[seq_id][0])
-            # set_frameset_timestamps.append(data_dict[seq_id][1])
+        for thread_id in np.unique(self.thread_ids):
+            seq_ids = list(filter(lambda x: thread_ids_dict[x] == thread_id, self.seq_ids))
+            seq_ids = sorted(seq_ids)
+            previous_set_zero_seq_id = None
+            set_seq_ids = list[int]()
+            set_frameset_seconds = set[int]()
+            for seq_id in seq_ids:
+                if seq_id in self.zero_seq_ids:
+                    if previous_set_zero_seq_id is None:
+                        previous_set_zero_seq_id = seq_id
+                        set_seq_ids.append(seq_id)
+                        set_frameset_seconds.add(seconds_dict[seq_id])
+                        continue
+
+                    if len(set_seq_ids) != self.framerate:
+                        self.invalid_framesets.append(set_seq_ids)
+                    elif set_frameset_seconds != {seconds_dict[previous_set_zero_seq_id]}:
+                        self.invalid_framesets.append(set_seq_ids)
+                    else:
+                        yield (
+                            set_seq_ids.copy(),
+                            next(iter(set_frameset_seconds)),
+                            thread_ids_dict[previous_set_zero_seq_id],
+                        )
+                    previous_set_zero_seq_id = seq_id
+                    set_seq_ids.clear()
+                    set_frameset_seconds.clear()
+                set_seq_ids.append(seq_id)
+                set_frameset_seconds.add(seconds_dict[seq_id])
+            if previous_set_zero_seq_id is not None:
+                if len(set_seq_ids) != self.framerate:
+                    self.invalid_framesets.append(set_seq_ids)
+                elif set_frameset_seconds != {seconds_dict[previous_set_zero_seq_id]}:
+                    self.invalid_framesets.append(set_seq_ids)
+                else:
+                    yield (
+                        set_seq_ids.copy(),
+                        next(iter(set_frameset_seconds)),
+                        thread_ids_dict[previous_set_zero_seq_id],
+                    )
+        set_seq_ids.clear()
+        set_frameset_seconds.clear()
 
     def close(self) -> None:
         """Close the buffer."""
         self.seq_ids.clear()
-        self.incomplete_framesets.clear()
-        self.zero_seq_id.clear()
+        self.zero_seq_ids.clear()
         self.thread_ids.clear()
-        self.frameset_timestamps.clear()
+        self.seconds.clear()
         self.samples_per_frame = None
         self.framerate = None
+        self.invalid_framesets.clear()
 
 
 class TiedArrayResampledVoltageReceiver:
@@ -764,7 +784,7 @@ class TiedArrayResampledVoltageReceiver:
             mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
             self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
             self.socket.setblocking(False)
-        self.vtp_buffer = VTPBuffer(4, self.bandwidth)  # TODO: calculate number of threads
+        self.vtp_decoder = VTPDecoder(4, self.bandwidth)  # TODO: calculate number of threads
 
     async def _read(self) -> bytes:
         loop = asyncio.get_running_loop()
@@ -773,19 +793,19 @@ class TiedArrayResampledVoltageReceiver:
     async def listen(self) -> AsyncGenerator[tuple[int, bytes], None]:
         """Listen for packets from the v engine and store them in the VTPBuffer."""
         while True:
-            self.vtp_buffer.add_packet(await self._read())
+            self.vtp_decoder.add_packet(await self._read())
 
-    async def framesets(self) -> AsyncGenerator[tuple[int, list[int], list[int]], None]:
+    async def framesets(self) -> AsyncGenerator[tuple[list[int], int, int], None]:
         """Decode the VDIF framesets in the buffer."""
-        async for seq_id, set_seq_ids, frameset_timestamps in self.vtp_buffer.decode_vdif_framesets():
-            yield seq_id, set_seq_ids, frameset_timestamps
+        async for set_seq_ids, frameset_seconds, thread_id in self.vtp_decoder.decode_vdif_framesets():
+            yield set_seq_ids, frameset_seconds, thread_id
 
     async def get_frameset(self) -> list[int]:
         """Listen until a single complete VDIF frameset is available, then return it."""
         while True:
-            self.vtp_buffer.add_packet(await self._read())
+            self.vtp_decoder.add_packet(await self._read())
             try:
-                seq_id, set_seq_ids, frameset_timestamps = await anext(self.vtp_buffer.decode_vdif_framesets())
+                set_seq_ids, frameset_timestamps, thread_id = await anext(self.vtp_decoder.decode_vdif_framesets())
             except StopAsyncIteration:
                 continue
             return set_seq_ids
@@ -793,4 +813,4 @@ class TiedArrayResampledVoltageReceiver:
     def close(self) -> None:
         """Close the socket."""
         self.socket.close()
-        self.vtp_buffer.close()
+        self.vtp_decoder.close()

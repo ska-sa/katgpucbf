@@ -1,0 +1,181 @@
+#! /usr/bin/env python3
+# ruff: noqa
+
+################################################################################
+# Copyright (c) 2026, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""Sample checks for :class:`qualification.recv.VTPDecoder`.
+
+Run directly::
+
+    qualification/.venv/bin/python qualification/test/test_vtp_decoder.py
+"""
+
+import asyncio
+import io
+import struct
+import sys
+from pathlib import Path
+
+import numpy as np
+from baseband.vdif import VDIFFrame
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from qualification.recv import VTPDecoder
+
+SAMPLES_PER_FRAME = 8000
+BANDWIDTH = 64e6
+N_THREADS = 4
+
+
+def make_vtp_packet(
+    seq_id: int, frame_nr: int, seconds: int, thread_id: int, samples_per_frame: int = SAMPLES_PER_FRAME
+) -> bytes:
+    """Build a VTP packet (8-byte seq header + VDIF frame)."""
+    data = np.zeros((SAMPLES_PER_FRAME, 1), dtype=np.complex64)
+    frame = VDIFFrame.fromdata(
+        data,
+        frame_nr=frame_nr,
+        seconds=seconds,
+        samples_per_frame=samples_per_frame,
+        nchan=1,
+        bps=2,
+        complex_data=True,
+        thread_id=thread_id,
+    )
+    buf = io.BytesIO()
+    frame.tofile(buf)
+    return struct.pack("<Q", seq_id) + buf.getvalue()
+
+
+def check_framerate_from_first_zero_frame() -> None:
+    """
+    `check_framerate_from_first_zero_frame` checks that the first
+    frame_nr=0 packet sets framerate based on the samples_per_frame.
+    """
+    decoder = VTPDecoder(N_THREADS, BANDWIDTH)
+    decoder.add_packet(make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0))
+    assert decoder.framerate == round(BANDWIDTH / SAMPLES_PER_FRAME)
+    assert decoder.samples_per_frame == SAMPLES_PER_FRAME
+    assert decoder.seq_ids == [0]
+
+
+def check_packets_recorded_from_calibration() -> None:
+    """`check_packets_recorded_from_calibration` checks that packets are tracked once framerate is known."""
+    decoder = VTPDecoder(N_THREADS, BANDWIDTH)
+    decoder.add_packet(make_vtp_packet(0, frame_nr=10, seconds=99, thread_id=0))  # some old data
+    decoder.add_packet(make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=0))
+    decoder.add_packet(make_vtp_packet(2, frame_nr=0, seconds=100, thread_id=0))
+    decoder.add_packet(make_vtp_packet(3, frame_nr=1, seconds=100, thread_id=0))
+    assert decoder.seq_ids == [1, 2, 3]
+    assert decoder.seconds == [100, 100, 100]
+    assert decoder.thread_ids == [0, 0, 0]
+    assert decoder.zero_seq_ids == [1, 2]
+
+
+def check_zero_seq_ids() -> None:
+    """
+    `check_zero_seq_ids` checks that data before the first
+    frame_nr=0 packet is ignored, but after that it is recorded in zero_seq_ids.
+    """
+    decoder = VTPDecoder(N_THREADS, BANDWIDTH)
+    decoder.add_packet(make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0))
+    for seq_id, thread_id in enumerate(range(N_THREADS), start=1):
+        decoder.add_packet(make_vtp_packet(seq_id, frame_nr=0, seconds=100, thread_id=thread_id))
+    assert decoder.zero_seq_ids == list(range(0, N_THREADS + 1))
+
+
+async def check_decode_vdif_framesets_filters_incomplete_framesets() -> None:
+    """
+    `check_decode_vdif_framesets_filters_incomplete_framesets` checks that
+    decode_vdif_framesets yields on each frame_nr=0 boundary.
+    """
+    decoder = VTPDecoder(N_THREADS, BANDWIDTH)
+    decoder.add_packet(make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0))
+    for seq_id, thread_id in enumerate(range(N_THREADS), start=0):
+        decoder.add_packet(make_vtp_packet(seq_id, frame_nr=0, seconds=100, thread_id=thread_id))
+    for seq_id, thread_id in enumerate(range(N_THREADS), start=N_THREADS):
+        decoder.add_packet(make_vtp_packet(seq_id, frame_nr=1, seconds=100, thread_id=thread_id))
+
+    framesets = [item async for item in decoder.decode_vdif_framesets()]
+    assert len(framesets) == 0
+    assert len(decoder.invalid_framesets) == N_THREADS + 1
+
+
+async def check_decode_vdif_framesets_unordered() -> None:
+    """
+    `check_decode_vdif_framesets_unordered` checks that decode_vdif_framesets
+    yields on each frame_nr=0 boundary.
+    """
+    decoder = VTPDecoder(4, 16000)
+    decoder.add_packet(make_vtp_packet(5, frame_nr=10, seconds=99, thread_id=0))  # some old data
+    decoder.add_packet(make_vtp_packet(6, frame_nr=0, seconds=100, thread_id=0))
+    decoder.add_packet(make_vtp_packet(11, frame_nr=1, seconds=100, thread_id=1))
+    decoder.add_packet(make_vtp_packet(7, frame_nr=1, seconds=100, thread_id=0))
+    decoder.add_packet(make_vtp_packet(13, frame_nr=1, seconds=100, thread_id=3))
+    decoder.add_packet(make_vtp_packet(8, frame_nr=0, seconds=100, thread_id=1))
+    decoder.add_packet(make_vtp_packet(9, frame_nr=0, seconds=100, thread_id=2))
+    decoder.add_packet(make_vtp_packet(10, frame_nr=0, seconds=100, thread_id=3))
+    decoder.add_packet(make_vtp_packet(12, frame_nr=1, seconds=100, thread_id=2))
+    # todo: just do random access in a test instead.
+
+    framesets = [item async for item in decoder.decode_vdif_framesets()]
+    assert len(framesets) == N_THREADS
+    assert framesets[0] == ([6, 7], 100, 0)
+    assert framesets[1] == ([8, 11], 100, 1)
+    assert framesets[2] == ([9, 12], 100, 2)
+    assert framesets[3] == ([10, 13], 100, 3)
+
+
+def check_close_clears_state() -> None:
+    """`check_close_clears_state` checks that close() resets all buffered state."""
+    decoder = VTPDecoder(N_THREADS, BANDWIDTH)
+    decoder.add_packet(make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0))
+    decoder.add_packet(make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=0))
+    decoder.close()
+    assert decoder.seq_ids == []
+    assert decoder.zero_seq_ids == []
+    assert decoder.seconds == []
+    assert decoder.thread_ids == []
+    assert decoder.framerate is None
+    assert decoder.samples_per_frame is None
+
+
+def main() -> None:
+    """Run all checks."""
+    checks = [
+        check_framerate_from_first_zero_frame,
+        check_packets_recorded_from_calibration,
+        check_zero_seq_ids,
+        check_close_clears_state,
+    ]
+    for check in checks:
+        print(f"running {check.__name__}...", flush=True)
+        check()
+        print("  ok", flush=True)
+
+    print("running check_decode_vdif_framesets...", flush=True)
+    asyncio.run(check_decode_vdif_framesets_filters_incomplete_framesets())
+    print("  ok", flush=True)
+    print("running check_decode_vdif_framesets_unordered...", flush=True)
+    asyncio.run(check_decode_vdif_framesets_unordered())
+    print("  ok", flush=True)
+
+    print("all checks passed")
+
+
+if __name__ == "__main__":
+    main()
