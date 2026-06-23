@@ -90,45 +90,44 @@ class RecvStream:
 
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         last_chunk_id: int | None = None
-        with self._recv_iter:
-            async for chunk in self._recv_iter:
-                with chunk:
-                    if chunk.timestamp < self._min_timestamp:
-                        continue
-                    # TODO: need to do something with the presence flags
-                    # TODO: pipeline these transfers (but keeping in mind
-                    # that we need to recycle the chunk only when the transfer
-                    # is complete).
-                    data = cp.asarray(chunk.data, blocking=False)
-                    await katcbf_vlbi_resample.utils.stream_future(None)
-                    # There are two time axes. Transpose to place them together, then flatten
-                    # over them. The current shape is
-                    # (N_POLS, n_batches_per_chunk, channels, n_spectra_per_heap, COMPLEX)
-                    data = data.transpose(0, 1, 3, 2, 4)
-                    # Now it is
-                    # (N_POLS, n_batches_per_chunk, n_spectra_per_heap, channels, COMPLEX)
-                    data = data.reshape(N_POLS, -1, self.channels, COMPLEX)
-                    # Now it is
-                    # (N_POLS, n_spectra_per_chunk, channels, COMPLEX)
-                    # Convert Gaussian integers to complex
-                    data = cp.ascontiguousarray(data.astype(np.float32)).view(np.complex64)[..., 0]
-                    arr = xr.DataArray(
-                        data,
-                        dims=("pol", "time", "channel"),
-                        coords={"pol": list(self._pol_labels)},
-                        attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
-                    )
-                    # TODO (NGC-1689): need to properly handle missing data in
-                    # katcbf-vlbi-resample. This is a quick hack to keep things
-                    # running by injecting zero data into the stream.
-                    while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
-                        last_chunk_id += 1
-                        zero_arr = xr.zeros_like(arr)
-                        timestamp = last_chunk_id * self._layout.chunk_timestamp_step
-                        zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
-                        yield zero_arr
-                    last_chunk_id = chunk.chunk_id
-                    yield arr
+        async for chunk in self._recv_iter:
+            with chunk:
+                if chunk.timestamp < self._min_timestamp:
+                    continue
+                # TODO: need to do something with the presence flags
+                # TODO: pipeline these transfers (but keeping in mind
+                # that we need to recycle the chunk only when the transfer
+                # is complete).
+                data = cp.asarray(chunk.data, blocking=False)
+                await katcbf_vlbi_resample.utils.stream_future(None)
+                # There are two time axes. Transpose to place them together, then flatten
+                # over them. The current shape is
+                # (N_POLS, n_batches_per_chunk, channels, n_spectra_per_heap, COMPLEX)
+                data = data.transpose(0, 1, 3, 2, 4)
+                # Now it is
+                # (N_POLS, n_batches_per_chunk, n_spectra_per_heap, channels, COMPLEX)
+                data = data.reshape(N_POLS, -1, self.channels, COMPLEX)
+                # Now it is
+                # (N_POLS, n_spectra_per_chunk, channels, COMPLEX)
+                # Convert Gaussian integers to complex
+                data = cp.ascontiguousarray(data.astype(np.float32)).view(np.complex64)[..., 0]
+                arr = xr.DataArray(
+                    data,
+                    dims=("pol", "time", "channel"),
+                    coords={"pol": list(self._pol_labels)},
+                    attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
+                )
+                # TODO (NGC-1689): need to properly handle missing data in
+                # katcbf-vlbi-resample. This is a quick hack to keep things
+                # running by injecting zero data into the stream.
+                while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
+                    last_chunk_id += 1
+                    zero_arr = xr.zeros_like(arr)
+                    timestamp = last_chunk_id * self._layout.chunk_timestamp_step
+                    zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
+                    yield zero_arr
+                last_chunk_id = chunk.chunk_id
+                yield arr
 
 
 class RecordPower(katcbf_vlbi_resample.power.RecordPower):
@@ -252,6 +251,10 @@ class _CaptureSession:
         self._min_timestamp = min_timestamp
         self._sender = sender
         self._capture_task = asyncio.create_task(self._capture(), name="Capture Loop")
+        recv_iter.stop_discarding()
+        # start_discarding is called in a few other places too. This just ensures that
+        # it gets called even if capture_task crashes.
+        self._capture_task.add_done_callback(lambda future: recv_iter.start_discarding())
         engine.add_service_task(self._capture_task, wait_on_stop=True)
 
     def _capture_complete(self) -> None:
@@ -301,6 +304,7 @@ class _CaptureSession:
         )
         async for frameset in frameset_it:
             await self._sender.send(frameset)
+        self._recv_iter.start_discarding()
         await self._sender.flush()
         self._capture_complete()
 
