@@ -136,7 +136,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=[],
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
-        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol. Optional keys: dither.",
+        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol. "
+        "Optional keys: dither, send_enabled.",
     )
     parser.add_argument(
         "--corrprod",
@@ -145,7 +146,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help="Add a baseline-correlation-products output (may be repeated). The required keys are: "
-        "name, dst, heap_accumulation_threshold.",
+        "name, dst, heap_accumulation_threshold. Optional keys: send_enabled.",
     )
     add_common_arguments(parser)
     add_time_converter_arguments(parser)
