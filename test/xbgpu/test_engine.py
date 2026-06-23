@@ -1526,8 +1526,7 @@ class TestXBEngine:
     ) -> None:
         """Test capture-start and capture-stop requests.
 
-        TODO: Update below docstring
-        First issue a capture-stop as `engine` is initialised with --send-enabled.
+        First issue a capture-stop as all streams are initialised with `send_enabled=True`.
         """
 
         def get_stream_status(stream_name: str) -> bool:
