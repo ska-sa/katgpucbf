@@ -16,32 +16,25 @@
 
 """Fixtures for use in vgpu unit tests."""
 
-from collections.abc import AsyncGenerator, Buffer, Iterable
+import functools
+from collections.abc import Buffer, Callable, Iterable
 from typing import Any
 
 import pytest
-import spead2
 
 from katgpucbf.vgpu.engine import VEngine
 from katgpucbf.vgpu.main import make_engine, parse_args
 
 
 @pytest.fixture
-async def engine(
-    request: pytest.FixtureRequest,
-    mock_recv_streams: list[spead2.InprocQueue],
-    engine_arglist: list[str],
-) -> AsyncGenerator[VEngine, None]:
+def make_engine_impl(engine_arglist: list[str]) -> Callable[[], VEngine]:
     """Create a dummy :class:`.VEngine` for unit testing.
 
     The command-line arguments are provided by a class-level `engine_arglist`
     fixture.
     """
     args = parse_args(engine_arglist)
-    server = make_engine(args)
-    await server.start()
-    yield server
-    await server.stop()
+    return functools.partial(make_engine, args)
 
 
 @pytest.fixture

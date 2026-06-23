@@ -43,7 +43,8 @@ combination is a candidate.
 
 import asyncio
 import itertools
-from collections.abc import AsyncGenerator
+from collections import deque
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
 from typing import Any
@@ -222,18 +223,70 @@ def vkgdr_handle(_vkgdr_handles: dict[pycuda.driver.Device, vkgdr.Vkgdr], device
 
 
 @pytest.fixture
-async def engine_client(engine: Engine) -> AsyncGenerator[aiokatcp.Client, None]:
+async def make_engine(make_engine_impl: Callable[[], Engine]) -> AsyncGenerator[Callable[[], Awaitable[Engine]], None]:
+    """Factory fixture for creating engines.
+
+    This is a variant of :func:`engine` that can be called multiple times.
+    The implementation details of creating the engine come from the
+    engine-specific func:`make_engine_impl` fixture, which just instantiates
+    the engine but does not start or stop it.
+    """
+    engines = []
+
+    async def factory() -> Engine:
+        engine = make_engine_impl()
+        await engine.start()
+        engines.append(engine)
+        return engine
+
+    yield factory
+    async with asyncio.TaskGroup() as tg:
+        for engine in engines:
+            tg.create_task(engine.stop())
+
+
+@pytest.fixture
+async def engine(
+    make_engine: Callable[[], Awaitable[Engine]],
+    mock_recv_streams: list[spead2.InprocQueue],
+) -> Engine:
+    """Create an engine instance for a test."""
+    return await make_engine()
+
+
+@pytest.fixture
+async def make_engine_client() -> AsyncGenerator[Callable[[Engine], Awaitable[aiokatcp.Client]], None]:
+    """Factory fixture for creating aiokatcp clients to servers.
+
+    The return value is a coroutine function that connects to a server.
+    The fixture teardown takes care of closing the client.
+    """
+    clients = []
+
+    async def factory(engine: Engine) -> aiokatcp.Client:
+        host, port = engine.sockets[0].getsockname()[:2]
+        async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
+            client = await aiokatcp.Client.connect(host, port)
+        clients.append(client)
+        return client
+
+    yield factory
+    async with asyncio.TaskGroup() as tg:
+        for client in clients:
+            client.close()
+            tg.create_task(client.wait_closed())
+
+
+@pytest.fixture
+async def engine_client(
+    engine: Engine, make_engine_client: Callable[[Engine], Awaitable[aiokatcp.Client]]
+) -> aiokatcp.Client:
     """Create a KATCP client for communicating with the dummy server.
 
     The `engine` fixture is not defined in at this level. It's
     defined differently for each type of engine, in lower-level sub-packages.
     """
-    host, port = engine.sockets[0].getsockname()[:2]
-    async with asyncio.timeout(5):  # To fail the test quickly if unable to connect
-        client = await aiokatcp.Client.connect(host, port)
-    yield client
-    client.close()
-    await client.wait_closed()
+    return await make_engine_client(engine)
 
 
 @pytest.fixture
@@ -243,17 +296,14 @@ def n_recv_streams() -> int:
 
 
 @pytest.fixture
-def mock_recv_streams(monkeypatch: pytest.MonkeyPatch, n_recv_streams: int) -> list[spead2.InprocQueue]:
-    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
+def make_mock_recv_streams(monkeypatch: pytest.MonkeyPatch) -> Callable[[int], list[spead2.InprocQueue]]:
+    """Factory fixture corresponding to :func:`mock_recv_streams`.
 
-    Returns
-    -------
-    queues
-        A list of in-process queue to use for sending data. The number of queues
-        in the list is determined by :func:`n_recv_streams`.
+    The returned factory function can be used multiple times to attach
+    different queues to different engines, but each engine must construct
+    all the requested streams before the fixture can be used again.
     """
-    queues = [spead2.InprocQueue() for _ in range(n_recv_streams)]
-    queue_iter = iter(queues)  # Each call to add_reader gets the next queue
+    queues: deque[spead2.InprocQueue] = deque()
 
     def add_reader(
         stream: spead2.recv.ChunkRingStream,
@@ -265,8 +315,29 @@ def mock_recv_streams(monkeypatch: pytest.MonkeyPatch, n_recv_streams: int) -> l
         buffer_size: int,
     ) -> None:
         """Mock implementation of :func:`katgpucbf.recv.add_reader`."""
-        queue = next(queue_iter)
+        queue = queues.popleft()
         stream.add_inproc_reader(queue)
 
+    def factory(n_recv_streams: int) -> list[spead2.InprocQueue]:
+        assert not queues, "previous make_mock_recv_streams queues were not all consumed"
+        my_queues = [spead2.InprocQueue() for _ in range(n_recv_streams)]
+        queues.extend(my_queues)
+        return my_queues
+
     monkeypatch.setattr("katgpucbf.recv.add_reader", add_reader)
-    return queues
+    return factory
+
+
+@pytest.fixture
+def mock_recv_streams(
+    make_mock_recv_streams: Callable[[int], list[spead2.InprocQueue]], n_recv_streams: int
+) -> list[spead2.InprocQueue]:
+    """Mock out :func:`katgpucbf.recv.add_reader` to use in-process queues.
+
+    Returns
+    -------
+    queues
+        A list of in-process queue to use for sending data. The number of queues
+        in the list is determined by :func:`n_recv_streams`.
+    """
+    return make_mock_recv_streams(n_recv_streams)
