@@ -35,6 +35,7 @@ from fractions import Fraction
 import aiokatcp
 
 import katgpucbf.configure_tools
+from katgpucbf import DEFAULT_DIG_HEAP_SAMPLES, DEFAULT_DIG_SAMPLE_BITS
 from katgpucbf.main import comma_split
 from katgpucbf.meerkat import BANDS
 
@@ -78,6 +79,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--band", default="l", choices=BANDS.keys(), help="Band ID [%(default)s]")
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
     parser.add_argument("--centre-frequency", type=float, help="Sky centre frequency in Hz [from --band]")
+    parser.add_argument(
+        "--dig-heap-samples",
+        type=int,
+        default=DEFAULT_DIG_HEAP_SAMPLES,
+        help="Number of samples per digitiser heap [%(default)s]",
+    )
+    parser.add_argument(
+        "--dig-sample-bits",
+        type=int,
+        default=DEFAULT_DIG_SAMPLE_BITS,
+        help="Number of bits per digitised sample [%(default)s]",
+    )
     parser.add_argument("--beams", type=int, default=0, help="Number of dual-polarisation wideband beams [%(default)s]")
     parser.add_argument("--narrowband", action="store_true", help="Enable a narrowband output [no]")
     parser.add_argument(
@@ -143,13 +156,18 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
         for pol in ["h", "v"]:
             name = f"m{number}{pol}"
             dig_names.append(name)
+            dig_config_common = {
+                "band": args.band[:1],
+                "adc_sample_rate": args.adc_sample_rate,
+                "centre_frequency": args.centre_frequency,
+                "bits_per_sample": args.dig_sample_bits,
+                "samples_per_heap": args.dig_heap_samples,
+            }
             if args.digitiser_address is None:
                 config["outputs"][name] = {
                     "type": "sim.dig.baseband_voltage",
-                    "band": args.band[:1],
-                    "adc_sample_rate": args.adc_sample_rate,
-                    "centre_frequency": args.centre_frequency,
                     "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
+                    **dig_config_common,
                 }
                 if args.sync_time is not None:
                     config["outputs"][name]["sync_time"] = args.sync_time
@@ -157,11 +175,9 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
                 config["inputs"][name] = {
                     "type": "dig.baseband_voltage",
                     "sync_time": args.sync_time,
-                    "band": args.band[:1],
-                    "adc_sample_rate": args.adc_sample_rate,
-                    "centre_frequency": args.centre_frequency,
                     "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
                     "url": f"spead://{next_dig_ip}+7:7148",
+                    **dig_config_common,
                 }
                 next_dig_ip += 8
     return dig_names
@@ -267,7 +283,7 @@ def generate_sdp(args: argparse.Namespace, outputs: dict) -> None:
 def generate_config(args: argparse.Namespace) -> dict:
     """Produce the configuration dict from the parsed command-line arguments."""
     config: dict = {
-        "version": "4.7",
+        "version": "4.9",
         "config": {"mirror_sensors": False},
         "inputs": {},
         "outputs": {},
