@@ -33,7 +33,7 @@ import spead2.send
 from katsdpsigproc.accel import roundup
 from numpy.typing import ArrayLike
 
-from katgpucbf import COMPLEX, DIG_SAMPLE_BITS, N_POLS
+from katgpucbf import COMPLEX, DEFAULT_DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu import METRIC_NAMESPACE
 from katgpucbf.fgpu.delay import wrap_angle
 from katgpucbf.fgpu.engine import (
@@ -700,7 +700,7 @@ class TestFEngine:
         "dig_sample_bits,send_sample_bits",
         [
             pytest.param(
-                DIG_SAMPLE_BITS, 4, marks=[pytest.mark.cmdline_args("--send-sample-bits=4"), pytest.mark.slow]
+                DEFAULT_DIG_SAMPLE_BITS, 4, marks=[pytest.mark.cmdline_args("--send-sample-bits=4"), pytest.mark.slow]
             ),
             pytest.param(12, 8, marks=pytest.mark.cmdline_args("--dig-sample-bits=12", "--send-sample-bits=8")),
         ],
@@ -913,7 +913,7 @@ class TestFEngine:
         dig_data = np.sum([self._make_tone(tone_timestamps, tone, 0) for tone in tones], axis=0)
         dig_data[1] = dig_data[0]  # Copy data from pol 0 to pol 1
         # Ensure we haven't saturated
-        assert np.max(np.abs(dig_data)) < 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        assert np.max(np.abs(dig_data)) < 2 ** (DEFAULT_DIG_SAMPLE_BITS - 1) - 1
 
         expected_first_timestamp = first_timestamp
         # The data should have as many samples as the input, minus a reduction
@@ -1329,7 +1329,7 @@ class TestFEngine:
         rng = np.random.default_rng(seed=1)
         # Should be low enough to limit saturation but high enough to minimise
         # impact of quantisation noise.
-        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        dig_max = 2 ** (DEFAULT_DIG_SAMPLE_BITS - 1) - 1
         sigma = 40.0
         dig_data = np.rint(rng.normal(scale=sigma, size=(2, n_samples)).clip(-dig_max, dig_max)).astype(int)
         out_data, timestamps = await self._send_data(

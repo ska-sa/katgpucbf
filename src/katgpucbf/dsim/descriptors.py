@@ -19,7 +19,7 @@
 import spead2
 import spead2.send.asyncio
 
-from .. import DIG_HEAP_SAMPLES
+from .. import DEFAULT_DIG_HEAP_SAMPLES
 from ..spead import (
     ADC_SAMPLES_ID,
     DIGITISER_ID_ID,
@@ -62,7 +62,7 @@ def create_descriptors_heap() -> spead2.send.Heap:
         ADC_SAMPLES_ID,
         "adc_samples",
         "Digitiser Raw ADC Sample Data",
-        shape=(DIG_HEAP_SAMPLES,),
+        shape=(DEFAULT_DIG_HEAP_SAMPLES,),
         format=[("i", 10)],
     )
     descriptor_heap = item_group.get_heap(descriptors="all", data="none")

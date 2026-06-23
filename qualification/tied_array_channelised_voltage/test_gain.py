@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from pytest_check import check
 
-from katgpucbf import DIG_SAMPLE_BITS
+from katgpucbf import DEFAULT_DIG_SAMPLE_BITS
 from katgpucbf.pytest_plugins.reporter import Reporter
 
 from ..cbf import CBFRemoteControl
@@ -46,7 +46,7 @@ async def test_gain(
     pcc = cbf.product_controller_client
 
     pdf_report.step("Configure the D-sim with Gaussian noise.")
-    dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+    dig_max = 2 ** (DEFAULT_DIG_SAMPLE_BITS - 1) - 1
     amplitude = 32 / dig_max
     await pcc.request("dsim-signals", cbf.dsim_names[0], f"common=nodither(wgn({amplitude}));common;common;")
     pdf_report.detail(f"Set D-sim with wgn amplitude={amplitude}.")

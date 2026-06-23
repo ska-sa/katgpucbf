@@ -27,7 +27,7 @@ import spead2.recv.asyncio
 import spead2.send.asyncio
 from spead2 import ItemGroup
 
-from katgpucbf import DIG_HEAP_SAMPLES
+from katgpucbf import DEFAULT_DIG_HEAP_SAMPLES
 from katgpucbf.dsim import send
 from katgpucbf.send import DescriptorSender
 from katgpucbf.utils import TimeConverter
@@ -121,7 +121,7 @@ async def test_sender(
     # Check that the descriptors received make sense.
     assert set(ig.keys()) == {"timestamp", "digitiser_id", "digitiser_status", "adc_samples"}
     assert ig["adc_samples"].format == [("i", 10)]
-    assert ig["adc_samples"].shape == (DIG_HEAP_SAMPLES,)
+    assert ig["adc_samples"].shape == (DEFAULT_DIG_HEAP_SAMPLES,)
 
     # Now proceed with DSim data using received descriptors (in ItemGroup)(ig)
     with PromDiff(namespace=send.METRIC_NAMESPACE) as prom_diff:
@@ -141,7 +141,7 @@ async def test_sender(
                 updated = ig.update(heap)
             except spead2.Stopped:
                 break
-            assert updated["timestamp"].value == i * DIG_HEAP_SAMPLES
+            assert updated["timestamp"].value == i * DEFAULT_DIG_HEAP_SAMPLES
             assert updated["digitiser_id"].value == pol
             assert updated["digitiser_status"].value == 0
             side = int(i >= switch_heap)
@@ -150,7 +150,7 @@ async def test_sender(
             np.testing.assert_equal(updated["adc_samples"].value, expected_unpacked)
         assert i == SIGNAL_HEAPS * repeats  # Check that all the data arrived
     assert switch_task is not None
-    assert (await switch_task) == switch_heap * DIG_HEAP_SAMPLES
+    assert (await switch_task) == switch_heap * DEFAULT_DIG_HEAP_SAMPLES
 
     # Check the Prometheus counters
     assert prom_diff.diff("output_heaps_total") == SIGNAL_HEAPS * repeats * N_POLS
