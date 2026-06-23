@@ -23,7 +23,7 @@ import numpy as np
 from katsdpsigproc import accel
 from katsdptelstate.endpoint import Endpoint
 
-from katgpucbf import DEFAULT_JONES_PER_BATCH, DIG_SAMPLE_BITS
+from katgpucbf import DEFAULT_DIG_SAMPLE_BITS, DEFAULT_JONES_PER_BATCH
 from katgpucbf.fgpu.compute import ComputeTemplate, NarrowbandConfig
 from katgpucbf.fgpu.engine import generate_ddc_weights, generate_pfb_weights
 from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
@@ -45,7 +45,7 @@ def main():
     parser.add_argument("--send-chunk-jones", type=int, default=8 * 1024 * 1024)
     parser.add_argument("--channels", type=int, default=32768)
     parser.add_argument("--jones-per-batch", type=int, default=DEFAULT_JONES_PER_BATCH)
-    parser.add_argument("--dig-sample-bits", type=int, default=DIG_SAMPLE_BITS)
+    parser.add_argument("--dig-sample-bits", type=int, default=DEFAULT_DIG_SAMPLE_BITS)
     parser.add_argument("--send-sample-bits", type=int, default=8, choices=[4, 8])
     parser.add_argument("--passes", type=int, default=1000)
     parser.add_argument("--ddc-taps", type=int)  # Default is computed from decimation

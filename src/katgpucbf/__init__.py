@@ -42,8 +42,8 @@ DEFAULT_RECV_BUFFER_SIZE: Final = 2**27  # 128 MiB
 DEFAULT_KATCP_HOST: Final = ""  # All interfaces
 DEFAULT_KATCP_PORT: Final = 7147
 DEFAULT_JONES_PER_BATCH: Final = 2**20
-DIG_HEAP_SAMPLES: Final = 4096
-DIG_SAMPLE_BITS: Final = 10
+DEFAULT_DIG_HEAP_SAMPLES: Final = 4096
+DEFAULT_DIG_SAMPLE_BITS: Final = 10
 ENGINE_DITHER_SEED_BITS: Final = 64
 #: Minimum update period (in seconds) for katcp sensors where the underlying
 #: value may update extremely rapidly.

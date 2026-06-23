@@ -25,10 +25,10 @@ import spead2.send.asyncio
 
 from katgpucbf import (
     BYTE_BITS,
+    DEFAULT_DIG_HEAP_SAMPLES,
+    DEFAULT_DIG_SAMPLE_BITS,
     DEFAULT_SEND_BUFFER_SIZE,
     DEFAULT_TTL,
-    DIG_HEAP_SAMPLES,
-    DIG_SAMPLE_BITS,
     SPEAD_DESCRIPTOR_INTERVAL_S,
     spead,
 )
@@ -80,8 +80,8 @@ def send_stream(
             heap_sets=[],  # Only needed for UdpIbvStream, which we're not using
             n_pols=N_POLS,
             adc_sample_rate=ADC_SAMPLE_RATE,
-            heap_samples=DIG_HEAP_SAMPLES,
-            sample_bits=DIG_SAMPLE_BITS,
+            heap_samples=DEFAULT_DIG_HEAP_SAMPLES,
+            sample_bits=DEFAULT_DIG_SAMPLE_BITS,
             max_heaps=SIGNAL_HEAPS * N_POLS,
             ttl=DEFAULT_TTL,
             interface_address="",
@@ -103,7 +103,10 @@ def heap_sets(timestamps: np.ndarray) -> Sequence[send.HeapSet]:
     """Two instances of :class:`~katgpucbf.dsim.send.HeapSet` with random payload bytes and one with zeros."""
     heap_sets = [
         send.HeapSet.create(
-            timestamps, [N_ENDPOINTS_PER_POL] * N_POLS, DIG_HEAP_SAMPLES * DIG_SAMPLE_BITS // BYTE_BITS, range(N_POLS)
+            timestamps,
+            [N_ENDPOINTS_PER_POL] * N_POLS,
+            DEFAULT_DIG_HEAP_SAMPLES * DEFAULT_DIG_SAMPLE_BITS // BYTE_BITS,
+            range(N_POLS),
         )
         for _ in range(3)
     ]
@@ -116,7 +119,7 @@ def heap_sets(timestamps: np.ndarray) -> Sequence[send.HeapSet]:
 @pytest.fixture
 def sender(send_stream: "spead2.send.asyncio.AsyncStream", heap_sets: Sequence[send.HeapSet]) -> send.Sender:
     """A :class:`~katgpucbf.dsim.Sender` using the first of :func:`heaps_sets`."""
-    return send.Sender(send_stream, heap_sets[0], DIG_HEAP_SAMPLES)
+    return send.Sender(send_stream, heap_sets[0], DEFAULT_DIG_HEAP_SAMPLES)
 
 
 @pytest.fixture
