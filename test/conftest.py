@@ -249,6 +249,7 @@ async def make_engine(make_engine_impl: Callable[[], Engine]) -> AsyncGenerator[
 async def engine(
     make_engine: Callable[[], Awaitable[Engine]],
     mock_recv_streams: list[spead2.InprocQueue],
+    mock_send_stream: list[spead2.InprocQueue],
 ) -> Engine:
     """Create an engine instance for a test."""
     return await make_engine()
