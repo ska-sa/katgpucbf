@@ -17,6 +17,7 @@
 """Unit tests for argument parsing."""
 
 import argparse
+import re
 
 import pytest
 from katsdptelstate.endpoint import Endpoint
@@ -51,8 +52,18 @@ class TestParseBeam:
 
     def test_bad_pol(self) -> None:
         """Test with a polarisation value that isn't 0 or 1."""
-        with pytest.raises(argparse.ArgumentTypeError, match="pol must be either 0 or 1"):
+        with pytest.raises(argparse.ArgumentTypeError, match="pol: must be either 0 or 1"):
             parse_beam("name=foo,dst=239.1.2.3:7148,pol=2")
+
+    def test_bad_send_enabled(self) -> None:
+        """Test with a send_enabled value that isn't true/false or 1/0.
+
+        This is shared with :func:`.parse_corrprod`.
+        """
+        with pytest.raises(
+            argparse.ArgumentTypeError, match=re.escape("send_enabled: must be a boolean value (true/false, 1/0)")
+        ):
+            parse_beam("name=foo,dst=239.1.2.3:7148,pol=1,send_enabled=maybe")
 
 
 class TestParseCorrprod:

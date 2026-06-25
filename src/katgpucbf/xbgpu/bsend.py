@@ -394,8 +394,6 @@ class BSend(Send):
     packet_payload
         Size, in bytes, for the output packets (tied array channelised voltage
         payload only; headers and padding are added to this).
-    send_enabled
-        Enable/Disable transmission.
     """
 
     descriptor_heap: spead2.send.Heap

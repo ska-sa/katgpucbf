@@ -71,23 +71,23 @@ logger = logging.getLogger(__name__)
 def _add_stream_args(parser: SubParser) -> None:
     parser.add_argument("name", type=str, required=True)
     parser.add_argument("dst", type=endpoint_parser(DEFAULT_PORT), required=True)
-    parser.add_argument("send_enabled", type=_parse_send_enabled, default=False)
+    parser.add_argument("send_enabled", type=_parse_bool, default=False)
 
 
 def _parse_pol(value: str) -> int:
     pol = int(value)
     if pol not in {0, 1}:
-        raise argparse.ArgumentTypeError("pol must be either 0 or 1")
+        raise argparse.ArgumentTypeError("must be either 0 or 1")
     return pol
 
 
-def _parse_send_enabled(value: str) -> bool:
+def _parse_bool(value: str) -> bool:
     if value.lower() in {"true", "1"}:
         return True
     elif value.lower() in {"false", "0"}:
         return False
     else:
-        raise argparse.ArgumentTypeError("send_enabled must be a boolean value (true/false, 1/0)")
+        raise argparse.ArgumentTypeError("must be a boolean value (true/false, 1/0)")
 
 
 def parse_beam(value: str) -> BOutput:
