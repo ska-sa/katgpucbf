@@ -274,6 +274,7 @@ class TestVEngine:
             await engine_client.wait_closed()
             await engine.stop()
 
+        assert len(packets[0]) == len(packets[1])
         assert len(packets[0]) > 0
         for i, (packet0, packet1) in enumerate(zip(packets[0], packets[1], strict=True)):
             # The first 8 bytes are the VTP sequence number.
