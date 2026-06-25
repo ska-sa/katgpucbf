@@ -62,7 +62,7 @@ jinja2==3.1.6
     # via aiomonitor
 katcbf-vlbi-resample==0.5.2
     # via katgpucbf (pyproject.toml)
-katcp-codec==0.2.0
+katcp-codec==0.2.1
     # via aiokatcp
 katsdpservices==1.4
     # via katgpucbf (pyproject.toml)
@@ -82,7 +82,7 @@ markupsafe==3.0.3
     # via
     #   jinja2
     #   mako
-msgpack==1.1.2
+msgpack==1.2.1
     # via katsdptelstate
 multidict==6.7.0
     # via
