@@ -49,6 +49,8 @@ from katgpucbf.utils import TimeConverter
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
 DEFAULT_TIMEOUT = 10.0
+IP_MULTICAST_ALL = 49
+
 logger = logging.getLogger(__name__)
 
 
@@ -667,21 +669,15 @@ class VTPDecoder:
         new_seq_id = struct.unpack("<Q", packet[:8])[0]
         frame = VDIFFrame.fromfile(io.BytesIO(packet[8:]))
         frame_id = frame.header["frame_nr"]
-        if self.framerate is not None:
-            self.seq_ids.append(new_seq_id)
-            self.seconds.append(frame.header["seconds"])
-            self.thread_ids.append(frame.header["thread_id"])
-            self.frame_ids.append(frame_id)
-
-        else:
+        if self.framerate is None:
             self.samples_per_frame = frame.header.samples_per_frame
             if TYPE_CHECKING:
                 assert self.samples_per_frame is not None
             self.framerate = round(self.bandwidth / self.samples_per_frame)
-            self.seq_ids.append(new_seq_id)
-            self.seconds.append(frame.header["seconds"])
-            self.thread_ids.append(frame.header["thread_id"])
-            self.frame_ids.append(frame_id)
+        self.seq_ids.append(new_seq_id)
+        self.seconds.append(frame.header["seconds"])
+        self.thread_ids.append(frame.header["thread_id"])
+        self.frame_ids.append(frame_id)
 
     async def decode_vdif_framesets(self) -> AsyncGenerator[tuple[list[int], tuple[int, int]], None]:
         """Slow computation: order and decode all the data captured so far.
@@ -717,10 +713,6 @@ class VTPDecoder:
                     break
                 thread_ids.add(thread_ids_dict[seq_id])
             if len(thread_ids) != self.n_threads:
-                print(f"Invalid thread ids: {key}")
-                print(f"thread_ids: {thread_ids}")
-                print(f"n_threads: {self.n_threads}")
-                print(f"seq_ids: {seq_ids}")
                 self.invalid_framesets.append(key)
                 continue
             if valid:
@@ -740,7 +732,7 @@ class VTPDecoder:
 class TiedArrayResampledVoltageReceiver:
     """Receive tied-array-resampled-voltage streams from the V-engines."""
 
-    max_packet_size = 5040
+    packet_size = 16 * 1024
 
     def __init__(
         self,
@@ -751,6 +743,10 @@ class TiedArrayResampledVoltageReceiver:
         self.multicast_groups = endpoint_list_parser(VTP_DEFAULT_PORT)(
             cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
         )
+        self.n_chans = cbf.init_sensors[f"{self.stream_names[0]}.n-chans"].value
+        self.pol_ordering = ast.literal_eval(cbf.init_sensors[f"{self.stream_names[0]}.pol-ordering"].value.decode())
+        self.n_threads = self.n_chans * len(self.pol_ordering)
+        self.veng_out_bits_per_sample = cbf.init_sensors[f"{self.stream_names[0]}.veng-out-bits-per-sample"].value
 
         # all multicast groups must use the same port
         port = self.multicast_groups[0].port
@@ -761,29 +757,22 @@ class TiedArrayResampledVoltageReceiver:
         self.scale_factor_timestamp = cbf.init_sensors[f"{self.stream_names[0]}.scale-factor-timestamp"].value
         self.power_int_time = cbf.init_sensors[f"{self.stream_names[0]}.power-int-time"].value
         self.bandwidth = cbf.init_sensors[f"{self.stream_names[0]}.bandwidth"].value
-        tacv_src_streams: list[str] = cbf.config["outputs"][self.stream_names[0]]["src_streams"]
-        n_threads = len(
-            endpoint_list_parser(VTP_DEFAULT_PORT)(
-                cbf.config["outputs"][tacv_src_streams[0]]["destination"].value.decode()
-            )
-        )
-        acv_name: str = cbf.config["outputs"][tacv_src_streams[0]]["src_streams"][0]
-        acv_config: dict[str, Any] = cbf.config["outputs"][acv_name]
-        self.n_inputs = len(acv_config["src_streams"])
+        # self.max_packet_size = ((samples_per_frame * veng_out_bits_per_sample) + 32*8 + 64) / 8
+
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.setsockopt(socket.SOL_SOCKET, 49, 0)
+        self.socket.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
         self.socket.bind(("", port))
         for multicast_group in self.multicast_groups:
             mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
             self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
             self.socket.setblocking(False)
-        self.vtp_decoder = VTPDecoder(n_threads, self.bandwidth)  # TODO: calculate number of threads
+        self.vtp_decoder = VTPDecoder(self.n_threads, self.bandwidth)
 
     async def _read(self) -> bytes:
         loop = asyncio.get_running_loop()
-        return await loop.sock_recv(self.socket, self.max_packet_size)
+        return await loop.sock_recv(self.socket, self.packet_size)
 
     async def listen(self) -> AsyncGenerator[tuple[int, bytes], None]:
         """Listen for packets from the v engine and store them in the VTPBuffer."""

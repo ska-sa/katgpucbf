@@ -251,8 +251,8 @@ async def check_v_timestamps(
         framesets_per_second[frameset_key[0]] += 1
 
     seconds = sorted(seconds)
-    for second, framesets in framesets_per_second.items():
-        if framesets != receiver.vtp_decoder.framerate and second not in [
+    for second, framesets_total in framesets_per_second.items():
+        if framesets_total != receiver.vtp_decoder.framerate and second not in [
             seconds[0],
             seconds[-1],
         ]:  # skip the first and last second as they could be incomplete
@@ -265,7 +265,6 @@ async def check_v_timestamps(
             f"Invalid framesets: {receiver.vtp_decoder.invalid_framesets}"
         )
     pdf_report.detail(f"{name}: Received {len(seconds)} V-Framesets.")
-    pdf_report.step(f"timestamps {seconds}")
     elapsed = seconds[-1] - seconds[0]
     pdf_report.detail(f"{name}: received data over {elapsed:.3f}s.")
     min_time = TEST_TIME - TEST_TIME_TOL
