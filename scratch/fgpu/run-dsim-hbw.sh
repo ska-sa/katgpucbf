@@ -17,7 +17,9 @@ for i in 0 1; do
         --affinity "${cpu[$i]}" \
         --ibv \
         --interface "${iface[$i]}" \
-        --adc-sample-rate ${adc_sample_rate:-7000000000} \
+        --adc-sample-rate ${adc_sample_rate:-5992000000} \
+        --sample-bits ${dig_sample_bits:-6} \
+        --heap-samples ${dig_heap_samples:-8192} \
         --ttl 2 \
         --katcp-port $(($i + 7140)) \
         --prometheus-port $(($i + 7150)) \
