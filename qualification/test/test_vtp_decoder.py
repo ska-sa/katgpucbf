@@ -1,5 +1,4 @@
 #! /usr/bin/env python3
-# ruff: noqa
 
 ################################################################################
 # Copyright (c) 2026, National Research Foundation (SARAO)
@@ -17,14 +16,12 @@
 # limitations under the License.
 ################################################################################
 
-"""Sample checks for :class:`qualification.recv.VTPDecoder`.
+"""Check for :class:`qualification.recv.VTPDecoder`.
 
 Run directly::
-
     qualification/.venv/bin/python qualification/test/test_vtp_decoder.py
 """
 
-from qualification.recv import VTPBuffer, VTPDecoder
 import asyncio
 import io
 import struct
@@ -33,6 +30,8 @@ from pathlib import Path
 
 import numpy as np
 from baseband.vdif import VDIFFrame
+
+from qualification.recv import VTPBuffer, VTPDecoder
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -62,10 +61,7 @@ def make_vtp_packet(
 
 
 def check_samples_per_frame_from_first_frame() -> None:
-    """
-    `check_samples_per_frame_from_first_frame` checks that the first
-    frame sets samples_per_frame.
-    """
+    """`check_samples_per_frame_from_first_frame` checks that the first frame sets the samples_per_frame."""
     buffer = VTPBuffer()
     buffer.add_packet(make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0))
     assert buffer.samples_per_frame == SAMPLES_PER_FRAME
@@ -73,10 +69,7 @@ def check_samples_per_frame_from_first_frame() -> None:
 
 
 async def check_decode_vdif_framesets_filters_incomplete_threads() -> None:
-    """
-    `check_decode_vdif_framesets_filters_incomplete_framesets` checks that
-    decode_vdif_framesets correctly filters out framesets with incomplete threads.
-    """
+    """`check_decode_vdif_framesets_filters_incomplete_threads` checks that decode_vdif_framesets correctly filters out framesets with incomplete threads."""  # noqa: E501
     buffer = VTPBuffer()
     # 2 theads data only
     buffer.add_packet(make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0))
@@ -94,10 +87,7 @@ async def check_decode_vdif_framesets_filters_incomplete_threads() -> None:
 
 
 async def check_decode_vdif_framesets_unordered() -> None:
-    """
-    `check_decode_vdif_framesets_unordered` checks that decode_vdif_framesets
-    yields on each frameset boundary.
-    """
+    """`check_decode_vdif_framesets_unordered` checks that decode_vdif_framesets yields on each frameset boundary."""
     buffer = VTPBuffer()
     buffer.add_packet(make_vtp_packet(5, frame_nr=10, seconds=99, thread_id=0))
     buffer.add_packet(make_vtp_packet(6, frame_nr=0, seconds=100, thread_id=0))
@@ -119,10 +109,7 @@ async def check_decode_vdif_framesets_unordered() -> None:
 
 
 async def check_decode_vdif_framesets_second_border() -> None:
-    """
-    `check_decode_vdif_framesets_second_border` checks that decode_vdif_framesets
-    yields on each frameset boundary over multiple seconds.
-    """
+    """`check_decode_vdif_framesets_second_border` checks that decode_vdif_framesets yields on each frameset boundary over multiple seconds."""  # noqa: E501
     buffer = VTPBuffer()
     buffer.add_packet(make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0))
     buffer.add_packet(make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=1))
