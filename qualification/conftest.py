@@ -599,7 +599,7 @@ async def cbf(
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
             await pcc.request("beam-weights", name, *((1.0,) * n_inputs))
         elif conf["type"] == "gpucbf.tied_array_resampled_voltage":
-            await pcc.request("delays", name, "0.0")
+            await pcc.request("vlbi-delay", name, "0.0")
 
     for name in capture_start_streams:
         await pcc.request("capture-start", name)
