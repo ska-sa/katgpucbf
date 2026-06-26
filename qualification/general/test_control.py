@@ -261,9 +261,9 @@ async def check_vdif_timestamps(
     with check:
         assert len(incomplete_seconds) <= 2, f"Incomplete seconds: {incomplete_seconds}"
         assert len(seconds) > 0, f"No valid V framesets received on stream {name}"
-        assert len(receiver.invalid_framesets) <= 20, f"Invalid framesets: {receiver.invalid_framesets}"
+        assert len(receiver.invalid_framesets) <= 2, f"Invalid framesets: {receiver.invalid_framesets}"
     pdf_report.detail(f"{name}: Received {len(seconds)} VLBI framesets.")
-    elapsed = seconds[-1] - seconds[0]
+    elapsed = (seconds[-1] + 1) - seconds[0]
     pdf_report.detail(f"{name}: received data over {elapsed:.3f}s.")
     min_time = TEST_TIME - TEST_TIME_TOL
     with check:
@@ -275,10 +275,9 @@ async def check_vdif_timestamps(
             prev_seq_id = seq_id
 
         assert missed_sequences <= 2, f"Missed {missed_sequences} sequence IDs"
-        if missed_sequences > 0:
-            pdf_report.detail(f"{name}: missed {missed_sequences} frames.")
-
         assert elapsed >= min_time, f"Less than {min_time}s of data received for {name}"
+
+    pdf_report.detail(f"{name}: missed {missed_sequences} frames.")
 
 
 async def test_control(  # noqa: D103
