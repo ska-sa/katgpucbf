@@ -17,7 +17,6 @@
 """Test that controlling a correlator doesn't cause data to be lost."""
 
 import asyncio
-import logging
 import math
 import time
 from collections.abc import AsyncGenerator, Awaitable
@@ -37,8 +36,6 @@ from ..recv import (
     TiedArrayResampledVoltageReceiver,
     XBReceiver,
 )
-
-logger = logging.getLogger(__name__)
 
 #: Time to run the test for (in seconds)
 TEST_TIME = 30.0
@@ -94,11 +91,8 @@ async def consume_chunks(receiver: XBReceiver, timestamps: list[int]) -> None:
             timestamps.append(timestamp)
 
 
-async def consume_v_chunks(receiver: TiedArrayResampledVoltageReceiver) -> None:
-    """Consume chunks from a receiver until it is closed.
-
-    The timestamps of the complete chunks are appended to `timestamps`.
-    """
+async def consume_vlbi_chunks(receiver: TiedArrayResampledVoltageReceiver) -> None:
+    """Consume VLBI chunks from a receiver until it is closed."""
     await receiver.listen()
 
 
@@ -228,9 +222,6 @@ def check_timestamps(
         assert missing <= 2, f"{missing} of {expected} chunks missing for {name}"
 
 
-# TODO: just use another interface instead so these can be reused.
-
-
 async def check_vdif_timestamps(
     name: str,
     receiver: TiedArrayResampledVoltageReceiver,
@@ -314,7 +305,7 @@ async def test_control(  # noqa: D103
         tasks.append(tg.create_task(consume_chunks(receive_baseline_correlation_products, timestamps_bcp)))
         tasks.append(tg.create_task(consume_chunks(receive_tied_array_channelised_voltage, timestamps_tacv)))
         if vlbi:
-            tasks.append(tg.create_task(consume_v_chunks(receive_tied_array_resampled_voltage)))
+            tasks.append(tg.create_task(consume_vlbi_chunks(receive_tied_array_resampled_voltage)))
         pdf_report.step(f"Run correlator for {TEST_TIME}s.")
         await asyncio.sleep(TEST_TIME)
         pdf_report.detail("Stop asynchronous tasks.")

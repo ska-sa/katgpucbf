@@ -599,7 +599,7 @@ async def cbf(
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
             await pcc.request("beam-weights", name, *((1.0,) * n_inputs))
         elif conf["type"] == "gpucbf.tied_array_resampled_voltage":
-            pass  # fill in later
+            await pcc.request("delays", name, "0.0")
 
     for name in capture_start_streams:
         await pcc.request("capture-start", name)
@@ -671,11 +671,11 @@ async def receive_tied_array_channelised_voltage(
 @pytest.fixture
 async def receive_tied_array_resampled_voltage(
     cbf: CBFRemoteControl,
-    vlbi: bool,
+    capture_start_streams: list[str],
 ) -> TiedArrayResampledVoltageReceiver | None:
     """Get the receiver for ingesting the tied-array-resampled-voltage streams."""
     receiver = cbf.tied_array_resampled_voltage_receiver
     # Receiver is only created when vlbi is enabled.
-    if vlbi:
+    if "tied-array-resampled-voltage" in capture_start_streams:
         assert receiver is not None
     return receiver
