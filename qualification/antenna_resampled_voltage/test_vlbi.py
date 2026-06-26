@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c)2026, National Research Foundation (SARAO)
+# Copyright (c) 2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -38,7 +38,7 @@ async def test_vlbi_vdif(
     """
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frame.")
-    frameset, key = await receiver.get_frameset()
-    pdf_report.step("Verify we have `log_2(1) * polarizations` threads in the set.")
+    frameset, _ = await receiver.get_frameset()
+    pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
     with check:
         assert len(frameset) == receiver.n_chans * len(receiver.pol_ordering)

@@ -673,11 +673,9 @@ async def receive_tied_array_resampled_voltage(
     cbf: CBFRemoteControl,
     vlbi: bool,
 ) -> TiedArrayResampledVoltageReceiver | None:
-    """Get the receive stream for ingesting the tied-array-resampled-voltage streams."""
+    """Get the receiver for ingesting the tied-array-resampled-voltage streams."""
     receiver = cbf.tied_array_resampled_voltage_receiver
-    # we don't have a stream for vlbi for all cases.
+    # Receiver is only created when vlbi is enabled.
     if vlbi:
         assert receiver is not None
-
-    # streams from v engine is not spead2
     return receiver
