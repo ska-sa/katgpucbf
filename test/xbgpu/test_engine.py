@@ -17,7 +17,7 @@
 """Unit tests for XBEngine module."""
 
 from collections import Counter
-from collections.abc import AsyncGenerator, Callable, Iterable
+from collections.abc import Callable, Iterable
 from itertools import chain
 from logging import WARNING
 from typing import Final
@@ -1032,20 +1032,15 @@ class TestXBEngine:
         return args
 
     @pytest.fixture
-    async def engine(
+    def make_engine_impl(
         self,
         context: AbstractContext,
         vkgdr_handle: vkgdr.Vkgdr,
         engine_arglist: list[str],
-    ) -> AsyncGenerator[XBEngine, None]:
-        """Create and start an engine based on the fixture values."""
+    ) -> Callable[[], XBEngine]:
+        """Create an engine based on the fixture values."""
         args = parse_args(engine_arglist)
-        server, _ = make_engine(context, vkgdr_handle, args)
-        await server.start()
-
-        yield server
-
-        await server.stop()
+        return lambda: make_engine(context, vkgdr_handle, args)[0]
 
     @pytest.mark.combinations(
         "n_ants, n_channels, n_jones_per_batch, missing_antenna, heap_accumulation_threshold",

@@ -17,10 +17,11 @@
 """Unit tests for :mod:`katgpucbf.vgpu.engine`."""
 
 import asyncio
+import functools
 import io
 import math
 import struct
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Final
 
 import aiokatcp
@@ -32,7 +33,7 @@ from astropy.time import Time
 from baseband.vdif import VDIFFrame
 
 from katgpucbf import COMPLEX, N_POLS
-from katgpucbf.utils import TimeConverter
+from katgpucbf.utils import Engine, TimeConverter
 from katgpucbf.vgpu.engine import VEngine, _CaptureSession
 from katgpucbf.vgpu.recv import Layout
 
@@ -70,28 +71,35 @@ async def _send_data(
     chunks: int,
     mock_recv_streams: list[spead2.InprocQueue],
     factory: Callable[[np.ndarray], None] | None = None,
+    first_timestamp: int = FIRST_TIMESTAMP,
 ) -> None:
     """Send data to the engine.
 
     If `factory` is given, it is passed the data and should fill in the values. If not
     given, zeros are sent.
     """
-    assert FIRST_TIMESTAMP % layout.chunk_timestamp_step == 0
+    assert first_timestamp % layout.chunk_timestamp_step == 0
     beng = _make_beng(mock_recv_streams)
     data = np.zeros(
         (N_POLS, chunks * layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8
     )
     if factory is not None:
         factory(data)
-    for heap in gen_heaps(layout, data, FIRST_TIMESTAMP):
+    for heap in gen_heaps(layout, data, first_timestamp):
         await beng.async_send_heap(heap.heap, substream_index=heap.substream_index)
+
+
+def _randomize(data: np.ndarray, seed: int) -> None:
+    """Randomize `data` in place, using a fixed seed."""
+    rng = np.random.default_rng(seed=seed)
+    data[:] = rng.integers(-127, 127, data.shape, data.dtype)
 
 
 class TestVEngine:
     """Test :class:`.VEngine`."""
 
     @pytest.fixture
-    def capture_complete_event(self, engine: VEngine, monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
+    async def capture_complete_event(self, engine: VEngine, monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
         """Asyncio event that is set when :meth:`._CaptureSession._capture_complete` is called."""
         capture_complete_event = asyncio.Event()
 
@@ -210,3 +218,80 @@ class TestVEngine:
         await engine_client.request("capture-stop")
         with pytest.raises(aiokatcp.FailReply, match="no capture in progress"):
             await engine_client.request("capture-stop")
+
+    async def test_vlbi_delay_rounding(self, engine_client: aiokatcp.Client) -> None:
+        """Test that the ``?vlbi-delay`` is rounded to the nearest output sample count."""
+        # Try to set a delay equating to 33.25 samples, to ensure it gets rounded
+        # to a sample boundary properly.
+        delay_samples = 33
+        delay = (delay_samples + 0.25) / SEND_BANDWIDTH
+        await engine_client.request("vlbi-delay", delay)
+        actual_delay = await engine_client.sensor_value("delay", float)
+        assert actual_delay * SEND_BANDWIDTH == pytest.approx(delay_samples)
+
+    async def test_vlbi_delay(
+        self,
+        make_engine: Callable[[], Awaitable[VEngine]],
+        make_engine_client: Callable[[Engine], Awaitable[aiokatcp.Client]],
+        make_mock_recv_streams: Callable[[int], list[spead2.InprocQueue]],
+        capture_complete_event: asyncio.Event,
+        sendmsg_packets: list[bytes],
+    ) -> None:
+        """Test effect of ?vlbi-delay on the signal path.
+
+        The same input data is sent twice to two different engines.
+        """
+        chunks = 60  # Enough to ensure some amount of data comes out
+        data_factory = functools.partial(_randomize, seed=123234)
+        # Note: the test requires the delay to be a whole number of seconds
+        # because otherwise the power normalisation intervals don't line up.
+        delays = [0.0, 1.0]
+
+        packets = []  # Two elements, each a list of packets for the pass
+        for delay in delays:
+            queues = make_mock_recv_streams(N_POLS)
+            engine = await make_engine()
+            engine_client = await make_engine_client(engine)
+            await engine_client.request("vlbi-delay", delay)
+            await engine_client.request("capture-start", 0)
+            await _send_data(
+                engine.config.recv_config.layout,
+                chunks,
+                queues,
+                factory=data_factory,
+            )
+            for queue in queues:
+                queue.stop()
+            await capture_complete_event.wait()
+            await engine_client.request("capture-stop")
+            packets.append(list(sendmsg_packets))
+            # Prepare for the next pass
+            sendmsg_packets.clear()
+            capture_complete_event.clear()
+            # The fixture cleanup will do this, but only at the end of the
+            # test. Release the resources now.
+            engine_client.close()
+            await engine_client.wait_closed()
+            await engine.stop()
+
+        assert len(packets[0]) == len(packets[1])
+        assert len(packets[0]) > 0
+        for i, (packet0, packet1) in enumerate(zip(packets[0], packets[1], strict=True)):
+            # The first 8 bytes are the VTP sequence number.
+            assert packet0[:8] == packet1[:8]
+            with io.BytesIO(packet0[8:]) as vdif0:
+                frame0 = VDIFFrame.fromfile(vdif0)
+            with io.BytesIO(packet1[8:]) as vdif1:
+                frame1 = VDIFFrame.fromfile(vdif1)
+            np.testing.assert_equal(frame0.data, frame1.data, f"Payload mismatch on packet {i}")
+            # Should be 1 second apart
+            assert frame0["ref_epoch"] == frame1["ref_epoch"]
+            assert frame0["seconds"] == frame1["seconds"] - 1
+            assert frame0["frame_nr"] == frame1["frame_nr"]
+
+    async def test_vlbi_delay_while_capturing(self, engine_client: aiokatcp.Client) -> None:
+        """Test that ``vlbi-delay`` fails if used during capture."""
+        await engine_client.request("capture-start", 0)
+        with pytest.raises(aiokatcp.FailReply, match="cannot set vlbi-delay while capturing"):
+            await engine_client.request("vlbi-delay", 0.1)
+        await engine_client.request("capture-stop")
