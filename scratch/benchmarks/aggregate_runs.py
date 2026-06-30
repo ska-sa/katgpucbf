@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-# noqa
 
 """Aggregate the output of multiple runs of the benchmark.
 
-Reads all .txt.n files from the xbgpu_calibration results directory,
+Reads all .txt.n<n> files from the xbgpu_calibration results directory,
 sums the last 3 columns per frequency, and writes an output file.
+
+Example command to rename existing files for each run:
+```ls ./ | xargs -I file sh -c "mv file file.n0"```
+Then they can all be in the same directory and be aggregated:
+    calibrate-n2-1.txt.n0
+    calibrate-n2-1.txt.n1
 """
 
 import argparse
@@ -28,9 +33,9 @@ files = sorted(glob.glob(os.path.join(args.directory, "*")))
 if not files:
     raise SystemExit(f"No .txt.n files found in {args.directory}")
 
-sums: dict[int, list[int]] = {}
-freq_order: list[int] = []
-seen: set[int] = set()
+sums: dict[float, list[int]] = {}
+freq_order: list[float] = []
+seen: set[float] = set()
 
 for path in files:
     with open(path) as f:
@@ -39,7 +44,7 @@ for path in files:
             if not line:
                 continue
             parts = line.split()
-            freq = parts[0]
+            freq = float(parts[0])
             vals = [int(v) for v in parts[-3:]]
             if freq not in seen:
                 freq_order.append(freq)
