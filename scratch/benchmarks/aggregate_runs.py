@@ -44,7 +44,11 @@ for path in files:
             if not line:
                 continue
             parts = line.split()
-            freq = float(parts[0])
+            try:
+                freq = float(parts[0])
+            except ValueError:
+                print(f"Warning: could not convert {parts[0]} to float, skipping line: {line} in {path}")
+                continue
             vals = [int(v) for v in parts[-3:]]
             if freq not in seen:
                 freq_order.append(freq)
