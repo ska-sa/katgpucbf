@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# noqa
 
 """Aggregate the output of multiple runs of the benchmark.
 
@@ -38,11 +39,12 @@ for path in files:
             if not line:
                 continue
             parts = line.split()
-            freq = int(parts[0])
+            freq = parts[0]
             vals = [int(v) for v in parts[-3:]]
             if freq not in seen:
                 freq_order.append(freq)
                 seen.add(freq)
+                sums[freq] = [0, 0, 0]
             for i in range(3):
                 sums[freq][i] += vals[i]
 
