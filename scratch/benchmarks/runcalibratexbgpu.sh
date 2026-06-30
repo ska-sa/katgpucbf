@@ -21,6 +21,8 @@ is_ssh_failure() {
   grep -qiE 'asyncssh|SSH.*(fail|error|closed|lost|reset|disconnect)|ConnectionLost|DisconnectError|ChannelOpenError' "$logfile"
 }
 
+# n = 2: --high 5850000000 --low 5600000000
+# n = 4: --high 3350000000 --low 3100000000
 run_benchmark() {
   local outfile=$1
   ./benchmark_xbgpu.py -vvv -n "$n" --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 2 --calibrate --high 5850000000 --low 5600000000 --multicast-groups 239.192.160.0/19 >"$outfile" 2>&1
