@@ -168,9 +168,10 @@ pipeline {
           registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
           /* Use the Jenkins-specific stage of the Dockerfile as the image for
-           * testing. This provides the appropriate dependencies.
+           * testing. This provides the appropriate dependencies. The label
+           * is just to assist with garbage collection.
            */
-          additionalBuildArgs '--target=jenkins'
+          additionalBuildArgs "--target=jenkins --label=za.ac.kat.dpp.jenkins.build=${env.BUILD_ID}"
 
           /* The following arguments needs to be specified in order for the container
            * to launch correctly.
