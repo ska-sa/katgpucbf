@@ -56,3 +56,5 @@ RECV_TASK_NAME: Final[str] = "Receiver Loop"
 SEND_TASK_NAME: Final[str] = "Sender Loop"
 DESCRIPTOR_TASK_NAME: Final[str] = "Descriptor Loop"
 TIME_SYNC_TASK_NAME: Final[str] = "Time Sync Check Loop"
+
+VTP_DEFAULT_PORT = 52030

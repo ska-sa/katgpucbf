@@ -35,13 +35,22 @@ from katgpucbf.meerkat import BANDS
 from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
 
 from .cbf import CBFCache, CBFRemoteControl, FailedCBF
-from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+from .recv import (
+    DEFAULT_TIMEOUT,
+    BaselineCorrelationProductsReceiver,
+    TiedArrayChannelisedVoltageReceiver,
+    TiedArrayResampledVoltageReceiver,
+)
 
 pytest_plugins = ["katgpucbf.pytest_plugins.numpy_dump", "katgpucbf.pytest_plugins.reporter_plugin"]
 logger = logging.getLogger(__name__)
 FULL_ANTENNAS = [1, 4, 8, 20, 32, 40, 64, 80]
 MAX_PASS_FRACTION = 0.7  # Maximum fraction of total narrowband bandwidth to use as pass_bandwidth
-_CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
+_CAPTURE_TYPES = {
+    "gpucbf.baseline_correlation_products",
+    "gpucbf.tied_array_channelised_voltage",
+    "gpucbf.tied_array_resampled_voltage",
+}
 
 # Storing ini options this way makes pytest.ini easier to validate up-front.
 IniOption = namedtuple("IniOption", ["name", "help", "type", "default"], defaults=[None])
@@ -528,6 +537,7 @@ async def cbf(
     core_allocator: CoreAllocator,
     capture_start_streams: list[str],
     tied_array_channelised_voltage_receive_streams: list[str],
+    vlbi: bool,
     pdf_report: Reporter,
 ) -> AsyncGenerator[CBFRemoteControl, None]:
     """Set up a CBF for a single test.
@@ -564,6 +574,12 @@ async def cbf(
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
+    if cbf.tied_array_resampled_voltage_receiver is None and vlbi:
+        logger.info("Subscribing to tied-array-resampled-voltage")
+        cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
+            cbf=cbf,
+            interface_address=interface_address,
+        )
 
     # Reset the CBF to default state
     pcc = cbf.product_controller_client
@@ -582,6 +598,8 @@ async def cbf(
             await pcc.request("beam-quant-gains", name, 1.0)
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
             await pcc.request("beam-weights", name, *((1.0,) * n_inputs))
+        elif conf["type"] == "gpucbf.tied_array_resampled_voltage":
+            await pcc.request("vlbi-delay", name, "0.0")
 
     for name in capture_start_streams:
         await pcc.request("capture-start", name)
@@ -647,4 +665,17 @@ async def receive_tied_array_channelised_voltage(
         if config["type"] == "gpucbf.tied_array_channelised_voltage"
     ):
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
+    return receiver
+
+
+@pytest.fixture
+async def receive_tied_array_resampled_voltage(
+    cbf: CBFRemoteControl,
+    capture_start_streams: list[str],
+) -> TiedArrayResampledVoltageReceiver | None:
+    """Get the receiver for ingesting the tied-array-resampled-voltage streams."""
+    receiver = cbf.tied_array_resampled_voltage_receiver
+    # Receiver is only created when vlbi is enabled.
+    if "tied-array-resampled-voltage" in capture_start_streams:
+        assert receiver is not None
     return receiver

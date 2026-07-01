@@ -68,6 +68,7 @@ UNKNOWN = "unknown"
 GROUP_NAMES = {
     "general": "General tests",
     "antenna_channelised_voltage": "Antenna channelised voltage tests",
+    "antenna_resampled_voltage": "Antenna resampled voltage tests",
     "baseline_correlation_products": "Baseline correlation products tests",
     "tied_array_channelised_voltage": "Tied-array channelised voltage tests",
     "demo": "Report demonstration tests",

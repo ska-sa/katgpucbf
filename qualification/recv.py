@@ -19,9 +19,12 @@
 import ast
 import asyncio
 import ctypes
+import io
 import logging
 import math
 import os
+import socket
+import struct
 from collections.abc import AsyncGenerator, Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -31,6 +34,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
+from baseband.vdif import VDIFFrame
 from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from numpy.typing import NDArray
@@ -38,13 +42,15 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
-from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DIG_SAMPLE_BITS
+from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DIG_SAMPLE_BITS, VTP_DEFAULT_PORT
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
 DEFAULT_TIMEOUT = 10.0
+IP_MULTICAST_ALL = 49
+
 logger = logging.getLogger(__name__)
 
 
@@ -642,3 +648,179 @@ def create_tied_array_channelised_voltage_receive_stream_group(
             sink=stream_group,
         ),
     )
+
+
+class VTPBuffer:
+    """Data for storing VTP and VDIF stream statistics and validating framesets."""
+
+    def __init__(self) -> None:
+        self.seq_ids: list[int] = []
+        self.thread_ids: list[int] = []
+        self.seconds: list[int] = []
+        self.frame_ids: list[int] = []
+        self.samples_per_frame: int | None = None
+
+    def add_packet(self, packet: bytes) -> None:
+        """Add packet statistics to the buffer."""
+        new_seq_id = struct.unpack("<Q", packet[:8])[0]
+        frame = VDIFFrame.fromfile(io.BytesIO(packet[8:]))
+        frame_id = frame.header["frame_nr"]
+        if self.samples_per_frame is None:
+            self.samples_per_frame = frame.header.samples_per_frame
+        self.seq_ids.append(new_seq_id)
+        self.seconds.append(frame.header["seconds"])
+        self.thread_ids.append(frame.header["thread_id"])
+        self.frame_ids.append(frame_id)
+
+    def clear(self) -> None:
+        """Close the buffer."""
+        self.seq_ids.clear()
+        self.thread_ids.clear()
+        self.seconds.clear()
+        self.frame_ids.clear()
+
+
+class VTPDecoder:
+    """Decoder for sorting VTP and VDIF stream statistics and validating VDIF framesets."""
+
+    def __init__(self, vtp_data: VTPBuffer, n_threads: int) -> None:
+        """Initialize the VTPDecoder.
+
+        Groups the sequence IDs, frame IDs, thread IDs and seconds ordered by sequence ID.
+
+        Parameters
+        ----------
+        vtp_data
+            VTPBuffer containing the VTP and VDIF stream statistics.
+        n_threads
+            Number of threads in the VDIF stream.
+        framerate
+            Framerate of the VDIF stream.
+        """
+        self.n_threads = n_threads
+        if TYPE_CHECKING:
+            assert vtp_data.samples_per_frame is not None
+        self.invalid_framesets = list[tuple[int, int]]()
+        self.frame_seq_map = dict[tuple[int, int], list[int]]()
+        self.seconds_dict = dict[int, int](zip(vtp_data.seq_ids, vtp_data.seconds, strict=True))
+        self.frame_ids_dict = dict[int, int](zip(vtp_data.seq_ids, vtp_data.frame_ids, strict=True))
+        self.thread_ids_dict = dict[int, int](zip(vtp_data.seq_ids, vtp_data.thread_ids, strict=True))
+
+        seq_ids = sorted(vtp_data.seq_ids)
+        for seq_id in seq_ids:
+            frame_id = self.frame_ids_dict[seq_id]
+            second = self.seconds_dict[seq_id]
+            key = (second, frame_id)
+            if key not in self.frame_seq_map:
+                self.frame_seq_map[key] = list[int]()
+            self.frame_seq_map[key].append(seq_id)
+
+    async def vtp_framesets(self) -> AsyncGenerator[tuple[list[int], tuple[int, int]], None]:
+        """
+        Decode the VTP Sequence IDs for a complete VDIF frameset.
+
+        Stores incomplete framesets in :attr:`invalid_framesets`.
+
+        Returns
+        -------
+        list[int]
+            Sequence IDs for a complete VDIF frameset and the key (second, frame_id).
+        tuple[int, int]
+            Key (second, frame_id) for the VDIF frameset.
+        """
+        for key, seq_ids in self.frame_seq_map.items():
+            valid = True
+            thread_ids = set[int]()
+            if len(seq_ids) != self.n_threads:
+                self.invalid_framesets.append(key)
+                continue
+            for seq_id in seq_ids:
+                if self.seconds_dict[seq_id] != self.seconds_dict[seq_ids[0]]:
+                    self.invalid_framesets.append(key)
+                    valid = False
+                    break
+                thread_ids.add(self.thread_ids_dict[seq_id])
+            if len(thread_ids) != self.n_threads:
+                self.invalid_framesets.append(key)
+                continue
+            if valid:
+                yield (seq_ids.copy(), key)
+
+
+class TiedArrayResampledVoltageReceiver:
+    """Receive tied-array-resampled-voltage streams from the V-engines."""
+
+    packet_size = 16 * 1024
+
+    def __init__(
+        self,
+        cbf: CBFRemoteControl,
+        interface_address: str,
+    ) -> None:
+        self.stream_names = ["tied-array-resampled-voltage"]
+        self.multicast_groups = endpoint_list_parser(VTP_DEFAULT_PORT)(
+            cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
+        )
+        self.n_chans = cbf.init_sensors[f"{self.stream_names[0]}.n-chans"].value
+        self.pol_ordering = ast.literal_eval(cbf.init_sensors[f"{self.stream_names[0]}.pol-ordering"].value.decode())
+        self.n_threads = self.n_chans * len(self.pol_ordering)
+        self.veng_out_bits_per_sample = cbf.init_sensors[f"{self.stream_names[0]}.veng-out-bits-per-sample"].value
+
+        # all multicast groups must use the same port
+        port = self.multicast_groups[0].port
+        for multicast_group in self.multicast_groups:
+            if multicast_group.port != port:
+                raise ValueError("All multicast groups must use the same port")
+
+        self.scale_factor_timestamp = cbf.init_sensors[f"{self.stream_names[0]}.scale-factor-timestamp"].value
+        self.power_int_time = cbf.init_sensors[f"{self.stream_names[0]}.power-int-time"].value
+        self.bandwidth = cbf.init_sensors[f"{self.stream_names[0]}.bandwidth"].value
+
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
+        self.socket.bind(("", port))
+        self.vtp_buffer = VTPBuffer()
+        for multicast_group in self.multicast_groups:
+            mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
+            self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            self.socket.setblocking(False)
+
+        self.framerate = None
+        self.invalid_framesets = list[tuple[int, int]]()
+
+    async def _read(self) -> None:
+        loop = asyncio.get_running_loop()
+        self.vtp_buffer.add_packet(await loop.sock_recv(self.socket, self.packet_size))
+
+    async def listen(self) -> None:
+        """Listen for packets from the v engine and store them in the VTPDecoder."""
+        while True:
+            await self._read()
+
+    async def framesets(self) -> AsyncGenerator[tuple[list[int], tuple[int, int]], None]:
+        """Decode the VDIF framesets in the buffer."""
+        vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
+        if self.framerate is None and self.vtp_buffer.samples_per_frame is not None:
+            self.framerate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
+        async for set_seq_ids, key in vtp_decoder.vtp_framesets():
+            self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
+            yield set_seq_ids, key
+
+    async def get_frameset(self) -> tuple[list[int], tuple[int, int]]:
+        """Listen until a single complete VDIF frameset is available, then return it."""
+        while True:
+            await self._read()
+            try:
+                vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
+                self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
+                set_seq_ids, key = await anext(vtp_decoder.vtp_framesets())
+            except StopAsyncIteration:
+                continue
+            return set_seq_ids, key
+
+    def close(self) -> None:
+        """Close the socket."""
+        self.socket.close()
+        self.vtp_buffer.clear()

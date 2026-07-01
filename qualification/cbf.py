@@ -37,7 +37,11 @@ from .host_config import HostConfigQuerier
 if TYPE_CHECKING:
     # This is only imported for type checkers, because importing at runtime
     # would create a cyclic dependency.
-    from .recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+    from .recv import (
+        BaselineCorrelationProductsReceiver,
+        TiedArrayChannelisedVoltageReceiver,
+        TiedArrayResampledVoltageReceiver,
+    )
 
 logger = logging.getLogger(__name__)
 DEFAULT_MAX_DELAY = 1000000  # Around 0.5-1ms, depending on band. Increase if necessary
@@ -75,6 +79,7 @@ class CBFRemoteControl(CBFBase):
     # These are filled in by conftest.py.
     baseline_correlation_products_receiver: "BaselineCorrelationProductsReceiver | None" = None
     tied_array_channelised_voltage_receiver: "TiedArrayChannelisedVoltageReceiver | None" = None
+    tied_array_resampled_voltage_receiver: "TiedArrayResampledVoltageReceiver | None" = None
 
     @property
     def init_sensors(self) -> aiokatcp.SensorSet:
@@ -153,6 +158,9 @@ class CBFRemoteControl(CBFBase):
         if self.tied_array_channelised_voltage_receiver is not None:
             self.tied_array_channelised_voltage_receiver.stream_group.stop()
             self.tied_array_channelised_voltage_receiver = None  # Break reference cycle
+        if self.tied_array_resampled_voltage_receiver is not None:
+            self.tied_array_resampled_voltage_receiver.close()
+            self.tied_array_resampled_voltage_receiver = None  # Break reference cycle
         self.product_controller_client.close()
         await self.product_controller_client.wait_closed()
         if master_controller_client is not None:

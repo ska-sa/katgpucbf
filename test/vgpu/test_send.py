@@ -31,7 +31,7 @@ import numpy as np
 import pytest
 import pytest_mock
 
-from katgpucbf.vgpu.main import VTP_DEFAULT_PORT
+from katgpucbf import VTP_DEFAULT_PORT
 from katgpucbf.vgpu.send import RateLimiter, VDIFFrame, VDIFSender
 
 
