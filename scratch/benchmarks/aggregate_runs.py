@@ -58,6 +58,9 @@ for path in files:
             if not line:
                 continue
             parts = line.split()
+            if not len(parts) == 4:
+                print(f"Warning: expected 4 values in {line} in {path}, got {len(parts)}")
+                continue
             try:
                 freq = float(parts[0])
             except ValueError:

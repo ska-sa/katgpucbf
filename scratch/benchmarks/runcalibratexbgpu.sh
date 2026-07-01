@@ -23,25 +23,21 @@ high_freq=$4
 
 max_ssh_retries=${MAX_SSH_RETRIES:-3}
 ssh_retry_delay=${SSH_RETRY_DELAY:-30}
+email_address=${EMAIL_ADDRESS:-"$(whoami)@sarao.ac.za"}
 
-EMAIL_ADDRESS=${EMAIL_ADDRESS:-"$(whoami)@sarao.ac.za"}
 send_email() {
-  local subject=$1
-  local body=$2
-  ssmtp ${EMAIL_ADDRESS}<<EOF
-Subject: ${subject}
-${body}
+  ssmtp ${email_address}<<EOF
+Subject: $1
+$2
 EOF
 }
 
 is_ssh_failure() {
-  local logfile=$1
-  grep -qiE 'asyncssh|SSH.*(fail|error|closed|lost|reset|disconnect)|ConnectionLost|DisconnectError|ChannelOpenError' "$logfile"
+  grep -qiE 'asyncssh|SSH.*(fail|error|closed|lost|reset|disconnect)|ConnectionLost|DisconnectError|ChannelOpenError' "$1"
 }
 
 run_benchmark() {
-  local outfile=$1
-  ./benchmark_xbgpu.py -vvv -n "$n" --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 2 --calibrate --low "$low_freq" --high "$high_freq" --multicast-groups 239.192.160.0/19 >"$outfile" 2>&1
+  ./benchmark_xbgpu.py -vvv -n "$n" --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 2 --calibrate --low "$low_freq" --high "$high_freq" --multicast-groups 239.192.160.0/19 >"$1" 2>&1
 }
 
 for i in $(seq 1 "$runs"); do
