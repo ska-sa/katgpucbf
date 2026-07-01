@@ -29,7 +29,7 @@ from uuid import UUID, uuid4
 import aiokatcp
 import pytest
 
-from katgpucbf import DIG_SAMPLE_BITS
+from katgpucbf import DEFAULT_DIG_SAMPLE_BITS
 from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
 
 from .host_config import HostConfigQuerier
@@ -187,7 +187,7 @@ class CBFRemoteControl(CBFBase):
         """
         if pdf_report is not None:
             pdf_report.step("Configure the D-sim with Gaussian noise.")
-        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        dig_max = 2 ** (DEFAULT_DIG_SAMPLE_BITS - 1) - 1
         amplitude /= dig_max  # Convert to be relative to full-scale
         signal = f"common=nodither(wgn({amplitude}));common;common;"
         if period is None:

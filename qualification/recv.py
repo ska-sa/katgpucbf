@@ -38,7 +38,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
-from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DIG_SAMPLE_BITS
+from katgpucbf import COMPLEX, DEFAULT_DIG_SAMPLE_BITS, DEFAULT_RECV_BUFFER_SIZE
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
@@ -306,7 +306,7 @@ class XBReceiver:
             the target. The target may also be reduced if necessary to avoid
             saturating the X-engine output.
         """
-        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        dig_max = 2 ** (DEFAULT_DIG_SAMPLE_BITS - 1) - 1
         # The PFB is scaled for fixed incoherent gain, but we need to be concerned
         # about coherent gain to avoid overflowing the F-engine output. Coherent gain
         # scales approximately with sqrt(bw / chan_bw / 2).
