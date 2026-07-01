@@ -71,13 +71,23 @@ logger = logging.getLogger(__name__)
 def _add_stream_args(parser: SubParser) -> None:
     parser.add_argument("name", type=str, required=True)
     parser.add_argument("dst", type=endpoint_parser(DEFAULT_PORT), required=True)
+    parser.add_argument("send_enabled", type=_parse_bool, default=False)
 
 
 def _parse_pol(value: str) -> int:
     pol = int(value)
     if pol not in {0, 1}:
-        raise argparse.ArgumentTypeError("pol must be either 0 or 1")
+        raise argparse.ArgumentTypeError("must be either 0 or 1")
     return pol
+
+
+def _parse_bool(value: str) -> bool:
+    if value.lower() in {"true", "1"}:
+        return True
+    elif value.lower() in {"false", "0"}:
+        return False
+    else:
+        raise argparse.ArgumentTypeError("must be a boolean value (true/false, 1/0)")
 
 
 def parse_beam(value: str) -> BOutput:
@@ -126,7 +136,8 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=[],
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
-        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol. Optional keys: dither.",
+        help="Add a half-beam output (may be repeated). The required keys are: name, dst, pol. "
+        "Optional keys: dither, send_enabled.",
     )
     parser.add_argument(
         "--corrprod",
@@ -135,7 +146,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         metavar="KEY=VALUE[,KEY=VALUE...]",
         help="Add a baseline-correlation-products output (may be repeated). The required keys are: "
-        "name, dst, heap_accumulation_threshold.",
+        "name, dst, heap_accumulation_threshold. Optional keys: send_enabled.",
     )
     add_common_arguments(parser)
     add_time_converter_arguments(parser)
@@ -211,11 +222,6 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_PACKET_PAYLOAD_BYTES,
         help="Size in bytes for output packets (payload only) [%(default)s]",
     )
-    parser.add_argument(
-        "--send-enabled",
-        action="store_true",
-        help="Start with correlator output transmission enabled, without having to issue a katcp command.",
-    )
     parser.add_argument("--monitor-log", type=str, help="File to write performance-monitoring data to")
     parser.add_argument("src", type=parse_source_ipv4, help="Multicast address data is received from.")
 
@@ -290,7 +296,6 @@ def make_engine(
         send_comp_vector=args.send_comp_vector,
         heaps_per_fengine_per_chunk=args.heaps_per_fengine_per_chunk,
         recv_reorder_tol=args.recv_reorder_tol,
-        send_enabled=args.send_enabled,
         monitor=monitor,
         context=context,
         vkgdr_handle=vkgdr_handle,

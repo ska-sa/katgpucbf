@@ -394,8 +394,6 @@ class BSend(Send):
     packet_payload
         Size, in bytes, for the output packets (tied array channelised voltage
         payload only; headers and padding are added to this).
-    send_enabled
-        Enable/Disable transmission.
     """
 
     descriptor_heap: spead2.send.Heap
@@ -416,9 +414,8 @@ class BSend(Send):
         context: AbstractContext,
         stream_factory: Callable[[spead2.send.StreamConfig, Sequence[np.ndarray]], "spead2.send.asyncio.AsyncStream"],
         packet_payload: int = DEFAULT_PACKET_PAYLOAD_BYTES,
-        send_enabled: bool = False,
     ) -> None:
-        self.send_enabled = [send_enabled] * len(outputs)
+        self.send_enabled = [output.send_enabled for output in outputs]
         self.send_enabled_timestamp = [0] * len(outputs)
         n_beams = len(outputs)
         self.output_names = [output.name for output in outputs]

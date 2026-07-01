@@ -641,16 +641,16 @@ class TestXBEngine:
     def corrprod_args(self, heap_accumulation_threshold: tuple[int, int]) -> list[str]:
         """Arguments to pass to the command-line parser for multiple --corrprods."""
         return [
-            f"name=bcp1,dst=239.10.11.0:7148,heap_accumulation_threshold={heap_accumulation_threshold[0]}",
-            f"name=bcp2,dst=239.10.11.1:7148,heap_accumulation_threshold={heap_accumulation_threshold[1]}",
+            f"name=bcp1,dst=239.10.11.0:7148,heap_accumulation_threshold={heap_accumulation_threshold[0]},send_enabled=True",
+            f"name=bcp2,dst=239.10.11.1:7148,heap_accumulation_threshold={heap_accumulation_threshold[1]},send_enabled=True",
         ]
 
     @pytest.fixture
     def beam_args(self) -> list[str]:
         """Arguments to pass to the command-line parser for multiple beams."""
         return [
-            "name=beam_0x,dst=239.10.12.0:7148,pol=0",
-            "name=beam_0y,dst=239.10.12.1:7148,pol=1",
+            "name=beam_0x,dst=239.10.12.0:7148,pol=0,send_enabled=True",
+            "name=beam_0y,dst=239.10.12.1:7148,pol=1,send_enabled=True",
         ]
 
     @pytest.fixture
@@ -1022,7 +1022,6 @@ class TestXBEngine:
             f"--sync-time={SYNC_TIME}",
             "--recv-interface=lo",
             "--send-interface=lo",
-            "--send-enabled",
             "239.10.11.4:7149",  # src
         ]
         for corrprod in corrprod_args:
@@ -1522,7 +1521,7 @@ class TestXBEngine:
     ) -> None:
         """Test capture-start and capture-stop requests.
 
-        First issue a capture-stop as `engine` is initialised with --send-enabled.
+        First issue a capture-stop as all streams are initialised with `send_enabled=True`.
         """
 
         def get_stream_status(stream_name: str) -> bool:

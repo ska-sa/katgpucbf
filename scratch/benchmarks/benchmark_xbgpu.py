@@ -179,19 +179,19 @@ class XbgpuBenchmark(Benchmark):
             f"--send-comp-vector={cores[1]} "
             f"--send-interface={interface} "
             f"--send-ibv "
-            f"--send-enabled "
             f"{self.fsim_addresses_queue.popleft()}:7148 "
         )
         for i in range(self.args.beams):
             for j in range(N_POLS):
                 idx = N_POLS * i + j
-                command += f"--beam=name=beam{idx},dst={self.multicast_allocator()},pol={j} "
+                command += f"--beam=name=beam{idx},dst={self.multicast_allocator()},pol={j},send_enabled=True "
 
         for i in range(self.args.corrprods):
             corrprod_number = index * self.args.corrprods + i
             command += f"--corrprod=name=corrprod{corrprod_number},"
             command += f"dst={self.multicast_allocator()},"
-            command += f"heap_accumulation_threshold={threshold} "
+            command += f"heap_accumulation_threshold={threshold},"
+            command += "send_enabled=True "
         return command
 
     @override
