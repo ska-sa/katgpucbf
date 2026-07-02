@@ -1316,6 +1316,9 @@ class FEngine(Engine):
         self._populate_sensors(
             self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
+        global DIG_RMS_DBFS_LOW, DIG_RMS_DBFS_LOW_ERROR
+        DIG_RMS_DBFS_LOW = -6.02 * (dig_sample_bits - 2)
+        DIG_RMS_DBFS_LOW_ERROR = -6.02 * dig_sample_bits
 
         # Attributes copied or initialised from arguments
         self._srcs = copy.copy(srcs)
