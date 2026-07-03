@@ -1381,7 +1381,7 @@ class TestDigRmsDbfsStatus:
             pytest.param(-30.0 - EPSILON, aiokatcp.Sensor.Status.WARN, id="low-warn"),
             pytest.param(-10.0 + EPSILON, aiokatcp.Sensor.Status.WARN, id="high-warn"),
             pytest.param(-33.0, aiokatcp.Sensor.Status.ERROR, id="low-error"),
-            pytest.param(-7.0, aiokatcp.Sensor.Status.ERROR, id="high-error"),
+            pytest.param(-6.0, aiokatcp.Sensor.Status.ERROR, id="high-error"),
         ],
     )
     def test_status(self, sensor: aiokatcp.Sensor, value: float, status: aiokatcp.Sensor.Status) -> None:
