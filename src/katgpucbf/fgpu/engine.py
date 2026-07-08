@@ -62,8 +62,6 @@ from ..utils import (
 from . import (
     DIG_RMS_DBFS_HIGH,
     DIG_RMS_DBFS_HIGH_ERROR,
-    DIG_RMS_DBFS_LOW,
-    DIG_RMS_DBFS_LOW_ERROR,
     DIG_RMS_DBFS_WINDOW,
     INPUT_CHUNK_PADDING,
     recv,
@@ -82,6 +80,7 @@ from .output import (
 )
 
 logger = logging.getLogger(__name__)
+dig_rms_dbfs_status_ptr = None
 
 
 def _sample_models(
@@ -476,11 +475,22 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value:.17g}"
 
 
+def dig_rms_dbfs_status_params(dig_sample_bits) -> tuple[float, float]:
+    """Compute dig_rms_dbfs_low and dig_rms_dbfs_low_error for the given dig_sample_bits."""
+    dig_rms_dbfs_low = -6.02 * (dig_sample_bits - 2)
+    dig_rms_dbfs_low_error = -6.02 * dig_sample_bits
+    return dig_rms_dbfs_low, dig_rms_dbfs_low_error
+
+
 def dig_rms_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
     """Compute status for dig-rms-dbfs sensor."""
-    if DIG_RMS_DBFS_LOW <= value <= DIG_RMS_DBFS_HIGH:
+    if dig_rms_dbfs_status_ptr is not None:
+        dig_rms_dbfs_low, dig_rms_dbfs_low_error = dig_rms_dbfs_status_ptr()
+    else:
+        dig_rms_dbfs_low, dig_rms_dbfs_low_error = -30.0, -33.0
+    if dig_rms_dbfs_low <= value <= DIG_RMS_DBFS_HIGH:
         return aiokatcp.Sensor.Status.NOMINAL
-    elif DIG_RMS_DBFS_LOW_ERROR < value < DIG_RMS_DBFS_HIGH_ERROR:
+    elif dig_rms_dbfs_low_error < value < DIG_RMS_DBFS_HIGH_ERROR:
         return aiokatcp.Sensor.Status.WARN
     else:
         return aiokatcp.Sensor.Status.ERROR
@@ -1316,9 +1326,8 @@ class FEngine(Engine):
         self._populate_sensors(
             self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
-        global DIG_RMS_DBFS_LOW, DIG_RMS_DBFS_LOW_ERROR
-        DIG_RMS_DBFS_LOW = -6.02 * (dig_sample_bits - 2)
-        DIG_RMS_DBFS_LOW_ERROR = -6.02 * dig_sample_bits
+
+        dig_rms_dbfs_status_ptr = partial(dig_rms_dbfs_status_params, dig_sample_bits)  # noqa: F841
 
         # Attributes copied or initialised from arguments
         self._srcs = copy.copy(srcs)

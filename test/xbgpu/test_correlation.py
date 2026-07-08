@@ -53,7 +53,7 @@ def correlate_host(input_array: np.ndarray) -> np.ndarray:
     complexity = input_array.shape[5]
     n_baselines = n_ants * (n_ants + 1) * 2
     output_array = np.zeros(shape=(n_chans, n_baselines, complexity), dtype=np.int64)
-    for c in prange(n_chans):
+    for c in prange(n_chans):  # type: ignore
         for a2 in range(n_ants):
             for a1 in range(a2 + 1):
                 for p1 in range(n_pols):

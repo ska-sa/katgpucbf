@@ -137,10 +137,7 @@ class Layout(BaseLayout):
         n_statistics = len(_Statistic)
 
         # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
-        @numba.cfunc(
-            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(user_data_type)),
-            nopython=True,
-        )
+        @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(user_data_type)))
         def chunk_place_impl(data_ptr, data_size, user_data_ptr):
             data = numba.carray(data_ptr, 1)
             items = numba.carray(intp_to_voidptr(data[0].items), 3, dtype=np.int64)

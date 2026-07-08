@@ -22,9 +22,7 @@ METRIC_NAMESPACE: Final = "fgpu"
 
 # Range in which the dig-rms-dbfs sensor is NOMINAL
 # TODO these thresholds are probably only appropriate for 8-bit+ input
-DIG_RMS_DBFS_LOW: float = -30.0
 DIG_RMS_DBFS_HIGH: Final = -10.0
-DIG_RMS_DBFS_LOW_ERROR: float = -33.0
 DIG_RMS_DBFS_HIGH_ERROR: Final = -6.0
 DIG_RMS_DBFS_WINDOW: Final = 1.0  # Window length in seconds
 
