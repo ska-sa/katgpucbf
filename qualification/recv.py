@@ -535,7 +535,7 @@ def create_baseline_correlation_product_receive_stream_group(
 
     # Heap placement function. Gets compiled so that spead2's C code can call it.
     # A chunk consists of all channels and all baselines for a single point in time.
-    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t, types.CPointer(types.int64)), nopython=True)
+    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t, types.CPointer(types.int64)))
     def chunk_place(data_ptr, data_size, user_data_ptr):
         data = numba.carray(data_ptr, 1)
         items = numba.carray(intp_to_voidptr(data[0].items), 4, dtype=np.int64)
@@ -598,7 +598,7 @@ def create_tied_array_channelised_voltage_receive_stream_group(
     beam_ants_dtype = np.dtype(np.uint16)
     beam_ants_itemsize = beam_ants_dtype.itemsize
 
-    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t, types.CPointer(types.int64)), nopython=True)
+    @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.size_t, types.CPointer(types.int64)))
     def chunk_place(data_ptr, data_size, user_data_ptr):
         data = numba.carray(data_ptr, 1)
         user_data = numba.carray(user_data_ptr, 1)  # Contains the beam index

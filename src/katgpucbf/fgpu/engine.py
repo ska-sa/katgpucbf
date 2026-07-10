@@ -80,7 +80,6 @@ from .output import (
 )
 
 logger = logging.getLogger(__name__)
-dig_rms_dbfs_status_ptr = None
 
 
 def _sample_models(
@@ -475,25 +474,30 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value:.17g}"
 
 
-def dig_rms_dbfs_status_params(dig_sample_bits) -> tuple[float, float]:
+def dig_rms_dbfs_status_params(dig_sample_bits: float) -> tuple[float, float]:
     """Compute dig_rms_dbfs_low and dig_rms_dbfs_low_error for the given dig_sample_bits."""
     dig_rms_dbfs_low = -6.02 * (dig_sample_bits - 2)
     dig_rms_dbfs_low_error = -6.02 * dig_sample_bits
     return dig_rms_dbfs_low, dig_rms_dbfs_low_error
 
 
-def dig_rms_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
+def dig_rms_dbfs_status(
+    value: float, dig_rms_dbfs_low: float = -30.0, dig_rms_dbfs_low_error: float = -33.0
+) -> aiokatcp.Sensor.Status:
     """Compute status for dig-rms-dbfs sensor."""
-    if dig_rms_dbfs_status_ptr is not None:
-        dig_rms_dbfs_low, dig_rms_dbfs_low_error = dig_rms_dbfs_status_ptr()
-    else:
-        dig_rms_dbfs_low, dig_rms_dbfs_low_error = -30.0, -33.0
     if dig_rms_dbfs_low <= value <= DIG_RMS_DBFS_HIGH:
         return aiokatcp.Sensor.Status.NOMINAL
     elif dig_rms_dbfs_low_error < value < DIG_RMS_DBFS_HIGH_ERROR:
         return aiokatcp.Sensor.Status.WARN
     else:
         return aiokatcp.Sensor.Status.ERROR
+
+
+def dig_rms_dbfs_status_reordered(
+    dig_rms_dbfs_low: float, dig_rms_dbfs_low_error: float, value: float
+) -> aiokatcp.Sensor.Status:
+    """Return dig_rms_dbfs_status with properly ordered arguments."""
+    return dig_rms_dbfs_status(value, dig_rms_dbfs_low, dig_rms_dbfs_low_error)
 
 
 def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> np.ndarray:
@@ -1323,12 +1327,10 @@ class FEngine(Engine):
         monitor: Monitor,
     ) -> None:
         super().__init__(katcp_host, katcp_port)
+        self.dig_sample_bits = dig_sample_bits
         self._populate_sensors(
             self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
-
-        dig_rms_dbfs_status_ptr = partial(dig_rms_dbfs_status_params, dig_sample_bits)  # noqa: F841
-
         # Attributes copied or initialised from arguments
         self._srcs = copy.copy(srcs)
         self._recv_comp_vector = list(recv_comp_vector)
@@ -1433,6 +1435,7 @@ class FEngine(Engine):
     def _populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
+            drdbs_func = partial(dig_rms_dbfs_status_reordered, *dig_rms_dbfs_status_params(self.dig_sample_bits))
             sensors.add(
                 make_rate_limited_sensor(
                     int,
@@ -1448,7 +1451,7 @@ class FEngine(Engine):
                     f"input{pol}.dig-rms-dbfs",
                     "Digitiser ADC average power",
                     units="dBFS",
-                    status_func=dig_rms_dbfs_status,
+                    status_func=drdbs_func,
                 )
             )
 
