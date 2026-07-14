@@ -160,7 +160,9 @@ class Layout(BaseLayout):
         n_heaps_per_pol = n_batches_per_chunk * n_pol_substreams
         n_statistics = len(_Statistic)
 
-        @numba.cfunc(types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(user_data_type)))
+        @numba.cfunc(
+            types.void(types.CPointer(chunk_place_data), types.uintp, types.CPointer(user_data_type)), nopython=True
+        )
         def chunk_place_impl(data_ptr, data_size, user_data_ptr):
             data = numba.carray(data_ptr, 1)
             user_data = numba.carray(user_data_ptr, 1)

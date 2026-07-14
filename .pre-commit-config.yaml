@@ -44,6 +44,7 @@ repos:
             'katsdpsigproc==1.10.0',
             'katsdptelstate==1.0.0',
             'matplotlib==3.10.8',
+            'numba==0.63.1',
             'numpy==2.3.5',
             'pandas-stubs==2.3.3.251219',
             'prometheus-client==0.24.0',
