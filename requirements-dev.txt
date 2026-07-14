@@ -8,7 +8,7 @@ aiohappyeyeballs==2.6.1
     # via
     #   -c requirements.txt
     #   aiohttp
-aiohttp==3.13.4
+aiohttp==3.14.1
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
@@ -468,6 +468,7 @@ traitlets==5.14.3
 typing-extensions==4.15.0
     # via
     #   -c requirements.txt
+    #   aiohttp
     #   aiokatcp
     #   aiomonitor
     #   aiosignal
