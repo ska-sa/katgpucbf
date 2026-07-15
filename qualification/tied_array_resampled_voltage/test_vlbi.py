@@ -27,7 +27,7 @@ from ..recv import TiedArrayResampledVoltageReceiver
 @pytest.mark.name("VLBI VDIF output")
 async def test_vlbi_vdif(
     pdf_report: Reporter,
-    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
+    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver | None,
 ) -> None:
     """Test VDIF frame output.
 
@@ -36,9 +36,10 @@ async def test_vlbi_vdif(
     Verified by means of test.
     Collect a valid VDIF frameset.
     """
+    assert receive_tied_array_resampled_voltage is not None
     receiver = receive_tied_array_resampled_voltage
-    pdf_report.step("Collect a valid VDIF frame.")
-    frameset, _ = await receiver.get_frameset()
+    pdf_report.step("Collect a valid VDIF frameset.")
+    frameset, _ = await receiver.next_complete_frameset()
     pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
     with check:
         assert len(frameset) == receiver.n_chans * len(receiver.pol_ordering)

@@ -18,8 +18,8 @@
 
 """Check for :class:`qualification.recv.VTPDecoder`.
 
-Run directly::
-    qualification/.venv/bin/python qualification/test/test_vtp_decoder.py
+Run directly:
+    python qualification/test/test_vtp_decoder.py
 """
 
 import asyncio
@@ -28,12 +28,12 @@ import struct
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import numpy as np
 from baseband.vdif import VDIFFrame
 
 from qualification.recv import VTPBuffer, VTPDecoder
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 SAMPLES_PER_FRAME = 8000
 BANDWIDTH = 64000000
@@ -81,8 +81,23 @@ async def check_decode_vdif_framesets_filters_incomplete_threads() -> None:
     buffer.add_packet(make_vtp_packet(5, frame_nr=1, seconds=100, thread_id=0))
     decoder = VTPDecoder(buffer, 4)
 
-    framesets = [item async for item in decoder.vtp_framesets()]
+    framesets = [item for item in decoder.vtp_framesets()]
     assert len(framesets) == 0
+    assert len(decoder.invalid_framesets) == 2, f"Invalid framesets: {decoder.invalid_framesets}"
+
+
+async def check_decode_vdif_framesets_filters_duplicate_seq_ids() -> None:
+    """`check_decode_vdif_framesets_filters_duplicate_seq_ids` checks that decode_vdif_framesets correctly filters out framesets with duplicate sequence IDs."""  # noqa: E501
+    buffer = VTPBuffer()
+    buffer.add_packet(make_vtp_packet(4, frame_nr=1, seconds=100, thread_id=0))
+    buffer.add_packet(make_vtp_packet(5, frame_nr=1, seconds=100, thread_id=1))
+    buffer.add_packet(make_vtp_packet(5, frame_nr=2, seconds=100, thread_id=0))
+    buffer.add_packet(make_vtp_packet(5, frame_nr=2, seconds=100, thread_id=1))
+    buffer.add_packet(make_vtp_packet(5, frame_nr=3, seconds=100, thread_id=1))
+    decoder = VTPDecoder(buffer, 2)
+
+    framesets = [item for item in decoder.vtp_framesets()]
+    assert len(framesets) == 1
     assert len(decoder.invalid_framesets) == 2
 
 
@@ -101,11 +116,11 @@ async def check_decode_vdif_framesets_unordered() -> None:
     decoder = VTPDecoder(buffer, 4)
     # todo: just do random access in a test instead.
 
-    framesets = [item async for item in decoder.vtp_framesets()]
+    framesets = [item for item in decoder.vtp_framesets()]
     assert len(decoder.invalid_framesets) == 1, f"Invalid framesets: {decoder.invalid_framesets}"
     assert len(framesets) == 2
-    assert framesets[0] == ([6, 8, 9, 10], 100)
-    assert framesets[1] == ([7, 11, 12, 13], 100)
+    assert framesets[0] == ([6, 8, 9, 10], (100, 0))
+    assert framesets[1] == ([7, 11, 12, 13], (100, 1))
 
 
 async def check_decode_vdif_framesets_second_border() -> None:
@@ -122,13 +137,13 @@ async def check_decode_vdif_framesets_second_border() -> None:
     decoder = VTPDecoder(buffer, 2)
     # todo: just do random access in a test instead.
 
-    framesets = [item async for item in decoder.vtp_framesets()]
+    framesets = [item for item in decoder.vtp_framesets()]
     assert len(decoder.invalid_framesets) == 0
     assert len(framesets) == 4
-    assert framesets[0] == ([0, 1], 100)
-    assert framesets[1] == ([2, 3], 100)
-    assert framesets[2] == ([4, 5], 101)
-    assert framesets[3] == ([6, 7], 101)
+    assert framesets[0] == ([0, 1], (100, 0))
+    assert framesets[1] == ([2, 3], (100, 1))
+    assert framesets[2] == ([4, 5], (101, 0))
+    assert framesets[3] == ([6, 7], (101, 1))
 
 
 def check_close_clears_state() -> None:
@@ -152,12 +167,18 @@ def main() -> None:
         check()
         print("  ok", flush=True)
 
-    print("running check_decode_vdif_framesets...", flush=True)
+    print("running check_decode_vdif_framesets_filters_incomplete_threads...", flush=True)
     asyncio.run(check_decode_vdif_framesets_filters_incomplete_threads())
     print("  ok", flush=True)
+
+    print("running check_decode_vdif_framesets_filters_duplicate_seq_ids...", flush=True)
+    asyncio.run(check_decode_vdif_framesets_filters_duplicate_seq_ids())
+    print("  ok", flush=True)
+
     print("running check_decode_vdif_framesets_unordered...", flush=True)
     asyncio.run(check_decode_vdif_framesets_unordered())
     print("  ok", flush=True)
+
     print("running check_decode_vdif_framesets_second_border...", flush=True)
     asyncio.run(check_decode_vdif_framesets_second_border())
     print("  ok", flush=True)

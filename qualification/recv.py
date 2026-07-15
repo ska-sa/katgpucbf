@@ -25,7 +25,9 @@ import math
 import os
 import socket
 import struct
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections import defaultdict
+from collections.abc import AsyncGenerator, Callable, Generator, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numba
@@ -42,7 +44,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
-from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DIG_SAMPLE_BITS, VTP_DEFAULT_PORT
+from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DEFAULT_VTP_PORT, DIG_SAMPLE_BITS
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
@@ -678,6 +680,17 @@ class VTPBuffer:
         self.thread_ids.clear()
         self.seconds.clear()
         self.frame_ids.clear()
+        self.samples_per_frame = None
+
+
+@dataclass
+class VTPMeta:
+    """Metadata for a VDIF frameset."""
+
+    seq_ids: list[int]
+    thread_ids: set[int]
+    seconds: int
+    frame_id: int
 
 
 class VTPDecoder:
@@ -694,63 +707,62 @@ class VTPDecoder:
             VTPBuffer containing the VTP and VDIF stream statistics.
         n_threads
             Number of threads in the VDIF stream.
-        framerate
-            Framerate of the VDIF stream.
         """
         self.n_threads = n_threads
         if TYPE_CHECKING:
             assert vtp_data.samples_per_frame is not None
-        self.invalid_framesets = list[tuple[int, int]]()
-        self.frame_seq_map = dict[tuple[int, int], list[int]]()
-        self.seconds_dict = dict[int, int](zip(vtp_data.seq_ids, vtp_data.seconds, strict=True))
-        self.frame_ids_dict = dict[int, int](zip(vtp_data.seq_ids, vtp_data.frame_ids, strict=True))
-        self.thread_ids_dict = dict[int, int](zip(vtp_data.seq_ids, vtp_data.thread_ids, strict=True))
+        self.vtp_meta_list: list[VTPMeta] = []
+        self.invalid_framesets: list[tuple[int, int]] = []
+        self.frame_seq_map: dict[tuple[int, int], VTPMeta] = defaultdict()
+        self.seq_ids: set[int] = set()
 
-        seq_ids = sorted(vtp_data.seq_ids)
-        for seq_id in seq_ids:
-            frame_id = self.frame_ids_dict[seq_id]
-            second = self.seconds_dict[seq_id]
-            key = (second, frame_id)
+        for i, seq_id in enumerate(vtp_data.seq_ids):
+            key = (vtp_data.seconds[i], vtp_data.frame_ids[i])
             if key not in self.frame_seq_map:
-                self.frame_seq_map[key] = list[int]()
-            self.frame_seq_map[key].append(seq_id)
+                self.frame_seq_map[key] = VTPMeta(
+                    seq_ids=[seq_id],
+                    thread_ids={vtp_data.thread_ids[i]},
+                    seconds=vtp_data.seconds[i],
+                    frame_id=vtp_data.frame_ids[i],
+                )
+            else:
+                self.frame_seq_map[key].seq_ids.append(seq_id)
+                self.frame_seq_map[key].thread_ids.add(vtp_data.thread_ids[i])
 
-    async def vtp_framesets(self) -> AsyncGenerator[tuple[list[int], tuple[int, int]], None]:
+        for meta in self.frame_seq_map.values():
+            meta.seq_ids.sort()
+
+    def vtp_framesets(self) -> Generator[tuple[list[int], tuple[int, int]], None, None]:
         """
         Decode the VTP Sequence IDs for a complete VDIF frameset.
 
         Stores incomplete framesets in :attr:`invalid_framesets`.
 
-        Returns
-        -------
+        Yields
+        ------
         list[int]
             Sequence IDs for a complete VDIF frameset and the key (second, frame_id).
         tuple[int, int]
             Key (second, frame_id) for the VDIF frameset.
         """
-        for key, seq_ids in self.frame_seq_map.items():
-            valid = True
-            thread_ids = set[int]()
-            if len(seq_ids) != self.n_threads:
+        for key, meta in self.frame_seq_map.items():
+            if any(seq_id in self.seq_ids for seq_id in meta.seq_ids):
                 self.invalid_framesets.append(key)
                 continue
-            for seq_id in seq_ids:
-                if self.seconds_dict[seq_id] != self.seconds_dict[seq_ids[0]]:
-                    self.invalid_framesets.append(key)
-                    valid = False
-                    break
-                thread_ids.add(self.thread_ids_dict[seq_id])
-            if len(thread_ids) != self.n_threads:
+            self.seq_ids.update(meta.seq_ids)
+            if len(meta.seq_ids) != self.n_threads:
                 self.invalid_framesets.append(key)
                 continue
-            if valid:
-                yield (seq_ids.copy(), key)
+            if len(meta.thread_ids) != self.n_threads:
+                self.invalid_framesets.append(key)
+                continue
+            yield (meta.seq_ids.copy(), key)
 
 
 class TiedArrayResampledVoltageReceiver:
     """Receive tied-array-resampled-voltage streams from the V-engines."""
 
-    packet_size = 16 * 1024
+    _max_packet_size = 16 * 1024
 
     def __init__(
         self,
@@ -758,7 +770,7 @@ class TiedArrayResampledVoltageReceiver:
         interface_address: str,
     ) -> None:
         self.stream_names = ["tied-array-resampled-voltage"]
-        self.multicast_groups = endpoint_list_parser(VTP_DEFAULT_PORT)(
+        self.multicast_groups = endpoint_list_parser(DEFAULT_VTP_PORT)(
             cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
         )
         self.n_chans = cbf.init_sensors[f"{self.stream_names[0]}.n-chans"].value
@@ -787,40 +799,43 @@ class TiedArrayResampledVoltageReceiver:
             self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
             self.socket.setblocking(False)
 
-        self.framerate = None
+        self.frame_rate = None
         self.invalid_framesets = list[tuple[int, int]]()
 
     async def _read(self) -> None:
         loop = asyncio.get_running_loop()
-        self.vtp_buffer.add_packet(await loop.sock_recv(self.socket, self.packet_size))
+        self.vtp_buffer.add_packet(await loop.sock_recv(self.socket, self._max_packet_size))
 
     async def listen(self) -> None:
         """Listen for packets from the v engine and store them in the VTPDecoder."""
         while True:
             await self._read()
 
-    async def framesets(self) -> AsyncGenerator[tuple[list[int], tuple[int, int]], None]:
+    def complete_framesets(self) -> Generator[tuple[list[int], tuple[int, int]], None, None]:
         """Decode the VDIF framesets in the buffer."""
         vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
-        if self.framerate is None and self.vtp_buffer.samples_per_frame is not None:
-            self.framerate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
-        async for set_seq_ids, key in vtp_decoder.vtp_framesets():
+        if self.frame_rate is None and self.vtp_buffer.samples_per_frame is not None:
+            self.frame_rate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
+        for set_seq_ids, key in vtp_decoder.vtp_framesets():
             self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
             yield set_seq_ids, key
+        self.vtp_buffer.clear()
 
-    async def get_frameset(self) -> tuple[list[int], tuple[int, int]]:
+    async def next_complete_frameset(self) -> tuple[list[int], tuple[int, int]]:
         """Listen until a single complete VDIF frameset is available, then return it."""
         while True:
             await self._read()
             try:
                 vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
                 self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
-                set_seq_ids, key = await anext(vtp_decoder.vtp_framesets())
-            except StopAsyncIteration:
+                set_seq_ids, key = next(vtp_decoder.vtp_framesets())
+            except StopIteration:
                 continue
+            self.vtp_buffer.clear()
             return set_seq_ids, key
 
     def close(self) -> None:
         """Close the socket."""
         self.socket.close()
         self.vtp_buffer.clear()
+        self.invalid_framesets.clear()

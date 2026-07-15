@@ -26,7 +26,7 @@ from collections.abc import MutableMapping, Sequence
 import aiokatcp
 import katcbf_vlbi_resample.polarisation
 
-from .. import DEFAULT_JONES_PER_BATCH, VTP_DEFAULT_PORT
+from .. import DEFAULT_JONES_PER_BATCH, DEFAULT_VTP_PORT
 from ..main import (
     add_common_arguments,
     add_recv_arguments,
@@ -132,7 +132,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--monitor-log", help="File to write performance-monitoring data to")
     parser.add_argument("src", type=parse_source_ipv4, nargs=2, help="Source endpoints")
     parser.add_argument(
-        "dst", type=functools.partial(parse_source_ipv4, default_port=VTP_DEFAULT_PORT), help="Destination endpoints"
+        "dst", type=functools.partial(parse_source_ipv4, default_port=DEFAULT_VTP_PORT), help="Destination endpoints"
     )
 
     args = parser.parse_args(arglist)
