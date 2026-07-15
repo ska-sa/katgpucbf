@@ -4,7 +4,7 @@ aioconsole==0.8.2
     # via aiomonitor
 aiohappyeyeballs==2.6.1
     # via aiohttp
-aiohttp==3.13.4
+aiohttp==3.14.1
     # via
     #   katgpucbf (pyproject.toml)
     #   aiomonitor
@@ -62,7 +62,7 @@ jinja2==3.1.6
     # via aiomonitor
 katcbf-vlbi-resample==0.5.2
     # via katgpucbf (pyproject.toml)
-katcp-codec==0.2.1
+katcp-codec==0.2.2
     # via aiokatcp
 katsdpservices==1.4
     # via katgpucbf (pyproject.toml)
@@ -185,6 +185,7 @@ trafaret==2.1.1
     # via aiomonitor
 typing-extensions==4.15.0
     # via
+    #   aiohttp
     #   aiokatcp
     #   aiomonitor
     #   aiosignal

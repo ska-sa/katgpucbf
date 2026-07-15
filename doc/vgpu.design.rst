@@ -32,19 +32,29 @@ upstream before they are requested.
    blocking GPU work during transfers does not significantly impact
    performance.
 
-Reception
----------
-One difference from the F- and XB-engines is that ``capture-start`` and
-``capture-stop`` gate the entire processing chain rather than just
-transmission. This approach was chosen because changing the VLBI delay can
-make samples non-contiguous in time, which interacts poorly with rechunking
-steps in katcbf-vlbi-resample. An alternative approach would have been a model
+Delays
+------
+The ``?vlbi-delay`` request is implemented simply by adjusting the time base
+(sync epoch) of the first iterator in the processing chain.
+
+One consequence of this choice is that the delay cannot be changed without
+discarding the processing chain and creating a new one, because the rechunking
+steps require contiguous data. This is handled by using a new
+:class:`~katgpucbf.vgpu.engine._CaptureSession` object for each
+``?capture-start`` / ``?capture-stop`` cycle, which has its own processing
+chain. This is different to the F- and XB-engines, which run the processing
+continuously and only use ``?capture-start`` and ``?capture-stop`` to gate the
+output transmission.
+
+An alternative approach would have been a model
 similar to the F-engine, where contiguous data is sourced by reading from an
 input buffer with an offset (possibly skipping or duplicating samples); in
 retrospect this may have been a better approach.
 
-Initially we also gated the receiver on ``capture-start`` and
-``capture-stop``, but this meant that when not capturing there was no way to
+Reception
+---------
+Initially we also gated the receiver on ``?capture-start`` and
+``?capture-stop``, but this meant that when not capturing there was no way to
 tell whether the V-engine had a healthy network connection capable of
 receiving the full incoming bandwidth. To address this, a somewhat complicated
 :class:`.DiscardingIterator` wrapper is used to allow data to still be
