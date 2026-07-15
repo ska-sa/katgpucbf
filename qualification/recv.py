@@ -691,6 +691,7 @@ class TiedArrayResampledVoltageReceiver:
 
         self.frame_rate = 0
         self.invalid_framesets: list[tuple[int, int]] = []
+        self.start_timestamp = cbf.steady_state_timestamp() * self.scale_factor_timestamp
 
     async def _read(self) -> None:
         loop = asyncio.get_running_loop()
@@ -701,12 +702,19 @@ class TiedArrayResampledVoltageReceiver:
         while True:
             await self._read()
 
-    def complete_framesets(self) -> Generator[tuple[list[int], tuple[int, int]], None, None]:
+    def complete_framesets(
+        self, min_timestamp: int | None = None
+    ) -> Generator[tuple[list[int], tuple[int, int]], None, None]:
         """Decode the VDIF framesets in the buffer."""
         vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
+
         if self.frame_rate == 0 and self.vtp_buffer.samples_per_frame is not None:
             self.frame_rate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
+        if min_timestamp is None:
+            min_timestamp = self.start_timestamp
         for set_seq_ids, key in vtp_decoder.vtp_framesets():
+            if min_timestamp > key[0]:
+                continue
             self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
             yield set_seq_ids, key
         self.vtp_buffer.clear()
