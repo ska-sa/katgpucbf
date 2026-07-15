@@ -578,6 +578,7 @@ async def cbf(
         logger.info("Subscribing to tied-array-resampled-voltage")
         cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
             cbf=cbf,
+            stream_names=["tied-array-resampled-voltage"],
             interface_address=interface_address,
         )
 

@@ -19,6 +19,7 @@
 import ast
 import asyncio
 import ctypes
+import json
 import logging
 import math
 import os
@@ -656,16 +657,16 @@ class TiedArrayResampledVoltageReceiver:
     def __init__(
         self,
         cbf: CBFRemoteControl,
+        stream_names: Sequence[str],
         interface_address: str,
     ) -> None:
-        self.stream_names = ["tied-array-resampled-voltage"]
         self.multicast_groups = endpoint_list_parser(DEFAULT_VTP_PORT)(
-            cbf.init_sensors[f"{self.stream_names[0]}.destination"].value.decode()
+            cbf.init_sensors[f"{stream_names[0]}.destination"].value.decode()
         )
-        self.n_chans = cbf.init_sensors[f"{self.stream_names[0]}.n-chans"].value
-        self.pol_ordering = ast.literal_eval(cbf.init_sensors[f"{self.stream_names[0]}.pol-ordering"].value.decode())
+        self.n_chans = cbf.init_sensors[f"{stream_names[0]}.n-chans"].value
+        self.pol_ordering = json.loads(cbf.init_sensors[f"{stream_names[0]}.pol-ordering"].value.decode())
         self.n_threads = self.n_chans * len(self.pol_ordering)
-        self.veng_out_bits_per_sample = cbf.init_sensors[f"{self.stream_names[0]}.veng-out-bits-per-sample"].value
+        self.veng_out_bits_per_sample = cbf.init_sensors[f"{stream_names[0]}.veng-out-bits-per-sample"].value
 
         # all multicast groups must use the same port
         port = self.multicast_groups[0].port
@@ -673,27 +674,27 @@ class TiedArrayResampledVoltageReceiver:
             if multicast_group.port != port:
                 raise ValueError("All multicast groups must use the same port")
 
-        self.scale_factor_timestamp = cbf.init_sensors[f"{self.stream_names[0]}.scale-factor-timestamp"].value
-        self.power_int_time = cbf.init_sensors[f"{self.stream_names[0]}.power-int-time"].value
-        self.bandwidth = cbf.init_sensors[f"{self.stream_names[0]}.bandwidth"].value
+        self.scale_factor_timestamp = cbf.init_sensors[f"{stream_names[0]}.scale-factor-timestamp"].value
+        self.power_int_time = cbf.init_sensors[f"{stream_names[0]}.power-int-time"].value
+        self.bandwidth = cbf.init_sensors[f"{stream_names[0]}.bandwidth"].value
 
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
-        self.socket.bind(("", port))
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
+        self.sock.bind(("", port))
         self.vtp_buffer = VTPBuffer()
         for multicast_group in self.multicast_groups:
             mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
-            self.socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            self.socket.setblocking(False)
+            self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        self.sock.setblocking(False)
 
         self.frame_rate = None
-        self.invalid_framesets = list[tuple[int, int]]()
+        self.invalid_framesets: list[tuple[int, int]] = []
 
     async def _read(self) -> None:
         loop = asyncio.get_running_loop()
-        self.vtp_buffer.add_packet(await loop.sock_recv(self.socket, self._max_packet_size))
+        self.vtp_buffer.add_packet(await loop.sock_recv(self.sock, self._max_packet_size))
 
     async def listen(self) -> None:
         """Listen for packets from the v engine and store them in the VTPDecoder."""
@@ -725,6 +726,6 @@ class TiedArrayResampledVoltageReceiver:
 
     def close(self) -> None:
         """Close the socket."""
-        self.socket.close()
+        self.sock.close()
         self.vtp_buffer.clear()
         self.invalid_framesets.clear()

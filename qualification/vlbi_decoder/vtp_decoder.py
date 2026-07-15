@@ -5,7 +5,6 @@ import struct
 from collections import defaultdict
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from baseband.vdif.frame import VDIFFrame
 
@@ -18,14 +17,14 @@ class VTPBuffer:
         self.thread_ids: list[int] = []
         self.seconds: list[int] = []
         self.frame_ids: list[int] = []
-        self.samples_per_frame: int | None = None
+        self.samples_per_frame: int = 0
 
     def add_packet(self, packet: bytes) -> None:
         """Add packet statistics to the buffer."""
         new_seq_id = struct.unpack("<Q", packet[:8])[0]
         frame = VDIFFrame.fromfile(io.BytesIO(packet[8:]))
         frame_id = frame.header["frame_nr"]
-        if self.samples_per_frame is None:
+        if self.samples_per_frame == 0:
             self.samples_per_frame = frame.header.samples_per_frame
         self.seq_ids.append(new_seq_id)
         self.seconds.append(frame.header["seconds"])
@@ -38,7 +37,7 @@ class VTPBuffer:
         self.thread_ids.clear()
         self.seconds.clear()
         self.frame_ids.clear()
-        self.samples_per_frame = None
+        self.samples_per_frame = 0
 
 
 @dataclass
@@ -67,8 +66,6 @@ class VTPDecoder:
             Number of threads in the VDIF stream.
         """
         self.n_threads = n_threads
-        if TYPE_CHECKING:
-            assert vtp_data.samples_per_frame is not None
         self.vtp_meta_list: list[VTPMeta] = []
         self.invalid_framesets: list[tuple[int, int]] = []
         self.frame_seq_map: dict[tuple[int, int], VTPMeta] = defaultdict()
@@ -107,7 +104,6 @@ class VTPDecoder:
             if any(seq_id in self.seq_ids for seq_id in meta.seq_ids):
                 self.invalid_framesets.append(key)
                 continue
-            self.seq_ids.update(meta.seq_ids)
             if len(meta.seq_ids) != self.n_threads:
                 self.invalid_framesets.append(key)
                 continue
@@ -115,3 +111,4 @@ class VTPDecoder:
                 self.invalid_framesets.append(key)
                 continue
             yield (meta.seq_ids.copy(), key)
+            self.seq_ids.update(meta.seq_ids)
