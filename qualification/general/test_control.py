@@ -244,9 +244,12 @@ def check_vdif_timestamps(
     for second, framesets_total in framesets_per_second.items():
         if framesets_total == receiver.frame_rate:
             complete_seconds.append(second)
-
+    complete_seconds = sorted(complete_seconds)
     with check:
         assert len(timestamp) > 0, f"No valid V framesets received on stream {name}"
+        assert len(complete_seconds) - (complete_seconds[-1] - complete_seconds[0] + 1) < 2, (
+            f"No complete seconds received on stream {name}"
+        )
         assert len(receiver.invalid_framesets) <= 2, f"Invalid framesets: {receiver.invalid_framesets}"
     pdf_report.detail(f"{name}: Received {len(timestamp)} VLBI framesets.")
     elapsed = timestamp[-1] - timestamp[0] + 1
