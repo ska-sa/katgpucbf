@@ -481,9 +481,7 @@ def dig_rms_dbfs_status_params(dig_sample_bits: float) -> tuple[float, float]:
     return dig_rms_dbfs_low, dig_rms_dbfs_low_error
 
 
-def dig_rms_dbfs_status(
-    value: float, dig_rms_dbfs_low: float = -30.0, dig_rms_dbfs_low_error: float = -33.0
-) -> aiokatcp.Sensor.Status:
+def dig_rms_dbfs_status(value: float, dig_rms_dbfs_low: float, dig_rms_dbfs_low_error: float) -> aiokatcp.Sensor.Status:
     """Compute status for dig-rms-dbfs sensor."""
     if dig_rms_dbfs_low <= value <= DIG_RMS_DBFS_HIGH:
         return aiokatcp.Sensor.Status.NOMINAL
@@ -491,13 +489,6 @@ def dig_rms_dbfs_status(
         return aiokatcp.Sensor.Status.WARN
     else:
         return aiokatcp.Sensor.Status.ERROR
-
-
-def dig_rms_dbfs_status_reordered(
-    dig_rms_dbfs_low: float, dig_rms_dbfs_low_error: float, value: float
-) -> aiokatcp.Sensor.Status:
-    """Return dig_rms_dbfs_status with properly ordered arguments."""
-    return dig_rms_dbfs_status(value, dig_rms_dbfs_low, dig_rms_dbfs_low_error)
 
 
 def _parse_gains(*values: str, channels: int, default_gain: complex | None) -> np.ndarray:
@@ -1326,8 +1317,8 @@ class FEngine(Engine):
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
-        super().__init__(katcp_host, katcp_port)
-        self.dig_sample_bits = dig_sample_bits
+        super().__init__(katcp_host, katcp_port)        
+        self.recv_layout = recv.Layout(dig_sample_bits, recv_packet_samples, chunk_samples, mask_timestamp)
         self._populate_sensors(
             self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
         )
@@ -1337,7 +1328,6 @@ class FEngine(Engine):
         self._recv_interface = recv_interface
         self._recv_buffer = recv_buffer
         self._recv_ibv = recv_ibv
-        self.recv_layout = recv.Layout(dig_sample_bits, recv_packet_samples, chunk_samples, mask_timestamp)
         self._send_interface = send_interface
         self._send_ttl = send_ttl
         self._send_ibv = send_ibv
@@ -1435,7 +1425,10 @@ class FEngine(Engine):
     def _populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
-            drdbs_func = partial(dig_rms_dbfs_status_reordered, *dig_rms_dbfs_status_params(self.dig_sample_bits))
+            dig_rms_dbfs_low, dig_rms_dbfs_low_error = dig_rms_dbfs_status_params(self.recv_layout.sample_bits)
+            drdbs_func = partial(
+                dig_rms_dbfs_status, dig_rms_dbfs_low=dig_rms_dbfs_low, dig_rms_dbfs_low_error=dig_rms_dbfs_low_error
+            )
             sensors.add(
                 make_rate_limited_sensor(
                     int,

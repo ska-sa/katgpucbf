@@ -1366,7 +1366,8 @@ class TestDigRmsDbfsStatus:
     @pytest.fixture
     def sensor(self, mock_time: mock.Mock) -> aiokatcp.Sensor[float]:
         """Create a sensor using dig_rms_dbfs_status."""
-        return aiokatcp.Sensor(float, "sensor2", "", status_func=dig_rms_dbfs_status)
+        func = partial(dig_rms_dbfs_status, dig_rms_dbfs_low=-30.0, dig_rms_dbfs_low_error=-33.0)
+        return aiokatcp.Sensor(float, "sensor2", "", status_func=func)
 
     def test_initial_value(self, sensor: aiokatcp.Sensor) -> None:
         """Test that the status is NOMINAL when no value has been set."""
