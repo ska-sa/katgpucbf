@@ -140,5 +140,5 @@ def test_clear_clears_state() -> None:
     assert buffer.seq_ids == []
     assert buffer.seconds == []
     assert buffer.thread_ids == []
-    assert buffer.samples_per_frame is None
+    assert buffer.samples_per_frame == 0
     assert buffer.frame_ids == []

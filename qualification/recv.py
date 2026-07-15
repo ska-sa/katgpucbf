@@ -689,7 +689,7 @@ class TiedArrayResampledVoltageReceiver:
             self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
         self.sock.setblocking(False)
 
-        self.frame_rate = None
+        self.frame_rate = 0
         self.invalid_framesets: list[tuple[int, int]] = []
 
     async def _read(self) -> None:
@@ -704,7 +704,7 @@ class TiedArrayResampledVoltageReceiver:
     def complete_framesets(self) -> Generator[tuple[list[int], tuple[int, int]], None, None]:
         """Decode the VDIF framesets in the buffer."""
         vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
-        if self.frame_rate is None and self.vtp_buffer.samples_per_frame is not None:
+        if self.frame_rate == 0 and self.vtp_buffer.samples_per_frame is not None:
             self.frame_rate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
         for set_seq_ids, key in vtp_decoder.vtp_framesets():
             self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
@@ -715,6 +715,8 @@ class TiedArrayResampledVoltageReceiver:
         """Listen until a single complete VDIF frameset is available, then return it."""
         while True:
             await self._read()
+            if self.frame_rate == 0 and self.vtp_buffer.samples_per_frame is not None:
+                self.frame_rate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
             try:
                 vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
                 self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
@@ -724,8 +726,17 @@ class TiedArrayResampledVoltageReceiver:
             self.vtp_buffer.clear()
             return set_seq_ids, key
 
+    async def wait_complete_frameset(
+        self, max_delay: int = DEFAULT_MAX_DELAY, timeout: float | None = DEFAULT_TIMEOUT
+    ) -> float:
+        """Wait until a complete VDIF frameset is available."""
+        task = asyncio.create_task(self.next_complete_frameset())
+        _, key = await asyncio.wait_for(task, timeout)
+        return key[0] + (float)(key[1]) * self.frame_rate
+
     def close(self) -> None:
         """Close the socket."""
         self.sock.close()
         self.vtp_buffer.clear()
         self.invalid_framesets.clear()
+        self.frame_rate = 0

@@ -679,4 +679,5 @@ async def receive_tied_array_resampled_voltage(
     # Receiver is only created when vlbi is enabled.
     if "tied-array-resampled-voltage" in capture_start_streams:
         assert receiver is not None
+        await receiver.wait_complete_frameset(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
     return receiver
