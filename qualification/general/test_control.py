@@ -223,7 +223,7 @@ def check_timestamps(
         assert missing <= 2, f"{missing} of {expected} chunks missing for {name}"
 
 
-def check_vdif_timestamps(
+async def check_vdif_timestamps(
     name: str,
     receiver: TiedArrayResampledVoltageReceiver,
     pdf_report: Reporter,
@@ -235,7 +235,7 @@ def check_vdif_timestamps(
     complete_seconds = []
 
     pdf_report.step(f"Check validity of received frames for {name}.")
-    for frameset_seq_ids, frameset_key in receiver.complete_framesets():
+    async for frameset_seq_ids, frameset_key in receiver.complete_framesets():
         timestamp.append(frameset_key[0] + (float)(frameset_key[1]) / receiver.frame_rate)
         seq_ids.extend(frameset_seq_ids)
         framesets_per_second[frameset_key[0]] += 1
@@ -318,7 +318,7 @@ async def test_control(  # noqa: D103
         timestamps_tacv,
     )
     if receive_tied_array_resampled_voltage is not None:
-        check_vdif_timestamps(
+        await check_vdif_timestamps(
             "tied_array_resampled_voltage",
             receive_tied_array_resampled_voltage,
             pdf_report,
