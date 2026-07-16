@@ -1317,11 +1317,11 @@ class FEngine(Engine):
         use_peerdirect: bool,
         monitor: Monitor,
     ) -> None:
-        super().__init__(katcp_host, katcp_port)        
+        super().__init__(katcp_host, katcp_port)
         self._populate_sensors(
             self.sensors,
             max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate),
-            dig_sample_bits
+            dig_sample_bits,
         )
         # Attributes copied or initialised from arguments
         self._srcs = copy.copy(srcs)
@@ -1425,10 +1425,7 @@ class FEngine(Engine):
             chunk.recycle()  # Make available to the stream
 
     def _populate_sensors(
-        self,
-        sensors: aiokatcp.SensorSet,
-        recv_sensor_timeout: float,
-        dig_sample_bits: float
+        self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float, dig_sample_bits: float
     ) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
