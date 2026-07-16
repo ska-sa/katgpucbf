@@ -35,6 +35,7 @@ repos:
         types_or: [python, pyi]
         additional_dependencies: [
             'aioconsole==0.8.2',
+            'aiohttp==3.14.1',
             'aiokatcp==2.2.0',
             'aiomonitor==0.7.1',
             'astropy==7.2.0',
@@ -43,6 +44,7 @@ repos:
             'katcbf-vlbi-resample==0.5.2',
             'katsdpsigproc==1.10.0',
             'katsdptelstate==1.0.0',
+            'llvmlite==0.46.0',
             'matplotlib==3.10.8',
             'numba==0.63.1',
             'numpy==2.3.5',
