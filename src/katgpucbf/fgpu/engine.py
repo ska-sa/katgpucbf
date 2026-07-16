@@ -1318,9 +1318,10 @@ class FEngine(Engine):
         monitor: Monitor,
     ) -> None:
         super().__init__(katcp_host, katcp_port)        
-        self.recv_layout = recv.Layout(dig_sample_bits, recv_packet_samples, chunk_samples, mask_timestamp)
         self._populate_sensors(
-            self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
+            self.sensors,
+            max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate),
+            dig_sample_bits
         )
         # Attributes copied or initialised from arguments
         self._srcs = copy.copy(srcs)
@@ -1328,6 +1329,7 @@ class FEngine(Engine):
         self._recv_interface = recv_interface
         self._recv_buffer = recv_buffer
         self._recv_ibv = recv_ibv
+        self.recv_layout = recv.Layout(dig_sample_bits, recv_packet_samples, chunk_samples, mask_timestamp)
         self._send_interface = send_interface
         self._send_ttl = send_ttl
         self._send_ibv = send_ibv
@@ -1422,10 +1424,15 @@ class FEngine(Engine):
             )
             chunk.recycle()  # Make available to the stream
 
-    def _populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
+    def _populate_sensors(
+        self,
+        sensors: aiokatcp.SensorSet,
+        recv_sensor_timeout: float,
+        dig_sample_bits: float
+    ) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
-            dig_rms_dbfs_low, dig_rms_dbfs_low_error = dig_rms_dbfs_status_params(self.recv_layout.sample_bits)
+            dig_rms_dbfs_low, dig_rms_dbfs_low_error = dig_rms_dbfs_status_params(dig_sample_bits)
             drdbs_func = partial(
                 dig_rms_dbfs_status, dig_rms_dbfs_low=dig_rms_dbfs_low, dig_rms_dbfs_low_error=dig_rms_dbfs_low_error
             )
