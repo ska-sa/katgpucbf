@@ -232,7 +232,7 @@ async def check_vdif_timestamps(
     timestamp: list[float] = []
     seq_ids: list[int] = []
     framesets_per_second: collections.Counter[int] = collections.Counter()
-    complete_seconds = []
+    complete_seconds: list[int] = []
 
     pdf_report.step(f"Check validity of received frames for {name}.")
     async for frameset_seq_ids, frameset_key in receiver.complete_framesets():
@@ -240,6 +240,8 @@ async def check_vdif_timestamps(
         seq_ids.extend(frameset_seq_ids)
         framesets_per_second[frameset_key[0]] += 1
 
+    assert len(complete_seconds) > 0, f"No complete seconds received on stream {name}"
+    assert len(timestamp) > 0, f"No valid V framesets received on stream {name}"
     timestamp = sorted(timestamp)
     for second, framesets_total in framesets_per_second.items():
         if framesets_total == receiver.frame_rate:

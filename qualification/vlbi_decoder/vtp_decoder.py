@@ -18,6 +18,7 @@ class VTPBuffer:
         self.seconds: list[int] = []
         self.frame_ids: list[int] = []
         self.samples_per_frame: int = 0
+        self.ref_epoch: int = 0
 
     def add_packet(self, packet: bytes) -> None:
         """Add packet statistics to the buffer."""
@@ -26,6 +27,7 @@ class VTPBuffer:
         frame_id = frame.header["frame_nr"]
         if self.samples_per_frame == 0:
             self.samples_per_frame = frame.header.samples_per_frame
+            self.ref_epoch = frame.header["ref_epoch"]
         self.seq_ids.append(new_seq_id)
         self.seconds.append(frame.header["seconds"])
         self.thread_ids.append(frame.header["thread_id"])
@@ -38,6 +40,7 @@ class VTPBuffer:
         self.seconds.clear()
         self.frame_ids.clear()
         self.samples_per_frame = 0
+        self.ref_epoch = 0
 
 
 @dataclass

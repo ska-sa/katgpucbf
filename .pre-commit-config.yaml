@@ -56,6 +56,7 @@ repos:
             'spead2==4.4.1',
             'types-decorator==5.2.0.20251101',
             'types-docutils==0.21.0.20250809',
+            'types-python-dateutil==2.9.0.20260716',
             'types-six==1.17.0.20251009',
             'typing-extensions==4.15.0',
         ]

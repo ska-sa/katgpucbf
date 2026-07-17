@@ -19,6 +19,7 @@
 import ast
 import asyncio
 import ctypes
+import datetime
 import json
 import logging
 import math
@@ -33,6 +34,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
+from dateutil.relativedelta import relativedelta
 from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from numpy.typing import NDArray
@@ -677,6 +679,8 @@ class TiedArrayResampledVoltageReceiver:
         self.scale_factor_timestamp = cbf.init_sensors[f"{stream_names[0]}.scale-factor-timestamp"].value
         self.power_int_time = cbf.init_sensors[f"{stream_names[0]}.power-int-time"].value
         self.bandwidth = cbf.init_sensors[f"{stream_names[0]}.bandwidth"].value
+        logger.error(f"bandwidth: {self.bandwidth}")
+        self.sync_time: float = cbf.init_sensors[f"{stream_names[0]}.sync-time"].value
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -692,6 +696,7 @@ class TiedArrayResampledVoltageReceiver:
         self.frame_rate = 0
         self.invalid_framesets: list[tuple[int, int]] = []
         self.cbf = cbf
+        self.min_timestamp: int | None = None
 
     async def _read(self) -> None:
         loop = asyncio.get_running_loop()
@@ -699,6 +704,10 @@ class TiedArrayResampledVoltageReceiver:
 
     async def listen(self) -> None:
         """Listen for packets from the v engine and store them in the VTPDecoder."""
+        if self.min_timestamp is None:
+            time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
+            self.min_timestamp = int(time_converter.adc_to_unix(await self.cbf.steady_state_timestamp()))
+
         while True:
             await self._read()
 
@@ -711,9 +720,21 @@ class TiedArrayResampledVoltageReceiver:
         if self.frame_rate == 0 and self.vtp_buffer.samples_per_frame is not None:
             self.frame_rate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
         if min_timestamp is None:
-            min_timestamp = (await self.cbf.steady_state_timestamp()) * self.scale_factor_timestamp
+            assert self.min_timestamp is not None, "min_timestamp is not set"
+            min_timestamp = self.min_timestamp
+
+        # the seconds value in the vtp decoder is in reference to the ref_epoch
         for set_seq_ids, key in vtp_decoder.vtp_framesets():
-            if min_timestamp > key[0]:
+            timestamp = (
+                self.ref_epoch + datetime.timedelta(seconds=key[0] + ((float)(key[1]) / self.frame_rate))
+            ).timestamp()
+            if min_timestamp > timestamp:
+                logger.debug(
+                    "timestamp"
+                    + f" {datetime.datetime.fromtimestamp(timestamp, datetime.UTC).strftime('%Y-%m-%d %H:%M:%S')}"
+                    + " is before the min timestamp of"
+                    + f" {datetime.datetime.fromtimestamp(min_timestamp, datetime.UTC).strftime('%Y-%m-%d %H:%M:%S')}"
+                )
                 continue
             self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
             yield set_seq_ids, key
@@ -734,13 +755,18 @@ class TiedArrayResampledVoltageReceiver:
             self.vtp_buffer.clear()
             return set_seq_ids, key
 
-    async def wait_complete_frameset(
-        self, max_delay: int = DEFAULT_MAX_DELAY, timeout: float | None = DEFAULT_TIMEOUT
-    ) -> float:
+    async def wait_complete_frameset(self, timeout: float | None = DEFAULT_TIMEOUT) -> float:
         """Wait until a complete VDIF frameset is available."""
         task = asyncio.create_task(self.next_complete_frameset())
         _, key = await asyncio.wait_for(task, timeout)
-        return key[0] + (float)(key[1]) * self.frame_rate
+        return (self.ref_epoch + datetime.timedelta(seconds=key[0] + ((float)(key[1]) / self.frame_rate))).timestamp()
+
+    @property
+    def ref_epoch(self) -> datetime.datetime:
+        """Reference epoch for the VDIF framesets."""
+        # ref_epoch is the number of half-years since 2000-01-01.
+        ref_epoch = self.vtp_buffer.ref_epoch
+        return datetime.datetime(2000, 1, 1) + relativedelta(months=6 * ref_epoch)
 
     def close(self) -> None:
         """Close the socket."""
