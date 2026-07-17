@@ -240,12 +240,12 @@ async def check_vdif_timestamps(
         seq_ids.extend(frameset_seq_ids)
         framesets_per_second[frameset_key[0]] += 1
 
-    assert len(complete_seconds) > 0, f"No complete seconds received on stream {name}"
     assert len(timestamp) > 0, f"No valid V framesets received on stream {name}"
     timestamp = sorted(timestamp)
     for second, framesets_total in framesets_per_second.items():
         if framesets_total == receiver.frame_rate:
             complete_seconds.append(second)
+    assert len(complete_seconds) > 0, f"No complete seconds received on stream {name}"
     complete_seconds = sorted(complete_seconds)
     with check:
         assert len(timestamp) > 0, f"No valid V framesets received on stream {name}"

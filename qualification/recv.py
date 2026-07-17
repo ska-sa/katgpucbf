@@ -679,7 +679,6 @@ class TiedArrayResampledVoltageReceiver:
         self.scale_factor_timestamp = cbf.init_sensors[f"{stream_names[0]}.scale-factor-timestamp"].value
         self.power_int_time = cbf.init_sensors[f"{stream_names[0]}.power-int-time"].value
         self.bandwidth = cbf.init_sensors[f"{stream_names[0]}.bandwidth"].value
-        logger.error(f"bandwidth: {self.bandwidth}")
         self.sync_time: float = cbf.init_sensors[f"{stream_names[0]}.sync-time"].value
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
