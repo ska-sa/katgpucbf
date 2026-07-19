@@ -181,10 +181,12 @@ increase array size to increase computation, but still keep the output rate with
 the network limits (since the number of output baselines is proportional to the number
 of antennas), by increasing the number of total substreams.
 
-Execution parameters for the XBGPU calibration are:
+Since the benchmark execution for xbgpu takes a long time, the ssh sessions fail every
+few days, to prevent data loss without rewriting the benchmarkds, the execution is
+done via the runcalibratexbgpu.sh script.
+
 
 ```bash
-benchmark_xbgpu.py -n 1 --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 100 > xbgpu_calibration/calibration-n1.txt
-benchmark_xbgpu.py -n 2 --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 100 > xbgpu_calibration/calibration-n2.txt
-benchmark_xbgpu.py -n 4 --substreams 1024 --channels 32768 --array-size 680 --calibrate-repeat 100 > xbgpu_calibration/calibration-n4.txt
+./runcalibratexbgpu.sh 50 2 5600000000 5850000000
+./runcalibratexbgpu.sh 50 4 3100000000 3350000000
 ```

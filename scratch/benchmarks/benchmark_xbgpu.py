@@ -67,10 +67,7 @@ class XbgpuBenchmark(Benchmark):
             consumer_server=servers[args.xbgpu_server],
             expected_heaps_scale=args.array_size / heap_samples,
             metric_prefix="xbgpu",
-            slope={
-                1: -451.368500,
-                2: -429.814719,
-            },
+            slope={2: -305.898783, 4: -392.395256},
         )
 
     def fsim_factory(

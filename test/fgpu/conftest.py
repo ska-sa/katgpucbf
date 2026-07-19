@@ -16,7 +16,7 @@
 
 """Fixtures for use in fgpu unit tests."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import Callable
 
 import pytest
 import spead2
@@ -52,15 +52,14 @@ def mock_recv_stream(mock_recv_streams: list[spead2.InprocQueue]) -> spead2.Inpr
 
 
 @pytest.fixture
-async def engine(
+def make_engine_impl(
     request: pytest.FixtureRequest,
     engine_arglist: list[str],
-    mock_recv_stream,
     mock_send_stream,
     recv_max_chunks_one,
     context: AbstractContext,
     vkgdr_handle: vkgdr.Vkgdr,
-) -> AsyncGenerator[FEngine, None]:
+) -> Callable[[], FEngine]:
     """Create a dummy :class:`.FEngine` for unit testing.
 
     The arguments passed are based on the default arguments from
@@ -80,8 +79,4 @@ async def engine(
         arglist.extend(marker.args)
 
     args = parse_args(arglist)
-    server, _monitor = make_engine(context, vkgdr_handle, args)
-
-    await server.start()
-    yield server
-    await server.stop()
+    return lambda: make_engine(context, vkgdr_handle, args)[0]

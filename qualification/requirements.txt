@@ -10,7 +10,7 @@ aiohappyeyeballs==2.6.1
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   aiohttp
-aiohttp==3.13.4
+aiohttp==3.14.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -148,7 +148,7 @@ katcbf-vlbi-resample==0.5.2
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katgpucbf (pyproject.toml)
-katcp-codec==0.2.0
+katcp-codec==0.2.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -197,7 +197,7 @@ matplotlib==3.10.8
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (pyproject.toml)
-msgpack==1.1.2
+msgpack==1.2.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
@@ -411,6 +411,7 @@ typing-extensions==4.15.0
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
+    #   aiohttp
     #   aiokatcp
     #   aiomonitor
     #   aiosignal
