@@ -296,7 +296,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     return config
 
 
-async def issue_config(host: str, port: int, name: str, config: dict) -> int:
+async def issue_config(host: str, port: int, name: str, config: dict, has_vlbi: bool) -> int:
     """Connect to the product controller and issue ``?product-configure``).
 
     Returns
@@ -315,6 +315,9 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
         product_client = await aiokatcp.Client.connect(product_host, product_port)
         for output_name, output in config["outputs"].items():
             if output["type"] in CAPTURE_START_TYPES:
+                if has_vlbi and "narrow0-tied-array-channelised-voltage" in output_name:
+                    # vgpu src-streams are pre-enabled by katsdpcontroller
+                    continue
                 print(f"Enabling {output_name} transmission...")
                 await product_client.request("capture-start", output_name)
     except (aiokatcp.FailReply, ConnectionError) as exc:
@@ -336,7 +339,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f.write("\n")  # json.dump doesn't write a final newline
         return 0
     else:
-        return asyncio.run(issue_config(args.controller, args.port, args.name, config))
+        # Pass a boolean that indicates VLBI or not
+        return asyncio.run(issue_config(args.controller, args.port, args.name, config, args.vlbi))
 
 
 if __name__ == "__main__":
