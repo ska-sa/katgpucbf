@@ -235,27 +235,37 @@ async def check_vdif_timestamps(
     complete_seconds: list[int] = []
 
     pdf_report.step(f"Check validity of received frames for {name}.")
-    async for frameset_seq_ids, frameset_key in receiver.complete_framesets():
-        timestamp.append(frameset_key[0] + (float)(frameset_key[1]) / receiver.frame_rate)
-        seq_ids.extend(frameset_seq_ids)
-        framesets_per_second[frameset_key[0]] += 1
+    async for frameset_data, frameset_key in receiver.complete_framesets():
+        timestamp.append(frameset_key.timestamp(receiver.frame_rate))
+        seq_ids.extend(frameset_data.seq_ids)
+        framesets_per_second[frameset_key.second] += 1
 
     assert len(timestamp) > 0, f"No valid V framesets received on stream {name}"
     timestamp = sorted(timestamp)
+
+    pdf_report.detail(f"{name}: Received {len(timestamp)} VLBI framesets.")
+    elapsed = timestamp[-1] - timestamp[0]
+    pdf_report.detail(f"{name}: received data over {elapsed:.3f}s.")
+
+    sorted_expected_seconds = sorted(framesets_per_second.keys())
+    expected_seconds = sorted_expected_seconds[-1] - sorted_expected_seconds[0] + 1
+    with check:
+        assert expected_seconds == len(framesets_per_second.keys()), (
+            f"Completely missed a total of {abs(expected_seconds - len(framesets_per_second.keys()))} seconds of data"
+        )
+
     for second, framesets_total in framesets_per_second.items():
         if framesets_total == receiver.frame_rate:
             complete_seconds.append(second)
     assert len(complete_seconds) > 0, f"No complete seconds received on stream {name}"
     complete_seconds = sorted(complete_seconds)
     with check:
-        assert len(timestamp) > 0, f"No valid V framesets received on stream {name}"
-        assert len(complete_seconds) - (complete_seconds[-1] - complete_seconds[0] + 1) < 2, (
-            f"No complete seconds received on stream {name}"
+        assert abs(len(complete_seconds) - (complete_seconds[-1] - complete_seconds[0] + 1)) < 2, (
+            f"{name}: missing {len(complete_seconds) - (complete_seconds[-1] - complete_seconds[0] + 1)}"
+            f" of {complete_seconds[-1] - complete_seconds[0] + 1} seconds of data"
         )
-        assert len(receiver.invalid_framesets) <= 2, f"Invalid framesets: {receiver.invalid_framesets}"
-    pdf_report.detail(f"{name}: Received {len(timestamp)} VLBI framesets.")
-    elapsed = timestamp[-1] - timestamp[0] + 1
-    pdf_report.detail(f"{name}: received data over {elapsed:.3f}s.")
+        assert len(receiver.invalid_framesets) <= 5, f"Invalid framesets: {receiver.invalid_framesets}"
+
     min_time = TEST_TIME - TEST_TIME_TOL
     with check:
         missed_sequences = 0

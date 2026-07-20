@@ -34,7 +34,6 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
-from dateutil.relativedelta import relativedelta
 from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from numpy.typing import NDArray
@@ -45,7 +44,7 @@ import katgpucbf.recv
 from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DEFAULT_VTP_PORT, DIG_SAMPLE_BITS
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
-from qualification.vlbi_decoder.vtp_decoder import VTPBuffer, VTPDecoder
+from qualification.vlbi_decoder.vtp_decoder import VDIFFramesetData, VDIFFramesetKey, VTPBuffer, VTPDecoder
 
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
@@ -693,7 +692,7 @@ class TiedArrayResampledVoltageReceiver:
         self.sock.setblocking(False)
 
         self.frame_rate = 0
-        self.invalid_framesets: list[tuple[int, int]] = []
+        self.invalid_framesets: list[VDIFFramesetKey] = []
         self.cbf = cbf
         self.min_timestamp: int | None = None
 
@@ -712,21 +711,18 @@ class TiedArrayResampledVoltageReceiver:
 
     async def complete_framesets(
         self, min_timestamp: int | None = None
-    ) -> AsyncGenerator[tuple[list[int], tuple[int, int]], None]:
+    ) -> AsyncGenerator[tuple[VDIFFramesetData, VDIFFramesetKey], None]:
         """Decode the VDIF framesets in the buffer."""
-        vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
+        vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads, self.bandwidth)
+        self.frame_rate = vtp_decoder.frame_rate
 
-        if self.frame_rate == 0 and self.vtp_buffer.samples_per_frame is not None:
-            self.frame_rate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
         if min_timestamp is None:
             assert self.min_timestamp is not None, "min_timestamp is not set"
             min_timestamp = self.min_timestamp
 
         # the seconds value in the vtp decoder is in reference to the ref_epoch
-        for set_seq_ids, key in vtp_decoder.vtp_framesets():
-            timestamp = (
-                self.ref_epoch + datetime.timedelta(seconds=key[0] + ((float)(key[1]) / self.frame_rate))
-            ).timestamp()
+        for data, key in vtp_decoder.vtp_framesets():
+            timestamp = key.timestamp(self.frame_rate)
             if min_timestamp > timestamp:
                 logger.debug(
                     "timestamp"
@@ -736,17 +732,16 @@ class TiedArrayResampledVoltageReceiver:
                 )
                 continue
             self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
-            yield set_seq_ids, key
+            yield data, key
         self.vtp_buffer.clear()
 
-    async def next_complete_frameset(self) -> tuple[list[int], tuple[int, int]]:
+    async def next_complete_frameset(self) -> tuple[VDIFFramesetData, VDIFFramesetKey]:
         """Listen until a single complete VDIF frameset is available, then return it."""
         while True:
             await self._read()
-            if self.frame_rate == 0 and self.vtp_buffer.samples_per_frame is not None:
-                self.frame_rate = round(self.bandwidth / self.vtp_buffer.samples_per_frame)
             try:
-                vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads)
+                vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads, self.bandwidth)
+                self.frame_rate = vtp_decoder.frame_rate
                 self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
                 set_seq_ids, key = next(vtp_decoder.vtp_framesets())
             except StopIteration:
@@ -758,14 +753,7 @@ class TiedArrayResampledVoltageReceiver:
         """Wait until a complete VDIF frameset is available."""
         task = asyncio.create_task(self.next_complete_frameset())
         _, key = await asyncio.wait_for(task, timeout)
-        return (self.ref_epoch + datetime.timedelta(seconds=key[0] + ((float)(key[1]) / self.frame_rate))).timestamp()
-
-    @property
-    def ref_epoch(self) -> datetime.datetime:
-        """Reference epoch for the VDIF framesets."""
-        # ref_epoch is the number of half-years since 2000-01-01.
-        ref_epoch = self.vtp_buffer.ref_epoch
-        return datetime.datetime(2000, 1, 1) + relativedelta(months=6 * ref_epoch)
+        return key.timestamp(self.frame_rate)
 
     def close(self) -> None:
         """Close the socket."""

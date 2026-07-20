@@ -1,5 +1,6 @@
 """Classes for decoding VTP and VDIF stream statistics and validating framesets."""
 
+import datetime
 import io
 import struct
 from collections import defaultdict
@@ -7,6 +8,7 @@ from collections.abc import Generator
 from dataclasses import dataclass
 
 from baseband.vdif.frame import VDIFFrame
+from dateutil.relativedelta import relativedelta
 
 
 class VTPBuffer:
@@ -44,19 +46,35 @@ class VTPBuffer:
 
 
 @dataclass
-class VTPMeta:
-    """Metadata for a VDIF frameset."""
+class VDIFFramesetData:
+    """Data for a VDIF frameset."""
 
     seq_ids: list[int]
     thread_ids: set[int]
-    seconds: int
+
+
+@dataclass(frozen=True)
+class VDIFFramesetKey:
+    """Identifier of an VDIF frameset."""
+
+    second: int
     frame_id: int
+    ref_epoch: int
+
+    def timestamp(self, frame_rate: int) -> float:
+        """Timestamp of the VDIF frameset."""
+        # ref_epoch is the number of half-years since 2000-01-01.
+        return (
+            datetime.datetime(2000, 1, 1)
+            + relativedelta(months=6 * self.ref_epoch)
+            + datetime.timedelta(seconds=self.second + ((float)(self.frame_id) / frame_rate))
+        ).timestamp()
 
 
 class VTPDecoder:
     """Decoder for sorting VTP and VDIF stream statistics and validating VDIF framesets."""
 
-    def __init__(self, vtp_data: VTPBuffer, n_threads: int) -> None:
+    def __init__(self, vtp_data: VTPBuffer, n_threads: int, bandwidth: float) -> None:
         """Initialize the VTPDecoder.
 
         Groups the sequence IDs, frame IDs, thread IDs and seconds ordered by sequence ID.
@@ -67,21 +85,25 @@ class VTPDecoder:
             VTPBuffer containing the VTP and VDIF stream statistics.
         n_threads
             Number of threads in the VDIF stream.
+        bandwidth
+            Stream bandwidth in Hz, used to derive the VDIF frame rate.
         """
         self.n_threads = n_threads
-        self.vtp_meta_list: list[VTPMeta] = []
-        self.invalid_framesets: list[tuple[int, int]] = []
-        self.frame_seq_map: dict[tuple[int, int], VTPMeta] = defaultdict()
+        self.vtp_meta_list: list[VDIFFramesetData] = []
+        self.invalid_framesets: list[VDIFFramesetKey] = []
+        self.frame_seq_map: dict[VDIFFramesetKey, VDIFFramesetData] = defaultdict()
         self.seq_ids: set[int] = set()
+        self.frame_rate = round(bandwidth / vtp_data.samples_per_frame) if vtp_data.samples_per_frame != 0 else 0
 
         for i, seq_id in enumerate(vtp_data.seq_ids):
-            key = (vtp_data.seconds[i], vtp_data.frame_ids[i])
+            key = VDIFFramesetKey(
+                second=vtp_data.seconds[i], frame_id=vtp_data.frame_ids[i], ref_epoch=vtp_data.ref_epoch
+            )
+
             if key not in self.frame_seq_map:
-                self.frame_seq_map[key] = VTPMeta(
+                self.frame_seq_map[key] = VDIFFramesetData(
                     seq_ids=[seq_id],
                     thread_ids={vtp_data.thread_ids[i]},
-                    seconds=vtp_data.seconds[i],
-                    frame_id=vtp_data.frame_ids[i],
                 )
             else:
                 self.frame_seq_map[key].seq_ids.append(seq_id)
@@ -90,7 +112,7 @@ class VTPDecoder:
         for meta in self.frame_seq_map.values():
             meta.seq_ids.sort()
 
-    def vtp_framesets(self) -> Generator[tuple[list[int], tuple[int, int]], None, None]:
+    def vtp_framesets(self) -> Generator[tuple[VDIFFramesetData, VDIFFramesetKey], None, None]:
         """
         Decode the VTP Sequence IDs for a complete VDIF frameset.
 
@@ -103,15 +125,15 @@ class VTPDecoder:
         tuple[int, int]
             Key (second, frame_id) for the VDIF frameset.
         """
-        for key, meta in self.frame_seq_map.items():
-            if any(seq_id in self.seq_ids for seq_id in meta.seq_ids):
+        for key, data in self.frame_seq_map.items():
+            if any(seq_id in self.seq_ids for seq_id in data.seq_ids):
                 self.invalid_framesets.append(key)
                 continue
-            if len(meta.seq_ids) != self.n_threads:
+            if len(data.seq_ids) != self.n_threads:
                 self.invalid_framesets.append(key)
                 continue
-            if len(meta.thread_ids) != self.n_threads:
+            if len(data.thread_ids) != self.n_threads:
                 self.invalid_framesets.append(key)
                 continue
-            yield (meta.seq_ids.copy(), key)
-            self.seq_ids.update(meta.seq_ids)
+            yield (data, key)
+            self.seq_ids.update(data.seq_ids)

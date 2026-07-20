@@ -42,4 +42,4 @@ async def test_vlbi_vdif(
     frameset, _ = await receiver.next_complete_frameset()
     pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
     with check:
-        assert len(frameset) == receiver.n_chans * len(receiver.pol_ordering)
+        assert len(frameset.seq_ids) == receiver.n_chans * len(receiver.pol_ordering)
