@@ -233,12 +233,23 @@ async def check_vdif_timestamps(
     seq_ids: list[int] = []
     framesets_per_second: collections.Counter[int] = collections.Counter()
     complete_seconds: list[int] = []
+    prev_seq_id = None
+    missed_sequences = 0
 
     pdf_report.step(f"Check validity of received frames for {name}.")
     async for frameset_data, frameset_key in receiver.complete_framesets():
+        if prev_seq_id is None:
+            prev_seq_id = frameset_data.seq_ids[0]
+        else:
+            if frameset_data.seq_ids[0] != prev_seq_id + 1:
+                missed_sequences += frameset_data.seq_ids[0] - prev_seq_id - 1
+                prev_seq_id = frameset_data.seq_ids[0]
         timestamp.append(frameset_key.timestamp(receiver.frame_rate))
         seq_ids.extend(frameset_data.seq_ids)
         framesets_per_second[frameset_key.second] += 1
+
+    with check:
+        assert missed_sequences <= 2, f"Missed {missed_sequences} sequence IDs"
 
     assert len(timestamp) > 0, f"No valid V framesets received on stream {name}"
     timestamp = sorted(timestamp)
@@ -260,22 +271,14 @@ async def check_vdif_timestamps(
     assert len(complete_seconds) > 0, f"No complete seconds received on stream {name}"
     complete_seconds = sorted(complete_seconds)
     with check:
-        assert abs(len(complete_seconds) - (complete_seconds[-1] - complete_seconds[0] + 1)) < 2, (
-            f"{name}: missing {len(complete_seconds) - (complete_seconds[-1] - complete_seconds[0] + 1)}"
-            f" of {complete_seconds[-1] - complete_seconds[0] + 1} seconds of data"
+        missing_seconds_total = len(complete_seconds) - (complete_seconds[-1] - complete_seconds[0] + 1)
+        assert missing_seconds_total < 2, (
+            f"{name}: missing {missing_seconds_total}s of {complete_seconds[-1] - complete_seconds[0] + 1}s of data"
         )
         assert len(receiver.invalid_framesets) <= 5, f"Invalid framesets: {receiver.invalid_framesets}"
 
     min_time = TEST_TIME - TEST_TIME_TOL
     with check:
-        missed_sequences = 0
-        prev_seq_id = seq_ids[0]
-        for seq_id in seq_ids[1:]:
-            if seq_id != prev_seq_id + 1:
-                missed_sequences += seq_id - prev_seq_id - 1
-            prev_seq_id = seq_id
-
-        assert missed_sequences <= 2, f"Missed {missed_sequences} sequence IDs"
         assert elapsed >= min_time, f"Less than {min_time}s of data received for {name}"
 
     pdf_report.detail(f"{name}: missed {missed_sequences} frames.")
