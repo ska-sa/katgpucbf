@@ -239,12 +239,15 @@ async def check_vdif_timestamps(
         seq_ids.extend(frameset_data.seq_ids)
         framesets_per_second[frameset_key.second] += 1
 
-    prev_seq_id = frameset_data.seq_ids[0]
+    sorted(seq_ids)
+    prev_seq_id = seq_ids[0]
     missed_sequences = 0
-    for seq in seq_ids:
+    for seq in seq_ids[1:]:
         if seq != prev_seq_id + 1:
             missed_sequences += seq - prev_seq_id - 1
-            prev_seq_id = seq
+        prev_seq_id = seq
+    with check:
+        assert missed_sequences <= 2, f"{name}: Missed {missed_sequences} sequences"
 
     assert len(timestamp) > 0, f"No valid V framesets received on stream {name}"
     timestamp = sorted(timestamp)
