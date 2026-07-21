@@ -65,10 +65,14 @@ class VDIFFramesetKey:
         """Timestamp of the VDIF frameset."""
         # ref_epoch is the number of half-years since 2000-01-01.
         return (
-            datetime.datetime(2000, 1, 1)
-            + relativedelta(months=6 * self.ref_epoch)
-            + datetime.timedelta(seconds=self.second + ((float)(self.frame_id) / frame_rate))
-        ).timestamp()
+            (
+                datetime.datetime(2000, 1, 1)
+                + relativedelta(months=6 * self.ref_epoch)
+                + datetime.timedelta(seconds=self.second + ((float)(self.frame_id) / frame_rate))
+            )
+            .astimezone(datetime.UTC)
+            .timestamp()
+        )
 
 
 class VTPDecoder:
