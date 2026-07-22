@@ -159,7 +159,7 @@ def test_timestamp_from_epoch() -> None:
     buffer.add_packet(make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0, ref_epoch=2))
     decoder = VTPDecoder(buffer, 1, BANDWIDTH)
     _, key = next(decoder.vtp_framesets())
-    assert key.timestamp(decoder.frame_rate) == pytest.approx(978300100.000125)
+    assert key.timestamp(decoder.frame_rate) == pytest.approx(978307300.000125)
 
 
 def test_clear_clears_state() -> None:
