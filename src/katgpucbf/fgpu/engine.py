@@ -475,10 +475,10 @@ def format_complex(value: numbers.Complex) -> str:
 def dig_rms_dbfs_status_params(dig_sample_bits: float) -> tuple[float, float, float, float]:
     """Compute dig_rms_dbfs_low and dig_rms_dbfs_low_error for the given dig_sample_bits."""
     if dig_sample_bits == 10.0:
-        return -33, -30, -10, -7
-    dig_rms_dbfs_low = -6.02 * (dig_sample_bits - 2)
+        return -33.0, -30.0, -10.0, -7.0
+    dig_rms_dbfs_low = -6.02 * (dig_sample_bits - 2.0)
     dig_rms_dbfs_low_error = -6.02 * dig_sample_bits
-    return dig_rms_dbfs_low, dig_rms_dbfs_low_error, -10, -6
+    return dig_rms_dbfs_low, dig_rms_dbfs_low_error, -10.0, -6.0
 
 
 def dig_rms_dbfs_status(
@@ -489,6 +489,7 @@ def dig_rms_dbfs_status(
     dig_rms_dbfs_high_error: float,
 ) -> aiokatcp.Sensor.Status:
     """Compute status for dig-rms-dbfs sensor."""
+    print(f"VINC : {value} : {dig_rms_dbfs_low_error} {dig_rms_dbfs_low} {dig_rms_dbfs_high} {dig_rms_dbfs_high_error}")
     if dig_rms_dbfs_low <= value <= dig_rms_dbfs_high:
         return aiokatcp.Sensor.Status.NOMINAL
     elif dig_rms_dbfs_low_error < value < dig_rms_dbfs_high_error:
@@ -1441,7 +1442,7 @@ class FEngine(Engine):
                 dig_rms_dbfs_low=low,
                 dig_rms_dbfs_low_error=low_error,
                 dig_rms_dbfs_high=high,
-                dig_rms_dbfs_high_error=high_error
+                dig_rms_dbfs_high_error=high_error,
             )
             sensors.add(
                 make_rate_limited_sensor(

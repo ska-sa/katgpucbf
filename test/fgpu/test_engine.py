@@ -1367,13 +1367,13 @@ class TestDigRmsDbfsStatus:
     @pytest.fixture
     def sensor(self, mock_time: mock.Mock) -> aiokatcp.Sensor[float]:
         """Create a sensor using dig_rms_dbfs_status for a 10 bit signal."""
-        low, low_error, high, high_error = dig_rms_dbfs_status_params(10)
+        low_error, low, high, high_error = dig_rms_dbfs_status_params(10)
         func = partial(
             dig_rms_dbfs_status,
-            dig_rms_dbfs_low=low,
             dig_rms_dbfs_low_error=low_error,
-            dig_rms_dbfs_low=high,
-            dig_rms_dbfs_low_error=high_error
+            dig_rms_dbfs_low=low,
+            dig_rms_dbfs_high=high,
+            dig_rms_dbfs_high_error=high_error,
         )
         return aiokatcp.Sensor(float, "sensor2", "", status_func=func)
 
@@ -1404,9 +1404,9 @@ class TestDigRmsDbfsStatus:
             (10, (-33.0, -30.0, -10, -7)),
             (2, (-0.0, -12.04, -10, -6)),
             (16, (-84.28, -96.32, -10, -6)),
-        ]
+        ],
     )
-    def test_dig_rms_dbfs_status_params(self, value: float, params: tuple(float, float, float, float)) -> None:
+    def test_dig_rms_dbfs_status_params(self, value: float, params: tuple[float, float, float, float]) -> None:
         """Test that the correct parameters are generated for the given value."""
         result = dig_rms_dbfs_status_params(value)
         assert params == result
