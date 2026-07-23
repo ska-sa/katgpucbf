@@ -345,7 +345,7 @@ def verify_corrprod_data(
                 n_batches,
                 n_channels_per_substream,
                 n_spectra_per_heap,
-                np.array(present[batch_start_index : batch_start_index + n_batches].all(axis=0)),
+                present[batch_start_index : batch_start_index + n_batches].all(axis=0),
             )
             np.testing.assert_equal(expected_output, corrprod_results[corrprod_output.name][j])
 

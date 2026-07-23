@@ -60,8 +60,6 @@ from ..utils import (
     make_rate_limited_sensor,
 )
 from . import (
-    DIG_RMS_DBFS_HIGH,
-    DIG_RMS_DBFS_HIGH_ERROR,
     DIG_RMS_DBFS_WINDOW,
     INPUT_CHUNK_PADDING,
     recv,
@@ -474,18 +472,26 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value:.17g}"
 
 
-def dig_rms_dbfs_status_params(dig_sample_bits: float) -> tuple[float, float]:
+def dig_rms_dbfs_status_params(dig_sample_bits: float) -> tuple[float, float, float, float]:
     """Compute dig_rms_dbfs_low and dig_rms_dbfs_low_error for the given dig_sample_bits."""
+    if dig_sample_bits == 10.0:
+        return -33, -30, -10, -7
     dig_rms_dbfs_low = -6.02 * (dig_sample_bits - 2)
     dig_rms_dbfs_low_error = -6.02 * dig_sample_bits
-    return dig_rms_dbfs_low, dig_rms_dbfs_low_error
+    return dig_rms_dbfs_low, dig_rms_dbfs_low_error, -10, -6
 
 
-def dig_rms_dbfs_status(value: float, dig_rms_dbfs_low: float, dig_rms_dbfs_low_error: float) -> aiokatcp.Sensor.Status:
+def dig_rms_dbfs_status(
+    value: float,
+    dig_rms_dbfs_low: float,
+    dig_rms_dbfs_low_error: float,
+    dig_rms_dbfs_high: float,
+    dig_rms_dbfs_high_error: float,
+) -> aiokatcp.Sensor.Status:
     """Compute status for dig-rms-dbfs sensor."""
-    if dig_rms_dbfs_low <= value <= DIG_RMS_DBFS_HIGH:
+    if dig_rms_dbfs_low <= value <= dig_rms_dbfs_high:
         return aiokatcp.Sensor.Status.NOMINAL
-    elif dig_rms_dbfs_low_error < value < DIG_RMS_DBFS_HIGH_ERROR:
+    elif dig_rms_dbfs_low_error < value < dig_rms_dbfs_high_error:
         return aiokatcp.Sensor.Status.WARN
     else:
         return aiokatcp.Sensor.Status.ERROR
@@ -1429,9 +1435,13 @@ class FEngine(Engine):
     ) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
-            dig_rms_dbfs_low, dig_rms_dbfs_low_error = dig_rms_dbfs_status_params(dig_sample_bits)
+            low, low_error, high, high_error = dig_rms_dbfs_status_params(dig_sample_bits)
             drdbs_func = partial(
-                dig_rms_dbfs_status, dig_rms_dbfs_low=dig_rms_dbfs_low, dig_rms_dbfs_low_error=dig_rms_dbfs_low_error
+                dig_rms_dbfs_status,
+                dig_rms_dbfs_low=low,
+                dig_rms_dbfs_low_error=low_error,
+                dig_rms_dbfs_high=high,
+                dig_rms_dbfs_high_error=high_error
             )
             sensors.add(
                 make_rate_limited_sensor(

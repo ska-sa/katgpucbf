@@ -41,6 +41,7 @@ from katgpucbf.fgpu.engine import (
     InQueueItem,
     Pipeline,
     dig_rms_dbfs_status,
+    dig_rms_dbfs_status_params,
     generate_ddc_weights,
     generate_pfb_weights,
 )
@@ -1365,8 +1366,15 @@ class TestDigRmsDbfsStatus:
 
     @pytest.fixture
     def sensor(self, mock_time: mock.Mock) -> aiokatcp.Sensor[float]:
-        """Create a sensor using dig_rms_dbfs_status."""
-        func = partial(dig_rms_dbfs_status, dig_rms_dbfs_low=-30.0, dig_rms_dbfs_low_error=-33.0)
+        """Create a sensor using dig_rms_dbfs_status for a 10 bit signal."""
+        low, low_error, high, high_error = dig_rms_dbfs_status_params(10)
+        func = partial(
+            dig_rms_dbfs_status,
+            dig_rms_dbfs_low=low,
+            dig_rms_dbfs_low_error=low_error,
+            dig_rms_dbfs_low=high,
+            dig_rms_dbfs_low_error=high_error
+        )
         return aiokatcp.Sensor(float, "sensor2", "", status_func=func)
 
     def test_initial_value(self, sensor: aiokatcp.Sensor) -> None:
@@ -1381,11 +1389,24 @@ class TestDigRmsDbfsStatus:
             (-12.0, aiokatcp.Sensor.Status.NOMINAL),
             pytest.param(-30.0 - EPSILON, aiokatcp.Sensor.Status.WARN, id="low-warn"),
             pytest.param(-10.0 + EPSILON, aiokatcp.Sensor.Status.WARN, id="high-warn"),
-            pytest.param(-33.0 - EPSILON, aiokatcp.Sensor.Status.ERROR, id="low-error"),
-            pytest.param(-6.0, aiokatcp.Sensor.Status.ERROR, id="high-error"),
+            pytest.param(-33.0, aiokatcp.Sensor.Status.ERROR, id="low-error"),
+            pytest.param(-7.0, aiokatcp.Sensor.Status.ERROR, id="high-error"),
         ],
     )
     def test_status(self, sensor: aiokatcp.Sensor, value: float, status: aiokatcp.Sensor.Status) -> None:
         """Test that the status is set correctly for a given value."""
         sensor.set_value(value, timestamp=2345678901.0)
         assert sensor.reading == aiokatcp.Reading(2345678901.0, status, value)
+
+    @pytest.mark.parametrize(
+        ("value", "params"),
+        [
+            (10, (-33.0, -30.0, -10, -7)),
+            (2, (-0.0, -12.04, -10, -6)),
+            (16, (-84.28, -96.32, -10, -6)),
+        ]
+    )
+    def test_dig_rms_dbfs_status_params(self, value: float, params: tuple(float, float, float, float)) -> None:
+        """Test that the correct parameters are generated for the given value."""
+        result = dig_rms_dbfs_status_params(value)
+        assert params == result
