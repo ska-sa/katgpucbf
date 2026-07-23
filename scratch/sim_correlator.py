@@ -75,6 +75,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="ADDRESS",
         help="Starting IP address for external digitisers",
     )
+    parser.add_argument(
+        "--digitiser-multicast-groups",
+        type=int,
+        metavar="N",
+        default=8,
+        help="Number of multicast groups per digitiser [%(default)s]",
+    )
     parser.add_argument("--sync-time", type=float, help="Digitiser sync time [current time]")
     parser.add_argument("--band", default="l", choices=BANDS.keys(), help="Band ID [%(default)s]")
     parser.add_argument("--adc-sample-rate", type=float, help="ADC sample rate in Hz [from --band]")
@@ -150,6 +157,7 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
         Names of the digitiser streams
     """
     next_dig_ip = args.digitiser_address
+    n = args.digitiser_multicast_groups
     dig_names = []
     for ant_index in range(args.digitisers):
         number = 800 + ant_index  # Avoid confusion with real antennas
@@ -176,10 +184,10 @@ def generate_digitisers(args: argparse.Namespace, config: dict) -> list[str]:
                     "type": "dig.baseband_voltage",
                     "sync_time": args.sync_time,
                     "antenna": f"m{number}, 0:0:0, 0:0:0, 0, 0",
-                    "url": f"spead://{next_dig_ip}+7:7148",
+                    "url": f"spead://{next_dig_ip}+{n - 1}:7148",
                     **dig_config_common,
                 }
-                next_dig_ip += 8
+                next_dig_ip += n
     return dig_names
 
 
