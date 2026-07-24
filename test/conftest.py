@@ -42,6 +42,7 @@ combination is a candidate.
 """
 
 import asyncio
+import async_solipsism
 import itertools
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -53,6 +54,7 @@ import aiokatcp
 import katsdpsigproc.cuda
 import pycuda.driver
 import pytest
+import pytest_asyncio
 import spead2
 import vkgdr
 from katsdpsigproc.abc import AbstractDevice
@@ -342,3 +344,21 @@ def mock_recv_streams(
         in the list is determined by :func:`n_recv_streams`.
     """
     return make_mock_recv_streams(n_recv_streams)
+
+class TestDiscardingIteratorEventLoopPolicy(async_solipsism.EventLoopPolicy):
+    pass
+
+def _make_loop():
+    # Set the policy for this loop instance
+    asyncio.set_event_loop_policy(TestDiscardingIteratorEventLoopPolicy())
+    policy = asyncio.get_event_loop_policy()
+    return policy.new_event_loop()
+
+@pytest_asyncio.fixture
+def event_loop_factories():
+    # Return default mapping
+    return {"default": _make_loop}  
+
+def pytest_asyncio_loop_factories(config, item):
+    # Return default mapping
+    return {"default": asyncio.new_event_loop}

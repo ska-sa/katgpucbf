@@ -66,18 +66,10 @@ class SpyDiscardingIterator(DiscardingIterator[int]):
 
 # Note: function must be async because DiscardingIterator requires an event loop
 @pytest.fixture
+@pytest.mark.asyncio(scope="function")
 async def discarding_iterator(counter: AsyncIterable[int]) -> SpyDiscardingIterator:
     """Fixture for :class:`.DiscardingIterator` tests."""
     return SpyDiscardingIterator(counter)
-
-
-class TestDiscardingIterator:
-    """Test :class:`.DiscardingIterator`."""
-
-    @pytest.fixture
-    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
-        """Use async_solipsism event loop."""
-        return async_solipsism.EventLoopPolicy()
 
     async def test_simple(self, discarding_iterator: SpyDiscardingIterator) -> None:
         """Test basic operations."""
@@ -228,13 +220,9 @@ class TestDeviceStatusSensor:
         assert ds.reading == aiokatcp.Reading(3456789012.0, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
 
 
+@pytest.mark.asyncio(scope="class")
 class TestTimeoutSensorStatus:
     """Tests for :func:`katgpucbf.utils.timeout_sensor_status`."""
-
-    @pytest.fixture
-    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
-        """Use async_solipsism event loop."""
-        return async_solipsism.EventLoopPolicy()
 
     @pytest.fixture
     def sensor(self) -> aiokatcp.Sensor:

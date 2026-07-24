@@ -35,12 +35,6 @@ from katgpucbf.vgpu.main import VTP_DEFAULT_PORT
 from katgpucbf.vgpu.send import RateLimiter, VDIFFrame, VDIFSender
 
 
-@pytest.fixture
-def event_loop_policy() -> async_solipsism.EventLoopPolicy:
-    """Use async_solipsism event loop."""
-    return async_solipsism.EventLoopPolicy()
-
-
 @dataclass(frozen=True)
 class DummyItem:
     """Item type for :class:`DummyRateLimiter`."""
@@ -48,7 +42,7 @@ class DummyItem:
     size: int  #: Size of the item for the rate-limiting algorithm
     sleep: float = 0.0  #: Time that processing the item will sleep
 
-
+@pytest.mark.asyncio(scope="class")
 class DummyRateLimiter(RateLimiter[DummyItem]):
     """Process items and store the times they were processed."""
 
@@ -65,7 +59,7 @@ class DummyRateLimiter(RateLimiter[DummyItem]):
         self.times.append(asyncio.get_running_loop().time())
         await asyncio.sleep(item.sleep)
 
-
+@pytest.mark.asyncio(scope="class")
 class TestRateLimiter:
     """Test :class:`.RateLimiter`."""
 
@@ -123,7 +117,7 @@ class TestRateLimiter:
         await limiter.stop()
         assert len(limiter.times) == 10
 
-
+@pytest.mark.asyncio(scope="class")
 class TestVDIFSender:
     """Test :class:.`VDIFSender`."""
 

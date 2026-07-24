@@ -20,7 +20,9 @@ import functools
 from collections.abc import Buffer, Callable, Iterable
 from typing import Any
 
+import async_solipsism
 import pytest
+import pytest_asyncio
 
 from katgpucbf.vgpu.engine import VEngine
 from katgpucbf.vgpu.main import make_engine, parse_args
@@ -54,3 +56,21 @@ def sendmsg_packets(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
     packets: list[bytes] = []
     monkeypatch.setattr("socket.socket.sendmsg", my_sendmsg)
     return packets
+
+class TestEventLoopPolicy(async_solipsism.EventLoopPolicy):
+    pass
+
+def _make_loop():
+    # Set the policy for this loop instance
+    asyncio.set_event_loop_policy(TestEventLoopPolicy())
+    policy = asyncio.get_event_loop_policy()
+    return policy.new_event_loop()
+
+@pytest_asyncio.fixture
+def event_loop_factories():
+    # Return default mapping
+    return {"default": _make_loop}  
+
+def pytest_asyncio_loop_factories(config, item):
+    # Return default mapping
+    return {"default": _make_loop}
