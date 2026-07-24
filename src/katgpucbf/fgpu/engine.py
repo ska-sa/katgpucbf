@@ -475,16 +475,16 @@ def format_complex(value: numbers.Complex) -> str:
 def dig_rms_dbfs_status_params(dig_sample_bits: float) -> tuple[float, float, float, float]:
     """Compute dig_rms_dbfs_low and dig_rms_dbfs_low_error for the given dig_sample_bits."""
     if dig_sample_bits == 10.0:
-        return -33.0, -30.0, -10.0, -7.0
+        return -33, -30, -10, -7
     dig_rms_dbfs_low = -6.02 * (dig_sample_bits - 2.0)
     dig_rms_dbfs_low_error = -6.02 * dig_sample_bits
-    return dig_rms_dbfs_low, dig_rms_dbfs_low_error, -10.0, -6.0
+    return dig_rms_dbfs_low_error, dig_rms_dbfs_low, -10, -6
 
 
 def dig_rms_dbfs_status(
     value: float,
-    dig_rms_dbfs_low: float,
     dig_rms_dbfs_low_error: float,
+    dig_rms_dbfs_low: float,
     dig_rms_dbfs_high: float,
     dig_rms_dbfs_high_error: float,
 ) -> aiokatcp.Sensor.Status:
@@ -1436,12 +1436,12 @@ class FEngine(Engine):
     ) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
-            low, low_error, high, high_error = dig_rms_dbfs_status_params(dig_sample_bits)
+            low_error, low_value, high_value, high_error = dig_rms_dbfs_status_params(dig_sample_bits)
             drdbs_func = partial(
                 dig_rms_dbfs_status,
-                dig_rms_dbfs_low=low,
                 dig_rms_dbfs_low_error=low_error,
-                dig_rms_dbfs_high=high,
+                dig_rms_dbfs_low=low_value,
+                dig_rms_dbfs_high=high_value,
                 dig_rms_dbfs_high_error=high_error,
             )
             sensors.add(
