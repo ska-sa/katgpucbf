@@ -42,7 +42,6 @@ combination is a candidate.
 """
 
 import asyncio
-import async_solipsism
 import itertools
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -51,6 +50,7 @@ from ipaddress import IPv4Address, IPv4Network
 from typing import Any
 
 import aiokatcp
+import async_solipsism
 import katsdpsigproc.cuda
 import pycuda.driver
 import pytest
@@ -345,8 +345,10 @@ def mock_recv_streams(
     """
     return make_mock_recv_streams(n_recv_streams)
 
+
 class TestDiscardingIteratorEventLoopPolicy(async_solipsism.EventLoopPolicy):
     pass
+
 
 def _make_loop():
     # Set the policy for this loop instance
@@ -354,10 +356,12 @@ def _make_loop():
     policy = asyncio.get_event_loop_policy()
     return policy.new_event_loop()
 
+
 @pytest_asyncio.fixture
 def event_loop_factories():
     # Return default mapping
-    return {"default": _make_loop}  
+    return {"default": _make_loop}
+
 
 def pytest_asyncio_loop_factories(config, item):
     # Return default mapping

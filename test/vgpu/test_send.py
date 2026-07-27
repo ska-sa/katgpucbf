@@ -42,6 +42,7 @@ class DummyItem:
     size: int  #: Size of the item for the rate-limiting algorithm
     sleep: float = 0.0  #: Time that processing the item will sleep
 
+
 @pytest.mark.asyncio(scope="class")
 class DummyRateLimiter(RateLimiter[DummyItem]):
     """Process items and store the times they were processed."""
@@ -58,6 +59,7 @@ class DummyRateLimiter(RateLimiter[DummyItem]):
     async def _process_item(self, item: DummyItem) -> None:
         self.times.append(asyncio.get_running_loop().time())
         await asyncio.sleep(item.sleep)
+
 
 @pytest.mark.asyncio(scope="class")
 class TestRateLimiter:
@@ -116,6 +118,7 @@ class TestRateLimiter:
             assert loop.time() - start_time == pytest.approx(0.4)
         await limiter.stop()
         assert len(limiter.times) == 10
+
 
 @pytest.mark.asyncio(scope="class")
 class TestVDIFSender:
