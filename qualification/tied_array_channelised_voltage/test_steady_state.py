@@ -14,7 +14,22 @@
 # limitations under the License.
 ################################################################################
 
-"""Test capture-start following state change requests."""
+"""Test capture-start following state change requests.
+
+.. note::
+
+    capture-start requests cannot be issued to tied-array-channelised-voltage
+    streams that feed tied-array-resampled-voltage (VLBI) streams.
+    :meth:`._test_capture_start` filters out any such streams from the list
+    to which capture-start requests are issued.
+
+    Due to the way the CBF config is generated, tied-array-channelised-voltage-{0x, 0y}
+    are always used as src_streams for a tied-array-resampled-voltage stream. These two
+    beam streams are always first in the list of stream names for a
+    :class:`.TiedArrayChannelisedVoltageReceiver`. As a result, the tests herein only
+    only issue state change requests to the last beam stream, which is guaranteed to
+    not be a src_stream for any tied-array-resampled-voltage stream.
+"""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -73,8 +88,17 @@ async def _test_capture_start(
     await prepare()
 
     pdf_report.step("Capture and verify output")
+    # Make a copy of this list as the metohd (and its fixtures) are reused between tests
+    capture_start_streams = receiver.stream_names.copy()
+    # Note: If CBF has a VLBI stream, we cannot issue ?capture-start to its
+    # src beam streams.
+    vlbi_config = cbf.config["outputs"].get("tied-array-resampled-voltage", None)
+    if vlbi_config is not None:
+        for src_beam_stream in vlbi_config["src_streams"]:
+            capture_start_streams.remove(src_beam_stream)
+
     async with asyncio.TaskGroup() as tg:
-        for stream in receiver.stream_names:
+        for stream in capture_start_streams:
             tg.create_task(pcc.request("capture-start", stream))
     # We use dsim_timestamp as a minimum to ensure that we're not receiving
     # data from a *previous* capture-start/stop.
@@ -101,10 +125,10 @@ async def test_beam_quant_gains_capture_start(
     async def prepare() -> None:
         pdf_report.step("Send request.")
         pdf_report.detail("Set beam-quant-gains to 0 on first beam.")
-        await cbf.product_controller_client.request("beam-quant-gains", receiver.stream_names[0], 0.0)
+        await cbf.product_controller_client.request("beam-quant-gains", receiver.stream_names[-1], 0.0)
 
     data = await _test_capture_start(cbf, receiver, pdf_report, prepare)
-    assert np.all(data[0] == 0)
+    assert np.all(data[-1] == 0)
     assert np.sum(data[1] != 0) >= data[1].size // 2  # Should be mostly non-zero
     pdf_report.detail("Output reflects effects of beam-quant-gains.")
 
@@ -129,10 +153,10 @@ async def test_beam_weights_capture_start(
         pdf_report.step("Send request.")
         pdf_report.detail("Set beam-weights to 0 on first beam.")
         weights = [0.0] * len(receiver.source_indices[0])
-        await cbf.product_controller_client.request("beam-weights", receiver.stream_names[0], *weights)
+        await cbf.product_controller_client.request("beam-weights", receiver.stream_names[-1], *weights)
 
     data = await _test_capture_start(cbf, receiver, pdf_report, prepare)
-    assert np.all(data[0] == 0)
+    assert np.all(data[-1] == 0)
     assert np.sum(data[1] != 0) >= data[1].size // 2  # Should be mostly non-zero
     pdf_report.detail("Output reflects effects of beam-weights.")
 
@@ -157,12 +181,12 @@ async def test_beam_delays_capture_start(
         pdf_report.step("Send request.")
         pdf_report.detail("Set beam-delays to phase π on first beam.")
         delays = [f"0:{np.pi}"] * len(receiver.source_indices[0])
-        await cbf.product_controller_client.request("beam-delays", receiver.stream_names[0], *delays)
+        await cbf.product_controller_client.request("beam-delays", receiver.stream_names[-1], *delays)
 
     data = await _test_capture_start(cbf, receiver, pdf_report, prepare)
-    assert np.sum(data[0] != 0) >= data[0].size // 2  # Should be mostly non-zero
+    assert np.sum(data[-1] != 0) >= data[-1].size // 2  # Should be mostly non-zero
     # We use data[2] instead of data[1], because data[1] is the other
     # polarisation and so experiences different F-engine dithering. The
     # tolerance allows for some rounding error plus dithered quantisation.
-    np.testing.assert_allclose(data[0], -data[2], atol=2)
+    np.testing.assert_allclose(data[-1], -data[2], atol=2)
     pdf_report.detail("Output reflects effects of beam-delays.")
