@@ -165,7 +165,7 @@ class PFBFIR(accel.Operation):
         FIR-filtered time data, ready to be processed by the FFT.
     **weights** : 2*channels*taps, float32
         The time-domain transfer function of the FIR filter to be applied.
-    **total_power** : pols, uint64
+    **total_power** : spectra × pols, uint64
         Sum of squares of input samples. This will not include every input
         sample. Rather, it will contain a specific tap from each PFB window
         (currently, the last tap, but that is an implementation detail).
@@ -260,9 +260,15 @@ class PFBFIR(accel.Operation):
                 np.float32,
             )
             self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
-            self.slots["total_power"] = accel.IOSlot((template.n_pols,), np.uint64)
+            self.slots["total_power"] = accel.IOSlot(
+                (
+                    spectra,
+                    accel.Dimension(template.n_pols, exact=True),
+                ),
+                np.uint64,
+            )
         self.in_offset = np.zeros(template.n_pols, int)  # Number of samples to skip from the start of *in
-        self.out_offset = 0  # Number of "spectra" to skip from the start of *out.
+        self.out_offset = 0  # Number of "spectra" to skip from the start of *out and *total_power.
 
     def _run(self) -> None:
         if self.spectra == 0:

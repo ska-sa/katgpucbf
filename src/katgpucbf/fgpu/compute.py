@@ -312,8 +312,8 @@ class Compute(accel.OperationSequence):
         samples
             A device arrays containing the samples
         dig_total_power
-            A device array holding digitiser total power for each pol. This
-            is not zeroed.
+            A device array holding digitiser total power for each spectrum
+            and pol. This is not zeroed.
         in_offsets
             Index of first sample in input array to process (one for each pol).
         out_offset

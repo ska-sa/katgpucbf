@@ -1024,12 +1024,14 @@ class Pipeline:
         dig_total_power_accums
             Accumulators tracking long-term digitiser total power (one per polarisation)
         dig_total_power
-            The total power per polarisation in `out_item`
+            The total power per spectrum and polarisation in `out_item`
         out_item
             The current :class:`OutQueueItem`
         """
         all_present = np.all(out_item.present)
-        for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power, strict=True)):
+        # Sum over spectra
+        dig_total_power_sum = np.sum(dig_total_power, axis=0)
+        for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power_sum, strict=True)):
             power: int | None = int(trg)
             if not all_present:
                 power = None

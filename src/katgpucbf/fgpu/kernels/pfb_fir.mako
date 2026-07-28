@@ -110,6 +110,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     // Increment this pointer because this thread may not need to write to the
     // beginning of the block.
     out += shuffle_index(offset + out_offset);
+% if not complex_input:
+    // TODO: change how parameters are passed to avoid division here
+    out_total_power += (offset + out_offset) / step * N_POLS + pol;
+% endif
 
     // can't skip individual (input) samples with pointer arithmetic, so track in_offset
     in_offset += offset;
@@ -149,9 +153,6 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     // output "spectra" worth of data.
     int rows = min(n, stepy) / step;
 
-% if not complex_input:
-    unsigned long long total_power = 0;
-% endif
     // We'll be at our most memory-bandwidth-efficient if rows >> TAPS.
     // Launching ~256K threads should ensure this.
     for (int i = 0; i < rows; i++)
@@ -164,13 +165,21 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         for (int j = 0; j < TAPS - 1; j++)
             samples[j] = samples[j + 1];
 
+% if not complex_input:
+        {
+            unsigned long long total_power = sample * sample;
+            // Reduce total_power across work items, to reduce the number of atomics needed.
+            // TODO: use 32-bit reduction when sample_bits is small enough.
+            LOCAL_DECL scratch_t scratch;
+            total_power = reduce(total_power, lid, &scratch);
+            if (lid == 0)
+                atomicAdd(&out_total_power[i * N_POLS], total_power);
+        }
+% endif
         /* Each FIR output sample only needs one new sample, and TAPS-1 old
          * ones. Read the new one into the array, and also use it to compute
          * total power.
          */
-% if not complex_input:
-        total_power += sample * sample;
-% endif
         samples[TAPS - 1] = (float) sample;
 
         // Implement the actual FIR filter by multiplying samples by weights and summing.
@@ -180,12 +189,4 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         // Sum written out to global memory.
         out[i * step] = sum;
     }
-
-% if not complex_input:
-    // Reduce total_power across work items, to reduce the number of atomics needed.
-    LOCAL_DECL scratch_t scratch;
-    total_power = reduce(total_power, lid, &scratch);
-    if (lid == 0)
-        atomicAdd(&out_total_power[pol], total_power);
-% endif
 }

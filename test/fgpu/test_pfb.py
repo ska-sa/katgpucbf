@@ -47,7 +47,8 @@ def pfb_fir_host_real(data, channels, input_sample_bits, unzip_factor, weights):
     out = out.reshape(n_pols, -1, channels // unzip_factor, unzip_factor, 2)
     out = out.swapaxes(2, 3)
     out = out.reshape(n_pols, -1, step)
-    total_power = np.sum(np.square(decoded[:, step * (taps - 1) :].astype(np.int64)), axis=1)
+    power_samples = decoded.reshape(decoded.shape[0], -1, step)[:, taps - 1 :, :]
+    total_power = np.sum(np.square(power_samples.astype(np.int64)), axis=2).T
     return out, total_power
 
 
