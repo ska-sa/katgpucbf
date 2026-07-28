@@ -87,6 +87,8 @@ class ComputeTemplate:
         self.channels = channels
         self.narrowband = narrowband
         self.unzip_factor = 4 if channels >= 8 else 1
+        # TODO: set this value correctly
+        self.ddc_outputs = 1
         if narrowband is None:
             self.internal_channels = channels
             self.postproc = postproc.PostprocTemplate(
@@ -111,7 +113,7 @@ class ComputeTemplate:
             self.pfb_fir = pfb.PFBFIRTemplate(
                 context, taps, self.internal_channels, 32, self.unzip_factor, complex_input=True, n_pols=N_POLS
             )
-            self.ddc = ddc.DDCTemplate(context, len(narrowband.weights), subsampling, dig_sample_bits)
+            self.ddc = ddc.DDCTemplate(context, len(narrowband.weights), subsampling, self.ddc_outputs, dig_sample_bits)
 
     def instantiate(
         self,

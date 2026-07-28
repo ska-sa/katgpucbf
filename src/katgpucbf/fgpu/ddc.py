@@ -52,9 +52,11 @@ class DDCTemplate:
         Fraction of samples to retain after filtering
     input_sample_bits
         Bits per input sample
+    outputs
+        Joint DDC outputs
     """
 
-    autotune_version = 3
+    autotune_version = 4
 
     def __init__(
         self,
@@ -62,6 +64,7 @@ class DDCTemplate:
         taps: int,
         subsampling: int,
         input_sample_bits: int,
+        ddc_outputs: int,
         tuning: _TuningDict | None = None,
     ) -> None:
         if taps <= 0:
@@ -71,18 +74,21 @@ class DDCTemplate:
         if not 1 <= input_sample_bits <= 32:
             raise ValueError("input_sample_bits must be in the range [1, 32]")
         if tuning is None:
-            tuning = self.autotune(context, taps, subsampling, input_sample_bits)
+            tuning = self.autotune(context, taps, subsampling, input_sample_bits, ddc_outputs)
         self.context = context
         self.wgs = tuning["wgs"]
         self.unroll = tuning["unroll"]
         self.taps = taps
         self.subsampling = subsampling
         self.input_sample_bits = input_sample_bits
+        self.ddc_outputs = ddc_outputs
 
         # Sanity check the tuning parameters
         ua = self.unroll_align(subsampling, input_sample_bits)
         if self.unroll % ua != 0:
             raise ValueError(f"unroll must be a multiple of {ua}")
+
+        outputs = "".join([f"\tGLOBAL cplx * RESTRICT out_{i},\n" for i in range(0, ddc_outputs)])
 
         with resources.as_file(resources.files(__package__)) as resource_dir:
             program = accel.build(
@@ -94,6 +100,7 @@ class DDCTemplate:
                     "taps": taps,
                     "subsampling": subsampling,
                     "input_sample_bits": input_sample_bits,
+                    "ddc_outputs": outputs,
                 },
                 extra_dirs=[str(resource_dir), str(resource_dir.parent)],
             )
@@ -106,19 +113,24 @@ class DDCTemplate:
 
     @classmethod
     @tune.autotuner(test={"wgs": 32, "unroll": 16})
-    def autotune(cls, context: AbstractContext, taps: int, subsampling: int, input_sample_bits: int) -> _TuningDict:
+    def autotune(
+        cls, context: AbstractContext, taps: int, subsampling: int, input_sample_bits: int, ddc_outputs: int
+    ) -> _TuningDict:
         """Determine tuning parameters."""
         queue = context.create_tuning_command_queue()
         in_samples = 16 * 1024 * 1024
         # Create one just to generate the correct padding for the inputs
         ua = cls.unroll_align(subsampling, input_sample_bits)
-        dummy_fn = cls(context, taps, subsampling, input_sample_bits, tuning={"wgs": 32, "unroll": ua}).instantiate(
-            queue, in_samples, N_POLS
-        )
+        dummy_fn = cls(
+            context, taps, subsampling, input_sample_bits, ddc_outputs, tuning={"wgs": 32, "unroll": ua}
+        ).instantiate(queue, in_samples, N_POLS)
         dummy_fn.ensure_all_bound()
         in_data = dummy_fn.buffer("in")
-        out_data = dummy_fn.buffer("out")
         in_data.zero(queue)
+        data = {"in": in_data}
+        data["out"] = dummy_fn.buffer("out")
+        for i in range(0, ddc_outputs):
+            data[f"out_{i}"] = dummy_fn.buffer(f"out_{i}")
 
         def generate(wgs: int, unroll: int) -> Callable[[int], float] | None:
             # Making the context current allows `fn._weights` and
@@ -126,9 +138,9 @@ class DDCTemplate:
             # goes out of scope.
             with context:
                 fn = cls(
-                    context, taps, subsampling, input_sample_bits, tuning={"wgs": wgs, "unroll": unroll}
+                    context, taps, subsampling, input_sample_bits, ddc_outputs, tuning={"wgs": wgs, "unroll": unroll}
                 ).instantiate(queue, in_samples, N_POLS)
-                fn.bind(**{"in": in_data, "out": out_data})
+                fn.bind(**data)
                 return tune.make_measure(queue, fn)
 
         return cast(_TuningDict, tune.autotune(generate, wgs=[32, 64], unroll=range(ua, 17, ua)))
@@ -202,6 +214,8 @@ class DDC(accel.Operation):
             np.uint8,
         )
         self.slots["out"] = accel.IOSlot((n_pols, self.out_samples), np.complex64)
+        for i in range(0, template.ddc_outputs):
+            self.slots[f"out_{i}"] = accel.IOSlot((n_pols, self.out_samples), np.complex64)
         self._weights = accel.DeviceArray(template.context, (template.taps,), np.complex64)
         self._weights_host = self._weights.empty_like()
         self._mix_scale = 0  # Specify in cycles per output sample, times 2**64
@@ -240,8 +254,8 @@ class DDC(accel.Operation):
         groups = accel.divup(self.out_samples, self.template.wgs * self.template.unroll)
 
         mix_bias = round(self.mix_phase * 2**64) % 2**64
-        self.command_queue.enqueue_kernel(
-            self.template.kernel,
+        args = [self.buffer(f"out_{i}").buffer for i in range(0, self.template.ddc_outputs)]
+        args.extend(
             [
                 out_buffer.buffer,
                 in_buffer.buffer,
@@ -252,7 +266,11 @@ class DDC(accel.Operation):
                 np.uint32(accel.divup(in_buffer.shape[1], _SAMPLE_WORD_SIZE)),  # in_size_words
                 np.uint64(self._mix_scale),
                 np.uint64(mix_bias),
-            ],
+            ]
+        )
+        self.command_queue.enqueue_kernel(
+            self.template.kernel,
+            args,
             global_size=(groups * self.template.wgs, in_buffer.shape[0], 1),
             local_size=(self.template.wgs, 1, 1),
         )

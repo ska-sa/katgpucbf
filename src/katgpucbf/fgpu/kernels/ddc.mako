@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2023, 2025, National Research Foundation (SARAO)
+ * Copyright (c) 2023, 2025-2026, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -121,6 +121,7 @@ DEVICE_FN static void copy_to_local_cplx(LOCAL cplx *out, const GLOBAL cplx * RE
 
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1)
 void ddc(
+    ${ddc_outputs}
     GLOBAL cplx * RESTRICT out,
     const GLOBAL sample_word * RESTRICT in,
     const GLOBAL cplx * RESTRICT weights,
