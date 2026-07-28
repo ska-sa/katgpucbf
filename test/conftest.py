@@ -347,6 +347,8 @@ def mock_recv_streams(
 
 
 class TestDiscardingIteratorEventLoopPolicy(async_solipsism.EventLoopPolicy):
+    """Event loop policy used by tests."""
+
     pass
 
 
@@ -359,10 +361,10 @@ def _make_loop():
 
 @pytest_asyncio.fixture
 def event_loop_factories():
-    # Return default mapping
+    """Return the default mapping of asyncio event-loop factories."""
     return {"default": _make_loop}
 
 
 def pytest_asyncio_loop_factories(config, item):
-    # Return default mapping
+    """Provide the default asyncio event-loop factory for pytest-asyncio."""
     return {"default": asyncio.new_event_loop}

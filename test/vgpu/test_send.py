@@ -26,7 +26,6 @@ from dataclasses import dataclass
 from typing import override
 from unittest import mock
 
-import async_solipsism
 import numpy as np
 import pytest
 import pytest_mock
@@ -43,7 +42,6 @@ class DummyItem:
     sleep: float = 0.0  #: Time that processing the item will sleep
 
 
-@pytest.mark.asyncio(scope="class")
 class DummyRateLimiter(RateLimiter[DummyItem]):
     """Process items and store the times they were processed."""
 
@@ -61,7 +59,6 @@ class DummyRateLimiter(RateLimiter[DummyItem]):
         await asyncio.sleep(item.sleep)
 
 
-@pytest.mark.asyncio(scope="class")
 class TestRateLimiter:
     """Test :class:`.RateLimiter`."""
 
@@ -120,7 +117,6 @@ class TestRateLimiter:
         assert len(limiter.times) == 10
 
 
-@pytest.mark.asyncio(scope="class")
 class TestVDIFSender:
     """Test :class:.`VDIFSender`."""
 

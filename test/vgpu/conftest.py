@@ -16,6 +16,7 @@
 
 """Fixtures for use in vgpu unit tests."""
 
+import asyncio
 import functools
 from collections.abc import Buffer, Callable, Iterable
 from typing import Any
@@ -59,6 +60,8 @@ def sendmsg_packets(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
 
 
 class TestEventLoopPolicy(async_solipsism.EventLoopPolicy):
+    """Event loop policy used by tests."""
+
     pass
 
 
@@ -71,10 +74,10 @@ def _make_loop():
 
 @pytest_asyncio.fixture
 def event_loop_factories():
-    # Return default mapping
+    """Return the default mapping of asyncio event-loop factories."""
     return {"default": _make_loop}
 
 
 def pytest_asyncio_loop_factories(config, item):
-    # Return default mapping
+    """Provide the default asyncio event-loop factory for pytest-asyncio."""
     return {"default": _make_loop}
