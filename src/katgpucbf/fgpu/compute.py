@@ -70,6 +70,9 @@ class ComputeTemplate:
         Type of dithering to apply before quantisation.
     narrowband
         Configuration for narrowband operation. If ``None``, wideband is assumed.
+    total_power_spectra
+        Number of spectra to sum over when reporting total power metrics.
+        If `narrowband` is specified this is ignored.
     """
 
     def __init__(
@@ -81,6 +84,7 @@ class ComputeTemplate:
         out_bits: int,
         dither: DitherType,
         narrowband: NarrowbandConfig | None,
+        total_power_spectra: int = 1,
     ) -> None:
         self.context = context
         self.taps = taps
@@ -93,7 +97,13 @@ class ComputeTemplate:
                 context, channels, self.unzip_factor, complex_pfb=False, out_bits=out_bits, dither=dither
             )
             self.pfb_fir = pfb.PFBFIRTemplate(
-                context, taps, channels, dig_sample_bits, self.unzip_factor, n_pols=N_POLS
+                context,
+                taps,
+                channels,
+                dig_sample_bits,
+                self.unzip_factor,
+                n_pols=N_POLS,
+                total_power_spectra=total_power_spectra,
             )
             self.ddc: ddc.DDCTemplate | None = None
         else:

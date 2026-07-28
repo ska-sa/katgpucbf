@@ -369,7 +369,7 @@ class OutQueueItem(QueueItem):
     spectra: accel.DeviceArray
     #: Output saturation count, per pol
     saturated: accel.DeviceArray
-    #: Output sum of squared samples, per pol
+    #: Output sum of squared samples, per batch and pol
     dig_total_power: accel.DeviceArray | None
     #: Per-spectrum fine delays
     fine_delay: MappedArray
@@ -573,6 +573,7 @@ class Pipeline:
             engine.send_sample_bits,
             output.dither,
             narrowband=narrowband_config,
+            total_power_spectra=output.spectra_per_heap,
         )
         seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITS)
         self._compute = template.instantiate(
@@ -1024,7 +1025,7 @@ class Pipeline:
         dig_total_power_accums
             Accumulators tracking long-term digitiser total power (one per polarisation)
         dig_total_power
-            The total power per spectrum and polarisation in `out_item`
+            The total power per batch and polarisation in `out_item`
         out_item
             The current :class:`OutQueueItem`
         """

@@ -19,6 +19,7 @@
 #define WGS ${wgs}
 #define TAPS ${taps}
 #define CHANNELS ${channels}
+#define TOTAL_POWER_SPECTRA ${total_power_spectra}
 #define UNZIP_FACTOR ${unzip_factor}
 #define INPUT_SAMPLE_BITS ${input_sample_bits}
 #define WEIGHT_INDEX_SHIFT ${1 if complex_input else 0}
@@ -74,8 +75,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     const GLOBAL float * RESTRICT weights,// Weights for the PFB-FIR filter.
     int out_stride,                       // Offset to `out` between pols
     int in_stride,                        // Offset to `in` between pols
-    int n,                                // Size of the `out` array, to avoid going out-of-bounds.
-    int stepy,                            // Size of data that will be worked on by a single thread-block.
+    int n,                                // Size of the `out` array (in spectra), to avoid going out-of-bounds.
+    int stepy,                            // Size of data (in spectra) that will be worked on by a single thread-block.
 % for pol in range(n_pols):
     int in_offset${pol},                  // Number of samples to skip from the start of *in
 % endfor
@@ -86,8 +87,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
 {
     const unsigned int step = 2 * CHANNELS;
     // Figure out where our thread block has to work.
-    int group_x = get_group_id(0);
-    int group_y = get_group_id(1);
+    int group_y = get_group_id(1) * stepy;
     int pol = get_group_id(2);
     int in_offset;
     switch (pol)
@@ -98,26 +98,23 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         break;
 % endfor
     }
-    in += pol * in_stride;
-    out += pol * out_stride;
 
     // Figure out where this thread has to work.
     int lid = get_local_id(0);
-    int pos = group_x * WGS + lid; // pos is the position within the step (i.e. spectrum) that this thread will work on.
-    int offset = group_y * stepy + pos; // This thread probably doesn't work on the very beginning of the data, so we
-                                        // make the indexing easier for ourselves later.
+    // pos is the position within the step (i.e. spectrum) that this thread will work on.
+    int pos = get_group_id(0) * WGS + lid;
+
+    // can't skip individual (input) samples with pointer arithmetic, so track in_offset
+    in_offset += group_y * step + pos;
+    in += pol * in_stride;
 
     // Increment this pointer because this thread may not need to write to the
     // beginning of the block.
-    out += shuffle_index(offset + out_offset);
+    out += pol * out_stride + shuffle_index(pos);
 % if not complex_input:
-    // TODO: change how parameters are passed to avoid division here
-    out_total_power += (offset + out_offset) / step * N_POLS + pol;
+    out_total_power += pol;
 % endif
-
-    // can't skip individual (input) samples with pointer arithmetic, so track in_offset
-    in_offset += offset;
-    n -= group_y * stepy;
+    int spectrum0 = group_y + out_offset;
 
     /* Here we fill up the taps of the FIR before we bother to do any outputs.
      * We assume we are not interested in the initial transient spectra.
@@ -149,13 +146,15 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     for (int i = 0; i < TAPS; i++)
         rweights[i] = weights[(i * step + pos) >> WEIGHT_INDEX_SHIFT];
 
-    // This thread will process the same equivalent sample in `rows` successive
-    // output "spectra" worth of data.
-    int rows = min(n, stepy) / step;
+    // This thread will process up to (but excluding) spectrum `n`.
+    n = min(n, spectrum0 + stepy);
 
+% if not complex_input:
+    unsigned long long total_power = 0;
+% endif
     // We'll be at our most memory-bandwidth-efficient if rows >> TAPS.
     // Launching ~256K threads should ensure this.
-    for (int i = 0; i < rows; i++)
+    for (int i = spectrum0; i < n; i++)
     {
         // Load the raw data for the sample
         sample_t sample = unpack_read(&unpack);
@@ -166,14 +165,16 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
             samples[j] = samples[j + 1];
 
 % if not complex_input:
+        total_power += sample * sample;
+        if ((i + 1) % TOTAL_POWER_SPECTRA == 0 || i == n - 1)
         {
-            unsigned long long total_power = sample * sample;
             // Reduce total_power across work items, to reduce the number of atomics needed.
             // TODO: use 32-bit reduction when sample_bits is small enough.
             LOCAL_DECL scratch_t scratch;
             total_power = reduce(total_power, lid, &scratch);
             if (lid == 0)
-                atomicAdd(&out_total_power[i * N_POLS], total_power);
+                atomicAdd(&out_total_power[i / TOTAL_POWER_SPECTRA * N_POLS], total_power);
+            total_power = 0;
         }
 % endif
         /* Each FIR output sample only needs one new sample, and TAPS-1 old

@@ -62,6 +62,9 @@ class PFBFIRTemplate:
     n_pols
         Number of polarisations to operate over. The polarisations are
         stored contiguously in memory, but have independent offsets.
+    total_power_spectra
+        Number of spectra to sum over when reporting total power metrics.
+        If `complex_input` is true this is ignored.
 
     Raises
     ------
@@ -91,6 +94,7 @@ class PFBFIRTemplate:
         *,
         complex_input: bool = False,
         n_pols: int,
+        total_power_spectra: int = 1,
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
@@ -101,6 +105,12 @@ class PFBFIRTemplate:
         self.unzip_factor = unzip_factor
         self.complex_input = complex_input
         self.n_pols = n_pols
+        if complex_input:
+            # Ensures that the given value definitely has no effect. Choosing 1
+            # ensures that tests that it divides into other values are
+            # satisfied.
+            total_power_spectra = 1
+        self.total_power_spectra = total_power_spectra
         if complex_input:
             if input_sample_bits != 32:
                 raise ValueError("input_sample_bits must be 32 when complex_input is true")
@@ -125,6 +135,7 @@ class PFBFIRTemplate:
                     "unzip_factor": unzip_factor,
                     "complex_input": complex_input,
                     "n_pols": n_pols,
+                    "total_power_spectra": total_power_spectra,
                 },
                 extra_dirs=[str(resource_dir)],
             )
@@ -165,10 +176,12 @@ class PFBFIR(accel.Operation):
         FIR-filtered time data, ready to be processed by the FFT.
     **weights** : 2*channels*taps, float32
         The time-domain transfer function of the FIR filter to be applied.
-    **total_power** : spectra × pols, uint64
+    **total_power** : spectra/total_power_spectra × pols, uint64
         Sum of squares of input samples. This will not include every input
         sample. Rather, it will contain a specific tap from each PFB window
-        (currently, the last tap, but that is an implementation detail).
+        (currently, the last tap, but that is an implementation detail). One
+        value (per pol) is produced for every ``template.total_power_spectra``
+        output spectra.
 
         This is incremented rather than overwritten. It is the caller's
         responsibility to zero it when desired, or alternatively to track
@@ -189,6 +202,8 @@ class PFBFIR(accel.Operation):
         If ``samples`` is not a multiple of 8 and ``complex_input`` is false
     ValueError
         If ``samples`` is too large (more than 2**29)
+    ValueError
+        If ``spectra`` is not a multiple of ``template.total_power_spectra```.
 
     Parameters
     ----------
@@ -217,6 +232,8 @@ class PFBFIR(accel.Operation):
         if samples > 2**29:
             # This ensures no overflow in samples_to_bytes in the kernel
             raise ValueError("at most 2**29 samples are supported")
+        if spectra % template.total_power_spectra != 0:
+            raise ValueError("spectra must be a multiple of total_power_spectra")
         self.template = template
         self.samples = samples
         self.spectra = spectra  # Can be changed (TODO: documentation)
@@ -262,7 +279,7 @@ class PFBFIR(accel.Operation):
             self.slots["weights"] = accel.IOSlot((step * template.taps,), np.float32)
             self.slots["total_power"] = accel.IOSlot(
                 (
-                    spectra,
+                    spectra // template.total_power_spectra,
                     accel.Dimension(template.n_pols, exact=True),
                 ),
                 np.uint64,
@@ -298,7 +315,6 @@ class PFBFIR(accel.Operation):
         groupsy = max(groupsy, accel.divup(128 * 1024 // self.template.n_pols, real_step))
         # Re-compute work_spectra to balance the load
         work_spectra = accel.divup(self.spectra, groupsy)
-        stepy = work_spectra * real_step
         # Rounding up may have left some workgroups with nothing to do, so recalculate
         # groupsy again.
         groupsy = accel.divup(self.spectra, work_spectra)
@@ -313,12 +329,12 @@ class PFBFIR(accel.Operation):
                 self.buffer("weights").buffer,
                 np.int32(out_buffer.padded_shape[1] * out_buffer.padded_shape[2] * rps),
                 np.int32(in_buffer.padded_shape[1] * rps),
-                np.int32(real_step * self.spectra),
-                np.int32(stepy),
+                np.int32(self.spectra + self.out_offset),
+                np.int32(work_spectra),
             ]
             + list(raw_in_offset)
             + [
-                np.int32(self.out_offset * real_step),
+                np.int32(self.out_offset),
             ]
         )
         if not self.template.complex_input:

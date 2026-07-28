@@ -124,6 +124,7 @@ def main():
             args.send_sample_bits,
             dither=output.dither,
             narrowband=narrowband_config,
+            total_power_spectra=spectra_per_heap,
         )
         command_queue = context.create_tuning_command_queue()
         out_spectra = accel.roundup(args.send_chunk_jones // output.channels, spectra_per_heap)
