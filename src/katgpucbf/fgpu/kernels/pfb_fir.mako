@@ -149,45 +149,57 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     // This thread will process up to (but excluding) spectrum `n`.
     n = min(n, spectrum0 + stepy);
 
-% if not complex_input:
-    unsigned long long total_power = 0;
-% endif
     // We'll be at our most memory-bandwidth-efficient if rows >> TAPS.
     // Launching ~256K threads should ensure this.
+% if complex_input:
     for (int i = spectrum0; i < n; i++)
     {
-        // Load the raw data for the sample
-        sample_t sample = unpack_read(&unpack);
-        unpack_advance(&unpack, step);
+        {  // Block just to balance things with the !complex_input case.
+% else:
+    unsigned long long total_power = 0;
+    int spectrum = spectrum0;
+    while (spectrum < n)
+    {
+        // Determine the next boundary at which we need to emit
+        // accumulated total_power.
+        // TODO: rewrite without using division
+        int stop = min(n, (spectrum / TOTAL_POWER_SPECTRA + 1) * TOTAL_POWER_SPECTRA);
+        for (int i = spectrum; i < stop; i++)
+        {
+% endif
+            // Load the raw data for the sample
+            sample_t sample = unpack_read(&unpack);
+            unpack_advance(&unpack, step);
 
-        // Shuffle down the samples to make room for the new one
-        for (int j = 0; j < TAPS - 1; j++)
-            samples[j] = samples[j + 1];
+            // Shuffle down the samples to make room for the new one
+            for (int j = 0; j < TAPS - 1; j++)
+                samples[j] = samples[j + 1];
 
 % if not complex_input:
-        total_power += sample * sample;
-        if ((i + 1) % TOTAL_POWER_SPECTRA == 0 || i == n - 1)
-        {
-            // Reduce total_power across work items, to reduce the number of atomics needed.
-            // TODO: use 32-bit reduction when sample_bits is small enough.
-            LOCAL_DECL scratch_t scratch;
-            total_power = reduce(total_power, lid, &scratch);
-            if (lid == 0)
-                atomicAdd(&out_total_power[i / TOTAL_POWER_SPECTRA * N_POLS], total_power);
-            total_power = 0;
-        }
+            total_power += sample * sample;
 % endif
-        /* Each FIR output sample only needs one new sample, and TAPS-1 old
-         * ones. Read the new one into the array, and also use it to compute
-         * total power.
-         */
-        samples[TAPS - 1] = (float) sample;
+            /* Each FIR output sample only needs one new sample, and TAPS-1 old
+             * ones. Read the new one into the array, and also use it to compute
+             * total power.
+             */
+            samples[TAPS - 1] = (float) sample;
 
-        // Implement the actual FIR filter by multiplying samples by weights and summing.
-        float sum = rweights[0] * samples[0];
-        for (int j = 1; j < TAPS; j++)
-            sum += rweights[j] * samples[j];
-        // Sum written out to global memory.
-        out[i * step] = sum;
+            // Implement the actual FIR filter by multiplying samples by weights and summing.
+            float sum = rweights[0] * samples[0];
+            for (int j = 1; j < TAPS; j++)
+                sum += rweights[j] * samples[j];
+            // Sum written out to global memory.
+            out[i * step] = sum;
+        }
+% if not complex_input:
+        // Reduce total_power across work items, to reduce the number of atomics needed.
+        // TODO: use 32-bit reduction when sample_bits is small enough.
+        LOCAL_DECL scratch_t scratch;
+        total_power = reduce(total_power, lid, &scratch);
+        if (lid == 0)
+            atomicAdd(&out_total_power[spectrum / TOTAL_POWER_SPECTRA * N_POLS], total_power);
+        total_power = 0;
+        spectrum = stop;
+% endif
     }
 }
