@@ -188,5 +188,5 @@ async def test_beam_delays_capture_start(
     # We use data[2] instead of data[1], because data[1] is the other
     # polarisation and so experiences different F-engine dithering. The
     # tolerance allows for some rounding error plus dithered quantisation.
-    np.testing.assert_allclose(data[-1], -data[2], atol=2)
+    np.testing.assert_allclose(data[-1], -data[-3], atol=2)
     pdf_report.detail("Output reflects effects of beam-delays.")
