@@ -50,6 +50,7 @@ from ipaddress import IPv4Address, IPv4Network
 from typing import Any
 
 import aiokatcp
+import async_solipsism
 import katsdpsigproc.cuda
 import pycuda.driver
 import pytest
@@ -84,6 +85,7 @@ class _CombinationsCandidate:
     by_name: dict[str, Any]  # Lookup by argument name (for filtering)
 
 
+@pytest.hookimpl
 def pytest_generate_tests(metafunc) -> None:
     """Apply "combinations" marker."""
     all_combinations = metafunc.config.option.all_combinations
@@ -142,6 +144,15 @@ def pytest_generate_tests(metafunc) -> None:
             # last test rather than the first.
             combos.reverse()
         metafunc.parametrize(names, [combo.values for combo in combos])
+
+
+@pytest.hookimpl
+def pytest_asyncio_loop_factories(config: pytest.Config, item: pytest.Item) -> dict[str, Callable]:
+    """Override the event loop factory for tests with a ``use_async_solipsism`` mark."""
+    if item.get_closest_marker("use_async_solipsism") is not None:
+        return {"async_solipsism": async_solipsism.EventLoop}
+    else:
+        return {"stdlib": asyncio.new_event_loop}
 
 
 @pytest.fixture
