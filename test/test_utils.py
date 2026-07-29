@@ -25,7 +25,6 @@ from typing import override
 from unittest import mock
 
 import aiokatcp
-import async_solipsism
 import pytest
 from aiokatcp import DeviceStatus
 
@@ -71,13 +70,9 @@ async def discarding_iterator(counter: AsyncIterable[int]) -> SpyDiscardingItera
     return SpyDiscardingIterator(counter)
 
 
+@pytest.mark.use_async_solipsism
 class TestDiscardingIterator:
     """Test :class:`.DiscardingIterator`."""
-
-    @pytest.fixture
-    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
-        """Use async_solipsism event loop."""
-        return async_solipsism.EventLoopPolicy()
 
     async def test_simple(self, discarding_iterator: SpyDiscardingIterator) -> None:
         """Test basic operations."""
@@ -228,13 +223,9 @@ class TestDeviceStatusSensor:
         assert ds.reading == aiokatcp.Reading(3456789012.0, aiokatcp.Sensor.Status.NOMINAL, DeviceStatus.OK)
 
 
+@pytest.mark.use_async_solipsism
 class TestTimeoutSensorStatus:
     """Tests for :func:`katgpucbf.utils.timeout_sensor_status`."""
-
-    @pytest.fixture
-    def event_loop_policy(self) -> async_solipsism.EventLoopPolicy:
-        """Use async_solipsism event loop."""
-        return async_solipsism.EventLoopPolicy()
 
     @pytest.fixture
     def sensor(self) -> aiokatcp.Sensor:

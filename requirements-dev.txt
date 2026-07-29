@@ -344,7 +344,7 @@ pytest==9.0.3
     #   pytest-mock
     #   pytest-reportlog
     #   pytest-xdist
-pytest-asyncio==1.3.0
+pytest-asyncio==1.4.0
     # via katgpucbf (pyproject.toml)
 pytest-check==2.2.2
     # via katgpucbf (pyproject.toml)
