@@ -1017,6 +1017,7 @@ class Pipeline:
         dig_total_power_accums: list[Accum],
         dig_total_power: accel.HostArray,
         out_item: OutQueueItem,
+        present: np.ndarray,
     ) -> None:
         """Update digitiser power sensors.
 
@@ -1028,30 +1029,31 @@ class Pipeline:
             The total power per batch and polarisation in `out_item`
         out_item
             The current :class:`OutQueueItem`
+        present
+            Whether each output batch is fully present
         """
-        all_present = np.all(out_item.present)
-        # Sum over spectra
-        dig_total_power_sum = np.sum(dig_total_power, axis=0)
-        for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power_sum, strict=True)):
-            power: int | None = int(trg)
-            if not all_present:
-                power = None
-            if measurement := accum.add(out_item.timestamp, out_item.next_timestamp, power):
-                sensor = self.engine.sensors[f"input{pol}.dig-rms-dbfs"]
-                update_timestamp = self.engine.time_converter.adc_to_unix(measurement.end_timestamp)
-                if measurement.total is not None:
-                    # Normalise relative to full scale. The factor of 2 is because we
-                    # want 1.0 to correspond to a sine wave rather than a square wave.
-                    fs = ((1 << (self.engine.recv_layout.sample_bits - 1)) - 1) ** 2 / 2
-                    avg_power = measurement.total / (measurement.end_timestamp - measurement.start_timestamp) / fs
-                    # If for some reason there's zero power, avoid reporting
-                    # -inf dB by assigning the most negative representable value
-                    avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
-                    sensor.set_value(avg_power_db, timestamp=update_timestamp)
-                else:
-                    sensor.set_value(
-                        np.finfo(np.float64).min, status=aiokatcp.Sensor.Status.FAILURE, timestamp=update_timestamp
-                    )
+        batch_samples = out_item.capacity // len(present) * out_item.spectra_samples
+        for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power.T, strict=True)):
+            for i, p in enumerate(present):
+                power: int | None = trg[i] if p else None
+                start_timestamp = out_item.timestamp + i * batch_samples
+                stop_timestamp = start_timestamp + batch_samples
+                if measurement := accum.add(start_timestamp, stop_timestamp, power):
+                    sensor = self.engine.sensors[f"input{pol}.dig-rms-dbfs"]
+                    update_timestamp = self.engine.time_converter.adc_to_unix(measurement.end_timestamp)
+                    if measurement.total is not None:
+                        # Normalise relative to full scale. The factor of 2 is because we
+                        # want 1.0 to correspond to a sine wave rather than a square wave.
+                        fs = ((1 << (self.engine.recv_layout.sample_bits - 1)) - 1) ** 2 / 2
+                        avg_power = measurement.total / (measurement.end_timestamp - measurement.start_timestamp) / fs
+                        # If for some reason there's zero power, avoid reporting
+                        # -inf dB by assigning the most negative representable value
+                        avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
+                        sensor.set_value(avg_power_db, timestamp=update_timestamp)
+                    else:
+                        sensor.set_value(
+                            np.finfo(np.float64).min, status=aiokatcp.Sensor.Status.FAILURE, timestamp=update_timestamp
+                        )
 
     async def run_transmit(self) -> None:
         """Get the processed data from the GPU to the Network.
@@ -1109,7 +1111,7 @@ class Pipeline:
                 await async_wait_for_events([download_marker])
 
             if dig_total_power is not None:
-                self._update_dig_power_sensors(dig_total_power_windows, dig_total_power, out_item)
+                self._update_dig_power_sensors(dig_total_power_windows, dig_total_power, out_item, chunk.present)
 
             n_batches = out_item.n_spectra // self.output.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
