@@ -428,7 +428,6 @@ class TestFEngine:
         timestamps
             Labels for the time axis of `data`
         """
-        # Reshape into heap-size pieces (now has indices pol, heap, offset)
         recv_layout = engine.recv_layout
         channels = output.channels
         spectra_per_heap = output.spectra_per_heap
@@ -971,6 +970,12 @@ class TestFEngine:
         It then checks that the heaps successfully received in the first half match
         the heaps in the second half, up to a tolerance to account for dithering.
         """
+        # Set a non-zero delay as a regression test (NGC-2074).
+        delay_samples = 123
+        delay_s = delay_samples / ADC_SAMPLE_RATE
+        coeffs = [f"{delay_s},0.0:0.0,0.0"] * 2
+        await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
+
         sensors = [engine.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         spectra_per_heap = output.spectra_per_heap
@@ -981,7 +986,7 @@ class TestFEngine:
             (8, 10),
             (15, 16),
             (117, 133),
-            (6 * chunk_samples // PACKET_SAMPLES, 8 * chunk_samples // PACKET_SAMPLES),
+            (5 * chunk_samples // PACKET_SAMPLES, 7 * chunk_samples // PACKET_SAMPLES),
         ]
         rng = np.random.default_rng(seed=1)
         dig_data = np.tile(rng.integers(-255, 255, size=(2, n_samples // 2), dtype=np.int16), 2)
@@ -991,20 +996,21 @@ class TestFEngine:
             recv_present[:, a:b] = False
         # The data should have as many samples as the input, minus a reduction
         # from windowing, rounded down to a full batch.
-        total_spectra = (n_samples - output.window) // output.spectra_samples
+        total_spectra = (n_samples + delay_samples - output.window) // output.spectra_samples
         total_batches = total_spectra // spectra_per_heap
         send_present = np.ones(total_batches, bool)
         # Compute which output batches should be missing. first_* and last_* are
         # both inclusive (b is exclusive)
         for a, b in missing_ranges:
-            first_sample = a * PACKET_SAMPLES
-            last_sample = b * PACKET_SAMPLES - 1  # -1 to make it inclusive
+            first_sample = a * PACKET_SAMPLES + delay_samples
+            last_sample = b * PACKET_SAMPLES + delay_samples - 1  # -1 to make it inclusive
             assert last_sample < n_samples // 2  # Make sure gaps are restricted to first half
             first_spectrum = max(0, (first_sample - output.window + 1) // output.spectra_samples)
             last_spectrum = last_sample // output.spectra_samples
             first_batch = first_spectrum // spectra_per_heap
             last_batch = last_spectrum // spectra_per_heap
             send_present[first_batch : last_batch + 1] = False
+        send_present[0] = False  # Corresponds to negative input timestamps
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             out_data, timestamps = await self._send_data(
@@ -1041,7 +1047,12 @@ class TestFEngine:
         batch_size = batch_samples * COMPLEX * np.dtype(np.int8).itemsize
         assert prom_diff.diff("output_bytes_total") == np.sum(send_present) * batch_size
         assert prom_diff.diff("output_samples_total") == np.sum(send_present) * batch_samples
-        assert prom_diff.diff("output_skipped_heaps_total") == np.sum(~send_present) * n_substreams
+        # The first output chunk starts with heap 1 (the first one which corresponds
+        # to non-negative input timestamps) and so heap 0 is not considered to be
+        # "skipped" because it is before the start of transmission (but if heap 1 is
+        # missing, it *is* counted as skipped: this is a subtle case where the output
+        # chunking is externally visible).
+        assert prom_diff.diff("output_skipped_heaps_total") == (np.sum(~send_present) - 1) * n_substreams
 
         # Sensor is not present in the narrowband mode.
         if output.decimation == 1:
