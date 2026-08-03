@@ -70,6 +70,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     const GLOBAL float * RESTRICT in,     // Input data (down-converted samples)
 % else:
     GLOBAL unsigned long long * RESTRICT out_total_power,  // Sum of squares of samples (incremented)
+    int out_total_power_stride,           // Offset to `out_total_power` between pols
     const GLOBAL unsigned char * RESTRICT in,     // Input data (digitiser samples)
 % endif
     const GLOBAL float * RESTRICT weights,// Weights for the PFB-FIR filter.
@@ -112,7 +113,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     // beginning of the block.
     out += pol * out_stride + shuffle_index(pos);
 % if not complex_input:
-    out_total_power += pol;
+    out_total_power += pol * out_total_power_stride;
 % endif
     int spectrum0 = group_y + out_offset;
 
@@ -197,7 +198,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         LOCAL_DECL scratch_t scratch;
         total_power = reduce(total_power, lid, &scratch);
         if (lid == 0)
-            atomicAdd(&out_total_power[spectrum / TOTAL_POWER_SPECTRA * N_POLS], total_power);
+            atomicAdd(&out_total_power[spectrum / TOTAL_POWER_SPECTRA], total_power);
         total_power = 0;
         spectrum = stop;
 % endif
