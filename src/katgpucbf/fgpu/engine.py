@@ -1008,9 +1008,9 @@ class Pipeline:
 
         The unit tests mock out this function to replace the value.
         """
-        chunk_samples = self.spectra * self.output.spectra_samples
-        window_chunks = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / chunk_samples))
-        return window_chunks * chunk_samples
+        batch_samples = self.output.spectra_per_heap * self.output.spectra_samples
+        window_batches = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / batch_samples))
+        return window_batches * batch_samples
 
     def _update_dig_power_sensors(
         self,
