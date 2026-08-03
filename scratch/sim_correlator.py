@@ -39,7 +39,8 @@ from katgpucbf.main import comma_split
 from katgpucbf.meerkat import BANDS
 
 #: Stream types for which ``?capture-start`` is valid
-CAPTURE_START_TYPES = {
+GPUCBF_DATA_STREAMS = {
+    "gpucbf.antenna_channelised_voltage",
     "gpucbf.baseline_correlation_products",
     "gpucbf.tied_array_channelised_voltage",
     "gpucbf.tied_array_resampled_voltage",
@@ -292,7 +293,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     return config
 
 
-async def issue_config(host: str, port: int, name: str, config: dict, has_vlbi: bool) -> int:
+async def issue_config(host: str, port: int, name: str, config: dict) -> int:
     """Connect to the product controller and issue ``?product-configure``).
 
     Returns
@@ -309,13 +310,20 @@ async def issue_config(host: str, port: int, name: str, config: dict, has_vlbi: 
         print(f"Product controller is at {product_host}:{product_port}")
 
         product_client = await aiokatcp.Client.connect(product_host, product_port)
+        capture_start_streams = []
+        src_streams = []
         for output_name, output in config["outputs"].items():
-            if output["type"] in CAPTURE_START_TYPES:
-                if has_vlbi and "narrow0-tied-array-channelised-voltage" in output_name:
-                    # vgpu src-streams are pre-enabled by katsdpcontroller
-                    continue
-                print(f"Enabling {output_name} transmission...")
-                await product_client.request("capture-start", output_name)
+            if output["type"] in GPUCBF_DATA_STREAMS:
+                capture_start_streams.append(output_name)
+                src_streams.extend(output["src_streams"])
+
+        for output_name, output in config["outputs"].items():
+            if output["type"].startswith("gpucbf.") and output_name in src_streams:
+                capture_start_streams.remove(output_name)
+
+        for output_name in capture_start_streams:
+            print(f"Enabling {output_name} transmission...")
+            await product_client.request("capture-start", output_name)
     except (aiokatcp.FailReply, ConnectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -335,8 +343,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f.write("\n")  # json.dump doesn't write a final newline
         return 0
     else:
-        # Pass a boolean that indicates VLBI or not
-        return asyncio.run(issue_config(args.controller, args.port, args.name, config, args.vlbi))
+        return asyncio.run(issue_config(args.controller, args.port, args.name, config))
 
 
 if __name__ == "__main__":

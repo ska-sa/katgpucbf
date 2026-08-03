@@ -14,22 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Test capture-start following state change requests.
-
-.. note::
-
-    capture-start requests cannot be issued to tied-array-channelised-voltage
-    streams that feed tied-array-resampled-voltage (VLBI) streams.
-    :meth:`._test_capture_start` filters out any such streams from the list
-    to which capture-start requests are issued.
-
-    Due to the way the CBF config is generated, tied-array-channelised-voltage-{0x, 0y}
-    are always used as src_streams for a tied-array-resampled-voltage stream. These two
-    beam streams are always first in the list of stream names for a
-    :class:`.TiedArrayChannelisedVoltageReceiver`. As a result, the tests herein only
-    only issue state change requests to the last beam stream, which is guaranteed to
-    not be a src_stream for any tied-array-resampled-voltage stream.
-"""
+"""Test capture-start following state change requests."""
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -43,9 +28,28 @@ from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
 
 
+@pytest.fixture
+def streams_in_use(
+    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver, capture_stop_streams: list[str]
+) -> list[str]:
+    """The streams that are both in the receiver and in `capture_stop_streams`."""
+    return sorted(list(set(receive_tied_array_channelised_voltage.stream_names) & set(capture_stop_streams)))
+
+
+@pytest.fixture
+def stream_index_under_test(
+    streams_in_use: list[str],
+    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    stream_index_in_use: int = 0,
+) -> int:
+    """Index of the first stream in `streams_in_use` in the receiver."""
+    return receive_tied_array_channelised_voltage.stream_names.index(streams_in_use[stream_index_in_use])
+
+
 async def _test_capture_start(
     cbf: CBFRemoteControl,
     receiver: TiedArrayChannelisedVoltageReceiver,
+    streams_in_use: list[str],
     pdf_report: Reporter,
     prepare: Callable[[], Awaitable],
 ) -> np.ndarray:
@@ -54,6 +58,13 @@ async def _test_capture_start(
     Each test provides a callback that issues a request to the product
     controller. The received data is returned for the test to do
     verification.
+
+    capture-start requests cannot be issued to tied-array-channelised-voltage
+    streams that feed tied-array-resampled-voltage (VLBI) streams. `streams_in_use`
+    is filtered to exclude such streams.
+
+    The tests are run with the assumption that the first stream in `streams_in_use`
+    is the stream under test.
     """
     pcc = cbf.product_controller_client
 
@@ -69,7 +80,7 @@ async def _test_capture_start(
     pdf_report.step("Wait for injected signal to reach XB-engines Tx.")
     # Only need to query one stream, since it's the same engine backing
     # all of them.
-    stream_name = receiver.stream_names[0]
+    stream_name = streams_in_use[0]
     for _ in range(30):
         tasks = []
         async with asyncio.TaskGroup() as tg:
@@ -88,17 +99,9 @@ async def _test_capture_start(
     await prepare()
 
     pdf_report.step("Capture and verify output")
-    # Make a copy of this list as the metohd (and its fixtures) are reused between tests
-    capture_start_streams = receiver.stream_names.copy()
-    # Note: If CBF has a VLBI stream, we cannot issue ?capture-start to its
-    # src beam streams.
-    vlbi_config = cbf.config["outputs"].get("tied-array-resampled-voltage", None)
-    if vlbi_config is not None:
-        for src_beam_stream in vlbi_config["src_streams"]:
-            capture_start_streams.remove(src_beam_stream)
 
     async with asyncio.TaskGroup() as tg:
-        for stream in capture_start_streams:
+        for stream in streams_in_use:
             tg.create_task(pcc.request("capture-start", stream))
     # We use dsim_timestamp as a minimum to ensure that we're not receiving
     # data from a *previous* capture-start/stop.
@@ -111,6 +114,8 @@ async def _test_capture_start(
 async def test_beam_quant_gains_capture_start(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    streams_in_use: list[str],
+    stream_index_under_test: int,
     pdf_report: Reporter,
 ) -> None:
     """Test that beam-quant-gains issued before capture-start is not delayed.
@@ -124,12 +129,14 @@ async def test_beam_quant_gains_capture_start(
 
     async def prepare() -> None:
         pdf_report.step("Send request.")
-        pdf_report.detail("Set beam-quant-gains to 0 on first beam.")
-        await cbf.product_controller_client.request("beam-quant-gains", receiver.stream_names[-1], 0.0)
+        pdf_report.detail(f"Set beam-quant-gains to 0 on beam {streams_in_use[0]}.")
+        await cbf.product_controller_client.request("beam-quant-gains", streams_in_use[0], 0.0)
 
-    data = await _test_capture_start(cbf, receiver, pdf_report, prepare)
-    assert np.all(data[-1] == 0)
-    assert np.sum(data[1] != 0) >= data[1].size // 2  # Should be mostly non-zero
+    data = await _test_capture_start(cbf, receiver, streams_in_use, pdf_report, prepare)
+    assert np.all(data[stream_index_under_test] == 0)
+    assert (
+        np.sum(data[stream_index_under_test + 1] != 0) >= data[stream_index_under_test + 1].size // 2
+    )  # Should be mostly non-zero
     pdf_report.detail("Output reflects effects of beam-quant-gains.")
 
 
@@ -138,6 +145,8 @@ async def test_beam_quant_gains_capture_start(
 async def test_beam_weights_capture_start(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    streams_in_use: list[str],
+    stream_index_under_test: int,
     pdf_report: Reporter,
 ) -> None:
     """Test that beam-weights issued before capture-start is not delayed.
@@ -151,13 +160,15 @@ async def test_beam_weights_capture_start(
 
     async def prepare() -> None:
         pdf_report.step("Send request.")
-        pdf_report.detail("Set beam-weights to 0 on first beam.")
+        pdf_report.detail(f"Set beam-weights to 0 on beam {streams_in_use[0]}.")
         weights = [0.0] * len(receiver.source_indices[0])
-        await cbf.product_controller_client.request("beam-weights", receiver.stream_names[-1], *weights)
+        await cbf.product_controller_client.request("beam-weights", streams_in_use[0], *weights)
 
-    data = await _test_capture_start(cbf, receiver, pdf_report, prepare)
-    assert np.all(data[-1] == 0)
-    assert np.sum(data[1] != 0) >= data[1].size // 2  # Should be mostly non-zero
+    data = await _test_capture_start(cbf, receiver, streams_in_use, pdf_report, prepare)
+    assert np.all(data[stream_index_under_test] == 0)
+    assert (
+        np.sum(data[stream_index_under_test + 1] != 0) >= data[stream_index_under_test + 1].size // 2
+    )  # Should be mostly non-zero
     pdf_report.detail("Output reflects effects of beam-weights.")
 
 
@@ -166,6 +177,8 @@ async def test_beam_weights_capture_start(
 async def test_beam_delays_capture_start(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    streams_in_use: list[str],
+    stream_index_under_test: int,
     pdf_report: Reporter,
 ) -> None:
     """Test that beam-delays issued before capture-start is not delayed.
@@ -179,14 +192,16 @@ async def test_beam_delays_capture_start(
 
     async def prepare() -> None:
         pdf_report.step("Send request.")
-        pdf_report.detail("Set beam-delays to phase π on first beam.")
+        pdf_report.detail(f"Set beam-delays to phase π on beam {streams_in_use[0]}.")
         delays = [f"0:{np.pi}"] * len(receiver.source_indices[0])
-        await cbf.product_controller_client.request("beam-delays", receiver.stream_names[-1], *delays)
+        await cbf.product_controller_client.request("beam-delays", streams_in_use[0], *delays)
 
-    data = await _test_capture_start(cbf, receiver, pdf_report, prepare)
-    assert np.sum(data[-1] != 0) >= data[-1].size // 2  # Should be mostly non-zero
-    # We use data[2] instead of data[1], because data[1] is the other
-    # polarisation and so experiences different F-engine dithering. The
-    # tolerance allows for some rounding error plus dithered quantisation.
-    np.testing.assert_allclose(data[-1], -data[-3], atol=2)
+    data = await _test_capture_start(cbf, receiver, streams_in_use, pdf_report, prepare)
+    assert (
+        np.sum(data[stream_index_under_test] != 0) >= data[stream_index_under_test].size // 2
+    )  # Should be mostly non-zero
+    # We use a data subset two indices over because the immediate neighbour
+    # is the other polarisation and so experiences different F-engine dithering.
+    # The tolerance allows for some rounding error plus dithered quantisation.
+    np.testing.assert_allclose(data[stream_index_under_test], -data[stream_index_under_test + 2], atol=2)
     pdf_report.detail("Output reflects effects of beam-delays.")
