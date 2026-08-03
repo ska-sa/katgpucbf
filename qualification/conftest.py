@@ -428,19 +428,17 @@ async def cbf_cache(pytestconfig: pytest.Config) -> AsyncGenerator[CBFCache, Non
 
 
 @pytest.fixture
-async def capture_stop_streams(cbf_config: dict, vlbi: bool) -> list[str]:
+async def capture_stop_streams(cbf_config: dict) -> list[str]:
     """List of streams for which capture-stop will automatically be issued."""
     out = []
     for name, conf in cbf_config["outputs"].items():
         if conf["type"] in _CAPTURE_TYPES:
             out.append(name)
 
-    if vlbi:
-        for conf in cbf_config["outputs"].values():
-            if conf["type"].startswith("gpucbf."):
-                presence_filter = filter(lambda src_stream: src_stream in out, conf["src_streams"])
-                for stream in presence_filter:
-                    out.remove(stream)
+    for conf in cbf_config["outputs"].values():
+        for stream in conf.get("src_streams", []):
+            if stream in out:
+                out.remove(stream)
     return out
 
 

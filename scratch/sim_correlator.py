@@ -39,8 +39,7 @@ from katgpucbf.main import comma_split
 from katgpucbf.meerkat import BANDS
 
 #: Stream types for which ``?capture-start`` is valid
-GPUCBF_DATA_STREAMS = {
-    "gpucbf.antenna_channelised_voltage",
+CAPTURE_START_TYPES = {
     "gpucbf.baseline_correlation_products",
     "gpucbf.tied_array_channelised_voltage",
     "gpucbf.tied_array_resampled_voltage",
@@ -311,15 +310,14 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
 
         product_client = await aiokatcp.Client.connect(product_host, product_port)
         capture_start_streams = []
-        src_streams = []
-        for output_name, output in config["outputs"].items():
-            if output["type"] in GPUCBF_DATA_STREAMS:
-                capture_start_streams.append(output_name)
-                src_streams.extend(output["src_streams"])
+        for name, conf in config["outputs"].items():
+            if conf["type"] in CAPTURE_START_TYPES:
+                capture_start_streams.append(name)
 
-        for output_name, output in config["outputs"].items():
-            if output["type"].startswith("gpucbf.") and output_name in src_streams:
-                capture_start_streams.remove(output_name)
+        for conf in config["outputs"].values():
+            for stream in conf.get("src_streams", []):
+                if stream in capture_start_streams:
+                    capture_start_streams.remove(stream)
 
         for output_name in capture_start_streams:
             print(f"Enabling {output_name} transmission...")
