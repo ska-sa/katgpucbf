@@ -728,7 +728,7 @@ class TiedArrayResampledVoltageReceiver:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
         self.sock.bind(("", port))
         for multicast_group in self.multicast_groups:
             mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
@@ -763,31 +763,36 @@ class TiedArrayResampledVoltageReceiver:
             assert self.buffer.bisect_key_left(seq_id) == self.buffer.bisect_key_right(seq_id), "Duplicate sequence ID"
             self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
             self.buffer.add(frame)
+        else:
+            logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
         # TODO: log or record invalid frames
 
     async def complete_framesets(self, min_timestamp: int | None = None) -> AsyncGenerator[VDIFFrameset, None]:
         """Yield complete framesets."""
         while True:
             # Check if we have a complete frameset at the start of the buffer.
-            if len(self.buffer) >= self.n_threads and self.buffer[0].seq_id <= self.min_seq_id:
-                prefix = list(self.buffer[: self.n_threads])
-                if all(frame.timestamp == self.buffer[0].timestamp for frame in prefix) and sorted(
-                    frame.thread_id for frame in prefix
-                ) == list(range(self.n_threads)):
-                    # Make sure we don't re-accept these packets
-                    self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
-                    prefix.sort(key=lambda frame: frame.thread_id)
-                    # TODO: apply min_timestamp
-                    yield VDIFFrameset(prefix)
-                    del self.buffer[: self.n_threads]
+            if self.buffer:
+                frame0 = self.buffer[0]
+                if frame0.seq_id <= self.min_seq_id and len(self.buffer) >= self.n_threads:
+                    prefix = list(self.buffer[: self.n_threads])
+                    if all(
+                        frame.timestamp == frame0.timestamp and frame.seq_id < frame0.seq_id + self.n_threads
+                        for frame in prefix
+                    ) and sorted(frame.thread_id for frame in prefix) == list(range(self.n_threads)):
+                        # Make sure we don't re-accept these packets
+                        self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
+                        prefix.sort(key=lambda frame: frame.thread_id)
+                        # TODO: apply min_timestamp
+                        yield VDIFFrameset(prefix)
+                        del self.buffer[: self.n_threads]
+                        continue
+
+                if frame0.seq_id <= self.min_seq_id - self.n_threads:
+                    # If this frameset isn't complete now, it never will be. Drop the frame.
+                    del self.buffer[0]
                     continue
 
-            if self.buffer and self.buffer[0].seq_id <= self.min_seq_id - self.n_threads:
-                # If this frameset isn't complete now, it never will be. Drop the frame.
-                del self.buffer[0]
-                continue
-
-            # If neither of the above applies, we need more data from the network
+            # If we didn't hit a continue above, we need more data from the network
             await self._next_packet()
 
     async def next_complete_frameset(self) -> VDIFFrameset:
