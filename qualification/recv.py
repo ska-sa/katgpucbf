@@ -678,7 +678,7 @@ class VDIFFrame:
     seq_id: int
     thread_id: int
     timestamp: VDIFTimestamp
-    # TODO: add actual payload
+    raw_frame: bytes  #: VDIF frame (including VDIF header but without VTP sequence header)
 
 
 @dataclass
@@ -756,7 +756,7 @@ class TiedArrayResampledVoltageReceiver:
             samples_per_frame = length * 8 // sample_bits
             self.frame_rate = round(self.bandwidth / samples_per_frame)
         timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch)
-        frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp)
+        frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=packet[8:])
         if seq_id >= self.min_seq_id:
             self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
             # Insert the new frame into its sorted position
