@@ -38,7 +38,7 @@ def make_vtp_packet(
     ref_epoch: int = 0,
 ) -> bytes:
     """Build a VTP packet (8-byte seq header + VDIF frame)."""
-    data = np.zeros((SAMPLES_PER_FRAME, 1), dtype=np.complex64)
+    data = np.zeros((SAMPLES_PER_FRAME, 2), dtype=np.float32)
     frame = VDIFFrame.fromdata(
         data,
         frame_nr=frame_nr,
