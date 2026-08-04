@@ -386,8 +386,6 @@ six==1.17.0
     #   -c qualification/../requirements.txt
     #   katsdptelstate
     #   python-dateutil
-sortsmith==0.1.0
-    # via katgpucbf (pyproject.toml)
 spead2==4.4.1
     # via
     #   -c qualification/../requirements-dev.txt

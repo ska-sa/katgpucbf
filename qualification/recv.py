@@ -18,6 +18,7 @@
 
 import ast
 import asyncio
+import bisect
 import ctypes
 import datetime
 import io
@@ -42,7 +43,6 @@ from dateutil.relativedelta import relativedelta
 from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from numpy.typing import NDArray
-from sortsmith import SortedKeyList
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
@@ -734,9 +734,7 @@ class TiedArrayResampledVoltageReceiver:
             mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
             self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
         self.sock.setblocking(False)
-        # Note: we don't try to type the SortedKeyList due to
-        # https://github.com/agentine/sortsmith/issues/5
-        self.buffer = SortedKeyList[Any](key=lambda frame: frame.seq_id)
+        self.buffer: list[VDIFFrame] = []  # Kept sorted by sequence ID
         self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
         self.reorder_window = 32  # TODO: make a parameter
 
@@ -760,9 +758,11 @@ class TiedArrayResampledVoltageReceiver:
         timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch)
         frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp)
         if seq_id >= self.min_seq_id:
-            assert self.buffer.bisect_key_left(seq_id) == self.buffer.bisect_key_right(seq_id), "Duplicate sequence ID"
             self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
-            self.buffer.add(frame)
+            # Insert the new frame into its sorted position
+            pos = bisect.bisect_left(self.buffer, seq_id, key=lambda f: f.seq_id)
+            assert pos == len(self.buffer) or self.buffer[pos].seq_id != seq_id, "duplicate sequence ID"
+            self.buffer.insert(pos, frame)
         else:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
         # TODO: log or record invalid frames
@@ -774,7 +774,7 @@ class TiedArrayResampledVoltageReceiver:
             if self.buffer:
                 frame0 = self.buffer[0]
                 if frame0.seq_id <= self.min_seq_id and len(self.buffer) >= self.n_threads:
-                    prefix = list(self.buffer[: self.n_threads])
+                    prefix = self.buffer[: self.n_threads]
                     if all(
                         frame.timestamp == frame0.timestamp and frame.seq_id < frame0.seq_id + self.n_threads
                         for frame in prefix
