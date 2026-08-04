@@ -35,7 +35,6 @@ astropy==7.2.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
-    #   baseband
     #   katcbf-vlbi-resample
 astropy-iers-data==0.2026.1.12.0.42.13
     # via
@@ -58,8 +57,6 @@ attrs==25.4.0
     #   aiomonitor
 babel==2.17.0
     # via sphinx
-baseband==4.3.0
-    # via katgpucbf (pyproject.toml)
 certifi==2026.1.4
     # via requests
 cffi==2.0.0
@@ -91,6 +88,8 @@ dask==2025.12.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
+dateparser==1.4.1
+    # via prometheus-api-client
 decorator==5.2.1
     # via
     #   -c requirements.txt
@@ -278,6 +277,8 @@ pluggy==1.6.0
     #   pytest-cov
 pre-commit==4.5.1
     # via -r requirements-dev.in
+prometheus-api-client==0.7.2
+    # via katgpucbf (pyproject.toml)
 prometheus-async==26.1.0
     # via
     #   -c requirements.txt
@@ -361,6 +362,7 @@ pytest-xdist==3.8.0
 python-dateutil==2.9.0.post0
     # via
     #   -c requirements.txt
+    #   dateparser
     #   matplotlib
     #   pandas
 pytools==2025.2.5
@@ -370,6 +372,7 @@ pytools==2025.2.5
 pytz==2025.2
     # via
     #   -c requirements.txt
+    #   dateparser
     #   pandas
 pyyaml==6.0.3
     # via
@@ -382,8 +385,12 @@ redis==7.1.0
     # via
     #   -c requirements.txt
     #   katsdptelstate
+regex==2026.7.19
+    # via dateparser
 requests==2.33.0
-    # via sphinx
+    # via
+    #   prometheus-api-client
+    #   sphinx
 roman-numerals==4.1.0
     # via roman-numerals-py
 roman-numerals-py==4.1.0
@@ -481,6 +488,8 @@ tzdata==2025.3
     # via
     #   -c requirements.txt
     #   pandas
+tzlocal==5.4.4
+    # via dateparser
 urllib3==2.7.0
     # via requests
 uv==0.11.18

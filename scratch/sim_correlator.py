@@ -238,9 +238,7 @@ def generate_tied_array_resampled_voltage(args: argparse.Namespace, outputs: dic
         outputs["tied-array-resampled-voltage"] = {
             "type": "gpucbf.tied_array_resampled_voltage",
             "src_streams": [
-                f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"
-                for i in range(args.narrowband_beams)
-                for pol_name in "xy"
+                f"narrow0-tied-array-channelised-voltage-{i}{pol_name}" for i in range(1) for pol_name in "xy"
             ],
             "n_chans": 2,
             "pols": args.vlbi_pols,
@@ -296,7 +294,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     return config
 
 
-async def issue_config(host: str, port: int, name: str, config: dict) -> int:
+async def issue_config(host: str, port: int, name: str, config: dict, vlbi: bool) -> int:
     """Connect to the product controller and issue ``?product-configure``).
 
     Returns
@@ -313,6 +311,12 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
         print(f"Product controller is at {product_host}:{product_port}")
 
         product_client = await aiokatcp.Client.connect(product_host, product_port)
+        if vlbi:
+            for dsim_name, dsim in config["outputs"].items():
+                if dsim["type"] == "sim.dig.baseband_voltage":
+                    tasks = await product_client.sensor_value(f"{dsim_name}.tasks", str)
+                    tasklist = json.loads(tasks)
+                    await product_client.request("dsim-signals", tasklist[0], "common=wgn(0.02); common; common;")
         for output_name, output in config["outputs"].items():
             if output["type"] in CAPTURE_START_TYPES:
                 print(f"Enabling {output_name} transmission...")
@@ -336,7 +340,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f.write("\n")  # json.dump doesn't write a final newline
         return 0
     else:
-        return asyncio.run(issue_config(args.controller, args.port, args.name, config))
+        return asyncio.run(issue_config(args.controller, args.port, args.name, config, args.vlbi))
 
 
 if __name__ == "__main__":

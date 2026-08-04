@@ -19,6 +19,7 @@
 import ast
 import asyncio
 import ctypes
+import json
 import logging
 import math
 import os
@@ -45,6 +46,8 @@ from katgpucbf.utils import TimeConverter
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
 DEFAULT_TIMEOUT = 10.0
+IP_MULTICAST_ALL = 49
+
 logger = logging.getLogger(__name__)
 
 
@@ -642,3 +645,23 @@ def create_tied_array_channelised_voltage_receive_stream_group(
             sink=stream_group,
         ),
     )
+
+
+class TiedArrayResampledVoltageReceiver:
+    """Receive tied-array-resampled-voltage streams from the V-engines."""
+
+    def __init__(
+        self,
+        cbf: CBFRemoteControl,
+        stream_names: Sequence[str],
+        interface_address: str,
+    ) -> None:
+        self.stream_names = stream_names
+        self.n_chans = cbf.init_sensors[f"{stream_names[0]}.n-chans"].value
+        self.pol_ordering = json.loads(cbf.init_sensors[f"{stream_names[0]}.pol-ordering"].value.decode())
+        self.n_threads = self.n_chans * len(self.pol_ordering)
+        self.veng_out_bits_per_sample = cbf.init_sensors[f"{stream_names[0]}.veng-out-bits-per-sample"].value
+        self.scale_factor_timestamp = cbf.init_sensors[f"{stream_names[0]}.scale-factor-timestamp"].value
+        self.power_int_time = cbf.init_sensors[f"{stream_names[0]}.power-int-time"].value
+        self.bandwidth = cbf.init_sensors[f"{stream_names[0]}.bandwidth"].value
+        self.sync_time: float = cbf.init_sensors[f"{stream_names[0]}.sync-time"].value
