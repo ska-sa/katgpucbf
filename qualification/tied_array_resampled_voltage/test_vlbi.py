@@ -39,7 +39,7 @@ async def test_vlbi_vdif(
     assert receive_tied_array_resampled_voltage is not None
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frameset.")
-    frameset, _ = await receiver.next_complete_frameset()
+    frameset = await receiver.next_complete_frameset()
     pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
     with check:
-        assert len(frameset.seq_ids) == receiver.n_chans * len(receiver.pol_ordering)
+        assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)

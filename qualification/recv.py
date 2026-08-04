@@ -20,23 +20,29 @@ import ast
 import asyncio
 import ctypes
 import datetime
+import io
 import json
 import logging
 import math
 import os
 import socket
+import struct
 from collections.abc import AsyncGenerator, Callable, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, overload
 
+import baseband.vdif
 import numba
 import numpy as np
 import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
+from dateutil.relativedelta import relativedelta
 from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from numpy.typing import NDArray
+from sortsmith import SortedKeyList
 from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
@@ -44,7 +50,6 @@ import katgpucbf.recv
 from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DEFAULT_VTP_PORT, DIG_SAMPLE_BITS
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
-from qualification.vlbi_decoder.vtp_decoder import VDIFFramesetData, VDIFFramesetKey, VTPBuffer, VTPDecoder
 
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
@@ -650,6 +655,46 @@ def create_tied_array_channelised_voltage_receive_stream_group(
     )
 
 
+@dataclass(frozen=True, order=True)
+class VDIFTimestamp:
+    """Identifier of an VDIF frameset."""
+
+    seconds: int
+    frame_nr: int
+    ref_epoch: int
+
+    def unix_timestamp(self, frame_rate: int) -> float:
+        """Timestamp of the VDIF frameset in UNIX time."""
+        # ref_epoch is the number of half-years since 2000-01-01.
+        return (
+            datetime.datetime(2000, 1, 1, 0, 0, 0, 0, datetime.UTC)
+            + relativedelta(months=6 * self.ref_epoch)
+            + datetime.timedelta(seconds=self.seconds + ((float)(self.frame_nr) / frame_rate))
+        ).timestamp()
+
+
+@dataclass(frozen=True)
+class VDIFFrame:
+    """Holds low-level information about a single VDIF frame."""
+
+    seq_id: int
+    thread_id: int
+    timestamp: VDIFTimestamp
+    # TODO: add actual payload
+
+
+@dataclass
+class VDIFFrameset:
+    """Data for a VDIF frameset."""
+
+    frames: Sequence[VDIFFrame]
+
+    @property
+    def timestamp(self) -> VDIFTimestamp:
+        """Get the common timestamp of the frames."""
+        return self.frames[0].timestamp
+
+
 class TiedArrayResampledVoltageReceiver:
     """Receive tied-array-resampled-voltage streams from the V-engines."""
 
@@ -685,79 +730,79 @@ class TiedArrayResampledVoltageReceiver:
         self.sock.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
         self.sock.bind(("", port))
-        self.vtp_buffer = VTPBuffer()
         for multicast_group in self.multicast_groups:
             mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
             self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
         self.sock.setblocking(False)
+        # Note: we don't try to type the SortedKeyList due to
+        # https://github.com/agentine/sortsmith/issues/5
+        self.buffer = SortedKeyList[Any](key=lambda frame: frame.seq_id)
+        self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
+        self.reorder_window = 32  # TODO: make a parameter
 
         self.frame_rate = 0
-        self.invalid_framesets: list[VDIFFramesetKey] = []
         self.cbf = cbf
-        self.min_timestamp: int | None = None
 
-    async def _read(self) -> None:
-        loop = asyncio.get_running_loop()
-        self.vtp_buffer.add_packet(await loop.sock_recv(self.sock, self._max_packet_size))
+    async def _next_packet(self) -> None:
+        packet = await asyncio.get_event_loop().sock_recv(self.sock, self._max_packet_size)
+        # TODO: parse directly instead of with baseband
+        with io.BytesIO(packet) as fh:
+            seq_id = struct.unpack("<Q", fh.read(8))[0]
+            frame = baseband.vdif.VDIFFrame.fromfile(fh)
+        frame_nr = frame.header["frame_nr"]
+        ref_epoch = frame.header["ref_epoch"]
+        seconds = frame.header["seconds"]
+        thread_id = frame.header["thread_id"]
+        if self.frame_rate == 0:
+            samples_per_frame = frame.header.samples_per_frame
+            self.frame_rate = round(self.bandwidth / samples_per_frame)
+        timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch)
+        frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp)
+        if seq_id >= self.min_seq_id:
+            assert self.buffer.bisect_key_left(seq_id) == self.buffer.bisect_key_right(seq_id), "Duplicate sequence ID"
+            self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
+            self.buffer.add(frame)
+        # TODO: log or record invalid frames
 
-    async def listen(self) -> None:
-        """Listen for packets from the v engine and store them in the VTPDecoder."""
-        if self.min_timestamp is None:
-            time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
-            self.min_timestamp = int(time_converter.adc_to_unix(await self.cbf.steady_state_timestamp()))
-
+    async def complete_framesets(self, min_timestamp: int | None = None) -> AsyncGenerator[VDIFFrameset, None]:
+        """Yield complete framesets."""
         while True:
-            await self._read()
+            # Check if we have a complete frameset at the start of the buffer.
+            if len(self.buffer) >= self.n_threads and self.buffer[0].seq_id <= self.min_seq_id:
+                prefix = list(self.buffer[: self.n_threads])
+                if all(frame.timestamp == self.buffer[0].timestamp for frame in prefix) and sorted(
+                    frame.thread_id for frame in prefix
+                ) == list(range(self.n_threads)):
+                    # Make sure we don't re-accept these packets
+                    self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
+                    prefix.sort(key=lambda frame: frame.thread_id)
+                    # TODO: apply min_timestamp
+                    yield VDIFFrameset(prefix)
+                    del self.buffer[: self.n_threads]
+                    continue
 
-    async def complete_framesets(
-        self, min_timestamp: int | None = None
-    ) -> AsyncGenerator[tuple[VDIFFramesetData, VDIFFramesetKey], None]:
-        """Decode the VDIF framesets in the buffer."""
-        vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads, self.bandwidth)
-        self.frame_rate = vtp_decoder.frame_rate
-
-        if min_timestamp is None:
-            assert self.min_timestamp is not None, "min_timestamp is not set"
-            min_timestamp = self.min_timestamp
-
-        # the seconds value in the vtp decoder is in reference to the ref_epoch
-        for data, key in vtp_decoder.vtp_framesets():
-            timestamp = key.timestamp(self.frame_rate)
-            if min_timestamp > timestamp:
-                logger.debug(
-                    "timestamp"
-                    + f" {datetime.datetime.fromtimestamp(timestamp, datetime.UTC).strftime('%Y-%m-%d %H:%M:%S')}"
-                    + " is before the min timestamp of"
-                    + f" {datetime.datetime.fromtimestamp(min_timestamp, datetime.UTC).strftime('%Y-%m-%d %H:%M:%S')}"
-                )
+            if self.buffer and self.buffer[0].seq_id <= self.min_seq_id - self.n_threads:
+                # If this frameset isn't complete now, it never will be. Drop the frame.
+                del self.buffer[0]
                 continue
-            self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
-            yield data, key
-        self.vtp_buffer.clear()
 
-    async def next_complete_frameset(self) -> tuple[VDIFFramesetData, VDIFFramesetKey]:
+            # If neither of the above applies, we need more data from the network
+            await self._next_packet()
+
+    async def next_complete_frameset(self) -> VDIFFrameset:
         """Listen until a single complete VDIF frameset is available, then return it."""
-        while True:
-            await self._read()
-            try:
-                vtp_decoder = VTPDecoder(self.vtp_buffer, self.n_threads, self.bandwidth)
-                self.frame_rate = vtp_decoder.frame_rate
-                self.invalid_framesets.extend(vtp_decoder.invalid_framesets)
-                set_seq_ids, key = next(vtp_decoder.vtp_framesets())
-            except StopIteration:
-                continue
-            self.vtp_buffer.clear()
-            return set_seq_ids, key
+        # TODO: needs a min_timestamp option?
+        async for frameset in self.complete_framesets():
+            return frameset
+        raise RuntimeError("stream was shut down before we received a complete frameset")
 
-    async def wait_complete_frameset(self, timeout: float | None = DEFAULT_TIMEOUT) -> float:
-        """Wait until a complete VDIF frameset is available."""
-        task = asyncio.create_task(self.next_complete_frameset())
-        _, key = await asyncio.wait_for(task, timeout)
-        return key.timestamp(self.frame_rate)
+    async def wait_complete_frameset(self, timeout: float | None = DEFAULT_TIMEOUT) -> VDIFTimestamp:
+        """Wait until a complete VDIF frameset is available and return the timestamp."""
+        # TODO: needs a min_timestamp option?
+        return (await self.next_complete_frameset()).timestamp
 
     def close(self) -> None:
         """Close the socket."""
         self.sock.close()
-        self.vtp_buffer.clear()
-        self.invalid_framesets.clear()
-        self.frame_rate = 0
+        self.buffer.clear()
+        self.min_seq_id = 0
