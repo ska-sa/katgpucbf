@@ -237,11 +237,7 @@ def generate_tied_array_resampled_voltage(args: argparse.Namespace, outputs: dic
     if args.vlbi:
         outputs["tied-array-resampled-voltage"] = {
             "type": "gpucbf.tied_array_resampled_voltage",
-            "src_streams": [
-                f"narrow0-tied-array-channelised-voltage-{i}{pol_name}"
-                for i in range(args.narrowband_beams)
-                for pol_name in "xy"
-            ],
+            "src_streams": [f"narrow0-tied-array-channelised-voltage-0{pol_name}" for pol_name in "xy"],
             "n_chans": 2,
             "pols": args.vlbi_pols,
             "station_id": args.vlbi_station_id,
