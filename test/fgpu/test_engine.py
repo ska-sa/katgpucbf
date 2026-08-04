@@ -1402,8 +1402,8 @@ class TestDigRmsDbfsStatus:
         ("value", "params"),
         [
             (10, (-33.0, -30.0, -10, -7)),
-            (2, (-0.0, -12.04, -10, -6)),
-            (16, (-84.28, -96.32, -10, -6)),
+            (2, (-12.04, -0.0, -10, -6)),
+            (16, (-96.32, -84.28, -10, -6)),
         ],
     )
     def test_dig_rms_dbfs_status_params(self, value: float, params: tuple[float, float, float, float]) -> None:
