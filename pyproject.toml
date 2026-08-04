@@ -63,6 +63,7 @@ doc = [
 
 test = [
     "async-solipsism>=0.6",
+    "baseband",
     "katsdpsigproc[CUDA]",
     "matplotlib",
     "prometheus-api-client>=0.7.0",
