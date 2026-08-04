@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Sample test for tied-array-resampled-voltage stream."""
+"""Test for tied-array-resampled-voltage stream."""
 
 import asyncio
 from collections.abc import AsyncGenerator
