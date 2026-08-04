@@ -24,6 +24,7 @@ configuration can be written to file to be manually started later.
 """
 
 import argparse
+import ast
 import asyncio
 import contextlib
 import ipaddress
@@ -313,6 +314,10 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
         print(f"Product controller is at {product_host}:{product_port}")
 
         product_client = await aiokatcp.Client.connect(product_host, product_port)
+        for output_name, output in config["outputs"].items():
+            if output["type"] == "sim.dig.baseband_voltage":
+                arr = ast.literal_eval(await product_client.sensor_value(f"{output_name}.tasks", str))
+                await product_client.request("dsim-signals", arr[0], "common=wgn(0.0165);common;common;")
         for output_name, output in config["outputs"].items():
             if output["type"] in CAPTURE_START_TYPES:
                 print(f"Enabling {output_name} transmission...")

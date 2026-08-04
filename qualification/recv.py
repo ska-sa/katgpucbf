@@ -661,6 +661,7 @@ class TiedArrayResampledVoltageReceiver:
         stream_names: Sequence[str],
         interface_address: str,
     ) -> None:
+        self.stream_names = stream_names
         self.multicast_groups = endpoint_list_parser(DEFAULT_VTP_PORT)(
             cbf.init_sensors[f"{stream_names[0]}.destination"].value.decode()
         )
@@ -708,6 +709,7 @@ class TiedArrayResampledVoltageReceiver:
 
         while True:
             await self._read()
+            await asyncio.sleep(0)  # yield to the event loop
 
     async def complete_framesets(
         self, min_timestamp: int | None = None

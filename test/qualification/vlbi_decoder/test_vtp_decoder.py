@@ -44,10 +44,10 @@ def make_vtp_packet(
         frame_nr=frame_nr,
         seconds=seconds,
         samples_per_frame=samples_per_frame,
-        nchan=1,
+        nchan=2,
         bps=2,
         ref_epoch=ref_epoch,
-        complex_data=True,
+        complex_data=False,
         thread_id=thread_id,
     )
     buf = io.BytesIO()
