@@ -108,7 +108,7 @@ async def test_mean_power(
 
     async with asyncio.TaskGroup() as tg:
         for dsim_name in cbf.dsim_names:
-            tg.create_task(pcc.request("dsim-signals", dsim_name, "common=wgn(0.0165);common;common;"))
+            tg.create_task(pcc.request("dsim-signals", dsim_name, "common=wgn(0.02);common;common;"))
     pdf_report.detail("Set dsim signals white noise.")
 
     pdf_report.step("Wait for mean-power sensors to reach steady state.")
@@ -118,11 +118,6 @@ async def test_mean_power(
     # Require a full power-int-time of data after steady state so the sensor
     # average does not include pre-change samples.
     min_sensor_time = steady_state_unix + receiver.power_int_time
-    pdf_report.detail(
-        f"Steady-state timestamp is {steady_state_unix} (UNIX); "
-        f"waiting for mean-power timestamps >= {min_sensor_time} "
-        f"(power-int-time={receiver.power_int_time} s)."
-    )
 
     sensor_names = [
         f"{receiver.stream_names[0]}.{pol}{chan}.mean-power"
@@ -134,8 +129,8 @@ async def test_mean_power(
         while True:
             timestamps = [sensor_watcher.sensors[name].timestamp for name in sensor_names]
             earliest = min(timestamps)
-            pdf_report.detail(f"Earliest mean-power sensor timestamp: {earliest}.")
             if earliest >= min_sensor_time:
+                pdf_report.detail("Mean-power sensors reached steady state timestamp.")
                 break
             await asyncio.sleep(0.5)
 
@@ -154,7 +149,6 @@ async def test_mean_power(
     pdf_report.step("Compare mean-power sensors against TACV power.")
     for sensor_name in sensor_names:
         sensor = sensor_watcher.sensors[sensor_name]
-        pdf_report.detail(f"{sensor_name}: {sensor.value} at timestamp {sensor.timestamp}; expected: {tacv_power}.")
         with check:
             assert sensor.timestamp >= min_sensor_time
             assert sensor.value == pytest.approx(tacv_power, rel=5e-3), (
