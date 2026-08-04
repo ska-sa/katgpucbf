@@ -748,13 +748,14 @@ class TiedArrayResampledVoltageReceiver:
         # TODO: parse directly instead of with baseband
         with io.BytesIO(packet) as fh:
             seq_id = struct.unpack("<Q", fh.read(8))[0]
-            frame = baseband.vdif.VDIFFrame.fromfile(fh)
-        frame_nr = frame.header["frame_nr"]
-        ref_epoch = frame.header["ref_epoch"]
-        seconds = frame.header["seconds"]
-        thread_id = frame.header["thread_id"]
+            # Verification is too expensive to do in real time.
+            header = baseband.vdif.VDIFHeader.fromfile(fh, verify=False)
+        frame_nr = header["frame_nr"]
+        ref_epoch = header["ref_epoch"]
+        seconds = header["seconds"]
+        thread_id = header["thread_id"]
         if self.frame_rate == 0:
-            samples_per_frame = frame.header.samples_per_frame
+            samples_per_frame = header.samples_per_frame
             self.frame_rate = round(self.bandwidth / samples_per_frame)
         timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch)
         frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp)
