@@ -68,7 +68,7 @@ test = [
     "matplotlib",
     "prometheus-api-client>=0.7.0",
     "pytest>=8",
-    "pytest-asyncio>=0.24",
+    "pytest-asyncio>=1.4.0",
     "pytest-check>=1.3,<2.2.3",  # Upper bound due to https://github.com/okken/pytest-check/issues/173
     "pytest-custom_exit_code",
     "pytest-mock",
@@ -138,7 +138,7 @@ pytester_example_dir = "test/pytest_plugins/demo"
 # and only the top-level conftest.py is allowed to load plugins. See
 # test/pytest_plugins/demo/README.md for more info.
 addopts = "--cov-context=test --cov-report html --import-mode=prepend --ignore=test/pytest_plugins/demo"
-markers = ["mask_timestamp", "use_vkgdr", "cmdline_args", "spectra_per_heap", "slow"]
+markers = ["mask_timestamp", "use_vkgdr", "cmdline_args", "spectra_per_heap", "slow", "use_async_solipsism"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
