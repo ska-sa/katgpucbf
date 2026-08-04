@@ -21,7 +21,6 @@ import asyncio
 import bisect
 import ctypes
 import datetime
-import io
 import json
 import logging
 import math
@@ -32,7 +31,6 @@ from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, overload
 
-import baseband.vdif
 import numba
 import numpy as np
 import scipy
@@ -743,17 +741,19 @@ class TiedArrayResampledVoltageReceiver:
 
     async def _next_packet(self) -> None:
         packet = await asyncio.get_event_loop().sock_recv(self.sock, self._max_packet_size)
-        # TODO: parse directly instead of with baseband
-        with io.BytesIO(packet) as fh:
-            seq_id = struct.unpack("<Q", fh.read(8))[0]
-            # Verification is too expensive to do in real time.
-            header = baseband.vdif.VDIFHeader.fromfile(fh, verify=False)
-        frame_nr = header["frame_nr"]
-        ref_epoch = header["ref_epoch"]
-        seconds = header["seconds"]
-        thread_id = header["thread_id"]
+        # Using baseband to parse the header is expensive. We extract
+        # words from the header then slice out the fields we want.
+        (seq_id, seconds, ref_epoch_frame_nr, length, sample_bits_thread_id) = struct.unpack("<QIIIxxH", packet[:24])
+        seconds = seconds & 0x3FFF_FFFF
+        ref_epoch = (ref_epoch_frame_nr >> 24) & 0x3F
+        frame_nr = ref_epoch_frame_nr & 0xFF_FFFF
+        thread_id = sample_bits_thread_id & 0x3F
+        length = (length & 0xFF_FFFF) * 8 - 32  # Raw value includes the header
         if self.frame_rate == 0:
-            samples_per_frame = header.samples_per_frame
+            is_complex = sample_bits_thread_id >> 15
+            assert not is_complex
+            sample_bits = ((sample_bits_thread_id >> 10) & 0x1F) + 1
+            samples_per_frame = length * 8 // sample_bits
             self.frame_rate = round(self.bandwidth / samples_per_frame)
         timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch)
         frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp)
