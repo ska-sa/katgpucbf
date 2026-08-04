@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, 2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, 2025-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -79,7 +79,7 @@ def test_ddc(
     mix_frequency = Fraction("0.21")
 
     template = DDCTemplate(
-        context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, ddc_outputs=1, tuning=tuning
+        context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, outputs=1, tuning=tuning
     )
     fn = template.instantiate(command_queue, samples, n_pols)
     fn.configure(mix_frequency, weights)
@@ -111,20 +111,20 @@ def test_ddc(
 def test_bad_template_parameters(context: AbstractContext, taps: int, subsampling: int, input_sample_bits: int) -> None:
     """Test that :class:`DDCTemplate` raises ValueError when given invalid parameters."""
     with pytest.raises(ValueError):
-        DDCTemplate(context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, ddc_outputs=1)
+        DDCTemplate(context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, outputs=1)
 
 
 def test_bad_tuning(context: AbstractContext) -> None:
     """Test that :class:`DDCTemplate` raises ValueError when given bad tuning parameters."""
     with pytest.raises(ValueError, match="unroll must be a multiple of 16"):
         DDCTemplate(
-            context, taps=255, subsampling=5, input_sample_bits=10, ddc_outputs=1, tuning={"wgs": 32, "unroll": 5}
+            context, taps=255, subsampling=5, input_sample_bits=10, outputs=1, tuning={"wgs": 32, "unroll": 5}
         )
 
 
 def test_too_few_samples(context: AbstractContext, command_queue: AbstractCommandQueue) -> None:
     """Test that :class:`DDC` raises ValueError when `samples` is too small."""
-    template = DDCTemplate(context, taps=256, input_sample_bits=10, subsampling=16, ddc_outputs=1)
+    template = DDCTemplate(context, taps=256, input_sample_bits=10, subsampling=16, outputs=1)
     with pytest.raises(ValueError):
         template.instantiate(command_queue, 255, N_POLS)
 
@@ -141,4 +141,4 @@ def test_too_few_samples(context: AbstractContext, command_queue: AbstractComman
 @pytest.mark.force_autotune
 def test_autotune(context: AbstractContext, taps: int, subsampling: int, input_sample_bits: int) -> None:
     """Test that autotuner runs successfully."""
-    DDCTemplate(context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, ddc_outputs=1)
+    DDCTemplate(context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, outputs=1)
