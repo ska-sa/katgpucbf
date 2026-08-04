@@ -315,10 +315,10 @@ async def issue_config(host: str, port: int, name: str, config: dict) -> int:
                 capture_start_streams.append(name)
 
         for conf in config["outputs"].values():
-            for stream in conf.get("src_streams", []):
-                if stream in capture_start_streams:
-                    capture_start_streams.remove(stream)
-
+            if conf["type"].startswith("gpucbf."):
+                for stream in conf["src_streams"]:
+                    if stream in capture_start_streams:
+                        capture_start_streams.remove(stream)
         for output_name in capture_start_streams:
             print(f"Enabling {output_name} transmission...")
             await product_client.request("capture-start", output_name)
