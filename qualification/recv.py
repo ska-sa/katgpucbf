@@ -805,7 +805,8 @@ class TiedArrayResampledVoltageReceiver:
     async def wait_complete_frameset(self, timeout: float | None = DEFAULT_TIMEOUT) -> VDIFTimestamp:
         """Wait until a complete VDIF frameset is available and return the timestamp."""
         # TODO: needs a min_timestamp option?
-        return (await self.next_complete_frameset()).timestamp
+        async with asyncio.timeout(timeout):
+            return (await self.next_complete_frameset()).timestamp
 
     def close(self) -> None:
         """Close the socket."""
