@@ -761,8 +761,10 @@ class TiedArrayResampledVoltageReceiver:
             self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
             # Insert the new frame into its sorted position
             pos = bisect.bisect_left(self.buffer, seq_id, key=lambda f: f.seq_id)
-            assert pos == len(self.buffer) or self.buffer[pos].seq_id != seq_id, "duplicate sequence ID"
-            self.buffer.insert(pos, frame)
+            if pos == len(self.buffer) or self.buffer[pos].seq_id != seq_id:
+                self.buffer.insert(pos, frame)
+            else:
+                logger.warning("Duplicate sequence ID: %d", seq_id)
         else:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
         # TODO: log or record invalid frames
@@ -813,3 +815,4 @@ class TiedArrayResampledVoltageReceiver:
         self.sock.close()
         self.buffer.clear()
         self.min_seq_id = 0
+        self.frame_rate = 0
