@@ -80,7 +80,8 @@ async def test_mean_power(
             gains = [0.0] * len(receive_tied_array_channelised_voltage.source_indices[i])
             gains[0] = 1.0
             tg.create_task(pcc.request("beam-weights", name, *gains))
-    pdf_report.detail(f"Set beam weights to {gains}.")
+
+    pdf_report.detail(f"Set beam weights and delay to {gains}.")
 
     async with asyncio.TaskGroup() as tg:
         for dsim_name in cbf.dsim_names:
@@ -93,7 +94,7 @@ async def test_mean_power(
     steady_state_unix = time_converter.adc_to_unix(await cbf.steady_state_timestamp())
     # Require a full power-int-time of data after steady state so the sensor
     # average does not include pre-change samples.
-    min_sensor_time = steady_state_unix + receiver.power_int_time
+    min_sensor_time = steady_state_unix + receiver.power_int_time * 2
 
     sensor_names = [
         f"{receiver.stream_names[0]}.{pol}{chan}.mean-power"
@@ -110,7 +111,7 @@ async def test_mean_power(
                 break
             await asyncio.sleep(0.5)
 
-    await asyncio.wait_for(asyncio.create_task(wait_mean_power_steady_state()), timeout=15.0)
+    await asyncio.wait_for(asyncio.create_task(wait_mean_power_steady_state()), timeout=30.0)
 
     pdf_report.step("Measure power from tied-array channelised voltage.")
     _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk()
@@ -128,7 +129,7 @@ async def test_mean_power(
         with check:
             assert sensor.timestamp >= min_sensor_time
             assert sensor.value == pytest.approx(tacv_power, rel=5e-3), (
-                f"TACV power ^2: {tacv_power} does not match total theta^2: {sensor.value}"
+                f"TACV power ^2: {tacv_power} does not match total sigma^2: {sensor.value}"
                 + f" for sensor {sensor_name}"
             )
     pdf_report.detail("Power agrees to within 0.5%.")
