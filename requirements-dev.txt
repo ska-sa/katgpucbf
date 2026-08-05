@@ -244,6 +244,7 @@ packaging==25.0
     #   katcbf-vlbi-resample
     #   matplotlib
     #   pytest
+    #   pytest-check
     #   sphinx
     #   statsmodels
     #   xarray

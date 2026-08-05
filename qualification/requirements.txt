@@ -247,6 +247,7 @@ packaging==25.0
     #   katcbf-vlbi-resample
     #   matplotlib
     #   pytest
+    #   pytest-check
     #   xarray
 pandas==2.3.3
     # via
