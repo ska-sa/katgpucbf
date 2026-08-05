@@ -94,7 +94,7 @@ async def test_mean_power(
     steady_state_unix = time_converter.adc_to_unix(await cbf.steady_state_timestamp())
     # Require a full power-int-time of data after steady state so the sensor
     # average does not include pre-change samples.
-    min_sensor_time = steady_state_unix + receiver.power_int_time * 2
+    min_sensor_time = steady_state_unix + receiver.power_int_time * 4
 
     sensor_names = [
         f"{receiver.stream_names[0]}.{pol}{chan}.mean-power"
