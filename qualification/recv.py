@@ -669,6 +669,10 @@ class VDIFTimestamp:
         seconds = self.seconds + self.frame_nr / frame_rate
         return ref_time + TimeDelta(seconds, format="sec", scale="tai")
 
+    def linear(self, frame_rate: int) -> int:
+        """Linear frame number counting from the ref epoch."""
+        return self.seconds * frame_rate + self.frame_nr
+
 
 @dataclass(frozen=True)
 class VDIFFrame:
@@ -741,7 +745,8 @@ class TiedArrayResampledVoltageReceiver:
 
     async def _next_packet(self) -> None:
         # sock_recv will work synchronously if it can, but that can prevent the
-        # event loop from ever getting a chance to run.
+        # event loop from ever getting a chance to run. sleep(0) allows this.
+        await asyncio.sleep(0)
         packet = await asyncio.get_event_loop().sock_recv(self.sock, self._max_packet_size)
         # Using baseband to parse the header is expensive. We extract
         # words from the header then slice out the fields we want.
@@ -771,6 +776,12 @@ class TiedArrayResampledVoltageReceiver:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
         # TODO: log or record invalid frames
 
+    def _calc_min_frame(self, min_time: Time, ref_epoch: int, frame_rate: int) -> int:
+        """Compute the minimum linearised frame number that is at least `min_time`."""
+        ref_time = VDIFTimestamp(0, 0, ref_epoch).timestamp(frame_rate)
+        to_wait_sec = (min_time - ref_time).sec
+        return math.ceil(to_wait_sec * frame_rate)
+
     async def complete_framesets(
         self,
         min_timestamp: int | None = None,
@@ -780,6 +791,9 @@ class TiedArrayResampledVoltageReceiver:
     ) -> AsyncGenerator[VDIFFrameset, None]:
         """Yield complete framesets.
 
+        Note that this iterator is only suitable for a single capture session.
+        If the stream is stopped then restarted, create a new iterator.
+
         Parameters
         ----------
         min_timestamp
@@ -787,10 +801,6 @@ class TiedArrayResampledVoltageReceiver:
             (after F-engine delay is applied) will be discarded. If the default
             of ``None`` is used, a value is computed via
             :meth:`CBFRemoteControl.steady_state_timestamp`.
-
-            Note that the calculation for this assumes a fixed vlbi-delay for the
-            lifetime of the iterator (which is loaded when the iterator is created).
-            If the VLBI delay is changed you should create a new iterator.
         max_delay
             An upper bound on the delay set on any F-engine. This is used in
             the calculation of `min_timestamp` when no value is provided.
@@ -812,12 +822,18 @@ class TiedArrayResampledVoltageReceiver:
         vlbi_delay += 1e-3
         min_time += TimeDelta(vlbi_delay, format="sec", scale="tai")
 
+        # Computing timestamps is expensive. So once we know the frame rate and
+        # ref epoch, we can convert it into a minimum linearised frame number.
+        min_frame: int | None = None
+
         try:
             async with asyncio.timeout(time_limit) as timer:
                 while True:
                     # Check if we have a complete frameset at the start of the buffer.
                     if self.buffer:
                         frame0 = self.buffer[0]
+                        if min_frame is None:
+                            min_frame = self._calc_min_frame(min_time, frame0.timestamp.ref_epoch, self.frame_rate)
                         if frame0.seq_id <= self.min_seq_id and len(self.buffer) >= self.n_threads:
                             prefix = self.buffer[: self.n_threads]
                             if all(
@@ -827,9 +843,12 @@ class TiedArrayResampledVoltageReceiver:
                                 # Make sure we don't re-accept these packets
                                 self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
                                 prefix.sort(key=lambda frame: frame.thread_id)
-                                frame0_time = frame0.timestamp.timestamp(frame_rate=self.frame_rate)
-                                if frame0_time >= min_time:
+                                frame0_nr = frame0.timestamp.linear(self.frame_rate)
+                                if frame0_nr >= min_frame:
+                                    logger.debug("Yielding frame %d", frame0_nr)
                                     yield VDIFFrameset(prefix)
+                                else:
+                                    logger.debug("Skipping frame %d < %d", frame0_nr, min_frame)
                                 del self.buffer[: self.n_threads]
                                 continue
 
