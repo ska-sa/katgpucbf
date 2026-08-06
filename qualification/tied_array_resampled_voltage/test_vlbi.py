@@ -74,12 +74,16 @@ async def test_mean_power(
     receiver = receive_tied_array_resampled_voltage
     pcc = cbf.product_controller_client
 
-    pdf_report.step("Setup signal generator and gains.")
     async with asyncio.TaskGroup() as tg:
+        pdf_report.step("Setup signal generator and gains.")
         for i, name in enumerate(receive_tied_array_channelised_voltage.stream_names):
             gains = [0.0] * len(receive_tied_array_channelised_voltage.source_indices[i])
             gains[0] = 1.0
             tg.create_task(pcc.request("beam-weights", name, *gains))
+        pdf_report.step("Set VLBI delay to 5.")
+        tg.create_task(pcc.request("capture-stop", "tied-array-resampled-voltage"))
+        tg.create_task(pcc.request("vlbi-delay", 5.0))  # for some configurations the delay is very large.
+        tg.create_task(pcc.request("capture-start", "tied-array-resampled-voltage"))
 
     pdf_report.detail(f"Set beam weights and delay to {gains}.")
 
@@ -95,7 +99,6 @@ async def test_mean_power(
     # Require a full power-int-time of data after steady state so the sensor
     # average does not include pre-change samples.
     min_sensor_time = steady_state_unix + receiver.power_int_time
-    min_sensor_time += 5  # TODO: for some reason, the sensor is not quite steady at the steady state timestamp
 
     sensor_names = [
         f"{receiver.stream_names[0]}.{pol}{chan}.mean-power"
