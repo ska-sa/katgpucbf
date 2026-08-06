@@ -311,16 +311,26 @@ async def issue_config(host: str, port: int, name: str, config: dict, vlbi: bool
         print(f"Product controller is at {product_host}:{product_port}")
 
         product_client = await aiokatcp.Client.connect(product_host, product_port)
+
         if vlbi:
             for dsim_name, dsim in config["outputs"].items():
                 if dsim["type"] == "sim.dig.baseband_voltage":
                     tasks = await product_client.sensor_value(f"{dsim_name}.tasks", str)
                     tasklist = json.loads(tasks)
                     await product_client.request("dsim-signals", tasklist[0], "common=wgn(0.02); common; common;")
-        for output_name, output in config["outputs"].items():
-            if output["type"] in CAPTURE_START_TYPES:
-                print(f"Enabling {output_name} transmission...")
-                await product_client.request("capture-start", output_name)
+        capture_start_streams = []
+        for name, conf in config["outputs"].items():
+            if conf["type"] in CAPTURE_START_TYPES:
+                capture_start_streams.append(name)
+
+        for conf in config["outputs"].values():
+            if conf["type"].startswith("gpucbf."):
+                for stream in conf["src_streams"]:
+                    if stream in capture_start_streams:
+                        capture_start_streams.remove(stream)
+        for output_name in capture_start_streams:
+            print(f"Enabling {output_name} transmission...")
+            await product_client.request("capture-start", output_name)
     except (aiokatcp.FailReply, ConnectionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
