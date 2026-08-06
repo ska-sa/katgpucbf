@@ -428,7 +428,22 @@ async def cbf_cache(pytestconfig: pytest.Config) -> AsyncGenerator[CBFCache, Non
 
 
 @pytest.fixture
-async def capture_start_streams(request: pytest.FixtureRequest, cbf_config: dict) -> list[str]:
+async def capture_stop_streams(cbf_config: dict) -> list[str]:
+    """List of streams for which capture-stop will automatically be issued."""
+    out = []
+    for name, conf in cbf_config["outputs"].items():
+        if conf["type"] in _CAPTURE_TYPES:
+            out.append(name)
+
+    for conf in cbf_config["outputs"].values():
+        for stream in conf.get("src_streams", []):
+            if stream in out:
+                out.remove(stream)
+    return out
+
+
+@pytest.fixture
+async def capture_start_streams(request: pytest.FixtureRequest, capture_stop_streams: list[str]) -> list[str]:
     """List of streams for which capture-start will automatically be issued."""
     no_capture_start: set[str] = set()
     for marker in request.node.iter_markers("no_capture_start"):
@@ -437,8 +452,8 @@ async def capture_start_streams(request: pytest.FixtureRequest, cbf_config: dict
         no_capture_start.update(marker.args)
 
     out = []
-    for name, conf in cbf_config["outputs"].items():
-        if name not in no_capture_start and conf["type"] in _CAPTURE_TYPES:
+    for name in capture_stop_streams:
+        if name not in no_capture_start:
             out.append(name)
     return out
 
@@ -527,6 +542,7 @@ async def cbf(
     cbf_mode_config: dict,
     core_allocator: CoreAllocator,
     capture_start_streams: list[str],
+    capture_stop_streams: list[str],
     tied_array_channelised_voltage_receive_streams: list[str],
     pdf_report: Reporter,
 ) -> AsyncGenerator[CBFRemoteControl, None]:
@@ -588,9 +604,8 @@ async def cbf(
 
     yield cbf
 
-    for name, conf in cbf.config["outputs"].items():
-        if conf["type"] in _CAPTURE_TYPES:
-            await pcc.request("capture-stop", name)
+    for name in capture_stop_streams:
+        await pcc.request("capture-stop", name)
 
 
 @pytest.fixture

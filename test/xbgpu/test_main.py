@@ -17,6 +17,7 @@
 """Unit tests for argument parsing."""
 
 import argparse
+import re
 
 import pytest
 from katsdptelstate.endpoint import Endpoint
@@ -31,11 +32,12 @@ class TestParseBeam:
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1,dither=none") == BOutput(
+        assert parse_beam("name=beam1,dst=239.1.2.3:7148,pol=1,dither=none,send_enabled=True") == BOutput(
             name="beam1",
             dst=Endpoint("239.1.2.3", 7148),
             pol=1,
             dither=DitherType.NONE,
+            send_enabled=True,
         )
 
     def test_minimal(self) -> None:
@@ -45,12 +47,23 @@ class TestParseBeam:
             dst=Endpoint("239.1.2.3", 7148),
             pol=1,
             dither=DitherType.DEFAULT,
+            send_enabled=False,
         )
 
     def test_bad_pol(self) -> None:
         """Test with a polarisation value that isn't 0 or 1."""
-        with pytest.raises(argparse.ArgumentTypeError, match="pol must be either 0 or 1"):
+        with pytest.raises(argparse.ArgumentTypeError, match="pol: must be either 0 or 1"):
             parse_beam("name=foo,dst=239.1.2.3:7148,pol=2")
+
+    def test_bad_send_enabled(self) -> None:
+        """Test with a send_enabled value that isn't true/false or 1/0.
+
+        This is shared with :func:`.parse_corrprod`.
+        """
+        with pytest.raises(
+            argparse.ArgumentTypeError, match=re.escape("send_enabled: must be a boolean value (true/false, 1/0)")
+        ):
+            parse_beam("name=foo,dst=239.1.2.3:7148,pol=1,send_enabled=maybe")
 
 
 class TestParseCorrprod:
@@ -58,8 +71,11 @@ class TestParseCorrprod:
 
     def test_maximal(self) -> None:
         """Test with all valid arguments."""
-        assert parse_corrprod("name=foo,heap_accumulation_threshold=52,dst=239.2.3.4:7148") == XOutput(
+        assert parse_corrprod(
+            "name=foo,heap_accumulation_threshold=52,dst=239.2.3.4:7148,send_enabled=True"
+        ) == XOutput(
             name="foo",
             heap_accumulation_threshold=52,
             dst=Endpoint("239.2.3.4", 7148),
+            send_enabled=True,
         )
