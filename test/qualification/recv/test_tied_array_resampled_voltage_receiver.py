@@ -143,7 +143,7 @@ async def test_receive_samples_per_frame_from_first_frame(
     mock_cbf: CBFRemoteControl, mock_socket: socket.socket
 ) -> None:
     """First frame sets samples_per_frame on the buffer."""
-    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, ["stream0"], "127.0.0.1")
+    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     vdif_frame = make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0)
     mock_socket.recv.return_value = vdif_frame  # type: ignore[attr-defined]
     await receiver._next_packet()
@@ -162,7 +162,7 @@ async def test_receive_framesets_filters_incomplete_threads(
     mock_cbf: CBFRemoteControl, mock_socket: socket.socket
 ) -> None:
     """Incomplete thread sets are recorded as invalid framesets."""
-    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, ["stream0"], "127.0.0.1")
+    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     # 2 threads of data only
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
         make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0),
@@ -183,7 +183,7 @@ async def test_receive_framesets_filters_duplicate_seq_ids(
     mock_cbf: CBFRemoteControl, mock_socket: socket.socket
 ) -> None:
     """Framesets with duplicate sequence IDs are filtered out."""
-    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, ["stream0"], "127.0.0.1")
+    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
         make_vtp_packet(2, frame_nr=1, seconds=100, thread_id=0),
         make_vtp_packet(3, frame_nr=1, seconds=100, thread_id=1),
@@ -202,7 +202,7 @@ async def test_receive_framesets_filters_duplicate_seq_ids(
 
 async def test_receive_framesets_unordered(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
     """Framesets are yielded correctly when packets arrive out of order."""
-    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, ["stream0"], "127.0.0.1")
+    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
         make_vtp_packet(8, frame_nr=10, seconds=98, thread_id=0),
         make_vtp_packet(10, frame_nr=1, seconds=98, thread_id=1),
@@ -230,17 +230,17 @@ async def test_receive_framesets_unordered(mock_cbf: CBFRemoteControl, mock_sock
 
 async def test_timestamp_from_epoch(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
     """Timestamp is calculated correctly from the epoch."""
-    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, ["stream0"], "127.0.0.1")
+    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
         make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0, ref_epoch=2)
     ]
     await receiver._next_packet()
-    assert receiver.buffer[0].timestamp.unix_timestamp(receiver.frame_rate) == pytest.approx(978307300.000125)
+    assert receiver.buffer[0].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(978307300.000125)
 
 
 async def test_close_clears_state(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
     """clear() resets all buffered state."""
-    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, ["stream0"], "127.0.0.1")
+    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
         make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0),
         make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=0),

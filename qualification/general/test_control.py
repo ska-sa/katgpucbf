@@ -235,7 +235,7 @@ def check_vdif_timestamps(
         "Framesets have inconsistent reference epochs."
     )
 
-    elapsed = timestamps[-1].unix_timestamp(receiver.frame_rate) - timestamps[0].unix_timestamp(receiver.frame_rate)
+    elapsed = (timestamps[-1].timestamp(receiver.frame_rate) - timestamps[0].timestamp(receiver.frame_rate)).sec
     pdf_report.detail(f"{name}: received data over {elapsed:.3f}s.")
     min_time = TEST_TIME - TEST_TIME_TOL
     with check:
