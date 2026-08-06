@@ -80,10 +80,12 @@ async def test_mean_power(
             gains = [0.0] * len(receive_tied_array_channelised_voltage.source_indices[i])
             gains[0] = 1.0
             tg.create_task(pcc.request("beam-weights", name, *gains))
-        pdf_report.step("Set VLBI delay to 5.")
-        tg.create_task(pcc.request("capture-stop", "tied-array-resampled-voltage"))
-        tg.create_task(pcc.request("vlbi-delay", 5.0))  # for some configurations the delay is very large.
-        tg.create_task(pcc.request("capture-start", "tied-array-resampled-voltage"))
+    pdf_report.step("Set VLBI delay to 5.")
+    await pcc.request("capture-stop", "tied-array-resampled-voltage")
+    await pcc.request(
+        "vlbi-delay", "tied-array-resampled-voltage", "-5.0"
+    )  # for some configurations the delay is very large.
+    await pcc.request("capture-start", "tied-array-resampled-voltage")
 
     pdf_report.detail(f"Set beam weights and delay to {gains}.")
 
