@@ -33,8 +33,8 @@ declare -a beam_args
 beams=${beams:-4}
 i=0
 while [ "$i" -lt "$beams" ]; do
-    beam_args+=("--beam=name=beam_${i}x,pol=0,dst=239.10.$((12 + index)).$((i * 2)):7148")
-    beam_args+=("--beam=name=beam_${i}y,pol=1,dst=239.10.$((12 + index)).$((i * 2 + 1)):7148")
+    beam_args+=("--beam=name=beam_${i}x,pol=0,dst=239.10.$((12 + index)).$((i * 2)):7148,send_enabled=True")
+    beam_args+=("--beam=name=beam_${i}y,pol=1,dst=239.10.$((12 + index)).$((i * 2 + 1)):7148,send_enabled=True")
     i="$((i + 1))"
 done
 
@@ -74,7 +74,7 @@ exec schedrr spead2_net_raw numactl -C $other_affinity xbgpu \
     --recv-interface $iface \
     --send-interface $iface \
     --recv-ibv --send-ibv \
-    --corrprod=name=bcp1,heap_accumulation_threshold=${heap_accumulation_threshold},dst=$dst \
+    --corrprod=name=bcp1,heap_accumulation_threshold=${heap_accumulation_threshold},dst=$dst,send_enabled=True \
     "${beam_args[@]}" \
     --adc-sample-rate ${adc_sample_rate} \
     --array-size ${array_size:-64} \
@@ -87,5 +87,4 @@ exec schedrr spead2_net_raw numactl -C $other_affinity xbgpu \
     --sync-time 0 \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
-    --send-enabled \
     $src

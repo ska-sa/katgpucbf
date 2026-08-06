@@ -26,7 +26,6 @@ from dataclasses import dataclass
 from typing import override
 from unittest import mock
 
-import async_solipsism
 import numpy as np
 import pytest
 import pytest_mock
@@ -34,11 +33,7 @@ import pytest_mock
 from katgpucbf.vgpu.main import VTP_DEFAULT_PORT
 from katgpucbf.vgpu.send import RateLimiter, VDIFFrame, VDIFSender
 
-
-@pytest.fixture
-def event_loop_policy() -> async_solipsism.EventLoopPolicy:
-    """Use async_solipsism event loop."""
-    return async_solipsism.EventLoopPolicy()
+pytestmark = pytest.mark.use_async_solipsism
 
 
 @dataclass(frozen=True)

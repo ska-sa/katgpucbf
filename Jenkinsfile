@@ -140,7 +140,7 @@ pipeline {
             }
 
             stage('Build documentation') {
-              options { timeout(time: 5, unit: 'MINUTES') }
+              options { timeout(time: 10, unit: 'MINUTES') }
               steps {
                 // -W causes warnings to become errors.
                 // --keep-going ensures we get all warnings instead of just the first.
