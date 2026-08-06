@@ -444,7 +444,7 @@ class VEngine(Engine):
         sensors.add(
             aiokatcp.Sensor(
                 int,
-                "samples-per-frame",
+                "n-samples-per-frame",
                 "Number of samples per frame in each stream.",
                 units="samples/frame",
                 default=n_samples_per_frame,
