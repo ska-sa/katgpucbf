@@ -280,7 +280,7 @@ This describes version ``katgpucbf-xbgpu-1.0`` of the katcp-device API.
 :samp:`?capture-start {stream} [{timestamp}]`, :samp:`?capture-stop {stream}`
     Enable or disable transmission of output data. This does not affect
     transmission of descriptors, which cannot be disabled. In the initial
-    state transmission is disabled, unless the :option:`!--send-enabled`
+    state transmission is disabled, unless the :option:`!send_enabled=True`
     command-line option has been passed.
 
     If :samp:`{timestamp}` is specified, heaps with timestamps less than this
