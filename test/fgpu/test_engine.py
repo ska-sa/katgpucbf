@@ -41,6 +41,7 @@ from katgpucbf.fgpu.engine import (
     InQueueItem,
     Pipeline,
     dig_rms_dbfs_status,
+    dig_rms_dbfs_status_params,
     generate_ddc_weights,
     generate_pfb_weights,
 )
@@ -1365,8 +1366,16 @@ class TestDigRmsDbfsStatus:
 
     @pytest.fixture
     def sensor(self, mock_time: mock.Mock) -> aiokatcp.Sensor[float]:
-        """Create a sensor using dig_rms_dbfs_status."""
-        return aiokatcp.Sensor(float, "sensor2", "", status_func=dig_rms_dbfs_status)
+        """Create a sensor using dig_rms_dbfs_status for a 10 bit signal."""
+        low_error, low, high, high_error = dig_rms_dbfs_status_params(10)
+        func = partial(
+            dig_rms_dbfs_status,
+            dig_rms_dbfs_low_error=low_error,
+            dig_rms_dbfs_low=low,
+            dig_rms_dbfs_high=high,
+            dig_rms_dbfs_high_error=high_error,
+        )
+        return aiokatcp.Sensor(float, "sensor2", "", status_func=func)
 
     def test_initial_value(self, sensor: aiokatcp.Sensor) -> None:
         """Test that the status is NOMINAL when no value has been set."""
@@ -1388,3 +1397,16 @@ class TestDigRmsDbfsStatus:
         """Test that the status is set correctly for a given value."""
         sensor.set_value(value, timestamp=2345678901.0)
         assert sensor.reading == aiokatcp.Reading(2345678901.0, status, value)
+
+    @pytest.mark.parametrize(
+        ("value", "params"),
+        [
+            (10.0, (-33.0, -30.0, -10.0, -7.0)),
+            (2.0, (-12.04, -0.0, -10.0, -6.0)),
+            (16.0, (-96.32, -84.28, -10.0, -6.0)),
+        ],
+    )
+    def test_dig_rms_dbfs_status_params(self, value: float, params: tuple[float, float, float, float]) -> None:
+        """Test that the correct parameters are generated for the given value."""
+        result = dig_rms_dbfs_status_params(value)
+        assert params == result
