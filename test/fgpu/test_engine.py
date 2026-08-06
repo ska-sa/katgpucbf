@@ -1401,9 +1401,9 @@ class TestDigRmsDbfsStatus:
     @pytest.mark.parametrize(
         ("value", "params"),
         [
-            (10, (-33.0, -30.0, -10, -7)),
-            (2, (-12.04, -0.0, -10, -6)),
-            (16, (-96.32, -84.28, -10, -6)),
+            (10.0, (-33.0, -30.0, -10.0, -7.0)),
+            (2.0, (-12.04, -0.0, -10.0, -6.0)),
+            (16.0, (-96.32, -84.28, -10.0, -6.0)),
         ],
     )
     def test_dig_rms_dbfs_status_params(self, value: float, params: tuple[float, float, float, float]) -> None:
