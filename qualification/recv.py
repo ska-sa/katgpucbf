@@ -664,7 +664,7 @@ class VDIFTimestamp:
         """Timestamp of the VDIF frameset."""
         # ref_epoch is the number of half-years since 2000-01-01.
         ref_time = Time(
-            (2000 + self.ref_epoch // 2, self.ref_epoch % 2 * 6 + 1, 1, 0, 0, 0), format="ymdhms", scale="utc"
+            dict(year=2000 + self.ref_epoch // 2, month=self.ref_epoch % 2 * 6 + 1), format="ymdhms", scale="utc"
         )
         seconds = self.seconds + self.frame_nr / frame_rate
         return ref_time + TimeDelta(seconds, format="sec", scale="tai")
@@ -740,6 +740,8 @@ class TiedArrayResampledVoltageReceiver:
         self.cbf = cbf
 
     async def _next_packet(self) -> None:
+        # sock_recv will work synchronously if it can, but that can prevent the
+        # event loop from ever getting a chance to run.
         packet = await asyncio.get_event_loop().sock_recv(self.sock, self._max_packet_size)
         # Using baseband to parse the header is expensive. We extract
         # words from the header then slice out the fields we want.
@@ -803,7 +805,7 @@ class TiedArrayResampledVoltageReceiver:
             min_timestamp / self.scale_factor_timestamp, format="sec", scale="tai"
         )
 
-        vlbi_delay = await self.cbf.product_controller_client.sensor_value(f"{self.stream_name}.vlbi-delay", float)
+        vlbi_delay = await self.cbf.product_controller_client.sensor_value(f"{self.stream_name}.delay", float)
         # TODO: The V-engine has filters which take input data from either side
         # of the nominal output timestamp. We need to establish an upper bound
         # on how far back in time they reach, probably based on sensors.
@@ -825,7 +827,8 @@ class TiedArrayResampledVoltageReceiver:
                                 # Make sure we don't re-accept these packets
                                 self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
                                 prefix.sort(key=lambda frame: frame.thread_id)
-                                if frame0.timestamp >= min_time:
+                                frame0_time = frame0.timestamp.timestamp(frame_rate=self.frame_rate)
+                                if frame0_time >= min_time:
                                     yield VDIFFrameset(prefix)
                                 del self.buffer[: self.n_threads]
                                 continue
