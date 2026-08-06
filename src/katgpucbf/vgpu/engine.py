@@ -338,7 +338,9 @@ class VEngine(Engine):
             RECV_SENSOR_TIMEOUT_MIN,
             RECV_SENSOR_TIMEOUT_CHUNKS * recv_config.layout.chunk_timestamp_step / recv_config.adc_sample_rate,
         )
-        self._populate_sensors(self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout)
+        self._populate_sensors(
+            self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout, send_config.n_samples_per_frame
+        )
         self._init_recv()
         self._capture: _CaptureSession | None = None
         send_rate = send_config.sample_rate * send_config.rate_factor
@@ -417,6 +419,7 @@ class VEngine(Engine):
         recv_pol_labels: Sequence[str],
         send_pols: Sequence[str],
         recv_sensor_timeout: float,
+        n_samples_per_frame: int,
     ) -> None:
         """Define the sensors for the engine."""
         for pol in send_pols:
@@ -435,6 +438,16 @@ class VEngine(Engine):
                 "Delay introduced by processing",
                 units="s",
                 default=0.0,
+                initial_status=aiokatcp.Sensor.Status.NOMINAL,
+            )
+        )
+        sensors.add(
+            aiokatcp.Sensor(
+                int,
+                "samples-per-frame",
+                "Number of samples per frame in each stream.",
+                units="samples/frame",
+                default=n_samples_per_frame,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
             )
         )
