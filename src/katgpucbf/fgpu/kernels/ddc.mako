@@ -125,7 +125,9 @@ void ddc(
     GLOBAL cplx * RESTRICT out${i},
     % endfor
     const GLOBAL sample_word * RESTRICT in,
-    const GLOBAL cplx * RESTRICT weights,
+    % for i in range(outputs):
+    const GLOBAL cplx * RESTRICT weights${i},
+    %endfor
     unsigned int out_stride, // stride between pols, unit: cplx
     unsigned int in_stride,  // stride between pols, unit: sample_word
     unsigned int out_size,
@@ -180,9 +182,9 @@ void ddc(
     }
 
     /* Copy weights to local memory */
-    for(int k = 0;k < ${outputs};k++){
-        copy_to_local_cplx(local[k].weights, weights, TAPS);
-    }
+    % for k in range(outputs):
+    copy_to_local_cplx(local[k].weights, weights${k}, TAPS);
+    % endfor
     BARRIER();
 
     cplx accum[${outputs}][C];
