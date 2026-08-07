@@ -339,7 +339,12 @@ class VEngine(Engine):
             RECV_SENSOR_TIMEOUT_CHUNKS * recv_config.layout.chunk_timestamp_step / recv_config.adc_sample_rate,
         )
         self._populate_sensors(
-            self.sensors, recv_config.pol_labels, send_config.pols, recv_sensor_timeout, send_config.n_samples_per_frame
+            self.sensors,
+            recv_config.pol_labels,
+            send_config.pols,
+            recv_sensor_timeout,
+            send_config.n_samples_per_frame,
+            [config.threshold],
         )
         self._init_recv()
         self._capture: _CaptureSession | None = None
@@ -420,6 +425,7 @@ class VEngine(Engine):
         send_pols: Sequence[str],
         recv_sensor_timeout: float,
         n_samples_per_frame: int,
+        quantisation_threshold: list[float],
     ) -> None:
         """Define the sensors for the engine."""
         for pol in send_pols:
@@ -454,6 +460,17 @@ class VEngine(Engine):
         prefixes = [f"{pol}." for pol in recv_pol_labels]
         for sensor in base_recv.make_sensors(recv_sensor_timeout, prefixes).values():
             sensors.add(sensor)
+        for i, threshold in enumerate(quantisation_threshold):
+            sensors.add(
+                aiokatcp.Sensor(
+                    float,
+                    f"quantisation-threshold-{i}",
+                    "Quantisation threshold per value for all streams.",
+                    units="volts",
+                    default=threshold,
+                    initial_status=aiokatcp.Sensor.Status.NOMINAL,
+                )
+            )
 
     async def on_stop(self) -> None:  # noqa: D102
         if self._capture is not None:
