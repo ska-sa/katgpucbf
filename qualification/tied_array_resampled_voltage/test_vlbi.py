@@ -18,13 +18,15 @@
 
 import asyncio
 from collections.abc import AsyncGenerator
+from math import ceil
 
 import aiokatcp
 import numpy as np
 import pytest
+from matplotlib.figure import Figure
 from pytest_check import check
 
-from katgpucbf.pytest_plugins.reporter import Reporter
+from katgpucbf.pytest_plugins.reporter import Reporter, plot_focus
 from katgpucbf.utils import TimeConverter
 from qualification.cbf import CBFRemoteControl
 
@@ -108,16 +110,39 @@ async def test_mean_power(
         for chan in range(receiver.n_chans)
     ]
 
+    sample_rate = 5
+    samples = ceil(min_sensor_time - sensor_watcher.sensors[sensor_names[0]].timestamp) * sample_rate
+    mean_power_sensor_values = np.zeros((len(sensor_names), samples))
+    mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples))
+
     async def wait_mean_power_steady_state() -> None:
+        j = 0
         while True:
             timestamps = [sensor_watcher.sensors[name].timestamp for name in sensor_names]
+            for i, name in enumerate(sensor_names):
+                mean_power_sensor_values[i, j] = sensor_watcher.sensors[name].value
+                mean_power_sensor_timestamps[i, j] = sensor_watcher.sensors[name].timestamp
+            j += 1
             earliest = min(timestamps)
             if earliest >= min_sensor_time:
                 pdf_report.detail("Mean-power sensors reached steady state timestamp.")
+            if j >= samples:
                 break
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1 / sample_rate)
 
     await asyncio.wait_for(asyncio.create_task(wait_mean_power_steady_state()), timeout=30.0)
+
+    fig = Figure(tight_layout=True)
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xlabel("Timestamp")
+    ax.set_ylabel("Mean Power")
+    ax.set_title("Mean Power Sensor Values")
+    for i, name in enumerate(sensor_names):
+        plot_focus(
+            ax, slice(0, samples), mean_power_sensor_timestamps[i, :], mean_power_sensor_values[i, :], label=name
+        )
+    ax.legend()
+    pdf_report.figure(fig)
 
     pdf_report.step("Measure power from tied-array channelised voltage.")
     _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk()
