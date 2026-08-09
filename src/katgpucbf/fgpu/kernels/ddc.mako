@@ -183,7 +183,7 @@ void ddc(
 
     /* Copy weights to local memory */
     % for k in range(outputs):
-    copy_to_local_cplx(local[k].weights, weights${k}, TAPS);
+    copy_to_local_cplx(local[${k}].weights, weights${k}, TAPS);
     % endfor
     BARRIER();
 

@@ -210,50 +210,60 @@ class DDC(accel.Operation):
             ),
             np.uint8,
         )
-        self._weights = []
-        self._weights_host = []
+        _weights: list[accel.DeviceArray] = []
+        _weights_host: list[accel.HostArray] = []
         for i in range(0, template.outputs):
             self.slots[f"out{i}"] = accel.IOSlot((n_pols, self.out_samples), np.complex64)
-            self._weights.append(accel.DeviceArray(template.context, (template.taps,), np.complex64))
-            self._weights_host.append(self._weights[i].empty_like())
-        self._mix_scale = [0] * template.outputs # Specify in cycles per output sample, times 2**64
-        self._mix_scale_buf = accel.DeviceArray(template.context, (template.outputs), np.uint64)
-        self._mix_bias_buf = accel.DeviceArray(template.context, (template.outputs), np.uint64)
-        self._mix_frequencies = [Fraction(0)] * template.outputs
-        self.mix_phase = [Fraction(0)] * template.outputs # Specify in fractions of a cycle (0-1)
+            _weights.append(accel.DeviceArray(template.context, (template.taps,), np.complex64))
+            _weights_host.append(_weights[i].empty_like())
+        self._weights = np.array(_weights, dtype=accel.DeviceArray)
+        self._weights_host = np.array(_weights_host, dtype=accel.HostArray)
+        self._mix_scale = np.array(
+            [0] * template.outputs, dtype=np.uint64
+        )  # Specify in cycles per output sample, times 2**64
+        self._mix_scale_buf = accel.DeviceArray(template.context, (template.outputs,), np.uint64)
+        self._mix_bias_buf = accel.DeviceArray(template.context, (template.outputs,), np.uint64)
+        self._mix_frequencies = np.array([Fraction(0)] * template.outputs, dtype=Fraction)
+        self.mix_phase = np.array(
+            [Fraction(0)] * template.outputs, dtype=Fraction
+        )  # Specify in fractions of a cycle (0-1)
 
-    def configure(self, mix_frequencies: Fraction | [Fraction], weights: np.ndarray) -> None:
+    def configure(self, mix_frequencies: Fraction | np.ndarray, weights: np.ndarray) -> None:
         """Set the mixer frequency and filter weights.
 
         This is a somewhat expensive operation, as it computes lookup tables
         and transfers them to the device synchronously. It is only intended
         to be used at startup rather than continuously.
         """
-        assert weights.shape == self._weights_host.shape
+        print(weights.shape, self._weights_host.shape)
+        assert all((weights.shape == _weight_host.shape) for _weight_host in self._weights_host)
         # Passing a float implies that it has not been computed exactly
-        if not isinstance(mix_frequencies, Iterable):
-            mix_frequencies = [mix_frequencies]
+        if not isinstance(mix_frequencies, np.ndarray):
+            mix_frequencies = np.array([mix_frequencies], dtype=Fraction)
 
         assert all(isinstance(mix_frequency, Fraction) for mix_frequency in mix_frequencies)
         self._mix_frequencies = mix_frequencies
         # Quantise the mixer frequency so that cycles per *output* sample are
         # represented in fixed point with 64 fractional bits.
-        #TODO: generalize (just do one for now)
+        # TODO: generalize (just do one for now)
         self._mix_scale = np.array(
             [round(mix_frequency * self.template.subsampling * 2**64) % 2**64 for mix_frequency in mix_frequencies],
-            dtype=uint64,
+            dtype=np.uint64,
         )
         self._mix_scale_buf.set(self.command_queue, self._mix_scale)
         # Here we're quantising the mixer frequency to float (double
         # precision). Since len(weights) should be small (hundreds or maybe
         # thousands) and _weights is only single-precision, there should be no
         # loss in precision.
-        for i in range(0, template.outputs):
-            self._weights_host[i][:] = weights * np.exp(2j * np.pi * float(mix_frequencies[i]) * np.arange(len(weights)))
+        for i in range(0, self.template.outputs):
+            self._weights_host[i][:] = weights * np.exp(
+                2j * np.pi * float(mix_frequencies[i]) * np.arange(len(weights))
+            )
+            print("HELLO:", self._weights_host[i].dtype, type(self._weights_host[i][i]))
             self._weights[i].set(self.command_queue, self._weights_host[i])
 
     @property
-    def mix_frequencies(self) -> [Fraction]:
+    def mix_frequencies(self) -> np.ndarray:
         """Mixer frequencies in cycles per ADC sample."""
         return self._mix_frequencies
 
@@ -267,7 +277,7 @@ class DDC(accel.Operation):
         args = [self.buffer(f"out{i}").buffer for i in range(0, self.template.outputs)]
         args.append(in_buffer.buffer)
         for weights in self._weights:
-                args.append(weights.buffer)
+            args.append(weights.buffer)
         args.extend(
             [
                 np.uint32(self.buffer("out0").padded_shape[1]),  # out_stride
