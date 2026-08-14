@@ -86,18 +86,19 @@ def test_ddc(
     fn.ensure_all_bound()
     fn.buffer("in").set(command_queue, h_in)
     fn()
-    h_out = fn.buffer("out").get(command_queue)
+    for i in range(0, 1):
+        h_out = fn.buffer(f"out{i}").get(command_queue)
 
-    assert fn.mix_frequency == mix_frequency
+        assert fn.mix_frequencies[i] == mix_frequency
 
-    # atol has to be quite large because the calculation is fundamentally
-    # numerically unstable.
-    expected = ddc_host(h_in, weights, subsampling, input_sample_bits, fn.mix_frequency)
-    np.testing.assert_allclose(h_out, expected, atol=2e-5 * 2**input_sample_bits)
-    # RMS error should be an order of magnitude lower
-    err = h_out - expected
-    rms = np.sqrt(np.vdot(err, err) / err.size)
-    assert rms < 2e-6 * 2**input_sample_bits
+        # atol has to be quite large because the calculation is fundamentally
+        # numerically unstable.
+        expected = ddc_host(h_in, weights, subsampling, input_sample_bits, fn.mix_frequencies[i])
+        np.testing.assert_allclose(h_out, expected, atol=2e-5 * 2**input_sample_bits)
+        # RMS error should be an order of magnitude lower
+        err = h_out - expected
+        rms = np.sqrt(np.vdot(err, err) / err.size)
+        assert rms < 2e-6 * 2**input_sample_bits
 
 
 @pytest.mark.parametrize(

@@ -17,7 +17,7 @@
 """Digital down-conversion."""
 
 import math
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from fractions import Fraction
 from importlib import resources
 from typing import TypedDict, cast
@@ -210,14 +210,12 @@ class DDC(accel.Operation):
             ),
             np.uint8,
         )
-        _weights: list[accel.DeviceArray] = []
-        _weights_host: list[accel.HostArray] = []
+        self._weights = {}
+        self._weights_host = {}
         for i in range(0, template.outputs):
             self.slots[f"out{i}"] = accel.IOSlot((n_pols, self.out_samples), np.complex64)
-            _weights.append(accel.DeviceArray(template.context, (template.taps,), np.complex64))
-            _weights_host.append(_weights[i].empty_like())
-        self._weights = np.array(_weights, dtype=accel.DeviceArray)
-        self._weights_host = np.array(_weights_host, dtype=accel.HostArray)
+            self._weights[i] = accel.DeviceArray(template.context, (template.taps,), np.complex64)
+            self._weights_host[i] = self._weights[i].empty_like()
         self._mix_scale = np.array(
             [0] * template.outputs, dtype=np.uint64
         )  # Specify in cycles per output sample, times 2**64
@@ -235,8 +233,7 @@ class DDC(accel.Operation):
         and transfers them to the device synchronously. It is only intended
         to be used at startup rather than continuously.
         """
-        print(weights.shape, self._weights_host.shape)
-        assert all((weights.shape == _weight_host.shape) for _weight_host in self._weights_host)
+        assert all((weights.shape == _weight_host.shape) for _weight_host in self._weights_host.values())
         # Passing a float implies that it has not been computed exactly
         if not isinstance(mix_frequencies, np.ndarray):
             mix_frequencies = np.array([mix_frequencies], dtype=Fraction)
@@ -256,10 +253,9 @@ class DDC(accel.Operation):
         # thousands) and _weights is only single-precision, there should be no
         # loss in precision.
         for i in range(0, self.template.outputs):
-            self._weights_host[i][:] = weights * np.exp(
-                2j * np.pi * float(mix_frequencies[i]) * np.arange(len(weights))
-            )
-            print("HELLO:", self._weights_host[i].dtype, type(self._weights_host[i][i]))
+            mix_frequency = mix_frequencies[i]
+            assert isinstance(mix_frequency, Fraction)
+            self._weights_host[i][:] = weights * np.exp(2j * np.pi * float(mix_frequency) * np.arange(len(weights)))
             self._weights[i].set(self.command_queue, self._weights_host[i])
 
     @property
@@ -276,7 +272,7 @@ class DDC(accel.Operation):
 
         args = [self.buffer(f"out{i}").buffer for i in range(0, self.template.outputs)]
         args.append(in_buffer.buffer)
-        for weights in self._weights:
+        for weights in self._weights.values():
             args.append(weights.buffer)
         args.extend(
             [

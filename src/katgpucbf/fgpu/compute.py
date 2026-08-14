@@ -279,8 +279,11 @@ class Compute(accel.OperationSequence):
         # Compute the fractional part of first_sample * mix_frequency.
         # Using Fraction avoids the serious rounding errors that would
         # occur using floating point.
-        assert isinstance(self.ddc.mix_frequency, Fraction)
-        phase = self.ddc.mix_frequency * first_sample
+
+        # TODO: confirm this with @BM
+        assert all(isinstance(mix_frequency, Fraction) for mix_frequency in self.ddc.mix_frequencies)
+        mix_frequencies = self.ddc.mix_frequencies
+        phase = mix_frequencies[0] * first_sample
         phase -= round(phase)
         self.ddc.mix_phase = phase
         self.ddc()
