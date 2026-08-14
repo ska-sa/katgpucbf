@@ -100,6 +100,60 @@ def test_ddc(
         rms = np.sqrt(np.vdot(err, err) / err.size)
         assert rms < 2e-6 * 2**input_sample_bits
 
+@pytest.mark.parametrize(
+    "n_pols,taps,subsampling,samples,input_sample_bits,tuning,mix_frequencies",
+    [
+        (2, 256, 16, 256, 10, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (1, 256, 16, 1024 * 1024, 12, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (2, 256, 16, 1234568, 13, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (1, 256, 8, 1234568, 16, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (2, 255, 4, 1234568, 32, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (1, 257, 32, 1234568, 8, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (2, 256, 64, 1234568, 5, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (1, 32, 32, 1234568, 7, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (2, 55, 5, 123464, 10, None, np.array([Fraction("0.21"), Fraction("0.21")])),
+        (1, 256, 16, 256 * 1024, 10, {"wgs": 96, "unroll": 4}, np.array([Fraction("0.21"), Fraction("0.21")])),
+    ],
+)
+def test_ddc_multi_frequency(
+    context: AbstractContext,
+    command_queue: AbstractCommandQueue,
+    n_pols: int,
+    taps: int,
+    subsampling: int,
+    samples: int,
+    input_sample_bits: int,
+    tuning: _TuningDict | None,
+    mix_frequencies: np.ndarray
+) -> None:
+    """Test DDC kernel."""
+    rng = np.random.default_rng(seed=1)
+    h_in = rng.integers(0, 256, (n_pols, samples * input_sample_bits // BYTE_BITS), np.uint8)
+    weights = rng.uniform(-1.0, 1.0, (taps,)).astype(np.float32)
+    mix_frequencies = np.array([Fraction("0.21"), Fraction("0.21")], dtype=Fraction)
+    outputs = mix_frequencies.shape[0]
+    template = DDCTemplate(
+        context, taps=taps, subsampling=subsampling, input_sample_bits=input_sample_bits, outputs=outputs, tuning=tuning
+    )
+    fn = template.instantiate(command_queue, samples, n_pols)
+    fn.configure(mix_frequencies, weights)
+    fn.ensure_all_bound()
+    fn.buffer("in").set(command_queue, h_in)
+    fn()
+    for i in range(0, 1):
+        h_out = fn.buffer(f"out{i}").get(command_queue)
+
+        assert fn.mix_frequencies[i] == mix_frequencies[i]
+
+        # atol has to be quite large because the calculation is fundamentally
+        # numerically unstable.
+        expected = ddc_host(h_in, weights, subsampling, input_sample_bits, fn.mix_frequencies[i])
+        np.testing.assert_allclose(h_out, expected, atol=2e-5 * 2**input_sample_bits)
+        # RMS error should be an order of magnitude lower
+        err = h_out - expected
+        rms = np.sqrt(np.vdot(err, err) / err.size)
+        assert rms < 2e-6 * 2**input_sample_bits
+
 
 @pytest.mark.parametrize(
     "taps,subsampling,input_sample_bits",
