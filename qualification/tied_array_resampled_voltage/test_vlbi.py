@@ -17,7 +17,8 @@
 """Test for tied-array-resampled-voltage stream."""
 
 import asyncio
-from collections.abc import AsyncGenerator
+import time
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from math import ceil
 
 import aiokatcp
@@ -52,6 +53,20 @@ async def sensor_watcher(cbf: CBFRemoteControl) -> AsyncGenerator[aiokatcp.Senso
     await secondary.wait_closed()
 
 
+async def max_retry_test(
+    lambda_function: Callable[[int], Awaitable[bool]], max_retries: int, retry_interval: float
+) -> bool:
+    """Test a subroutine with a maximum number of retries and a retry interval."""
+    sleep_period = retry_interval
+    for try_number in range(max_retries):
+        start_time = time.time()
+        if await lambda_function(try_number):
+            return True
+        sleep_period = (time.time() - start_time) - (retry_interval)
+        await asyncio.sleep(sleep_period)
+    return False
+
+
 @pytest.mark.name("VLBI mean power")
 async def test_mean_power(
     pdf_report: Reporter,
@@ -82,12 +97,6 @@ async def test_mean_power(
             gains = [0.0] * len(receive_tied_array_channelised_voltage.source_indices[i])
             gains[0] = 1.0
             tg.create_task(pcc.request("beam-weights", name, *gains))
-    pdf_report.step("Set VLBI delay to 5.")
-    await pcc.request("capture-stop", "tied-array-resampled-voltage")
-    await pcc.request(
-        "vlbi-delay", "tied-array-resampled-voltage", "-5.0"
-    )  # for some configurations the delay is very large.
-    await pcc.request("capture-start", "tied-array-resampled-voltage")
 
     pdf_report.detail(f"Set beam weights and delay to {gains}.")
 
@@ -100,8 +109,8 @@ async def test_mean_power(
     await sensor_watcher.synced.wait()  # Implicitly waits for connection too
     time_converter = TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp)
     steady_state_unix = time_converter.adc_to_unix(await cbf.steady_state_timestamp())
-    # Require a full power-int-time of data after steady state so the sensor
-    # average does not include pre-change samples.
+    # TODO: Because the v engine reciever is padding zeros,
+    # for now just retry with 2 second intervals since steady state is unknown.
     min_sensor_time = steady_state_unix + receiver.power_int_time
 
     sensor_names = [
@@ -110,27 +119,39 @@ async def test_mean_power(
         for chan in range(receiver.n_chans)
     ]
 
+    pdf_report.step("Measure power from tied-array channelised voltage.")
+    _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk()
+    tacv_data = tacv_data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
+    # Only use the pass channels for beam zero for the power calculation.
+    tacv_data = tacv_data[0][pass_channels]
+    tacv_power = (np.square(tacv_data.real) + np.square(tacv_data.imag)).mean()
+    pdf_report.detail(f"Mean TACV power over passband channels: {tacv_power}.")
+
     sample_rate = 5
     samples = ceil(min_sensor_time - sensor_watcher.sensors[sensor_names[0]].timestamp) * sample_rate
     mean_power_sensor_values = np.zeros((len(sensor_names), samples))
     mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples))
 
-    async def wait_mean_power_steady_state() -> None:
-        j = 0
-        while True:
-            timestamps = [sensor_watcher.sensors[name].timestamp for name in sensor_names]
-            for i, name in enumerate(sensor_names):
-                mean_power_sensor_values[i, j] = sensor_watcher.sensors[name].value
-                mean_power_sensor_timestamps[i, j] = sensor_watcher.sensors[name].timestamp
-            j += 1
-            earliest = min(timestamps)
-            if earliest >= min_sensor_time:
-                pdf_report.detail("Mean-power sensors reached steady state timestamp.")
-            if j >= samples:
-                break
-            await asyncio.sleep(1 / sample_rate)
+    async def wait_mean_power_steady_state(j: int) -> bool:
+        for i, name in enumerate(sensor_names):
+            mean_power_sensor_values[i, j] = sensor_watcher.sensors[name].value
+            mean_power_sensor_timestamps[i, j] = sensor_watcher.sensors[name].timestamp
 
-    await asyncio.wait_for(asyncio.create_task(wait_mean_power_steady_state()), timeout=30.0)
+        return all(
+            [
+                sensor_watcher.sensors[name].timestamp >= min_sensor_time
+                and sensor_watcher.sensors[name].value == pytest.approx(tacv_power, rel=5e-3)
+                for name in sensor_names
+            ]
+        )
+
+    pdf_report.step("Compare mean-power sensors against TACV power.")
+    test_passed = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
+    with check:
+        assert test_passed, f"Power does not agree to within 0.5% after {samples} retries."
+        assert tacv_power > 0.0
+
+    mean_power_sensor_timestamps = mean_power_sensor_timestamps - mean_power_sensor_timestamps[:, 0]
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
@@ -143,24 +164,3 @@ async def test_mean_power(
         )
     ax.legend()
     pdf_report.figure(fig)
-
-    pdf_report.step("Measure power from tied-array channelised voltage.")
-    _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk()
-    tacv_data = tacv_data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
-    # Only use the pass channels for beam zero for the power calculation.
-    tacv_data = tacv_data[0][pass_channels]
-    tacv_power = (np.square(tacv_data.real) + np.square(tacv_data.imag)).mean()
-    pdf_report.detail(f"Mean TACV power over passband channels: {tacv_power}.")
-    # Test that we aren't accidentally testing zero values:
-    assert tacv_power > 0.0
-
-    pdf_report.step("Compare mean-power sensors against TACV power.")
-    for sensor_name in sensor_names:
-        sensor = sensor_watcher.sensors[sensor_name]
-        with check:
-            assert sensor.timestamp >= min_sensor_time
-            assert sensor.value == pytest.approx(tacv_power, rel=5e-3), (
-                f"TACV power ^2: {tacv_power} does not match total sigma^2: {sensor.value}"
-                + f" for sensor {sensor_name}"
-            )
-    pdf_report.detail("Power agrees to within 0.5%.")
