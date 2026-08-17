@@ -17,6 +17,7 @@
 """Test for tied-array-resampled-voltage stream."""
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from math import ceil
@@ -32,6 +33,8 @@ from katgpucbf.utils import TimeConverter
 from qualification.cbf import CBFRemoteControl
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -62,7 +65,8 @@ async def max_retry_test(
         start_time = time.time()
         if await lambda_function(try_number):
             return True
-        sleep_period = (time.time() - start_time) - (retry_interval)
+        sleep_period = retry_interval - (time.time() - start_time)
+        logger.error(f"Sleeping for {sleep_period} seconds.")
         await asyncio.sleep(sleep_period)
     return False
 
@@ -151,7 +155,7 @@ async def test_mean_power(
         assert test_passed, f"Power does not agree to within 0.5% after {samples} retries."
         assert tacv_power > 0.0
 
-    mean_power_sensor_timestamps = mean_power_sensor_timestamps - mean_power_sensor_timestamps[:, 0]
+    mean_power_sensor_timestamps = mean_power_sensor_timestamps - mean_power_sensor_timestamps[:, :1]
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
