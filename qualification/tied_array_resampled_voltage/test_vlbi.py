@@ -17,7 +17,6 @@
 """Test for tied-array-resampled-voltage stream."""
 
 import asyncio
-import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from math import ceil
@@ -33,8 +32,6 @@ from katgpucbf.utils import TimeConverter
 from qualification.cbf import CBFRemoteControl
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
-
-logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -66,7 +63,6 @@ async def max_retry_test(
         if await lambda_function(try_number):
             return True
         sleep_period = retry_interval - (time.time() - start_time)
-        logger.error(f"Sleeping for {sleep_period} seconds.")
         await asyncio.sleep(sleep_period)
     return False
 
