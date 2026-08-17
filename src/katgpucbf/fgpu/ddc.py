@@ -288,5 +288,5 @@ class DDC(accel.Operation):
             self.template.kernel,
             args,
             global_size=(groups * self.template.wgs, in_buffer.shape[0], 1),
-            local_size=(self.template.wgs, 1, 1),
+            local_size=(self.template.wgs, self.template.outputs, 1),
         )

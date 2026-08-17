@@ -148,15 +148,18 @@ void ddc(
             cplx weights[TAPS];
         };
         float out[2][C * WGS];  // Logically cplx, but split to reduce bank conflicts
-    } local[${outputs}];
-    GLOBAL cplx * RESTRICT out[${outputs}];
+    } local;
+    GLOBAL cplx * RESTRICT out_refs[${outputs}];
+    const GLOBAL cplx * RESTRICT weights_refs[${outputs}];
+    unsigned int out_id = get_local_id(1);
     % for k in range(outputs):
-    out[${k}] = out${k};
+    out_refs[${k}] = out${k};
+    weights_refs[${k}] = weights${k};
     % endfor
+    GLOBAL cplx * RESTRICT out = out_refs[out_id];
+    const GLOBAL cplx * RESTRICT weights = weights_refs[out_id];
     int pol = get_group_id(1);
-    for(int k = 0; k < ${outputs};k++){
-        out[k] += pol * out_stride;
-    }
+    out += pol * out_stride;
     in += pol * in_stride;
 
     unsigned int lid = get_local_id(0);
@@ -170,63 +173,49 @@ void ddc(
         int v = (idx < in_size_words) ? in[idx] : 0;
         if (l_idx < group_in_words){
             // CUDA is little-endian, but the packing uses big endian
-            local[0].in[l_idx] = reverse_endian(v);
-        }
-    }
-#pragma unroll
-    for(int k = 1;k < ${outputs};k++){
-#pragma unroll
-        for(int i = 0;i < group_in_words;i++){
-            local[k].in[i] = local[0].in[i];
+            local.in[l_idx] = reverse_endian(v);
         }
     }
 
     /* Copy weights to local memory */
-    % for k in range(outputs):
-    copy_to_local_cplx(local[${k}].weights, weights${k}, TAPS);
-    % endfor
+    copy_to_local_cplx(local.weights, weights, TAPS);
     BARRIER();
 
-    cplx accum[${outputs}][C];
+    cplx accum[C];
     sample_word buffer[C + W - 1];
     float samples[C + W - 1];
 
-    for(int k = 0;k < ${outputs};k++){
-        for (int i = 0; i < C; i++)
-            accum[k][i] = make_float2(0.0f, 0.0f);
+    for (int i = 0; i < C; i++)
+        accum[i] = make_float2(0.0f, 0.0f);
 
-        unsigned int first_in_word = lid * (C * SUBSAMPLING * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS);
+    unsigned int first_in_word = lid * (C * SUBSAMPLING * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS);
 #pragma unroll
-        for (int i = 0; i < SUBSAMPLING; i++){
-            const int w = (W - 1) * SUBSAMPLING + i < TAPS ? W : W - 1;
+    for (int i = 0; i < SUBSAMPLING; i++){
+        const int w = (W - 1) * SUBSAMPLING + i < TAPS ? W : W - 1;
 #pragma unroll
-            for (int j = 0; j < C + w - 1; j++){
-                samples[j] = (float) decode(local[k].in + first_in_word, &buffer[j], j * SUBSAMPLING + i, i == 0);
-            }
+        for (int j = 0; j < C + w - 1; j++){
+            samples[j] = (float) decode(local.in + first_in_word, &buffer[j], j * SUBSAMPLING + i, i == 0);
+        }
 #pragma unroll
-            for (int j = 0; j < w; j++){
-                cplx w = local[k].weights[j * SUBSAMPLING + i];
-                for (int z = 0; z < C; z++){
-                    accum[k][z].x += samples[j + z] * w.x;
-                    accum[k][z].y += samples[j + z] * w.y;
-                }
+        for (int j = 0; j < w; j++){
+            cplx w = local.weights[j * SUBSAMPLING + i];
+            for (int k = 0; k < C; k++){
+                accum[k].x += samples[j + k] * w.x;
+                accum[k].y += samples[j + k] * w.y;
             }
         }
     }
 
+    unsigned long mix_cycles = get_global_id(0) * C * mix_scale[out_id] + mix_bias[out_id];
 #pragma unroll
-    for(int k = 0;k < ${outputs};k++){
-        unsigned long mix_cycles = get_global_id(0) * C * mix_scale[k] + mix_bias[k];
-#pragma unroll
-        for (int i = 0; i < C; i++){
-            cplx mix;
-            // Casting from unsigned long to long changes the range from [0, 2pi) to
-            // [-pi, pi). The magic number is 2^64, used to convert fixed-point
-            // representation to real.
-            __sincosf(2 * (float) M_PI / 18446744073709551616.0f * (long) mix_cycles, &mix.y, &mix.x);
-            accum[k][i] = cmul(accum[k][i], mix);
-            mix_cycles += mix_scale[k];
-        }
+    for (int i = 0; i < C; i++){
+        cplx mix;
+        // Casting from unsigned long to long changes the range from [0, 2pi) to
+        // [-pi, pi). The magic number is 2^64, used to convert fixed-point
+        // representation to real.
+        __sincosf(2 * (float) M_PI / 18446744073709551616.0f * (long) mix_cycles, &mix.y, &mix.x);
+        accum[i] = cmul(accum[i], mix);
+        mix_cycles += mix_scale[out_id];
     }
     BARRIER(); // Only needed because local.out is in a union
 
@@ -235,26 +224,22 @@ void ddc(
      * TODO: this can cause some bank conflicts if C is a multiple of a large
      * power of 2 - see if some padding could help.
      */
-    for(int k = 0;k < ${outputs};k++){
-        for (int i = 0; i < C; i++){
-            unsigned int idx = lid * C + i;
-            local[k].out[0][idx] = accum[k][i].x;
-            local[k].out[1][idx] = accum[k][i].y;
-        }
+    for (int i = 0; i < C; i++){
+        unsigned int idx = lid * C + i;
+        local.out[0][idx] = accum[i].x;
+        local.out[1][idx] = accum[i].y;
     }
     BARRIER();
 
     // Copy the results from local memory to global memory
     unsigned int first_out_idx = get_group_id(0) * (WGS * C);
+
 #pragma unroll
-    for(int k = 0;k < ${outputs};k++){
-#pragma unroll
-        for (int i = 0; i < C; i++){
-            unsigned int l_idx = lid + i * WGS;
-            unsigned int idx = first_out_idx + l_idx;
-            if (idx < out_size){
-                out[k][idx] = make_float2(local[k].out[0][l_idx], local[k].out[1][l_idx]);
-            }
+    for (int i = 0; i < C; i++){
+        unsigned int l_idx = lid + i * WGS;
+        unsigned int idx = first_out_idx + l_idx;
+        if (idx < out_size){
+            out[idx] = make_float2(local.out[0][l_idx], local.out[1][l_idx]);
         }
     }
 }
