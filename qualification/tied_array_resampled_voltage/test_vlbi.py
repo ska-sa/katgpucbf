@@ -55,16 +55,16 @@ async def sensor_watcher(cbf: CBFRemoteControl) -> AsyncGenerator[aiokatcp.Senso
 
 async def max_retry_test(
     lambda_function: Callable[[int], Awaitable[bool]], max_retries: int, retry_interval: float
-) -> bool:
+) -> tuple[bool, int]:
     """Test a subroutine with a maximum number of retries and a retry interval."""
     sleep_period = retry_interval
     for try_number in range(max_retries):
         start_time = time.time()
         if await lambda_function(try_number):
-            return True
+            return True, try_number
         sleep_period = retry_interval - (time.time() - start_time)
         await asyncio.sleep(sleep_period)
-    return False
+    return False, try_number
 
 
 @pytest.mark.name("VLBI mean power")
@@ -146,7 +146,7 @@ async def test_mean_power(
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
-    test_passed = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
+    test_passed, last_sample = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
     with check:
         assert test_passed, f"Power does not agree to within 0.5% after {samples} retries."
         assert tacv_power > 0.0
@@ -160,7 +160,11 @@ async def test_mean_power(
     ax.set_title("Mean Power Sensor Values")
     for i, name in enumerate(sensor_names):
         plot_focus(
-            ax, slice(0, samples), mean_power_sensor_timestamps[i, :], mean_power_sensor_values[i, :], label=name
+            ax,
+            slice(0, samples),
+            mean_power_sensor_timestamps[i, :last_sample],
+            mean_power_sensor_values[i, :last_sample],
+            label=name,
         )
     ax.legend()
     pdf_report.figure(fig)
