@@ -161,9 +161,9 @@ async def test_mean_power(
     for i, name in enumerate(sensor_names):
         plot_focus(
             ax,
-            slice(0, samples),
-            mean_power_sensor_timestamps[i, :last_sample],
-            mean_power_sensor_values[i, :last_sample],
+            slice(0, last_sample),
+            mean_power_sensor_timestamps[i, :],
+            mean_power_sensor_values[i, :],
             label=name,
         )
     ax.legend()
