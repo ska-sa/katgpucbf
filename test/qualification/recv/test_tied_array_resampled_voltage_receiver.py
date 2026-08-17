@@ -20,6 +20,7 @@ import io
 import socket
 import struct
 from collections.abc import AsyncGenerator
+from math import ceil
 from unittest import mock
 
 import aiokatcp
@@ -181,6 +182,37 @@ async def test_receive_framesets_filters_incomplete_threads(
 
     with pytest.raises(RuntimeError):
         await anext(receiver.complete_framesets())
+
+
+async def test_receive_framesets_filters_untill_delay(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
+    """Framesets are filtered until the delay is reached."""
+    mock_cbf.init_sensors.add(
+        Sensor(
+            float,
+            "stream0.sync-time",
+            "Sync time",
+            "sync-time",
+            default=VDIFTimestamp(0, 0, 0).timestamp(ceil(BANDWIDTH / SAMPLES_PER_FRAME)).unix,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    )  # set sync time to 0 frames
+    mock_cbf.product_controller_client.sensor_value.return_value = ceil(  # type: ignore[attr-defined]
+        10.0 / BANDWIDTH * SAMPLES_PER_FRAME
+    )  # delay 10 frames
+    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
+    mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
+        make_vtp_packet(0, frame_nr=10, seconds=0, thread_id=0),
+        make_vtp_packet(1, frame_nr=10, seconds=0, thread_id=1),
+        make_vtp_packet(2, frame_nr=10, seconds=0, thread_id=2),
+        make_vtp_packet(3, frame_nr=10, seconds=0, thread_id=3),
+        make_vtp_packet(4, frame_nr=100, seconds=0, thread_id=0),
+        make_vtp_packet(5, frame_nr=100, seconds=0, thread_id=1),
+        make_vtp_packet(6, frame_nr=100, seconds=0, thread_id=2),
+        make_vtp_packet(7, frame_nr=100, seconds=0, thread_id=3),
+    ]
+    frameset = await anext(receiver.complete_framesets())
+    assert frameset.timestamp == VDIFTimestamp(seconds=0, frame_nr=100, ref_epoch=0)
+    assert len(frameset.frames) == 4
 
 
 async def test_receive_framesets_filters_duplicate_seq_ids(
