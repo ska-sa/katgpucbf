@@ -162,8 +162,8 @@ async def test_mean_power(
         plot_focus(
             ax,
             slice(0, last_sample),
-            mean_power_sensor_timestamps[i, :],
-            mean_power_sensor_values[i, :],
+            mean_power_sensor_timestamps[i, :last_sample],
+            mean_power_sensor_values[i, :last_sample],
             label=name,
         )
     ax.legend()
