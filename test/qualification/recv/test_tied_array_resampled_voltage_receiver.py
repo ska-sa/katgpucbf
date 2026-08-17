@@ -22,6 +22,7 @@ import struct
 from collections.abc import AsyncGenerator
 from unittest import mock
 
+import aiokatcp
 import numpy as np
 import pytest
 from aiokatcp.sensor import Sensor, SensorSet
@@ -128,6 +129,9 @@ def mock_cbf() -> CBFRemoteControl:
             initial_status=Sensor.Status.NOMINAL,
         )
     )
+    cbf.product_controller_client = mock.Mock(spec=aiokatcp.Client)
+    cbf.product_controller_client.sensor_value = mock.AsyncMock(return_value=0.0)
+    cbf.steady_state_timestamp = mock.AsyncMock(return_value=0)
     return cbf
 
 
