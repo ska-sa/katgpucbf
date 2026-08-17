@@ -26,15 +26,7 @@ from typing import override
 import aiokatcp
 import cupy as cp
 import cupyx
-import katcbf_vlbi_resample.cupy_bridge
-import katcbf_vlbi_resample.parameters
-import katcbf_vlbi_resample.polarisation
-import katcbf_vlbi_resample.power
-import katcbf_vlbi_resample.rechunk
-import katcbf_vlbi_resample.resample
-import katcbf_vlbi_resample.stream
-import katcbf_vlbi_resample.utils
-import katcbf_vlbi_resample.vdif_writer
+import katcbf_vlbi_resample
 import numpy as np
 import spead2.recv.asyncio
 import xarray as xr
@@ -59,7 +51,7 @@ class DiscardingChunkIterator(DiscardingIterator[recv.Chunk]):
         item.recycle()
 
 
-class RecvStream:
+class RecvStream(katcbf_vlbi_resample.stream.Stream[xr.DataArray]):
     """Wrap the incoming data stream into a :class:`.katcbf_vlbi_resample.stream.Stream`."""
 
     def __init__(
@@ -79,17 +71,36 @@ class RecvStream:
         self._pol_labels = pol_labels
         self._samples_between_spectra = layout.heap_timestamp_step // layout.n_spectra_per_heap
         self._min_timestamp = min_timestamp
-        # Properties required by the Stream protocol
-        self.channels = layout.n_channels
-        self.is_cupy = True
-        self.time_base = Time(time_converter.sync_time, scale="utc", format="unix")
+        self._time_base = Time(time_converter.sync_time, scale="utc", format="unix")
         # Astropy doesn't allow UTC for TimeDelta because it doesn't play nice with
         # leap-seconds. TAI is the scale for differences between UTC timestamps.
-        self.time_base += TimeDelta(delay, scale="tai", format="sec")
-        self.time_scale = Fraction(self._samples_between_spectra) / Fraction(time_converter.adc_sample_rate)
+        self._time_base += TimeDelta(delay, scale="tai", format="sec")
+        self._time_scale = Fraction(self._samples_between_spectra) / Fraction(time_converter.adc_sample_rate)
+        self._counter = 0
+
+    @property
+    @override
+    def channels(self) -> int | None:
+        return self._layout.n_channels
+
+    @property
+    @override
+    def is_cupy(self) -> bool:
+        return True
+
+    @property
+    @override
+    def time_base(self) -> Time:
+        return self._time_base
+
+    @property
+    @override
+    def time_scale(self) -> Fraction:
+        return self._time_scale
 
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         last_chunk_id: int | None = None
+        zero_arr = None
         async for chunk in self._recv_iter:
             with chunk:
                 if chunk.timestamp < self._min_timestamp:
@@ -121,6 +132,11 @@ class RecvStream:
                 # katcbf-vlbi-resample. This is a quick hack to keep things
                 # running by injecting zero data into the stream.
                 while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
+                    self._counter += 1
+                    if self._counter % 100 == 0:
+                        logger.error("Skipped reading %s chunks, last chunk id: %s", self._counter, last_chunk_id)
+                        logger.error("distance from last chunk: %s", chunk.chunk_id - last_chunk_id)
+                    yield zero_arr
                     last_chunk_id += 1
                     zero_arr = xr.zeros_like(arr)
                     timestamp = last_chunk_id * self._layout.chunk_timestamp_step
@@ -286,6 +302,7 @@ class _CaptureSession:
             self._min_timestamp,
         )
         it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
+        it = katcbf_vlbi_resample.power.DebugPowerDataArray(it)
         it = katcbf_vlbi_resample.resample.IFFT(it)
         it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(
             it, config.pol_matrix, recv_config.pols, send_config.pols

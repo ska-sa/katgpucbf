@@ -85,6 +85,7 @@ RUN pip install pip==26.1.1 setuptools==82.0.1 wheel==0.47.0
 # Jenkins image has a clean environment to start from).
 WORKDIR /tmp/katgpucbf
 COPY requirements.txt .
+ADD katcbf-vlbi-resample ./katcbf-vlbi-resample
 RUN pip install --no-deps -c /tmp/katgpucbf/requirements.txt pycuda && \
     pip uninstall -y pycuda
 
