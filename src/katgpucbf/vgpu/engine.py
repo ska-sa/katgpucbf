@@ -451,7 +451,7 @@ class VEngine(Engine):
             aiokatcp.Sensor(
                 int,
                 "n-samples-per-frame",
-                "Number of samples per frame in each stream.",
+                "Number of samples per frame in the stream.",
                 units="samples/frame",
                 default=n_samples_per_frame,
                 initial_status=aiokatcp.Sensor.Status.NOMINAL,
