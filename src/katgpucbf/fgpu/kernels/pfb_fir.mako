@@ -155,7 +155,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
 % if complex_input:
     for (int i = spectrum0; i < n; i++)
     {
-        {  // Block just to balance things with the !complex_input case.
+        {  // Block just to balance things with the not complex_input case.
 % else:
     unsigned long long total_power = 0;
     int spectrum = spectrum0;

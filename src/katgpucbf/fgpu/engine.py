@@ -1032,7 +1032,7 @@ class Pipeline:
         present
             Whether each output batch is fully present
         """
-        batch_samples = out_item.capacity // len(present) * out_item.spectra_samples
+        batch_samples = self.output.spectra_per_heap * self.output.spectra_samples
         for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power, strict=True)):
             for i, p in enumerate(present):
                 power: int | None = trg[i] if p else None

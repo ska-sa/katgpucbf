@@ -69,6 +69,7 @@ TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
 DSTS = 16
+DIG_RMS_DBFS_WINDOW_BATCHES = 5  # Number of chunks per window for ``dig-rms-dbfs`` sensors.
 TIME_CONVERTER = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
 
 WIDEBAND_ARGS = f"name=test_wideband,dst=239.10.11.0+{DSTS - 1}:7149,taps={TAPS}"
@@ -95,12 +96,6 @@ def jones_per_batch(channels: int, request: pytest.FixtureRequest) -> int:
         return marker.args[0] * channels
     else:
         return JONES_PER_BATCH
-
-
-@pytest.fixture
-def dig_rms_dbfs_window_batches() -> int:
-    """Number of chunks per window for ``dig-rms-dbfs`` sensors."""
-    return 5
 
 
 @dataclass
@@ -218,13 +213,12 @@ class TestFEngine:
         self,
         monkeypatch: pytest.MonkeyPatch,
         dig_rms_dbfs_window_samples: list[int],
-        dig_rms_dbfs_window_batches: int,
         output: Output,
     ) -> None:
         """Mock :meth:`.Pipeline._dig_rms_dbfs_window_samples`.
 
         This overrides the calculation to use
-        :func:`dig_rms_dbfs_window_batches`, and also populates
+        :data:`DIG_RMS_DBFS_WINDOW_BATCHES`, and also populates
         :meth:`dig_rms_dbfs_window_samples` with the computed value.
 
         This is marked autouse to ensure it will be run before the
@@ -233,7 +227,7 @@ class TestFEngine:
 
         def _dig_rms_dbfs_window_samples(self: Pipeline) -> int:
             batch_samples = self.output.spectra_per_heap * self.output.spectra_samples
-            window_samples = dig_rms_dbfs_window_batches * batch_samples
+            window_samples = DIG_RMS_DBFS_WINDOW_BATCHES * batch_samples
             dig_rms_dbfs_window_samples.append(window_samples)
             return window_samples
 
@@ -962,7 +956,6 @@ class TestFEngine:
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
-        dig_rms_dbfs_window_batches: int,
     ) -> None:
         """Test that the right output heaps are omitted when input heaps are missing.
 
@@ -1063,20 +1056,20 @@ class TestFEngine:
                 OPTIONAL_FAILURE = 3
 
             expected_updates = []
-            window_timestamp_step = output.spectra_per_heap * output.spectra_samples * dig_rms_dbfs_window_batches
+            window_timestamp_step = output.spectra_per_heap * output.spectra_samples * DIG_RMS_DBFS_WINDOW_BATCHES
 
             # Round up to a whole number of windows (see after the for loop
             # for some special handling of the final window).
-            total_windows = (total_batches + dig_rms_dbfs_window_batches - 1) // dig_rms_dbfs_window_batches
+            total_windows = (total_batches + DIG_RMS_DBFS_WINDOW_BATCHES - 1) // DIG_RMS_DBFS_WINDOW_BATCHES
             for i in range(total_windows):
-                start_batch = i * dig_rms_dbfs_window_batches
-                stop_batch = (i + 1) * dig_rms_dbfs_window_batches
+                start_batch = i * DIG_RMS_DBFS_WINDOW_BATCHES
+                stop_batch = (i + 1) * DIG_RMS_DBFS_WINDOW_BATCHES
                 n_present = np.sum(send_present[start_batch:stop_batch])
                 # The sensor timestamp is the end of the window
                 sensor_timestamp = TIME_CONVERTER.adc_to_unix(
                     timestamps[start_batch * spectra_per_heap] + window_timestamp_step
                 )
-                if n_present == dig_rms_dbfs_window_batches:
+                if n_present == DIG_RMS_DBFS_WINDOW_BATCHES:
                     expected_updates.append((sensor_timestamp, Update.NORMAL))
                 elif n_present > 0:
                     # TODO: there is a corner case where if this window is
