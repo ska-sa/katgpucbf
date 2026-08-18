@@ -106,42 +106,30 @@ def test_ddc(
         rms = np.sqrt(np.vdot(err, err) / err.size)
         assert rms < 2e-6 * 2**input_sample_bits
 
+test_data = np.array(
+    [
+        Fraction("0.21"),
+        Fraction("0.42"),
+        Fraction("0.67"),
+        Fraction("0.21"),
+        Fraction("0.42"),
+        Fraction("0.67"),
+    ]
+)
 
 @pytest.mark.parametrize(
     "n_pols,taps,subsampling,samples,input_sample_bits,tuning,mix_frequencies",
     [
-        (2, 256, 16, 256, 10, None, np.array([Fraction("0.21"), Fraction("0.42"), Fraction("0.67")])),
-        (1, 256, 16, 1024 * 1024, 12, None, np.array([Fraction("0.21"), Fraction("0.42"), Fraction("0.67")])),
-        (2, 256, 16, 1234568, 13, None, np.array([Fraction("0.21"), Fraction("0.42"), Fraction("0.67")])),
-        (
-            1,
-            256,
-            8,
-            1234568,
-            16,
-            None,
-            np.array(
-                [
-                    Fraction("0.21"),
-                    Fraction("0.42"),
-                    Fraction("0.67"),
-                ]
-            ),
-        ),
-        (2, 255, 4, 1234568, 32, None, np.array([Fraction("0.21"), Fraction("0.42"), Fraction("0.67")])),
-        (1, 257, 32, 1234568, 8, None, np.array([Fraction("0.21"), Fraction("0.42")])),
-        (2, 256, 64, 1234568, 5, None, np.array([Fraction("0.21"), Fraction("0.42")])),
-        (1, 32, 32, 1234568, 7, None, np.array([Fraction("0.21"), Fraction("0.42"), Fraction("0.67")])),
-        (2, 55, 5, 123464, 10, None, np.array([Fraction("0.21"), Fraction("0.42"), Fraction("0.67")])),
-        (
-            1,
-            256,
-            16,
-            256 * 1024,
-            10,
-            {"wgs": 96, "unroll": 4},
-            np.array([Fraction("0.21"), Fraction("0.43"), Fraction("0.67")]),
-        ),
+        (2, 256, 16, 256, 10, None, test_data),
+        (1, 256, 16, 1024 * 1024, 12, None, test_data),
+        (2, 256, 16, 1234568, 13, None, test_data),
+        (1, 256, 8, 1234568, 16,None, test_data),
+        (2, 255, 4, 1234568, 32, None, test_data),
+        (1, 257, 32, 1234568, 8, None, test_data),
+        (2, 256, 64, 1234568, 5, None, test_data),
+        (1, 32, 32, 1234568, 7, None, test_data),
+        (2, 55, 5, 123464, 10, None, test_data),
+        (1, 256, 16, 256 * 1024, 10, {"wgs": 96, "unroll": 4}, test_data),
     ],
 )
 def test_ddc_multi_frequency(
@@ -186,7 +174,6 @@ def test_ddc_multi_frequency(
         err = h_out - expected
         rms = np.sqrt(np.vdot(err, err) / err.size)
         assert rms < 2e-6 * 2**input_sample_bits
-
 
 @pytest.mark.parametrize(
     "taps,subsampling,input_sample_bits",

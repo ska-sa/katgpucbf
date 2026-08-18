@@ -151,7 +151,7 @@ void ddc(
     } local;
     GLOBAL cplx * RESTRICT out_refs[${outputs}];
     const GLOBAL cplx * RESTRICT weights_refs[${outputs}];
-    unsigned int out_id = get_local_id(1);
+    unsigned int out_id = get_group_id(2);
     % for k in range(outputs):
     out_refs[${k}] = out${k};
     weights_refs[${k}] = weights${k};
@@ -205,8 +205,8 @@ void ddc(
             }
         }
     }
-
-    unsigned long mix_cycles = get_global_id(0) * C * mix_scale[out_id] + mix_bias[out_id];
+    unsigned long _mix_scale = mix_scale[out_id];
+    unsigned long mix_cycles = get_global_id(0) * C * _mix_scale + mix_bias[out_id];
 #pragma unroll
     for (int i = 0; i < C; i++){
         cplx mix;
@@ -215,7 +215,7 @@ void ddc(
         // representation to real.
         __sincosf(2 * (float) M_PI / 18446744073709551616.0f * (long) mix_cycles, &mix.y, &mix.x);
         accum[i] = cmul(accum[i], mix);
-        mix_cycles += mix_scale[out_id];
+        mix_cycles += _mix_scale;
     }
     BARRIER(); // Only needed because local.out is in a union
 
