@@ -196,8 +196,8 @@ async def test_receive_framesets_filters_untill_delay(mock_cbf: CBFRemoteControl
             initial_status=Sensor.Status.NOMINAL,
         )
     )  # set sync time to 0 frames
-    mock_cbf.product_controller_client.sensor_value.return_value = ceil(  # type: ignore[attr-defined]
-        10.0 / BANDWIDTH * SAMPLES_PER_FRAME
+    mock_cbf.product_controller_client.sensor_value.return_value = 10.0 / (  # type: ignore[attr-defined]
+        BANDWIDTH / SAMPLES_PER_FRAME
     )  # delay 10 frames
     receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
