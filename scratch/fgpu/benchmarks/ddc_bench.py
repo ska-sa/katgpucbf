@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright (c) 2022-2023, 2025, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, 2025-2026, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -17,6 +17,7 @@
 ################################################################################
 
 import argparse
+import random
 from fractions import Fraction
 
 import numpy as np
@@ -35,6 +36,7 @@ def main():
     parser.add_argument("--input-sample-bits", type=int, default=DIG_SAMPLE_BITS)
     parser.add_argument("--pols", type=int, default=N_POLS)
     parser.add_argument("--passes", type=int, default=1000)
+    parser.add_argument("--outputs", type=int, default=1)
     args = parser.parse_args()
     if args.taps is None:
         args.taps = args.subsampling * DEFAULT_DDC_TAPS_RATIO
@@ -43,12 +45,17 @@ def main():
     with context:
         command_queue = context.create_tuning_command_queue()
         template = DDCTemplate(
-            context, taps=args.taps, subsampling=args.subsampling, input_sample_bits=args.input_sample_bits
+            context,
+            taps=args.taps,
+            subsampling=args.subsampling,
+            input_sample_bits=args.input_sample_bits,
+            outputs=args.outputs
         )
         fn = template.instantiate(command_queue, samples=args.samples, n_pols=args.pols)
         fn.ensure_all_bound()
         fn.buffer("in").zero(command_queue)
-        fn.configure(Fraction(0.25), np.ones(args.taps, np.float32))
+        mix_frequencies = np.array([Fraction(round(random.random(), 2)) for i in range(0, args.outputs)])
+        fn.configure(mix_frequencies, np.ones(args.taps, np.float32))
         fn()  # Do a warmup pass
         start = command_queue.enqueue_marker()
         for _ in range(args.passes):
