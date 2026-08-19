@@ -70,11 +70,12 @@ TAPS = 16
 FENG_ID = 42
 ADC_SAMPLE_RATE = 1712e6
 DSTS = 16
+DIG_RMS_DBFS_WINDOW_BATCHES = 5  # Number of chunks per window for ``dig-rms-dbfs`` sensors.
 TIME_CONVERTER = TimeConverter(SYNC_TIME, ADC_SAMPLE_RATE)
 
 WIDEBAND_ARGS = f"name=test_wideband,dst=239.10.11.0+{DSTS - 1}:7149,taps={TAPS}"
 # Centre frequency is not a multiple of the channel width, but it does ensure
-# that the two copies of the same data in test_missing are separated by a
+# that the two copies of the same data in test_missing_heaps are separated by a
 # whole number of cycles.
 NARROWBAND_ARGS = f"name=test_narrowband,dst=239.10.12.0+{DSTS - 1}:7149,taps={TAPS},centre_frequency=408173015.5944824"
 
@@ -96,12 +97,6 @@ def jones_per_batch(channels: int, request: pytest.FixtureRequest) -> int:
         return marker.args[0] * channels
     else:
         return JONES_PER_BATCH
-
-
-@pytest.fixture
-def dig_rms_dbfs_window_chunks() -> int:
-    """Number of chunks per window for ``dig-rms-dbfs`` sensors."""
-    return 2
 
 
 @dataclass
@@ -219,13 +214,12 @@ class TestFEngine:
         self,
         monkeypatch: pytest.MonkeyPatch,
         dig_rms_dbfs_window_samples: list[int],
-        dig_rms_dbfs_window_chunks: int,
         output: Output,
     ) -> None:
         """Mock :meth:`.Pipeline._dig_rms_dbfs_window_samples`.
 
         This overrides the calculation to use
-        :func:`dig_rms_dbfs_window_chunks`, and also populates
+        :data:`DIG_RMS_DBFS_WINDOW_BATCHES`, and also populates
         :meth:`dig_rms_dbfs_window_samples` with the computed value.
 
         This is marked autouse to ensure it will be run before the
@@ -233,8 +227,8 @@ class TestFEngine:
         """
 
         def _dig_rms_dbfs_window_samples(self: Pipeline) -> int:
-            chunk_samples = self.spectra * self.output.spectra_samples
-            window_samples = dig_rms_dbfs_window_chunks * chunk_samples
+            batch_samples = self.output.spectra_per_heap * self.output.spectra_samples
+            window_samples = DIG_RMS_DBFS_WINDOW_BATCHES * batch_samples
             dig_rms_dbfs_window_samples.append(window_samples)
             return window_samples
 
@@ -429,7 +423,6 @@ class TestFEngine:
         timestamps
             Labels for the time axis of `data`
         """
-        # Reshape into heap-size pieces (now has indices pol, heap, offset)
         recv_layout = engine.recv_layout
         channels = output.channels
         spectra_per_heap = output.spectra_per_heap
@@ -964,7 +957,6 @@ class TestFEngine:
         engine_client: aiokatcp.Client,
         output: Output,
         channels: int,
-        dig_rms_dbfs_window_chunks: int,
     ) -> None:
         """Test that the right output heaps are omitted when input heaps are missing.
 
@@ -972,6 +964,12 @@ class TestFEngine:
         It then checks that the heaps successfully received in the first half match
         the heaps in the second half, up to a tolerance to account for dithering.
         """
+        # Set a non-zero delay as a regression test (NGC-2074).
+        delay_samples = 123
+        delay_s = delay_samples / ADC_SAMPLE_RATE
+        coeffs = [f"{delay_s},0.0:0.0,0.0"] * 2
+        await engine_client.request("delays", output.name, SYNC_TIME, *coeffs)
+
         sensors = [engine.sensors[f"input{pol}.dig-rms-dbfs"] for pol in range(N_POLS)]
         sensor_update_dict = self._watch_sensors(sensors)
         spectra_per_heap = output.spectra_per_heap
@@ -982,7 +980,7 @@ class TestFEngine:
             (8, 10),
             (15, 16),
             (117, 133),
-            (6 * chunk_samples // PACKET_SAMPLES, 8 * chunk_samples // PACKET_SAMPLES),
+            (5 * chunk_samples // PACKET_SAMPLES, 7 * chunk_samples // PACKET_SAMPLES),
         ]
         rng = np.random.default_rng(seed=1)
         dig_data = np.tile(rng.integers(-255, 255, size=(2, n_samples // 2), dtype=np.int16), 2)
@@ -992,20 +990,21 @@ class TestFEngine:
             recv_present[:, a:b] = False
         # The data should have as many samples as the input, minus a reduction
         # from windowing, rounded down to a full batch.
-        total_spectra = (n_samples - output.window) // output.spectra_samples
+        total_spectra = (n_samples + delay_samples - output.window) // output.spectra_samples
         total_batches = total_spectra // spectra_per_heap
         send_present = np.ones(total_batches, bool)
         # Compute which output batches should be missing. first_* and last_* are
         # both inclusive (b is exclusive)
         for a, b in missing_ranges:
-            first_sample = a * PACKET_SAMPLES
-            last_sample = b * PACKET_SAMPLES - 1  # -1 to make it inclusive
+            first_sample = a * PACKET_SAMPLES + delay_samples
+            last_sample = b * PACKET_SAMPLES + delay_samples - 1  # -1 to make it inclusive
             assert last_sample < n_samples // 2  # Make sure gaps are restricted to first half
             first_spectrum = max(0, (first_sample - output.window + 1) // output.spectra_samples)
             last_spectrum = last_sample // output.spectra_samples
             first_batch = first_spectrum // spectra_per_heap
             last_batch = last_spectrum // spectra_per_heap
             send_present[first_batch : last_batch + 1] = False
+        send_present[0] = False  # Corresponds to negative input timestamps
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             out_data, timestamps = await self._send_data(
@@ -1042,7 +1041,12 @@ class TestFEngine:
         batch_size = batch_samples * COMPLEX * np.dtype(np.int8).itemsize
         assert prom_diff.diff("output_bytes_total") == np.sum(send_present) * batch_size
         assert prom_diff.diff("output_samples_total") == np.sum(send_present) * batch_samples
-        assert prom_diff.diff("output_skipped_heaps_total") == np.sum(~send_present) * n_substreams
+        # The first output chunk starts with heap 1 (the first one which corresponds
+        # to non-negative input timestamps) and so heap 0 is not considered to be
+        # "skipped" because it is before the start of transmission (but if heap 1 is
+        # missing, it *is* counted as skipped: this is a subtle case where the output
+        # chunking is externally visible).
+        assert prom_diff.diff("output_skipped_heaps_total") == (np.sum(~send_present) - 1) * n_substreams
 
         # Sensor is not present in the narrowband mode.
         if output.decimation == 1:
@@ -1053,26 +1057,30 @@ class TestFEngine:
                 OPTIONAL_FAILURE = 3
 
             expected_updates = []
-            spectra_per_output_chunk = engine.chunk_jones // output.channels
-            batches_per_output_chunk = spectra_per_output_chunk // spectra_per_heap
-            batches_per_window = batches_per_output_chunk * dig_rms_dbfs_window_chunks
-            window_timestamp_step = spectra_per_output_chunk * output.spectra_samples * dig_rms_dbfs_window_chunks
+            window_timestamp_step = output.spectra_per_heap * output.spectra_samples * DIG_RMS_DBFS_WINDOW_BATCHES
 
-            total_chunks = (total_batches + batches_per_output_chunk - 1) // batches_per_output_chunk
-            # The last windows is only emitted if we observe its final chunk,
-            # so we round down here.
-            total_windows = total_chunks // dig_rms_dbfs_window_chunks
+            # Round up to a whole number of windows (see after the for loop
+            # for some special handling of the final window).
+            total_windows = (total_batches + DIG_RMS_DBFS_WINDOW_BATCHES - 1) // DIG_RMS_DBFS_WINDOW_BATCHES
             for i in range(total_windows):
-                start_batch = i * batches_per_window
-                stop_batch = (i + 1) * batches_per_window
+                start_batch = i * DIG_RMS_DBFS_WINDOW_BATCHES
+                stop_batch = (i + 1) * DIG_RMS_DBFS_WINDOW_BATCHES
                 n_present = np.sum(send_present[start_batch:stop_batch])
                 # The sensor timestamp is the end of the window
                 sensor_timestamp = TIME_CONVERTER.adc_to_unix(
                     timestamps[start_batch * spectra_per_heap] + window_timestamp_step
                 )
-                if n_present == batches_per_window:
+                if n_present == DIG_RMS_DBFS_WINDOW_BATCHES:
                     expected_updates.append((sensor_timestamp, Update.NORMAL))
                 elif n_present > 0:
+                    # TODO: there is a corner case where if this window is
+                    # incomplete and is missing the final batch, and the
+                    # following window contains only the final batch, the
+                    # former is not reported (because _update_dig_power_sensors
+                    # produces at most one measurement even if two become ready
+                    # at the same time). This doesn't happen for the chosen
+                    # fixtures, but may need to be taken into consideration in
+                    # the future.
                     expected_updates.append((sensor_timestamp, Update.FAILURE))
                 else:
                     # If a window is completely missing, it could indicate that
@@ -1081,6 +1089,12 @@ class TestFEngine:
                     # On the other hand, there might have been some OutQueueItems
                     # present but none of them had valid heaps.
                     expected_updates.append((sensor_timestamp, Update.OPTIONAL_FAILURE))
+            # If the final window is incomplete, it might or might not get sent
+            # depending on how the final chunk aligned with it. We could in
+            # theory work this out, but we don't really care about the exactly
+            # shutdown handling.
+            if expected_updates[-1][1] == Update.FAILURE:
+                expected_updates[-1] = (expected_updates[-1][0], Update.OPTIONAL_FAILURE)
 
             for pol in range(N_POLS):
                 p = 0
