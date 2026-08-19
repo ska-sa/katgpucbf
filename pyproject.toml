@@ -72,10 +72,12 @@ test = [
     "pytest-custom_exit_code",
     "pytest-mock",
     "pytest-reportlog",
+    "prometheus_api_client"
 ]
 
 qualification = [
     "async-timeout",
+    "baseband",
     "docutils>=0.18",
     "matplotlib",
     "prometheus-api-client",
