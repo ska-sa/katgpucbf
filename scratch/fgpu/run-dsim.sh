@@ -38,6 +38,8 @@ exec spead2_net_raw taskset -c $cpu2 dsim \
     --ibv \
     --interface $iface \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
+    --sample-bits ${dig_sample_bits:-10} \
+    --heap-samples ${dig_heap_samples:-4096} \
     --ttl 2 \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \
