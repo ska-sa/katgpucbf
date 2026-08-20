@@ -287,6 +287,6 @@ class DDC(accel.Operation):
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             args,
-            global_size=(groups * self.template.wgs, in_buffer.shape[0], self.template.outputs),
+            global_size=(groups * self.template.wgs, in_buffer.shape[0], 1),
             local_size=(self.template.wgs, 1, 1),
         )

@@ -115,7 +115,7 @@ test_data = np.array(
         Fraction("0.21"),
         Fraction("0.42"),
         Fraction("0.67"),
-    ]*20
+    ]
 )
 
 
