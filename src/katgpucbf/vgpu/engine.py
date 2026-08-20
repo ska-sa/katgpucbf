@@ -363,7 +363,7 @@ class VEngine(Engine):
     def _init_recv(self) -> None:
         """Initialise the receiver state."""
         config = self.config
-        recv_chunks = 4  # TODO: may need tuning?
+        recv_chunks = 8  # TODO: may need tuning?
         data_ringbuffer = ChunkRingbuffer(
             recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
         )
