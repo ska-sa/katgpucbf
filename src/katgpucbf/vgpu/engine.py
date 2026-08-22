@@ -291,9 +291,7 @@ class _CaptureSession:
             it, config.pol_matrix, recv_config.pols, send_config.pols
         )
         it = katcbf_vlbi_resample.resample.Resample(send_config.bandwidth, 0.0, config.resample_parameters, it)
-        # logger.info(f"Resample ratio: {self._ratio}")  # type: ignore[attr-defined]
-        # print(f"Resample ratio: {self._ratio}")  # type: ignore[attr-defined]
-        print("anything")
+        print(f"Resample ratio: {it._ratio}")
 
         it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
         it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
