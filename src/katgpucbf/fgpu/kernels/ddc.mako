@@ -51,7 +51,7 @@ DEVICE_FN static unsigned int reverse_endian(unsigned int v)
  * @param idx     Index of the sample to retrieve, relative to @a in
  * @param start   If true, @a buffer is ignored
  */
-DEVICE_FN static int decode(
+DEVICE_FN static inline int decode(
     const LOCAL sample_word * RESTRICT in,
     sample_word *buffer,
     unsigned int idx,
@@ -168,9 +168,9 @@ void ddc(
     /* Copy workgroup's sample data to local memory */
     unsigned int group_first_in_word =
         get_group_id(0) * (WGS * C * SUBSAMPLING * INPUT_SAMPLE_BITS / SAMPLE_WORD_BITS);
+    unsigned int l_idx = lid;
 #pragma unroll
-    for (int i = 0; i < load_rounds; i++){
-        unsigned int l_idx = i * WGS + lid;
+    for (int i = 0; i < load_rounds; i++, l_idx += WGS){
         unsigned int idx = group_first_in_word + l_idx;
         int v = (idx < in_size_words) ? in[idx] : 0;
         if (l_idx < group_in_words){
@@ -200,22 +200,25 @@ void ddc(
 #pragma unroll
     for (int i = 0; i < SUBSAMPLING; i++){
         const int w = (W - 1) * SUBSAMPLING + i < TAPS ? W : W - 1;
+        int sample_index = i;
 #pragma unroll
-        for (int j = 0; j < C + w - 1; j++){
-            samples[j] = (float) decode(local.in + first_in_word, &buffer[j], j * SUBSAMPLING + i, i == 0);
+        for (int j = 0; j < C + w - 1; j++, sample_index += SUBSAMPLING){
+            samples[j] = (float) decode(local.in + first_in_word, &buffer[j], sample_index, i == 0);
         }
 #pragma unroll
         for(int z = 0;z < ${outputs};z++){
 #pragma unroll
-            for (int j = 0; j < w; j++){
-                cplx w = local.weights[z][j * SUBSAMPLING + i];
+            for (int j = 0, tap = i; j < w; j++, tap += SUBSAMPLING){
+                cplx w = local.weights[z][tap];
                 for (int k = 0; k < C; k++){
-                    accum[z][k].x += samples[j + k] * w.x;
-                    accum[z][k].y += samples[j + k] * w.y;
+                    float sample = samples[j + k];
+                    accum[z][k].x += sample * w.x;
+                    accum[z][k].y += sample * w.y;
                 }
             }
         }
     }
+    float phase_scale =  2.0f * M_PI / 18446744073709551616.0f;
 #pragma unroll
     for(int z = 0;z < ${outputs};z++){
         unsigned long mix_cycles = get_global_id(0) * C * mix_scale[z] + mix_bias[z];
@@ -225,7 +228,7 @@ void ddc(
             // Casting from unsigned long to long changes the range from [0, 2pi) to
             // [-pi, pi). The magic number is 2^64, used to convert fixed-point
             // representation to real.
-            __sincosf(2 * (float) M_PI / 18446744073709551616.0f * (long) mix_cycles, &mix.y, &mix.x);
+            __sincosf(phase_scale * (long) mix_cycles, &mix.y, &mix.x);
             accum[z][i] = cmul(accum[z][i], mix);
             mix_cycles += mix_scale[z];
         }
@@ -250,17 +253,23 @@ void ddc(
 
     // Copy the results from local memory to global memory
     unsigned int first_out_idx = get_group_id(0) * (WGS * C);
-
+    int output_stride = (C * WGS);
+    int out_index = 0;
+    int first_idx = first_out_idx + lid;
+    int valid_i_count = 0;
+    if (first_idx < out_size) {
+        valid_i_count = min(C, (out_size - first_idx + WGS - 1) / WGS);
+    }
 #pragma unroll
     for(int z = 0;z < ${outputs};z++){
-        int out_index = z * (C * WGS);
+        unsigned int l_idx = lid;
+        unsigned int idx = first_idx;
 #pragma unroll
-        for (int i = 0; i < C; i++){
-            unsigned int l_idx = lid + i * WGS;
-            unsigned int idx = first_out_idx + l_idx;
-            if (idx < out_size){
-                out[z][idx] = make_float2(local.out[0][out_index + l_idx], local.out[1][out_index + l_idx]);
-            }
+        for (int i = 0; i < valid_i_count; i++){
+            out[z][idx] = make_float2(local.out[0][out_index + l_idx], local.out[1][out_index + l_idx]);
+            l_idx += WGS;
+            idx += WGS;
         }
+        out_index += output_stride;
     }
 }
