@@ -66,7 +66,6 @@ test = [
     "baseband",
     "katsdpsigproc[CUDA]",
     "matplotlib",
-    "prometheus-api-client>=0.7.0",
     "pytest>=8",
     "pytest-asyncio>=1.4.0",
     "pytest-check>=2.9.1",
