@@ -219,8 +219,8 @@ class DDC(accel.Operation):
         self._mix_scale = np.array(
             [0] * template.outputs, dtype=np.uint64
         )  # Specify in cycles per output sample, times 2**64
-        self._mix_scale_buf = accel.DeviceArray(template.context, (template.outputs,), np.uint64)
-        self._mix_bias_buf = accel.DeviceArray(template.context, (template.outputs,), np.uint64)
+        #self._mix_scale_buf = accel.DeviceArray(template.context, (template.outputs,), np.uint64)
+        #self._mix_bias_buf = accel.DeviceArray(template.context, (template.outputs,), np.uint64)
         self._mix_frequencies = np.array([Fraction(0)] * template.outputs, dtype=Fraction)
         self.mix_phase = np.array(
             [Fraction(0)] * template.outputs, dtype=Fraction
@@ -247,7 +247,7 @@ class DDC(accel.Operation):
             [round(mix_frequency * self.template.subsampling * 2**64) % 2**64 for mix_frequency in mix_frequencies],
             dtype=np.uint64,
         )
-        self._mix_scale_buf.set(self.command_queue, self._mix_scale)
+        #self._mix_scale_buf.set(self.command_queue, self._mix_scale)
         # Here we're quantising the mixer frequency to float (double
         # precision). Since len(weights) should be small (hundreds or maybe
         # thousands) and _weights is only single-precision, there should be no
@@ -268,7 +268,7 @@ class DDC(accel.Operation):
         groups = accel.divup(self.out_samples, self.template.wgs * self.template.unroll)
 
         mix_bias = np.array([round(mp * 2**64) % 2**64 for mp in self.mix_phase], np.uint64)
-        self._mix_bias_buf.set(self.command_queue, mix_bias)
+        #self._mix_bias_buf.set(self.command_queue, mix_bias)
 
         args = [self.buffer(f"out{i}").buffer for i in range(0, self.template.outputs)]
         args.append(in_buffer.buffer)
@@ -280,10 +280,13 @@ class DDC(accel.Operation):
                 np.uint32(in_buffer.padded_shape[1] // _SAMPLE_WORD_SIZE),  # in_stride in sample_words
                 np.uint32(self.buffer("out0").shape[1]),  # out_size
                 np.uint32(accel.divup(in_buffer.shape[1], _SAMPLE_WORD_SIZE)),  # in_size_words
-                self._mix_scale_buf.buffer,
-                self._mix_bias_buf.buffer,
+                #self._mix_scale_buf.buffer,
+                #self._mix_bias_buf.buffer,
             ]
         )
+        for i in range(0, self._mix_scale.shape[0]):
+            args.append(np.uint64(self._mix_scale[i]))
+            args.append(np.uint64(mix_bias[i]))
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             args,

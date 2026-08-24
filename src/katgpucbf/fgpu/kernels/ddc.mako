@@ -121,19 +121,21 @@ DEVICE_FN static void copy_to_local_cplx(LOCAL cplx *out, const GLOBAL cplx * RE
 
 KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1)
 void ddc(
-    % for i in range(outputs):
-    GLOBAL cplx * RESTRICT out${i},
+    % for k in range(outputs):
+    GLOBAL cplx * RESTRICT out${k},
     % endfor
     const GLOBAL sample_word * RESTRICT in,
-    % for i in range(outputs):
-    const GLOBAL cplx * RESTRICT weights${i},
+    % for k in range(outputs):
+    const GLOBAL cplx * RESTRICT weights${k},
     %endfor
     unsigned int out_stride, // stride between pols, unit: cplx
     unsigned int in_stride,  // stride between pols, unit: sample_word
     unsigned int out_size,
-    unsigned int in_size_words,
-    unsigned long *mix_scale,  // Mixer frequency in cycles per SUBSAMPLING samples, fixed point
-    unsigned long *mix_bias    // Mixer phase in cycles at the first sample, fixed point
+    unsigned int in_size_words
+    % for k in range(outputs):
+    ,unsigned long mix_scale${k}  // Mixer frequency in cycles per SUBSAMPLING samples, fixed point
+    ,unsigned long mix_bias${k}  // Mixer phase in cycles at the first sample, fixed point
+    %endfor
 )
 {
     const int group_in_size = TAPS + (WGS * C - 1) * SUBSAMPLING;
@@ -150,11 +152,14 @@ void ddc(
         float out[2][C * WGS * ${outputs}];  // Logically cplx, but split to reduce bank conflicts
     } local;
     GLOBAL cplx * RESTRICT out[${outputs}];
+    unsigned long mix_scale[${outputs}];
+    unsigned long mix_bias[${outputs}];
     //const GLOBAL cplx * RESTRICT weights[${outputs}];
     unsigned int out_id = get_group_id(2);
     % for k in range(outputs):
     out[${k}] = out${k};
-    //weights[${k}] = weights${k};
+    mix_scale[${k}] = mix_scale${k};
+    mix_bias[${k}] = mix_bias${k};
     % endfor
 
     int pol = get_group_id(1);
