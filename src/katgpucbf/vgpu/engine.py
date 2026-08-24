@@ -290,8 +290,10 @@ class _CaptureSession:
         it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(
             it, config.pol_matrix, recv_config.pols, send_config.pols
         )
+        logger.error(f"Input time_scale: {it.time_scale}")
         it = katcbf_vlbi_resample.resample.Resample(send_config.bandwidth, 0.0, config.resample_parameters, it)
-        print(f"Resample ratio: {it._ratio}")
+        logger.error(f"Resample ratio: {it._ratio}")
+        logger.error(f"Resample time_scale: {it.time_scale}")
 
         it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
         it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
