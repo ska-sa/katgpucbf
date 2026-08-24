@@ -100,10 +100,11 @@ async def test_mean_power(
 
     pdf_report.detail("Set beam weights to use antenna 0.")
 
+    dsim_signals = "common=wgn(0.02);common;common;"
     async with asyncio.TaskGroup() as tg:
         for dsim_name in cbf.dsim_names:
-            tg.create_task(pcc.request("dsim-signals", dsim_name, "common=wgn(0.02);common;common;"))
-    pdf_report.detail("Set dsim signals white noise.")
+            tg.create_task(pcc.request("dsim-signals", dsim_name, dsim_signals))
+    pdf_report.detail(f"Set dsim signals {dsim_signals}.")
 
     pdf_report.step("Wait for mean-power sensors to reach steady state.")
     await sensor_watcher.synced.wait()  # Implicitly waits for connection too
