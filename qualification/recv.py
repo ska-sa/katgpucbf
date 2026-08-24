@@ -654,9 +654,8 @@ class TiedArrayResampledVoltageReceiver:
         self,
         cbf: CBFRemoteControl,
         stream_names: Sequence[str],
-        interface_address: str,
     ) -> None:
-        self.stream_names = stream_names
+        self.stream_names = list(stream_names)
         self.n_chans = cbf.init_sensors[f"{stream_names[0]}.n-chans"].value
         self.pol_ordering = json.loads(cbf.init_sensors[f"{stream_names[0]}.pol-ordering"].value.decode())
         self.n_threads = self.n_chans * len(self.pol_ordering)

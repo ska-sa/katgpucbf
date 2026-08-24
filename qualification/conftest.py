@@ -595,7 +595,6 @@ async def cbf(
         cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
             cbf=cbf,
             stream_names=["tied-array-resampled-voltage"],
-            interface_address=interface_address,
         )
 
     # Reset the CBF to default state
