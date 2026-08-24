@@ -365,7 +365,7 @@ redis==7.1.0
     #   katsdptelstate
 regex==2026.7.19
     # via dateparser
-requests==2.33.0
+requests==2.34.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   prometheus-api-client
