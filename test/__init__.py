@@ -24,7 +24,7 @@ import numpy as np
 import prometheus_client
 from numpy.typing import NDArray
 
-from katgpucbf import BYTE_BITS, DIG_SAMPLE_BITS
+from katgpucbf import BYTE_BITS, DEFAULT_DIG_SAMPLE_BITS
 
 
 class PromDiff:
@@ -135,10 +135,10 @@ class PromDiff:
         return ret
 
 
-def unpackbits(data: NDArray[np.uint8], sample_bits: int = DIG_SAMPLE_BITS) -> np.ndarray:
+def unpackbits(data: NDArray[np.uint8], sample_bits: int = DEFAULT_DIG_SAMPLE_BITS) -> np.ndarray:
     """Unpack a bit-packed array of signed big-endian integers.
 
-    Typically `sample_bits` will be DIG_SAMPLE_BITS, but can be up to 64. The
+    Typically `sample_bits` will be DEFAULT_DIG_SAMPLE_BITS, but can be up to 64. The
     dtype of the result depends on the number of bits.
     """
     dtype: np.dtype
@@ -160,7 +160,7 @@ def unpackbits(data: NDArray[np.uint8], sample_bits: int = DIG_SAMPLE_BITS) -> n
     return packed.view(dtype.newbyteorder(">")).astype(dtype)
 
 
-def packbits(data: np.ndarray, sample_bits: int = DIG_SAMPLE_BITS) -> NDArray[np.uint8]:
+def packbits(data: np.ndarray, sample_bits: int = DEFAULT_DIG_SAMPLE_BITS) -> NDArray[np.uint8]:
     """Pack a bit-packed array of signed big-endian integers.
 
     This is the inverse of :meth:`unpackbits`, but it also handles

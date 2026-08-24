@@ -54,6 +54,8 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --recv-affinity $recv_affinity --recv-comp-vector=$recv_comp \
     --send-affinity $send_affinity --send-comp-vector=$send_comp \
     --adc-sample-rate ${adc_sample_rate:-1712000000} \
+    --dig-sample-bits ${dig_sample_bits:-10} \
+    --recv-packet-samples ${dig_heap_samples:-4096} \
     --jones-per-batch ${jones_per_batch:-1048576} \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \

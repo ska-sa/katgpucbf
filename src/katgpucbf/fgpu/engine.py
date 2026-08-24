@@ -60,10 +60,6 @@ from ..utils import (
     make_rate_limited_sensor,
 )
 from . import (
-    DIG_RMS_DBFS_HIGH,
-    DIG_RMS_DBFS_HIGH_ERROR,
-    DIG_RMS_DBFS_LOW,
-    DIG_RMS_DBFS_LOW_ERROR,
     DIG_RMS_DBFS_WINDOW,
     INPUT_CHUNK_PADDING,
     recv,
@@ -369,7 +365,7 @@ class OutQueueItem(QueueItem):
     spectra: accel.DeviceArray
     #: Output saturation count, per pol
     saturated: accel.DeviceArray
-    #: Output sum of squared samples, per pol
+    #: Output sum of squared samples, per batch and pol
     dig_total_power: accel.DeviceArray | None
     #: Per-spectrum fine delays
     fine_delay: MappedArray
@@ -476,11 +472,27 @@ def format_complex(value: numbers.Complex) -> str:
     return f"{value:.17g}"
 
 
-def dig_rms_dbfs_status(value: float) -> aiokatcp.Sensor.Status:
+def dig_rms_dbfs_status_params(dig_sample_bits: float) -> tuple[float, float, float, float]:
+    """Compute dig_rms_dbfs_low and dig_rms_dbfs_low_error for the given dig_sample_bits."""
+    if dig_sample_bits == 10.0:
+        return -33.0, -30.0, -10.0, -7.0
+    dig_rms_dbfs_low = -6.02 * (dig_sample_bits - 2.0)
+    dig_rms_dbfs_low_error = -6.02 * dig_sample_bits
+    return dig_rms_dbfs_low_error, dig_rms_dbfs_low, -10.0, -6.0
+
+
+def dig_rms_dbfs_status(
+    value: float,
+    dig_rms_dbfs_low_error: float,
+    dig_rms_dbfs_low: float,
+    dig_rms_dbfs_high: float,
+    dig_rms_dbfs_high_error: float,
+) -> aiokatcp.Sensor.Status:
     """Compute status for dig-rms-dbfs sensor."""
-    if DIG_RMS_DBFS_LOW <= value <= DIG_RMS_DBFS_HIGH:
+    print(f"VINC : {value} : {dig_rms_dbfs_low_error} {dig_rms_dbfs_low} {dig_rms_dbfs_high} {dig_rms_dbfs_high_error}")
+    if dig_rms_dbfs_low <= value <= dig_rms_dbfs_high:
         return aiokatcp.Sensor.Status.NOMINAL
-    elif DIG_RMS_DBFS_LOW_ERROR < value < DIG_RMS_DBFS_HIGH_ERROR:
+    elif dig_rms_dbfs_low_error < value < dig_rms_dbfs_high_error:
         return aiokatcp.Sensor.Status.WARN
     else:
         return aiokatcp.Sensor.Status.ERROR
@@ -573,6 +585,7 @@ class Pipeline:
             engine.send_sample_bits,
             output.dither,
             narrowband=narrowband_config,
+            total_power_spectra=output.spectra_per_heap,
         )
         seed = SystemRandom().randrange(2**ENGINE_DITHER_SEED_BITS)
         self._compute = template.instantiate(
@@ -1007,15 +1020,16 @@ class Pipeline:
 
         The unit tests mock out this function to replace the value.
         """
-        chunk_samples = self.spectra * self.output.spectra_samples
-        window_chunks = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / chunk_samples))
-        return window_chunks * chunk_samples
+        batch_samples = self.output.spectra_per_heap * self.output.spectra_samples
+        window_batches = max(1, round(DIG_RMS_DBFS_WINDOW * self.engine.adc_sample_rate / batch_samples))
+        return window_batches * batch_samples
 
     def _update_dig_power_sensors(
         self,
         dig_total_power_accums: list[Accum],
         dig_total_power: accel.HostArray,
         out_item: OutQueueItem,
+        present: np.ndarray,
     ) -> None:
         """Update digitiser power sensors.
 
@@ -1024,31 +1038,34 @@ class Pipeline:
         dig_total_power_accums
             Accumulators tracking long-term digitiser total power (one per polarisation)
         dig_total_power
-            The total power per polarisation in `out_item`
+            The total power per batch and polarisation in `out_item`
         out_item
             The current :class:`OutQueueItem`
+        present
+            Whether each output batch is fully present
         """
-        all_present = np.all(out_item.present)
+        batch_samples = self.output.spectra_per_heap * self.output.spectra_samples
         for pol, (accum, trg) in enumerate(zip(dig_total_power_accums, dig_total_power, strict=True)):
-            power: int | None = int(trg)
-            if not all_present:
-                power = None
-            if measurement := accum.add(out_item.timestamp, out_item.next_timestamp, power):
-                sensor = self.engine.sensors[f"input{pol}.dig-rms-dbfs"]
-                update_timestamp = self.engine.time_converter.adc_to_unix(measurement.end_timestamp)
-                if measurement.total is not None:
-                    # Normalise relative to full scale. The factor of 2 is because we
-                    # want 1.0 to correspond to a sine wave rather than a square wave.
-                    fs = ((1 << (self.engine.recv_layout.sample_bits - 1)) - 1) ** 2 / 2
-                    avg_power = measurement.total / (measurement.end_timestamp - measurement.start_timestamp) / fs
-                    # If for some reason there's zero power, avoid reporting
-                    # -inf dB by assigning the most negative representable value
-                    avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
-                    sensor.set_value(avg_power_db, timestamp=update_timestamp)
-                else:
-                    sensor.set_value(
-                        np.finfo(np.float64).min, status=aiokatcp.Sensor.Status.FAILURE, timestamp=update_timestamp
-                    )
+            for i, p in enumerate(present):
+                power: int | None = trg[i] if p else None
+                start_timestamp = out_item.timestamp + i * batch_samples
+                stop_timestamp = start_timestamp + batch_samples
+                if measurement := accum.add(start_timestamp, stop_timestamp, power):
+                    sensor = self.engine.sensors[f"input{pol}.dig-rms-dbfs"]
+                    update_timestamp = self.engine.time_converter.adc_to_unix(measurement.end_timestamp)
+                    if measurement.total is not None:
+                        # Normalise relative to full scale. The factor of 2 is because we
+                        # want 1.0 to correspond to a sine wave rather than a square wave.
+                        fs = ((1 << (self.engine.recv_layout.sample_bits - 1)) - 1) ** 2 / 2
+                        avg_power = measurement.total / (measurement.end_timestamp - measurement.start_timestamp) / fs
+                        # If for some reason there's zero power, avoid reporting
+                        # -inf dB by assigning the most negative representable value
+                        avg_power_db = 10 * math.log10(avg_power) if avg_power else np.finfo(np.float64).min
+                        sensor.set_value(avg_power_db, timestamp=update_timestamp)
+                    else:
+                        sensor.set_value(
+                            np.finfo(np.float64).min, status=aiokatcp.Sensor.Status.FAILURE, timestamp=update_timestamp
+                        )
 
     async def run_transmit(self) -> None:
         """Get the processed data from the GPU to the Network.
@@ -1106,7 +1123,7 @@ class Pipeline:
                 await async_wait_for_events([download_marker])
 
             if dig_total_power is not None:
-                self._update_dig_power_sensors(dig_total_power_windows, dig_total_power, out_item)
+                self._update_dig_power_sensors(dig_total_power_windows, dig_total_power, out_item, chunk.present)
 
             n_batches = out_item.n_spectra // self.output.spectra_per_heap
             if last_end_timestamp is not None and out_item.timestamp > last_end_timestamp:
@@ -1314,9 +1331,10 @@ class FEngine(Engine):
     ) -> None:
         super().__init__(katcp_host, katcp_port)
         self._populate_sensors(
-            self.sensors, max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate)
+            self.sensors,
+            max(RECV_SENSOR_TIMEOUT_MIN, RECV_SENSOR_TIMEOUT_CHUNKS * chunk_samples / adc_sample_rate),
+            dig_sample_bits,
         )
-
         # Attributes copied or initialised from arguments
         self._srcs = copy.copy(srcs)
         self._recv_comp_vector = list(recv_comp_vector)
@@ -1418,9 +1436,19 @@ class FEngine(Engine):
             )
             chunk.recycle()  # Make available to the stream
 
-    def _populate_sensors(self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float) -> None:
+    def _populate_sensors(
+        self, sensors: aiokatcp.SensorSet, recv_sensor_timeout: float, dig_sample_bits: float
+    ) -> None:
         """Define the sensors for an engine (excluding pipeline-specific sensors)."""
         for pol in range(N_POLS):
+            low_error, low_value, high_value, high_error = dig_rms_dbfs_status_params(dig_sample_bits)
+            status_func = partial(
+                dig_rms_dbfs_status,
+                dig_rms_dbfs_low_error=low_error,
+                dig_rms_dbfs_low=low_value,
+                dig_rms_dbfs_high=high_value,
+                dig_rms_dbfs_high_error=high_error,
+            )
             sensors.add(
                 make_rate_limited_sensor(
                     int,
@@ -1436,7 +1464,7 @@ class FEngine(Engine):
                     f"input{pol}.dig-rms-dbfs",
                     "Digitiser ADC average power",
                     units="dBFS",
-                    status_func=dig_rms_dbfs_status,
+                    status_func=status_func,
                 )
             )
 

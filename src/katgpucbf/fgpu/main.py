@@ -34,9 +34,10 @@ from katsdpsigproc.abc import AbstractContext
 from katsdptelstate.endpoint import endpoint_list_parser
 
 from .. import (
+    DEFAULT_DIG_HEAP_SAMPLES,
+    DEFAULT_DIG_SAMPLE_BITS,
     DEFAULT_JONES_PER_BATCH,
     DEFAULT_PACKET_PAYLOAD_BYTES,
-    DIG_SAMPLE_BITS,
 )
 from ..main import (
     SubParser,
@@ -170,7 +171,10 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     add_common_arguments(parser)
     add_recv_arguments(parser, multi=True)
     parser.add_argument(
-        "--recv-packet-samples", type=int, default=4096, help="Number of samples per digitiser packet [%(default)s]"
+        "--recv-packet-samples",
+        type=int,
+        default=DEFAULT_DIG_HEAP_SAMPLES,
+        help="Number of samples per digitiser packet [%(default)s]",
     )
     add_send_arguments(parser, multi=True)
     parser.add_argument(
@@ -224,7 +228,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--dig-sample-bits",
         type=int,
-        default=DIG_SAMPLE_BITS,
+        default=DEFAULT_DIG_SAMPLE_BITS,
         choices=DIG_SAMPLE_BITS_VALID,
         metavar="BITS",
         help="Number of bits per digitised sample [%(default)s]",
