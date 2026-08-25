@@ -706,6 +706,39 @@ async def test_group_delay(
     await pcc.request("delays", "antenna-channelised-voltage", receiver.sync_time, *delay_models)
     pdf_report.detail(f"Set delays to {delay_model} for all inputs.")
 
+    def compute_delay(
+        rel_freqs: tuple[float, float], first_timestamp: int, raw_data: np.ndarray
+    ) -> tuple[float, float, float]:
+        """Process the data collected by :func:`measure_once` to get the result.
+
+        This is split into a helper function so that it can be dispatched to
+        a worker thread to avoid blocking the event loop.
+        """
+        # Convert Gaussian integers to complex128
+        data = raw_data.astype(np.float64).view(np.complex128)[..., 0]
+        phase = np.angle(data[1] * data[0].conj())  # Takes the difference between phases
+        del data  # Free up some memory
+        # Pick a reference timestamp at which we know the dsim will be outputting
+        # both signals with phase 0.
+        ref_timestamp = first_timestamp // dsim_period * dsim_period
+        # Phase-rotate everything to be referenced to ref_timestamp
+        rel_timestamps = np.arange(n_spectra) * receiver.n_samples_between_spectra + (first_timestamp - ref_timestamp)
+        rel_times = rel_timestamps / receiver.scale_factor_timestamp
+        delta = rel_freqs[1] - rel_freqs[0]
+        phase -= 2 * np.pi * delta * rel_times[np.newaxis, :]
+        # The phases should all be similar, but we need to avoid steps of 2pi.
+        # np.unwrap is problematic since it accumulates rounding errors. The
+        # following is good enough as long as all phases are within pi of each
+        # other.
+        phase = wrap_angle(phase - phase[0, 0]) + phase[0, 0]
+        mean_phase = wrap_angle(np.mean(phase))
+        std_phase = np.std(phase) / np.sqrt(phase.size - 1)
+        scale = receiver.scale_factor_timestamp / (2 * np.pi * delta)
+        delay = -mean_phase * scale
+        period = 2 * np.pi * scale
+        std = std_phase * scale
+        return delay, period, std
+
     async def measure_once(rel_freqs: tuple[float, float]) -> tuple[float, float, float]:
         """Estimate group delay for a single pair of frequency offsets.
 
@@ -766,29 +799,8 @@ async def test_group_delay(
         except TimeoutError:
             pytest.fail("Timed out.")
 
-        # Convert Gaussian integers to complex128
-        data = raw_data.astype(np.float64).view(np.complex128)[..., 0]
-        phase = np.angle(data[1] * data[0].conj())  # Takes the difference between phases
-        del data  # Free up some memory
-        # Pick a reference timestamp at which we know the dsim will be outputting
-        # both signals with phase 0.
-        ref_timestamp = first_timestamp // dsim_period * dsim_period
-        # Phase-rotate everything to be referenced to ref_timestamp
-        rel_timestamps = np.arange(n_spectra) * receiver.n_samples_between_spectra + (first_timestamp - ref_timestamp)
-        rel_times = rel_timestamps / receiver.scale_factor_timestamp
-        delta = rel_freqs[1] - rel_freqs[0]
-        phase -= 2 * np.pi * delta * rel_times[np.newaxis, :]
-        # The phases should all be similar, but we need to avoid steps of 2pi.
-        # np.unwrap is problematic since it accumulates rounding errors. The
-        # following is good enough as long as all phases are within pi of each
-        # other.
-        phase = wrap_angle(phase - phase[0, 0]) + phase[0, 0]
-        mean_phase = wrap_angle(np.mean(phase))
-        std_phase = np.std(phase) / np.sqrt(phase.size - 1)
-        scale = receiver.scale_factor_timestamp / (2 * np.pi * delta)
-        delay = -mean_phase * scale
-        period = 2 * np.pi * scale
-        std = std_phase * scale
+        loop = asyncio.get_event_loop()
+        delay, period, std = await loop.run_in_executor(None, compute_delay, rel_freqs, first_timestamp, raw_data)
         pdf_report.detail(f"Delay is {delay} + k*{period} ± {std} samples.")
         return delay, period, std
 
