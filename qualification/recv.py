@@ -725,6 +725,8 @@ class TiedArrayResampledVoltageReceiver:
         self.scale_factor_timestamp = cbf.init_sensors[f"{stream_name}.scale-factor-timestamp"].value
         self.power_int_time = cbf.init_sensors[f"{stream_name}.power-int-time"].value
         self.bandwidth = cbf.init_sensors[f"{stream_name}.bandwidth"].value
+        n_samples_per_frame = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
+        self.frame_rate = round(self.bandwidth / n_samples_per_frame)
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -740,7 +742,6 @@ class TiedArrayResampledVoltageReceiver:
         self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
         self.reorder_window = 32  # TODO: make a parameter
 
-        self.frame_rate = 0
         self.cbf = cbf
 
     async def _next_packet(self) -> None:
@@ -756,12 +757,10 @@ class TiedArrayResampledVoltageReceiver:
         frame_nr = ref_epoch_frame_nr & 0xFF_FFFF
         thread_id = sample_bits_thread_id & 0x3F
         length = (length & 0xFF_FFFF) * 8 - 32  # Raw value includes the header
-        if self.frame_rate == 0:
+        if frame_nr == 0:
             is_complex = sample_bits_thread_id >> 15
             assert not is_complex
-            sample_bits = ((sample_bits_thread_id >> 10) & 0x1F) + 1
-            samples_per_frame = length * 8 // sample_bits
-            self.frame_rate = round(self.bandwidth / samples_per_frame)
+
         timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch)
         frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=packet[8:])
         if seq_id >= self.min_seq_id:
@@ -881,4 +880,3 @@ class TiedArrayResampledVoltageReceiver:
         self.sock.close()
         self.buffer.clear()
         self.min_seq_id = 0
-        self.frame_rate = 0
