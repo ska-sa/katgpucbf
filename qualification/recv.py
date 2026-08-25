@@ -18,11 +18,14 @@
 
 import ast
 import asyncio
+import contextlib
 import ctypes
+import functools
 import logging
 import math
+import operator
 import os
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Generator, Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numba
@@ -53,6 +56,7 @@ class XBReceiver:
     """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
 
     # Attributes instantiated by the derived classes
+    stream_group: spead2.recv.ChunkStreamRingGroup
     timestamp_step: int  # Step (in ADC samples) between chunk timestamps
     _chunk_iter: DiscardingChunkIterator
 
@@ -684,3 +688,21 @@ def create_tied_array_channelised_voltage_receive_stream_group(
             sink=stream_group,
         ),
     )
+
+
+@contextlib.contextmanager
+def diff_stats(stream_group: spead2.recv.ChunkStreamRingGroup) -> Generator[dict[str, int], None, None]:
+    """Collect stream group statistics on entry and exit and return differences.
+
+    The context manager value is a dictionary of statistics. Only "counter"
+    mode statistics are returned, as maximum-value statistics cannot be
+    meaningfully differenced. Note that the dictionary is only populated on
+    exit from the context manager.
+    """
+    delta_stats: dict[str, int] = {}
+    init_stats = functools.reduce(operator.add, [stream.stats for stream in stream_group])
+    yield delta_stats
+    final_stats = functools.reduce(operator.add, [stream.stats for stream in stream_group])
+    for stat in final_stats.config:
+        if stat.mode == spead2.recv.StreamStatConfig.Mode.COUNTER:
+            delta_stats[stat.name] = final_stats[stat.name] - init_stats[stat.name]
