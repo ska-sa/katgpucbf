@@ -78,17 +78,10 @@ async def test_delay_application_time(
         target_ts = round(receiver.time_converter.unix_to_adc(target))
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
         acc = None
-        async for timestamp, chunk in receiver.complete_chunks(min_timestamp=target_acc_ts, time_limit=10.0):
-            with chunk:
-                pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
-                total = np.sum(chunk.data[:, bl_idx, :], axis=0)  # Sum over channels
-                if timestamp == target_acc_ts:
-                    acc = total
-                if timestamp >= target_acc_ts:
-                    break
-        else:
-            pdf_report.detail("Did not reach the target timestamp within 10s.")
-        if acc is not None:
+        timestamp, data = await receiver.next_complete_chunk(min_timestamp=target_acc_ts, timeout=10.0)
+        pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
+        if timestamp == target_acc_ts:
+            acc = np.sum(data[:, bl_idx, :], axis=0)  # Sum over channels
             break
 
         pdf_report.detail("Did not receive all the expected chunks; reset delay and try again.")
