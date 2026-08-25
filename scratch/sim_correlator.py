@@ -261,7 +261,7 @@ def generate_tied_array_resampled_voltage(args: argparse.Namespace, outputs: dic
     if args.vlbi:
         outputs["tied-array-resampled-voltage"] = {
             "type": "gpucbf.tied_array_resampled_voltage",
-            "src_streams": [f"narrow0-tied-array-channelised-voltage0{pol_name}" for pol_name in "xy"],
+            "src_streams": [f"narrow0-tied-array-channelised-voltage-0{pol_name}" for pol_name in "xy"],
             "n_chans": 2,
             "pols": args.vlbi_pols,
             "station_id": args.vlbi_station_id,
@@ -316,7 +316,7 @@ def generate_config(args: argparse.Namespace) -> dict:
     return config
 
 
-async def issue_config(host: str, port: int, name: str, config: dict, vlbi: bool) -> int:
+async def issue_config(host: str, port: int, name: str, config: dict) -> int:
     """Connect to the product controller and issue ``?product-configure``).
 
     Returns
@@ -333,13 +333,6 @@ async def issue_config(host: str, port: int, name: str, config: dict, vlbi: bool
         print(f"Product controller is at {product_host}:{product_port}")
 
         product_client = await aiokatcp.Client.connect(product_host, product_port)
-
-        if vlbi:
-            for dsim_name, dsim in config["outputs"].items():
-                if dsim["type"] == "sim.dig.baseband_voltage":
-                    tasks = await product_client.sensor_value(f"{dsim_name}.tasks", str)
-                    tasklist = json.loads(tasks)
-                    await product_client.request("dsim-signals", tasklist[0], "common=wgn(0.02); common; common;")
         capture_start_streams = []
         for name, conf in config["outputs"].items():
             if conf["type"] in CAPTURE_START_TYPES:
@@ -372,7 +365,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f.write("\n")  # json.dump doesn't write a final newline
         return 0
     else:
-        return asyncio.run(issue_config(args.controller, args.port, args.name, config, args.vlbi))
+        return asyncio.run(issue_config(args.controller, args.port, args.name, config))
 
 
 if __name__ == "__main__":

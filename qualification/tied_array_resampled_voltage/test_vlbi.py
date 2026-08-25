@@ -91,26 +91,27 @@ async def test_mean_power(
     receiver = receive_tied_array_resampled_voltage
     pcc = cbf.product_controller_client
 
+    pdf_report.step("Set beam weights.")
     async with asyncio.TaskGroup() as tg:
-        pdf_report.step("Setup signal generator and beam-weights.")
         for i, name in enumerate(receive_tied_array_channelised_voltage.stream_names):
             weights = [0.0] * len(receive_tied_array_channelised_voltage.source_indices[i])
             weights[0] = 1.0
             tg.create_task(pcc.request("beam-weights", name, *weights))
 
-    pdf_report.detail("Set beam weights to use antenna 0.")
+    pdf_report.detail("Beam weights set to use antenna 0.")
 
+    pdf_report.step("Inject white noise signal.")
     dsim_signals = "common=wgn(0.02);common;common;"
     async with asyncio.TaskGroup() as tg:
         for dsim_name in cbf.dsim_names:
             tg.create_task(pcc.request("dsim-signals", dsim_name, dsim_signals))
-    pdf_report.detail(f"Set dsim signals {dsim_signals}.")
+    pdf_report.detail(f"Set dsim signals to {dsim_signals}.")
 
     pdf_report.step("Wait for mean-power sensors to reach steady state.")
     await sensor_watcher.synced.wait()  # Implicitly waits for connection too
     time_converter = TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp)
     steady_state_unix = time_converter.adc_to_unix(await cbf.steady_state_timestamp())
-    # TODO: NGC-2099 Because the v engine reciever is padding zeros,
+    # TODO: NGC-2099 Because the v engine receiver is padding zeros,
     # for now just retry with 2 second intervals since steady state is unknown.
     min_sensor_time = steady_state_unix + receiver.power_int_time
 
@@ -136,10 +137,10 @@ async def test_mean_power(
     async def wait_mean_power_steady_state(j: int) -> bool:
         measurements = np.zeros((len(sensor_names), 2))
         for i, name in enumerate(sensor_names):
-            measuement = sensor_watcher.sensors[name]
-            mean_power_sensor_values[i, j] = measuement.value
-            mean_power_sensor_timestamps[i, j] = measuement.timestamp
-            measurements[i] = (measuement.value, measuement.timestamp)
+            measurement = sensor_watcher.sensors[name]
+            mean_power_sensor_values[i, j] = measurement.value
+            mean_power_sensor_timestamps[i, j] = measurement.timestamp
+            measurements[i] = (measurement.value, measurement.timestamp)
 
         return bool(
             np.all(measurements[:, 1] >= min_sensor_time)
