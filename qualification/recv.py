@@ -39,6 +39,7 @@ from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
 from katgpucbf import COMPLEX, DEFAULT_DIG_SAMPLE_BITS, DEFAULT_RECV_BUFFER_SIZE
+from katgpucbf.recv import DiscardingChunkIterator
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
@@ -52,8 +53,8 @@ class XBReceiver:
     """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
 
     # Attributes instantiated by the derived classes
-    stream_group: spead2.recv.ChunkStreamRingGroup
     timestamp_step: int  # Step (in ADC samples) between chunk timestamps
+    _chunk_iter: DiscardingChunkIterator
 
     def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
         # Some metadata we know already from the config.
@@ -96,6 +97,45 @@ class XBReceiver:
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
         """Check whether this chunk is complete (no missing data)."""
         return bool(np.all(chunk.present))
+
+    # The overloads ensure that when all_timestamps is known to be False, the
+    # returned chunks are inferred to not be optional.
+    @overload
+    async def _next_complete_chunk(
+        self, min_timestamp: int, *, all_timestamps: Literal[False] = False
+    ) -> tuple[int, katgpucbf.recv.Chunk]: ...
+
+    @overload
+    async def _next_complete_chunk(
+        self, min_timestamp: int, *, all_timestamps: bool = False
+    ) -> tuple[int, katgpucbf.recv.Chunk | None]: ...
+
+    async def _next_complete_chunk(self, min_timestamp, *, all_timestamps=False):
+        """Return the data from the next complete chunk from the stream.
+
+        This implements the functionality of :meth:`next_complete_chunk`, but
+        the caller is responsible for computing `min_timestamp`, putting the
+        iterator into capturing mode, and recycling the returned chunk.
+
+        Raises
+        ------
+        StopAsyncIteration
+            If the stream closed or was interrupted before we received a complete chunk.
+        """
+        while True:
+            chunk = await anext(self._chunk_iter)
+            timestamp = chunk.chunk_id * self.timestamp_step
+            if min_timestamp is not None and timestamp < min_timestamp:
+                logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
+            elif not self.is_complete_chunk(chunk):
+                logger.debug("Incomplete chunk %d", chunk.chunk_id)
+            else:
+                chunk.timestamp = timestamp
+                return timestamp, chunk
+            # If we get here, the chunk is ignored.
+            chunk.recycle()
+            if all_timestamps:
+                return timestamp, None
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
@@ -153,24 +193,14 @@ class XBReceiver:
         if min_timestamp is None:
             min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
 
-        data_ringbuffer = self.stream_group.data_ringbuffer
-        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         try:
             async with asyncio.timeout(time_limit) as timer:
-                async for chunk in data_ringbuffer:
-                    assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
-                    timestamp = chunk.chunk_id * self.timestamp_step
-                    if min_timestamp is not None and timestamp < min_timestamp:
-                        logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
-                    elif not self.is_complete_chunk(chunk):
-                        logger.debug("Incomplete chunk %d", chunk.chunk_id)
-                    else:
-                        yield timestamp, chunk
-                        continue
-                    # If we get here, the chunk is ignored
-                    chunk.recycle()
-                    if all_timestamps:
-                        yield timestamp, None
+                with self._chunk_iter:
+                    while True:
+                        try:
+                            yield await self._next_complete_chunk(min_timestamp, all_timestamps=all_timestamps)
+                        except StopAsyncIteration:
+                            break
         except TimeoutError:
             if not timer.expired():
                 raise  # The TimeoutError came from something else
@@ -200,11 +230,16 @@ class XBReceiver:
         RuntimeError
             If the stream is stopped before a complete chunk is received
         """
+        if min_timestamp is None:
+            min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
         async with asyncio.timeout(timeout):
-            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
+            with self._chunk_iter:
+                try:
+                    timestamp, chunk = await self._next_complete_chunk(min_timestamp)
+                except StopAsyncIteration:
+                    raise RuntimeError("stream was shut down before we received a complete chunk") from None
                 with chunk:
                     return timestamp, np.array(chunk.data)  # Makes a copy before we return the chunk
-        raise RuntimeError("stream was shut down before we received a complete chunk")
 
     async def wait_complete_chunk(
         self,
@@ -233,11 +268,16 @@ class XBReceiver:
         RuntimeError
             If the stream is stopped before a complete chunk is received
         """
+        if min_timestamp is None:
+            min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
         async with asyncio.timeout(timeout):
-            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
+            with self._chunk_iter:
+                try:
+                    timestamp, chunk = await self._next_complete_chunk(min_timestamp)
+                except StopAsyncIteration:
+                    raise RuntimeError("stream was shut down before we received a complete chunk") from None
                 chunk.recycle()
                 return timestamp
-        raise RuntimeError("stream was shut down before we received a complete chunk")
 
     async def consecutive_chunks(
         self,
@@ -350,6 +390,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
+        self._chunk_iter = DiscardingChunkIterator(self.stream_group.data_ringbuffer)  # type: ignore
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
         if not super().is_complete_chunk(chunk):
@@ -411,6 +452,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             decimation_factor=self.decimation_factor,
             use_ibv=use_ibv,
         )
+        self._chunk_iter = DiscardingChunkIterator(self.stream_group.data_ringbuffer)  # type: ignore
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
         return super().is_complete_chunk(chunk) and (chunk.extra is None or np.min(chunk.extra) == self.n_ants)
