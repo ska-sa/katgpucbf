@@ -28,6 +28,7 @@ import socket
 import struct
 from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numba
@@ -731,6 +732,28 @@ class TiedArrayResampledVoltageReceiver:
         n_samples_per_frame = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
         self.frame_rate = round(self.bandwidth / n_samples_per_frame)
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
+        # The V-engine applies DSP filters, and unlike the F-engine, the
+        # timestamp used for the output corresponds to the centre input sample.
+        # That means that to ensure a frame contains only samples after a
+        # certain input timestamp, we need to add half the filter length to
+        # the target output timestamp.
+        fir_taps: int = cbf.init_sensors[f"{stream_name}.fir-taps"].value
+        sideband_taps: int = cbf.init_sensors[f"{stream_name}.sideband-taps"].value
+        src_streams: list[str] = cbf.config["outputs"][stream_name]["src_streams"]
+        src_bandwidth: float = cbf.init_sensors[f"{src_streams[0]}.bandwidth"].value
+        src_channels: int = cbf.init_sensors[f"{src_streams[0]}.n-chans"].value
+        bandwidth_ratio = Fraction(src_bandwidth) / Fraction(self.bandwidth)
+        # The inverse FFT takes an input spectrum with timestamp t and
+        # generates time-domain samples with timestamps t, t+1, t+2, ... so we
+        # need to include the length of one spectrum, which is just the inverse
+        # of the channel bandwidth (src_channels - 1 might be sufficient, but
+        # it's safe to be conservative).
+        filter_shift = src_channels / src_bandwidth
+        # fir_taps is for scipy.signal.upfirdn, and the units are in samples of
+        # the upsampled signal.
+        filter_shift += fir_taps / 2 / bandwidth_ratio.denominator / src_bandwidth
+        filter_shift += sideband_taps / 2 / self.bandwidth
+        self.filter_shift = TimeDelta(filter_shift, format="sec", scale="tai")
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -818,11 +841,7 @@ class TiedArrayResampledVoltageReceiver:
         )
 
         vlbi_delay = await self.cbf.product_controller_client.sensor_value(f"{self.stream_name}.delay", float)
-        # TODO: The V-engine has filters which take input data from either side
-        # of the nominal output timestamp. We need to establish an upper bound
-        # on how far back in time they reach, probably based on sensors.
-        vlbi_delay += 1e-3
-        min_time += TimeDelta(vlbi_delay, format="sec", scale="tai")
+        min_time += TimeDelta(vlbi_delay, format="sec", scale="tai") + self.filter_shift
 
         # Computing timestamps is expensive. So once we know the frame rate and
         # ref epoch, we can convert it into a minimum linearised frame number.
