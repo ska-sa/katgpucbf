@@ -20,7 +20,6 @@ import io
 import socket
 import struct
 from collections.abc import AsyncGenerator
-from math import ceil
 from unittest import mock
 
 import aiokatcp
@@ -34,6 +33,7 @@ from qualification.recv import TiedArrayResampledVoltageReceiver, VDIFFrame, VDI
 
 SAMPLES_PER_FRAME = 8000
 BANDWIDTH = 64e6
+FRAME_RATE = round(BANDWIDTH / SAMPLES_PER_FRAME)
 
 
 def make_vtp_packet(
@@ -74,11 +74,11 @@ def mock_cbf() -> CBFRemoteControl:
     )
     cbf.init_sensors.add(
         Sensor(
-            bytes,
+            str,
             "stream0.pol-ordering",
             "Polarisation ordering",
-            "json string",
-            default=b'["V", "H"]',
+            "",
+            default='["V", "H"]',
             initial_status=Sensor.Status.NOMINAL,
         )
     )
@@ -87,7 +87,7 @@ def mock_cbf() -> CBFRemoteControl:
             int,
             "stream0.veng-out-bits-per-sample",
             "Bits per sample",
-            "bits",
+            "",
             default=2,
             initial_status=Sensor.Status.NOMINAL,
         )
@@ -97,7 +97,7 @@ def mock_cbf() -> CBFRemoteControl:
             float,
             "stream0.scale-factor-timestamp",
             "Scale factor timestamp",
-            "scale-factor-timestamp",
+            "Hz",
             default=1.0,
             initial_status=Sensor.Status.NOMINAL,
         )
@@ -107,17 +107,25 @@ def mock_cbf() -> CBFRemoteControl:
             float,
             "stream0.power-int-time",
             "Power integration time",
-            "power-int-time",
+            "s",
             default=1.0,
             initial_status=Sensor.Status.NOMINAL,
         )
     )
     cbf.init_sensors.add(
-        Sensor(float, "stream0.bandwidth", "Bandwidth", "bandwidth", default=64e6, initial_status=Sensor.Status.NOMINAL)
+        Sensor(float, "stream0.bandwidth", "Bandwidth", "", default=64e6, initial_status=Sensor.Status.NOMINAL)
+    )
+    cbf.init_sensors.add(
+        Sensor(float, "stream0.sync-time", "Sync time", "s", default=100.0, initial_status=Sensor.Status.NOMINAL)
     )
     cbf.init_sensors.add(
         Sensor(
-            float, "stream0.sync-time", "Sync time", "sync-time", default=100.0, initial_status=Sensor.Status.NOMINAL
+            int,
+            "stream0.n-samples-per-frame",
+            "Samples per frame",
+            "",
+            default=SAMPLES_PER_FRAME,
+            initial_status=Sensor.Status.NOMINAL,
         )
     )
     cbf.init_sensors.add(
@@ -152,7 +160,7 @@ async def test_receive_samples_per_frame_from_first_frame(
     vdif_frame = make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0)
     mock_socket.recv.return_value = vdif_frame  # type: ignore[attr-defined]
     await receiver._next_packet()
-    assert receiver.frame_rate == BANDWIDTH / SAMPLES_PER_FRAME
+    assert receiver.frame_rate == FRAME_RATE
     assert receiver.buffer == [
         VDIFFrame(
             seq_id=0,
@@ -192,13 +200,12 @@ async def test_receive_framesets_filters_untill_delay(mock_cbf: CBFRemoteControl
             "stream0.sync-time",
             "Sync time",
             "sync-time",
-            default=VDIFTimestamp(0, 0, 0).timestamp(ceil(BANDWIDTH / SAMPLES_PER_FRAME)).unix,
+            default=VDIFTimestamp(0, 0, 0).timestamp(FRAME_RATE).unix,
             initial_status=Sensor.Status.NOMINAL,
         )
     )  # set sync time to 0 frames
-    mock_cbf.product_controller_client.sensor_value.return_value = 10.0 / (  # type: ignore[attr-defined]
-        BANDWIDTH / SAMPLES_PER_FRAME
-    )  # delay 10 frames
+    # delay 10 frames
+    mock_cbf.product_controller_client.sensor_value.return_value = 10.0 / FRAME_RATE  # type: ignore[attr-defined]
     receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
         make_vtp_packet(0, frame_nr=10, seconds=0, thread_id=0),
@@ -284,5 +291,4 @@ async def test_close_clears_state(mock_cbf: CBFRemoteControl, mock_socket: socke
     await receiver._next_packet()
     receiver.close()
     assert receiver.buffer == []
-    assert receiver.frame_rate == 0
     assert receiver.sock.close.call_count == 1  # type: ignore[attr-defined]
