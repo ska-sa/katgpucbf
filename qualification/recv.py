@@ -659,19 +659,22 @@ class VDIFTimestamp:
     seconds: int
     frame_nr: int
     ref_epoch: int
+    frame_rate: int
 
-    def timestamp(self, frame_rate: int) -> Time:
+    @property
+    def timestamp(self) -> Time:
         """Timestamp of the VDIF frameset."""
         # ref_epoch is the number of half-years since 2000-01-01.
         ref_time = Time(
             dict(year=2000 + self.ref_epoch // 2, month=self.ref_epoch % 2 * 6 + 1), format="ymdhms", scale="utc"
         )
-        seconds = self.seconds + self.frame_nr / frame_rate
+        seconds = self.seconds + self.frame_nr / self.frame_rate
         return ref_time + TimeDelta(seconds, format="sec", scale="tai")
 
-    def linear(self, frame_rate: int) -> int:
+    @property
+    def linear(self) -> int:
         """Linear frame number counting from the ref epoch."""
-        return self.seconds * frame_rate + self.frame_nr
+        return self.seconds * self.frame_rate + self.frame_nr
 
 
 @dataclass(frozen=True)
@@ -761,7 +764,7 @@ class TiedArrayResampledVoltageReceiver:
             is_complex = sample_bits_thread_id >> 15
             assert not is_complex
 
-        timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch)
+        timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch, frame_rate=self.frame_rate)
         frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=packet[8:])
         if seq_id >= self.min_seq_id:
             self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
@@ -775,11 +778,11 @@ class TiedArrayResampledVoltageReceiver:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
         # TODO: log or record invalid frames
 
-    def _calc_min_frame(self, min_time: Time, ref_epoch: int, frame_rate: int) -> int:
+    def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
         """Compute the minimum linearised frame number that is at least `min_time`."""
-        ref_time = VDIFTimestamp(0, 0, ref_epoch).timestamp(frame_rate)
+        ref_time = VDIFTimestamp(0, 0, ref_epoch, frame_rate=self.frame_rate).timestamp
         to_wait_sec = (min_time - ref_time).sec
-        return math.ceil(to_wait_sec * frame_rate)
+        return math.ceil(to_wait_sec * self.frame_rate)
 
     async def complete_framesets(
         self,
@@ -832,7 +835,7 @@ class TiedArrayResampledVoltageReceiver:
                     if self.buffer:
                         frame0 = self.buffer[0]
                         if min_frame is None:
-                            min_frame = self._calc_min_frame(min_time, frame0.timestamp.ref_epoch, self.frame_rate)
+                            min_frame = self._calc_min_frame(min_time, frame0.timestamp.ref_epoch)
                         if frame0.seq_id <= self.min_seq_id and len(self.buffer) >= self.n_threads:
                             prefix = self.buffer[: self.n_threads]
                             if all(
@@ -842,7 +845,7 @@ class TiedArrayResampledVoltageReceiver:
                                 # Make sure we don't re-accept these packets
                                 self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
                                 prefix.sort(key=lambda frame: frame.thread_id)
-                                frame0_nr = frame0.timestamp.linear(self.frame_rate)
+                                frame0_nr = frame0.timestamp.linear
                                 if frame0_nr >= min_frame:
                                     logger.debug("Yielding frame %d", frame0_nr)
                                     yield VDIFFrameset(prefix)

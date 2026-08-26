@@ -165,7 +165,7 @@ async def test_receive_samples_per_frame_from_first_frame(
         VDIFFrame(
             seq_id=0,
             thread_id=0,
-            timestamp=VDIFTimestamp(seconds=100, frame_nr=1, ref_epoch=0),
+            timestamp=VDIFTimestamp(seconds=100, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE),
             raw_frame=vdif_frame[8:],
         )
     ]  # raw frame excludes the vdif header
@@ -200,7 +200,7 @@ async def test_receive_framesets_filters_untill_delay(mock_cbf: CBFRemoteControl
             "stream0.sync-time",
             "Sync time",
             "sync-time",
-            default=VDIFTimestamp(0, 0, 0).timestamp(FRAME_RATE).unix,
+            default=VDIFTimestamp(0, 0, 0, frame_rate=FRAME_RATE).timestamp.unix,
             initial_status=Sensor.Status.NOMINAL,
         )
     )  # set sync time to 0 frames
@@ -218,7 +218,7 @@ async def test_receive_framesets_filters_untill_delay(mock_cbf: CBFRemoteControl
         make_vtp_packet(7, frame_nr=100, seconds=0, thread_id=3),
     ]
     frameset = await anext(receiver.complete_framesets())
-    assert frameset.timestamp == VDIFTimestamp(seconds=0, frame_nr=100, ref_epoch=0)
+    assert frameset.timestamp == VDIFTimestamp(seconds=0, frame_nr=100, ref_epoch=0, frame_rate=receiver.frame_rate)
     assert len(frameset.frames) == 4
 
 
@@ -265,9 +265,9 @@ async def test_receive_framesets_unordered(mock_cbf: CBFRemoteControl, mock_sock
 
     # assert len(decoder.invalid_framesets) == 1
     assert len(framesets) == 2
-    assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=0, ref_epoch=0)
+    assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=0, ref_epoch=0, frame_rate=FRAME_RATE)
     assert len(framesets[0].frames) == 4
-    assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=1, ref_epoch=0)
+    assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE)
     assert len(framesets[1].frames) == 4
 
 
@@ -278,7 +278,7 @@ async def test_timestamp_from_epoch(mock_cbf: CBFRemoteControl, mock_socket: soc
         make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0, ref_epoch=2)
     ]
     await receiver._next_packet()
-    assert receiver.buffer[0].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(978307300.000125)
+    assert receiver.buffer[0].timestamp.timestamp.unix == pytest.approx(978307300.000125)
 
 
 async def test_close_clears_state(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
