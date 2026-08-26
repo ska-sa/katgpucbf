@@ -20,6 +20,7 @@ import asyncio
 import math
 from ast import literal_eval
 from collections.abc import Callable
+from contextlib import aclosing
 
 import numpy as np
 import pytest
@@ -775,8 +776,8 @@ async def test_group_delay(
         # First axis corresponds to the 2 signals we're comparing.
         raw_data = np.ones((2, n_channels, n_spectra, COMPLEX), np.int8)
         try:
-            async with asyncio.timeout(acc_time * 3 + 10.0):
-                async for timestamp, chunk in receiver.complete_chunks():
+            async with asyncio.timeout(acc_time * 3 + 10.0), aclosing(receiver.complete_chunks()) as it:
+                async for timestamp, chunk in it:
                     with chunk:
                         if i == 0 or timestamp != first_timestamp + i * chunk_timestamp_step:
                             first_timestamp = timestamp

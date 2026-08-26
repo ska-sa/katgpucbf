@@ -26,6 +26,7 @@ import math
 import operator
 import os
 from collections.abc import AsyncGenerator, Callable, Generator, Sequence
+from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numba
@@ -177,6 +178,10 @@ class XBReceiver:
 
         Each yielded value is a ``(timestamp, chunk)`` pair.
 
+        It is important that this asynchronous generator is closed as soon as
+        it is no longer needed, for example, by using
+        :func:`contextlib.aclosing`.
+
         Parameters
         ----------
         min_timestamp
@@ -301,8 +306,11 @@ class XBReceiver:
            with enough chunks and update this comment.
         """
         chunks: list[tuple[int, katgpucbf.recv.Chunk]] = []
-        async with asyncio.timeout(timeout):
-            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, all_timestamps=True):
+        async with (
+            asyncio.timeout(timeout),
+            aclosing(self.complete_chunks(min_timestamp=min_timestamp, all_timestamps=True)) as it,
+        ):
+            async for timestamp, chunk in it:
                 if chunk is None:
                     # Throw away failed attempt at getting an adjacent set
                     for _, old_chunk in chunks:
