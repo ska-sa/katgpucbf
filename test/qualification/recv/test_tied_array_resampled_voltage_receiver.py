@@ -133,11 +133,55 @@ def mock_cbf() -> CBFRemoteControl:
             bytes,
             "stream0.destination",
             "Destination",
-            "ip address",
+            "",
             default=b"127.0.0.1",
             initial_status=Sensor.Status.NOMINAL,
         )
     )
+    cbf.init_sensors.add(
+        Sensor(
+            int,
+            "stream0.fir-taps",
+            "Number of taps in the rational downconversion filter",
+            "",
+            default=7201,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    )
+    cbf.init_sensors.add(
+        Sensor(
+            int,
+            "stream0.sideband-taps",
+            "Number of taps in the filter used to split into side-bands",
+            "",
+            default=201,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    )
+    src_streams = ["tied-array-channelised-voltage-0x", "tied-array-channelised-voltage-0y"]
+    for src_stream in src_streams:
+        cbf.init_sensors.add(
+            Sensor(
+                float,
+                f"{src_stream}.bandwidth",
+                "Bandwidth",
+                "Hz",
+                default=107e6,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+        cbf.init_sensors.add(
+            Sensor(
+                int,
+                f"{src_stream}.n-chans",
+                "Number of channels",
+                "",
+                default=32768,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+    # This is a skeleton with just the items needed to make the test work.
+    cbf.config = {"outputs": {"stream0": {"src_streams": src_streams}}}
     cbf.product_controller_client = mock.Mock(spec=aiokatcp.Client)
     cbf.product_controller_client.sensor_value = mock.AsyncMock(return_value=0.0)
     cbf.steady_state_timestamp = mock.AsyncMock(return_value=0)
