@@ -19,7 +19,6 @@
 import asyncio
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from math import ceil
 
 import aiokatcp
 import numpy as np
@@ -54,17 +53,17 @@ async def sensor_watcher(cbf: CBFRemoteControl) -> AsyncGenerator[aiokatcp.Senso
 
 
 async def max_retry_test(
-    lambda_function: Callable[[int], Awaitable[bool]], max_retries: int, retry_interval: float
+    test_procedure: Callable[[int], Awaitable[bool]], max_retries: int, retry_interval: float
 ) -> tuple[bool, int]:
     """Test a subroutine with a maximum number of retries and a retry interval."""
     sleep_period = retry_interval
-    for try_number in range(max_retries):
+    for attempt_nr in range(max_retries):
         start_time = time.time()
-        if await lambda_function(try_number):
-            return True, try_number
+        if await test_procedure(attempt_nr):
+            return True, attempt_nr
         sleep_period = retry_interval - (time.time() - start_time)
         await asyncio.sleep(sleep_period)
-    return False, try_number
+    return False, attempt_nr
 
 
 @pytest.mark.name("VLBI mean power")
@@ -111,8 +110,9 @@ async def test_mean_power(
     await sensor_watcher.synced.wait()  # Implicitly waits for connection too
     time_converter = TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp)
     steady_state_unix = time_converter.adc_to_unix(await cbf.steady_state_timestamp())
-    # TODO: NGC-2099 Because the v engine receiver is padding zeros,
-    # for now just retry with 2 second intervals since steady state is unknown.
+    # TODO: See NGC-2099: Because the data is zero for the first several seconds,
+    # for now just retry with .2 second intervals (sample rate of 5) since steady state is
+    # not known beforehand.
     min_sensor_time = steady_state_unix + receiver.power_int_time
 
     sensor_names = [
@@ -129,17 +129,16 @@ async def test_mean_power(
     tacv_power = (np.square(tacv_data.real) + np.square(tacv_data.imag)).mean()
     pdf_report.detail(f"Mean TACV power over passband channels: {tacv_power}.")
 
-    sample_rate = 5
-    samples = ceil(min_sensor_time - sensor_watcher.sensors[sensor_names[0]].timestamp) * sample_rate
-    mean_power_sensor_values = np.zeros((len(sensor_names), samples))
-    mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples))
+    sample_rate = 5  # TODO: NGC-2099 These are arbitrary values to get data for plotting mean power values.
+    samples = int(1e3 * sample_rate)
+    mean_power_sensor_readings = np.zeros(shape=(2, len(sensor_names), samples), dtype=np.float64)
 
     async def wait_mean_power_steady_state(j: int) -> bool:
         measurements = np.zeros((len(sensor_names), 2))
         for i, name in enumerate(sensor_names):
             measurement = sensor_watcher.sensors[name]
-            mean_power_sensor_values[i, j] = measurement.value
-            mean_power_sensor_timestamps[i, j] = measurement.timestamp
+            mean_power_sensor_readings[0, i, j] = measurement.timestamp
+            mean_power_sensor_readings[1, i, j] = measurement.value
             measurements[i] = (measurement.value, measurement.timestamp)
 
         return bool(
@@ -153,7 +152,12 @@ async def test_mean_power(
         assert test_passed, f"Power does not agree to within 0.5% after {samples} retries."
         assert tacv_power > 0.0
 
-    mean_power_sensor_timestamps = mean_power_sensor_timestamps - mean_power_sensor_timestamps[:, :1]
+    pdf_report.detail(
+        f"Mean power sensor readings from {np.min(mean_power_sensor_readings[0, :, 0])}"
+        f" to {np.max(mean_power_sensor_readings[0, :, last_sample])}"
+        f" in {last_sample} steps."
+    )
+    mean_power_sensor_readings[0] = mean_power_sensor_readings[0] - mean_power_sensor_readings[0, :, :1]
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
@@ -164,8 +168,8 @@ async def test_mean_power(
         plot_focus(
             ax,
             slice(0, last_sample),
-            mean_power_sensor_timestamps[i, :last_sample],
-            mean_power_sensor_values[i, :last_sample],
+            mean_power_sensor_readings[0, i, :last_sample],
+            mean_power_sensor_readings[1, i, :last_sample],
             label=name,
         )
     ax.legend()
