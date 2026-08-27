@@ -136,10 +136,10 @@ async def test_mean_power(
     async def wait_mean_power_steady_state(j: int) -> bool:
         measurements = np.zeros((len(sensor_names), 2))
         for i, name in enumerate(sensor_names):
-            measurement = sensor_watcher.sensors[name]
-            mean_power_sensor_readings[0, i, j] = measurement.timestamp
-            mean_power_sensor_readings[1, i, j] = measurement.value
-            measurements[i] = (measurement.value, measurement.timestamp)
+            reading = sensor_watcher.sensors[name].reading
+            mean_power_sensor_readings[0, i, j] = reading.timestamp
+            mean_power_sensor_readings[1, i, j] = reading.value
+            measurements[i] = (reading.value, reading.timestamp)
 
         return bool(
             np.all(measurements[:, 1] >= min_sensor_time)
