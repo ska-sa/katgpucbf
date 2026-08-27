@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2023, 2025-2026, National Research Foundation (SARAO)
+ * Copyright (c) 2023, 2025, National Research Foundation (SARAO)
  *
  * Licensed under the BSD 3-Clause License (the "License"); you may not use
  * this file except in compliance with the License. You may obtain a copy
@@ -163,10 +163,6 @@ void ddc(
     % endfor
 
     int pol = get_group_id(1);
-#pragma unroll
-    for(int z = 0;z < ${outputs};z++){
-        out[z] += pol * out_stride;
-    }
     in += pol * in_stride;
 
     unsigned int lid = get_local_id(0);
@@ -267,11 +263,12 @@ void ddc(
     }
 #pragma unroll
     for(int z = 0;z < ${outputs};z++){
+        cplx *this_out = out[z] + pol * out_stride;
         unsigned int l_idx = lid;
         unsigned int idx = first_idx;
 #pragma unroll
         for (int i = 0; i < valid_i_count; i++){
-            out[z][idx] = make_float2(local.out[0][out_index + l_idx], local.out[1][out_index + l_idx]);
+            this_out[idx] = make_float2(local.out[0][out_index + l_idx], local.out[1][out_index + l_idx]);
             l_idx += WGS;
             idx += WGS;
         }

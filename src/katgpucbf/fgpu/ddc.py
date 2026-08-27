@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2022-2023, 2025-2026, National Research Foundation (SARAO)
+# Copyright (c) 2022-2023, 2025, National Research Foundation (SARAO)
 #
 # Licensed under the BSD 3-Clause License (the "License"); you may not use
 # this file except in compliance with the License. You may obtain a copy
@@ -242,12 +242,11 @@ class DDC(accel.Operation):
         self._mix_frequencies = mix_frequencies
         # Quantise the mixer frequency so that cycles per *output* sample are
         # represented in fixed point with 64 fractional bits.
-        # TODO: generalize (just do one for now)
         self._mix_scale = np.array(
             [round(mix_frequency * self.template.subsampling * 2**64) % 2**64 for mix_frequency in mix_frequencies],
             dtype=np.uint64,
         )
-        #self._mix_scale_buf.set(self.command_queue, self._mix_scale)
+        
         # Here we're quantising the mixer frequency to float (double
         # precision). Since len(weights) should be small (hundreds or maybe
         # thousands) and _weights is only single-precision, there should be no
