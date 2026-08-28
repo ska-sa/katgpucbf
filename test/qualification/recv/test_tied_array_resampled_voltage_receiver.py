@@ -28,6 +28,7 @@ import numpy as np
 import pytest
 from aiokatcp.sensor import Sensor, SensorSet
 from baseband.vdif import VDIFFrame as BasebandVDIFFrame
+from pytest_mock import MockerFixture
 
 from qualification.cbf import CBFRemoteControl
 from qualification.recv import TiedArrayResampledVoltageReceiver, VDIFFrame, VDIFTimestamp
@@ -147,17 +148,17 @@ def mock_cbf() -> CBFRemoteControl:
 
 
 @pytest.fixture
-async def mock_socket() -> AsyncGenerator[socket.socket, None]:
+async def mock_socket(mocker: MockerFixture) -> AsyncGenerator[socket.socket, None]:
     """A fixture that creates a mock socket.socket to inject packets into the receiver."""
-    sock = mock.AsyncMock(spec=socket.socket)
-    with mock.patch("socket.socket", return_value=sock):
-        yield sock
+    sock = mock.Mock(spec=socket.socket)
+    mocker.patch("socket.socket", return_value=sock)
+    return sock
 
 
 async def test_receive_samples_per_frame_from_first_frame(
     mock_cbf: CBFRemoteControl, mock_socket: socket.socket
 ) -> None:
-    """First frame sets samples_per_frame on the buffer."""
+    """First frame_set sets buffer."""
     receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     vdif_frame = make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0)
     mock_socket.recv.return_value = vdif_frame  # type: ignore[attr-defined]
@@ -195,7 +196,12 @@ async def test_receive_framesets_filters_incomplete_threads(
 
 
 async def test_receive_framesets_filters_untill_delay(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
-    """Framesets are filtered until the delay is reached."""
+    """
+    Framesets are filtered until the delay is reached.
+
+    When no min_timestamp is provided, the delay used is provided by the CBF's steady_state_timestamp method.
+    """
+    # delay time is relative to sync time, so set a known sync time to be relative to the first frame.
     mock_cbf.init_sensors.add(
         Sensor(
             float,
@@ -205,22 +211,24 @@ async def test_receive_framesets_filters_untill_delay(mock_cbf: CBFRemoteControl
             default=VDIFTimestamp(0, 0, 0).timestamp(ceil(BANDWIDTH / SAMPLES_PER_FRAME)).unix,
             initial_status=Sensor.Status.NOMINAL,
         )
-    )  # set sync time to 0 frames
-    mock_cbf.product_controller_client.sensor_value.return_value = 10.0 / (  # type: ignore[attr-defined]
-        BANDWIDTH / SAMPLES_PER_FRAME
-    )  # delay 10 frames
+    )
+    # steady state timestamp is used when no min_timestamp is provided
+    mock_cbf.steady_state_timestamp.return_value = 10.0 / (BANDWIDTH / SAMPLES_PER_FRAME)  # type: ignore[attr-defined]
     receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
-        make_vtp_packet(0, frame_nr=10, seconds=0, thread_id=0),
-        make_vtp_packet(1, frame_nr=10, seconds=0, thread_id=1),
-        make_vtp_packet(2, frame_nr=10, seconds=0, thread_id=2),
-        make_vtp_packet(3, frame_nr=10, seconds=0, thread_id=3),
+        # these frames are still before the steady state timestamp value.
+        make_vtp_packet(0, frame_nr=8, seconds=0, thread_id=0),
+        make_vtp_packet(1, frame_nr=8, seconds=0, thread_id=1),
+        make_vtp_packet(2, frame_nr=8, seconds=0, thread_id=2),
+        make_vtp_packet(3, frame_nr=8, seconds=0, thread_id=3),
+        # these frames are after the steady state timestamp value.
         make_vtp_packet(4, frame_nr=100, seconds=0, thread_id=0),
         make_vtp_packet(5, frame_nr=100, seconds=0, thread_id=1),
         make_vtp_packet(6, frame_nr=100, seconds=0, thread_id=2),
         make_vtp_packet(7, frame_nr=100, seconds=0, thread_id=3),
     ]
     frameset = await anext(receiver.complete_framesets())
+    # The first frameset is the one after the steady state timestamp value.
     assert frameset.timestamp == VDIFTimestamp(seconds=0, frame_nr=100, ref_epoch=0)
     assert len(frameset.frames) == 4
 

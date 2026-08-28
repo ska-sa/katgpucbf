@@ -77,7 +77,6 @@ test = [
 
 qualification = [
     "async-timeout",
-    "baseband",
     "docutils>=0.18",
     "matplotlib",
     "prometheus-api-client",
