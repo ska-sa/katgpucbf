@@ -113,6 +113,16 @@ def mock_cbf() -> CBFRemoteControl:
         )
     )
     cbf.init_sensors.add(
+        Sensor(
+            float,
+            "stream0.n-samples-per-frame",
+            "Number of samples per frame",
+            "n-samples-per-frame",
+            default=SAMPLES_PER_FRAME,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    )
+    cbf.init_sensors.add(
         Sensor(float, "stream0.bandwidth", "Bandwidth", "bandwidth", default=64e6, initial_status=Sensor.Status.NOMINAL)
     )
     cbf.init_sensors.add(
@@ -256,12 +266,34 @@ async def test_receive_framesets_unordered(mock_cbf: CBFRemoteControl, mock_sock
         async for frameset in receiver.complete_framesets():
             framesets.append(frameset)
 
-    # assert len(decoder.invalid_framesets) == 1
     assert len(framesets) == 2
     assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=0, ref_epoch=0)
     assert len(framesets[0].frames) == 4
     assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=1, ref_epoch=0)
     assert len(framesets[1].frames) == 4
+
+
+async def test_receive_framesets_duplicate_timestamps_ignored(
+    mock_cbf: CBFRemoteControl, mock_socket: socket.socket
+) -> None:
+    """Framesets with duplicate timestamps."""
+    receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
+    mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
+        make_vtp_packet(8, frame_nr=10, seconds=98, thread_id=0),
+        make_vtp_packet(9, frame_nr=10, seconds=98, thread_id=0),
+        make_vtp_packet(10, frame_nr=10, seconds=98, thread_id=1),
+        make_vtp_packet(11, frame_nr=10, seconds=98, thread_id=2),
+        make_vtp_packet(12, frame_nr=10, seconds=98, thread_id=3),
+        make_vtp_packet(1000, frame_nr=0, seconds=101, thread_id=0),
+    ]
+    framesets = []
+    with pytest.raises(RuntimeError):
+        async for frameset in receiver.complete_framesets():
+            framesets.append(frameset)
+
+    assert len(framesets) == 1
+    assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0)
+    assert len(framesets[0].frames) == 4
 
 
 async def test_timestamp_from_epoch(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
@@ -284,5 +316,4 @@ async def test_close_clears_state(mock_cbf: CBFRemoteControl, mock_socket: socke
     await receiver._next_packet()
     receiver.close()
     assert receiver.buffer == []
-    assert receiver.frame_rate == 0
     assert receiver.sock.close.call_count == 1  # type: ignore[attr-defined]

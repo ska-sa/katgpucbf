@@ -699,8 +699,6 @@ class VDIFFrameset:
 class TiedArrayResampledVoltageReceiver:
     """Receive tied-array-resampled-voltage streams from the V-engines."""
 
-    _max_packet_size = 16 * 1024
-
     def __init__(
         self,
         cbf: CBFRemoteControl,
@@ -711,10 +709,10 @@ class TiedArrayResampledVoltageReceiver:
         self.multicast_groups = endpoint_list_parser(DEFAULT_VTP_PORT)(
             cbf.init_sensors[f"{stream_name}.destination"].value.decode()
         )
-        self.n_chans = cbf.init_sensors[f"{stream_name}.n-chans"].value
-        self.pol_ordering = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value.decode())
+        self.n_chans: int = cbf.init_sensors[f"{stream_name}.n-chans"].value
+        self.pol_ordering: list[str] = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value.decode())
         self.n_threads = self.n_chans * len(self.pol_ordering)
-        self.veng_out_bits_per_sample = cbf.init_sensors[f"{stream_name}.veng-out-bits-per-sample"].value
+        self.veng_out_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.veng-out-bits-per-sample"].value
 
         # all multicast groups must use the same port
         port = self.multicast_groups[0].port
@@ -722,11 +720,12 @@ class TiedArrayResampledVoltageReceiver:
             if multicast_group.port != port:
                 raise ValueError("All multicast groups must use the same port")
 
-        self.scale_factor_timestamp = cbf.init_sensors[f"{stream_name}.scale-factor-timestamp"].value
-        self.power_int_time = cbf.init_sensors[f"{stream_name}.power-int-time"].value
-        self.bandwidth = cbf.init_sensors[f"{stream_name}.bandwidth"].value
-        n_samples_per_frame = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
+        self.scale_factor_timestamp: float = cbf.init_sensors[f"{stream_name}.scale-factor-timestamp"].value
+        self.power_int_time: float = cbf.init_sensors[f"{stream_name}.power-int-time"].value
+        self.bandwidth: float = cbf.init_sensors[f"{stream_name}.bandwidth"].value
+        n_samples_per_frame: float = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
         self.frame_rate = round(self.bandwidth / n_samples_per_frame)
+        self._packet_size = math.ceil(n_samples_per_frame * self.veng_out_bits_per_sample + 32) // 8
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -748,7 +747,7 @@ class TiedArrayResampledVoltageReceiver:
         # sock_recv will work synchronously if it can, but that can prevent the
         # event loop from ever getting a chance to run. sleep(0) allows this.
         await asyncio.sleep(0)
-        packet = await asyncio.get_event_loop().sock_recv(self.sock, self._max_packet_size)
+        packet = await asyncio.get_event_loop().sock_recv(self.sock, self._packet_size)
         # Using baseband to parse the header is expensive. We extract
         # words from the header then slice out the fields we want.
         (seq_id, seconds, ref_epoch_frame_nr, length, sample_bits_thread_id) = struct.unpack("<QIIIxxH", packet[:24])

@@ -27,7 +27,7 @@ from ..recv import TiedArrayResampledVoltageReceiver
 @pytest.mark.name("VLBI VDIF output")
 async def test_vlbi_vdif(
     pdf_report: Reporter,
-    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver | None,
+    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
 ) -> None:
     """Test VDIF frame output.
 
