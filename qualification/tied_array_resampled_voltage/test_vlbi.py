@@ -131,19 +131,17 @@ async def test_mean_power(
 
     sample_rate = 5  # TODO: NGC-2099 These are arbitrary values to get data for plotting mean power values.
     samples = int(1e3 * sample_rate)
-    mean_power_sensor_readings = np.zeros(shape=(2, len(sensor_names), samples), dtype=np.float64)
+    mean_power_sensor_readings = np.zeros(shape=(len(sensor_names), samples, 2), dtype=np.float64)
 
     async def wait_mean_power_steady_state(j: int) -> bool:
-        measurements = np.zeros((len(sensor_names), 2))
         for i, name in enumerate(sensor_names):
             reading = sensor_watcher.sensors[name].reading
-            mean_power_sensor_readings[0, i, j] = reading.timestamp
-            mean_power_sensor_readings[1, i, j] = reading.value
-            measurements[i] = (reading.value, reading.timestamp)
+            mean_power_sensor_readings[i, j, 0] = reading.timestamp
+            mean_power_sensor_readings[i, j, 1] = reading.value
 
         return bool(
-            np.all(measurements[:, 1] >= min_sensor_time)
-            and np.all(measurements[:, 0] == pytest.approx(tacv_power, rel=5e-3))
+            np.all(mean_power_sensor_readings[:, j, 0] >= min_sensor_time)
+            and np.all(mean_power_sensor_readings[:, j, 1] == pytest.approx(tacv_power, rel=5e-3))
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
@@ -154,10 +152,10 @@ async def test_mean_power(
 
     pdf_report.detail(
         f"Mean power sensor readings from {np.min(mean_power_sensor_readings[0, :, 0])}"
-        f" to {np.max(mean_power_sensor_readings[0, :, last_sample])}"
+        f" to {np.max(mean_power_sensor_readings[:, last_sample, 0])}"
         f" in {last_sample} steps."
     )
-    mean_power_sensor_readings[0] = mean_power_sensor_readings[0] - mean_power_sensor_readings[0, :, :1]
+    mean_power_sensor_readings[:, :, 0] = mean_power_sensor_readings[:, :, 0] - mean_power_sensor_readings[:, :1, 0]
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
@@ -168,8 +166,8 @@ async def test_mean_power(
         plot_focus(
             ax,
             slice(0, last_sample),
-            mean_power_sensor_readings[0, i, :last_sample],
-            mean_power_sensor_readings[1, i, :last_sample],
+            mean_power_sensor_readings[i, :last_sample, 0],
+            mean_power_sensor_readings[i, :last_sample, 1],
             label=name,
         )
     ax.legend()
