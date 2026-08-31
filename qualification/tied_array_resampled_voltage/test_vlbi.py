@@ -19,7 +19,7 @@
 import asyncio
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiokatcp
 import numpy as np
@@ -168,8 +168,8 @@ async def test_mean_power(
         assert tacv_power > 0.0
 
     pdf_report.detail(
-        f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_readings[0, :, 0]))}"
-        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, last_sample, 0]))}"
+        f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_readings[:, 0, 0]), UTC)}"
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, last_sample - 1, 0]), UTC)}"
         f" in {last_sample} steps."
     )
     mean_power_sensor_readings[:, :, 0] = mean_power_sensor_readings[:, :, 0] - mean_power_sensor_readings[:, :1, 0]
@@ -182,9 +182,9 @@ async def test_mean_power(
     for i, name in enumerate(sensor_names):
         plot_focus(
             ax,
-            slice(0, last_sample),
-            mean_power_sensor_readings[i, :last_sample, 0],
-            mean_power_sensor_readings[i, :last_sample, 1],
+            slice(0, last_sample - 1),
+            mean_power_sensor_readings[i, : last_sample - 1, 0],
+            mean_power_sensor_readings[i, : last_sample - 1, 1],
             label=name,
         )
     ax.legend()
