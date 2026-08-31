@@ -19,6 +19,7 @@
 import asyncio
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from datetime import datetime
 
 import aiokatcp
 import numpy as np
@@ -55,9 +56,24 @@ async def sensor_watcher(cbf: CBFRemoteControl) -> AsyncGenerator[aiokatcp.Senso
 async def max_retry_test(
     test_procedure: Callable[[int], Awaitable[bool]], max_retries: int, retry_interval: float
 ) -> tuple[bool, int]:
-    """Test a subroutine with a maximum number of retries and a retry interval."""
-    sleep_period = retry_interval
-    for attempt_nr in range(max_retries):
+    """
+    Test a subroutine with a maximum number of retries and a retry interval.
+
+    Parameters
+    ----------
+        test_procedure
+            A subroutine that takes an integer indicating the attempt number (starting from 1)
+            and returns a boolean `True` if the test passed.
+        max_retries
+            The maximum number of retries.
+        retry_interval
+           The retry interval in seconds.
+
+    Returns
+    -------
+         A tuple containing a boolean indicating whether the test passed and the number of attempts.
+    """
+    for attempt_nr in range(1, max_retries + 1):
         start_time = time.time()
         if await test_procedure(attempt_nr):
             return True, attempt_nr
@@ -134,14 +150,15 @@ async def test_mean_power(
     mean_power_sensor_readings = np.zeros(shape=(len(sensor_names), samples, 2), dtype=np.float64)
 
     async def wait_mean_power_steady_state(j: int) -> bool:
+        sample_index = j - 1
         for i, name in enumerate(sensor_names):
             reading = sensor_watcher.sensors[name].reading
-            mean_power_sensor_readings[i, j, 0] = reading.timestamp
-            mean_power_sensor_readings[i, j, 1] = reading.value
+            mean_power_sensor_readings[i, sample_index, 0] = reading.timestamp
+            mean_power_sensor_readings[i, sample_index, 1] = reading.value
 
         return bool(
-            np.all(mean_power_sensor_readings[:, j, 0] >= min_sensor_time)
-            and np.all(mean_power_sensor_readings[:, j, 1] == pytest.approx(tacv_power, rel=5e-3))
+            np.all(mean_power_sensor_readings[:, sample_index, 0] >= min_sensor_time)
+            and np.all(mean_power_sensor_readings[:, sample_index, 1] == pytest.approx(tacv_power, rel=5e-3))
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
@@ -151,16 +168,16 @@ async def test_mean_power(
         assert tacv_power > 0.0
 
     pdf_report.detail(
-        f"Mean power sensor readings from {np.min(mean_power_sensor_readings[0, :, 0])}"
-        f" to {np.max(mean_power_sensor_readings[:, last_sample, 0])}"
+        f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_readings[0, :, 0]))}"
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, last_sample, 0]))}"
         f" in {last_sample} steps."
     )
     mean_power_sensor_readings[:, :, 0] = mean_power_sensor_readings[:, :, 0] - mean_power_sensor_readings[:, :1, 0]
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
-    ax.set_xlabel("Timestamp")
-    ax.set_ylabel("Mean Power")
+    ax.set_xlabel("Timestamp (s)")
+    ax.set_ylabel("Mean Power (dBmV)")
     ax.set_title("Mean Power Sensor Values")
     for i, name in enumerate(sensor_names):
         plot_focus(
