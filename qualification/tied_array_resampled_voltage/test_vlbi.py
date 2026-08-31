@@ -162,15 +162,15 @@ async def test_mean_power(
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
-    test_passed, last_sample = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
+    test_passed, total_retries = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
     with check:
         assert test_passed, f"Power does not agree to within 0.5% after {samples} retries."
         assert tacv_power > 0.0
 
     pdf_report.detail(
         f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_readings[:, 0, 0]), UTC)}"
-        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, last_sample - 1, 0]), UTC)}"
-        f" in {last_sample} steps."
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, total_retries - 1, 0]), UTC)}"
+        f" in {total_retries} steps."
     )
     mean_power_sensor_readings[:, :, 0] = mean_power_sensor_readings[:, :, 0] - mean_power_sensor_readings[:, :1, 0]
 
@@ -182,9 +182,9 @@ async def test_mean_power(
     for i, name in enumerate(sensor_names):
         plot_focus(
             ax,
-            slice(0, last_sample - 1),
-            mean_power_sensor_readings[i, : last_sample - 1, 0],
-            mean_power_sensor_readings[i, : last_sample - 1, 1],
+            slice(0, total_retries - 1),
+            mean_power_sensor_readings[i, : total_retries - 1, 0],
+            mean_power_sensor_readings[i, : total_retries - 1, 1],
             label=name,
         )
     ax.legend()
