@@ -169,7 +169,7 @@ async def test_mean_power(
 
     pdf_report.detail(
         f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_readings[:, 0, 0]), UTC)}"
-        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, total_retries - 1, 0]), UTC)}"
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, total_retries, 0]), UTC)}"
         f" in {total_retries} steps."
     )
     mean_power_sensor_readings[:, :, 0] = mean_power_sensor_readings[:, :, 0] - mean_power_sensor_readings[:, :1, 0]
@@ -182,9 +182,9 @@ async def test_mean_power(
     for i, name in enumerate(sensor_names):
         plot_focus(
             ax,
-            slice(0, total_retries - 1),
-            mean_power_sensor_readings[i, : total_retries - 1, 0],
-            mean_power_sensor_readings[i, : total_retries - 1, 1],
+            slice(0, total_retries),
+            mean_power_sensor_readings[i, :total_retries, 0],
+            mean_power_sensor_readings[i, :total_retries, 1],
             label=name,
         )
     ax.legend()
