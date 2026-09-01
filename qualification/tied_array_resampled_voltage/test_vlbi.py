@@ -73,13 +73,13 @@ async def max_retry_test(
     -------
          A tuple containing a boolean indicating whether the test passed and the number of attempts.
     """
-    for attempt_nr in range(1, max_retries + 1):
+    for attempt_num in range(max_retries):
         start_time = time.time()
-        if await test_procedure(attempt_nr):
-            return True, attempt_nr
+        if await test_procedure(attempt_num):
+            return True, attempt_num
         sleep_period = retry_interval - (time.time() - start_time)
         await asyncio.sleep(sleep_period)
-    return False, attempt_nr
+    return False, attempt_num
 
 
 @pytest.mark.name("VLBI mean power")
@@ -150,15 +150,14 @@ async def test_mean_power(
     mean_power_sensor_readings = np.zeros(shape=(len(sensor_names), samples, 2), dtype=np.float64)
 
     async def wait_mean_power_steady_state(j: int) -> bool:
-        sample_index = j - 1
         for i, name in enumerate(sensor_names):
             reading = sensor_watcher.sensors[name].reading
-            mean_power_sensor_readings[i, sample_index, 0] = reading.timestamp
-            mean_power_sensor_readings[i, sample_index, 1] = reading.value
+            mean_power_sensor_readings[i, j, 0] = reading.timestamp
+            mean_power_sensor_readings[i, j, 1] = reading.value
 
         return bool(
-            np.all(mean_power_sensor_readings[:, sample_index, 0] >= min_sensor_time)
-            and np.all(mean_power_sensor_readings[:, sample_index, 1] == pytest.approx(tacv_power, rel=5e-3))
+            np.all(mean_power_sensor_readings[:, j, 0] >= min_sensor_time)
+            and np.all(mean_power_sensor_readings[:, j, 1] == pytest.approx(tacv_power, rel=5e-3))
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
@@ -169,8 +168,8 @@ async def test_mean_power(
 
     pdf_report.detail(
         f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_readings[:, 0, 0]), UTC)}"
-        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, total_retries - 1, 0]), UTC)}"
-        f" in {total_retries} steps."
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, total_retries, 0]), UTC)}"
+        f" in {total_retries + 1} steps."
     )
     mean_power_sensor_readings[:, :, 0] = mean_power_sensor_readings[:, :, 0] - mean_power_sensor_readings[:, :1, 0]
 
@@ -182,9 +181,9 @@ async def test_mean_power(
     for i, name in enumerate(sensor_names):
         plot_focus(
             ax,
-            slice(0, total_retries),
-            mean_power_sensor_readings[i, :total_retries, 0],
-            mean_power_sensor_readings[i, :total_retries, 1],
+            slice(0, total_retries + 1),
+            mean_power_sensor_readings[i, : total_retries + 1, 0],
+            mean_power_sensor_readings[i, : total_retries + 1, 1],
             label=name,
         )
     ax.legend()
