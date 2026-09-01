@@ -87,6 +87,7 @@ class RecvStream:
         # leap-seconds. TAI is the scale for differences between UTC timestamps.
         self.time_base += TimeDelta(delay, scale="tai", format="sec")
         self.time_scale = Fraction(self._samples_between_spectra) / Fraction(time_converter.adc_sample_rate)
+        self.lost_count = 0
 
     async def __aiter__(self) -> AsyncIterator[xr.DataArray]:
         last_chunk_id: int | None = None
@@ -123,6 +124,16 @@ class RecvStream:
                 while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
                     last_chunk_id += 1
                     zero_arr = xr.zeros_like(arr)
+                    self.lost_count += 1
+                    if self.lost_count % 100 == 0:
+                        logger.warning(f"Lost {self.lost_count} chunks")
+                        logger.warning(f"Last chunk ID: {last_chunk_id}")
+                        logger.warning(f"Chunk ID: {chunk.chunk_id}")
+                        logger.warning(f"Samples between spectra: {self._samples_between_spectra}")
+                        logger.warning(f"Samples per chunk: {self._layout.chunk_timestamp_step}")
+                        logger.warning(f"Chunk timestamp step: {self._layout.chunk_timestamp_step}")
+                        logger.warning(f"Chunk timestamp: {chunk.timestamp}")
+                        logger.warning(f"Chunk timestamp step: {self._layout.chunk_timestamp_step}")
                     timestamp = last_chunk_id * self._layout.chunk_timestamp_step
                     zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
                     yield zero_arr
