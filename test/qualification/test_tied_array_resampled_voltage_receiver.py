@@ -304,14 +304,24 @@ async def test_receive_framesets_duplicate_timestamps_ignored(
     assert len(framesets[0].frames) == 4
 
 
-async def test_timestamp_from_epoch(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
+async def test_timestamp_leap_seconds(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
     """Timestamp is calculated correctly from the epoch."""
     receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1")
     mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
-        make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0, ref_epoch=2)
+        make_vtp_packet(0, frame_nr=1, seconds=15897600, thread_id=0, ref_epoch=33),
+        make_vtp_packet(1, frame_nr=1, seconds=15897700, thread_id=1, ref_epoch=33),
+        make_vtp_packet(2, frame_nr=1, seconds=100, thread_id=2, ref_epoch=34),
     ]
     await receiver._next_packet()
-    assert receiver.buffer[0].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(978307300.000125)
+    await receiver._next_packet()
+    await receiver._next_packet()
+    ref_time = receiver.buffer[2].timestamp.timestamp(receiver.frame_rate).unix
+    assert ref_time - receiver.buffer[1].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(1), (
+        "should have a leap second difference"
+    )
+    assert ref_time - receiver.buffer[0].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(101), (
+        "should have a difference of 101 seconds"
+    )
 
 
 async def test_close_clears_state(mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
