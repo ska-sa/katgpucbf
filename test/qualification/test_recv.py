@@ -19,7 +19,6 @@
 import io
 import socket
 import struct
-from math import ceil
 from unittest import mock
 
 import aiokatcp
@@ -33,6 +32,7 @@ from qualification.recv import TiedArrayResampledVoltageReceiver, VDIFFrame, VDI
 
 SAMPLES_PER_FRAME = 8000
 BANDWIDTH = 64e6
+FRAME_RATE = round(BANDWIDTH / SAMPLES_PER_FRAME)
 
 
 def make_vtp_packet(
@@ -73,11 +73,11 @@ def mock_cbf() -> CBFRemoteControl:
     )
     cbf.init_sensors.add(
         Sensor(
-            bytes,
+            str,
             "stream0.pol-ordering",
             "Polarisation ordering",
-            "json string",
-            default=b'["V", "H"]',
+            "",
+            default="""["V", "H"]""",
             initial_status=Sensor.Status.NOMINAL,
         )
     )
@@ -86,7 +86,7 @@ def mock_cbf() -> CBFRemoteControl:
             int,
             "stream0.veng-out-bits-per-sample",
             "Bits per sample",
-            "bits",
+            "",
             default=2,
             initial_status=Sensor.Status.NOMINAL,
         )
@@ -96,7 +96,7 @@ def mock_cbf() -> CBFRemoteControl:
             float,
             "stream0.scale-factor-timestamp",
             "Scale factor timestamp",
-            "scale-factor-timestamp",
+            "Hz",
             default=1.0,
             initial_status=Sensor.Status.NOMINAL,
         )
@@ -106,7 +106,7 @@ def mock_cbf() -> CBFRemoteControl:
             float,
             "stream0.power-int-time",
             "Power integration time",
-            "power-int-time",
+            "s",
             default=1.0,
             initial_status=Sensor.Status.NOMINAL,
         )
@@ -116,29 +116,71 @@ def mock_cbf() -> CBFRemoteControl:
             float,
             "stream0.n-samples-per-frame",
             "Number of samples per frame",
-            "n-samples-per-frame",
+            "",
             default=SAMPLES_PER_FRAME,
             initial_status=Sensor.Status.NOMINAL,
         )
     )
     cbf.init_sensors.add(
-        Sensor(float, "stream0.bandwidth", "Bandwidth", "bandwidth", default=64e6, initial_status=Sensor.Status.NOMINAL)
+        Sensor(float, "stream0.bandwidth", "Bandwidth", "", default=64e6, initial_status=Sensor.Status.NOMINAL)
     )
     cbf.init_sensors.add(
-        Sensor(
-            float, "stream0.sync-time", "Sync time", "sync-time", default=100.0, initial_status=Sensor.Status.NOMINAL
-        )
+        Sensor(float, "stream0.sync-time", "Sync time", "", default=100.0, initial_status=Sensor.Status.NOMINAL)
     )
     cbf.init_sensors.add(
         Sensor(
             bytes,
             "stream0.destination",
             "Destination",
-            "ip address",
+            "",
             default=b"127.0.0.1",
             initial_status=Sensor.Status.NOMINAL,
         )
     )
+    cbf.init_sensors.add(
+        Sensor(
+            int,
+            "stream0.fir-taps",
+            "Number of taps in the rational downconversion filter",
+            "",
+            default=7201,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    )
+    cbf.init_sensors.add(
+        Sensor(
+            int,
+            "stream0.sideband-taps",
+            "Number of taps in the filter used to split into side-bands",
+            "",
+            default=201,
+            initial_status=Sensor.Status.NOMINAL,
+        )
+    )
+    src_streams = ["tied-array-channelised-voltage-0x", "tied-array-channelised-voltage-0y"]
+    for src_stream in src_streams:
+        cbf.init_sensors.add(
+            Sensor(
+                float,
+                f"{src_stream}.bandwidth",
+                "Bandwidth",
+                "Hz",
+                default=107e6,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+        cbf.init_sensors.add(
+            Sensor(
+                int,
+                f"{src_stream}.n-chans",
+                "Number of channels",
+                "",
+                default=32768,
+                initial_status=Sensor.Status.NOMINAL,
+            )
+        )
+    # This is a skeleton with just the items needed to make the test work.
+    cbf.config = {"outputs": {"stream0": {"src_streams": src_streams}}}
     cbf.product_controller_client = mock.Mock(spec=aiokatcp.Client)
     cbf.product_controller_client.sensor_value = mock.AsyncMock(return_value=0.0)
     cbf.steady_state_timestamp = mock.AsyncMock(return_value=0)
@@ -163,12 +205,12 @@ class TestTiedArrayResampledVoltageReceiver:
         vdif_frame = make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0)
         mock_socket.recv.return_value = vdif_frame  # type: ignore[attr-defined]
         await receiver._next_packet()
-        assert receiver.frame_rate == BANDWIDTH / SAMPLES_PER_FRAME
+        assert receiver.frame_rate == FRAME_RATE
         assert receiver.buffer == [
             VDIFFrame(
                 seq_id=0,
                 thread_id=0,
-                timestamp=VDIFTimestamp(seconds=100, frame_nr=1, ref_epoch=0),
+                timestamp=VDIFTimestamp(seconds=100, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE),
                 raw_frame=vdif_frame[8:],
             )
         ]  # raw frame excludes the vdif header
@@ -208,12 +250,12 @@ class TestTiedArrayResampledVoltageReceiver:
                 "stream0.sync-time",
                 "Sync time",
                 "sync-time",
-                default=VDIFTimestamp(0, 0, 0).timestamp(ceil(BANDWIDTH / SAMPLES_PER_FRAME)).unix,
+                default=VDIFTimestamp(0, 0, 0, frame_rate=FRAME_RATE).timestamp.unix,
                 initial_status=Sensor.Status.NOMINAL,
             )
         )
         # steady state timestamp is used when no min_timestamp is provided
-        mock_cbf.steady_state_timestamp.return_value = 10.0 / (BANDWIDTH / SAMPLES_PER_FRAME)  # type: ignore[attr-defined]
+        mock_cbf.steady_state_timestamp.return_value = 10.0 / FRAME_RATE  # type: ignore[attr-defined]
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
             # these frames are still before the steady state timestamp value.
@@ -229,7 +271,7 @@ class TestTiedArrayResampledVoltageReceiver:
         ]
         frameset = await anext(receiver.complete_framesets())
         # The first frameset is the one after the steady state timestamp value.
-        assert frameset.timestamp == VDIFTimestamp(seconds=0, frame_nr=100, ref_epoch=0)
+        assert frameset.timestamp == VDIFTimestamp(seconds=0, frame_nr=100, ref_epoch=0, frame_rate=receiver.frame_rate)
         assert len(frameset.frames) == 4
 
     async def test_receive_framesets_filters_duplicate_seq_ids(
@@ -273,18 +315,18 @@ class TestTiedArrayResampledVoltageReceiver:
                 framesets.append(frameset)
 
         assert len(framesets) == 2
-        assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=0, ref_epoch=0)
+        assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=0, ref_epoch=0, frame_rate=FRAME_RATE)
         assert len(framesets[0].frames) == 4
-        assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=1, ref_epoch=0)
+        assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE)
         assert len(framesets[1].frames) == 4
 
-    async def test_receive_duplicate_packets_ignored(
+    async def test_receive_framesets_duplicate_timestamps_within_frameset_ignored(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
     ) -> None:
         """Duplicate packets are ignored."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
-            make_vtp_packet(8, frame_nr=10, seconds=98, thread_id=0),
+            make_vtp_packet(7, frame_nr=10, seconds=98, thread_id=0),
             make_vtp_packet(8, frame_nr=10, seconds=98, thread_id=0),
             make_vtp_packet(9, frame_nr=10, seconds=98, thread_id=1),
             make_vtp_packet(10, frame_nr=10, seconds=98, thread_id=2),
@@ -297,7 +339,7 @@ class TestTiedArrayResampledVoltageReceiver:
                 framesets.append(frameset)
 
         assert len(framesets) == 1
-        assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0)
+        assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0, frame_rate=FRAME_RATE)
         assert len(framesets[0].frames) == 4
 
     async def test_receive_framesets_allows_duplicate_timestamps(
@@ -322,9 +364,9 @@ class TestTiedArrayResampledVoltageReceiver:
                 framesets.append(frameset)
 
         assert len(framesets) == 2
-        assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0)
+        assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0, frame_rate=FRAME_RATE)
         assert len(framesets[0].frames) == 4
-        assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0)
+        assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0, frame_rate=FRAME_RATE)
         assert len(framesets[1].frames) == 4
 
     async def test_timestamp_leap_seconds(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
@@ -344,11 +386,11 @@ class TestTiedArrayResampledVoltageReceiver:
         await receiver._next_packet()
         await receiver._next_packet()
         await receiver._next_packet()
-        ref_time = receiver.buffer[2].timestamp.timestamp(receiver.frame_rate).unix
-        assert ref_time - receiver.buffer[1].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(1), (
+        ref_time = receiver.buffer[2].timestamp.timestamp.unix
+        assert ref_time - receiver.buffer[1].timestamp.timestamp.unix == pytest.approx(1), (
             "should have a leap second difference between 2017-01-01 00:01:40 and 2017-01-01 00:01:39"
         )
-        assert ref_time - receiver.buffer[0].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(101), (
+        assert ref_time - receiver.buffer[0].timestamp.timestamp.unix == pytest.approx(101), (
             "should have a difference of 101 seconds between 2016-12-31 23:59:60 and 2017-01-01 00:01:40"
         )
 

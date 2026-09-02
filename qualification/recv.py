@@ -28,6 +28,7 @@ import socket
 import struct
 from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numba
@@ -659,19 +660,22 @@ class VDIFTimestamp:
     seconds: int
     frame_nr: int
     ref_epoch: int
+    frame_rate: int
 
-    def timestamp(self, frame_rate: int) -> Time:
+    @property
+    def timestamp(self) -> Time:
         """Timestamp of the VDIF frameset."""
         # ref_epoch is the number of half-years since 2000-01-01.
         ref_time = Time(
             dict(year=2000 + self.ref_epoch // 2, month=self.ref_epoch % 2 * 6 + 1), format="ymdhms", scale="utc"
         )
-        seconds = self.seconds + self.frame_nr / frame_rate
+        seconds = self.seconds + self.frame_nr / self.frame_rate
         return ref_time + TimeDelta(seconds, format="sec", scale="tai")
 
-    def linear(self, frame_rate: int) -> int:
+    @property
+    def linear(self) -> int:
         """Linear frame number counting from the ref epoch."""
-        return self.seconds * frame_rate + self.frame_nr
+        return self.seconds * self.frame_rate + self.frame_nr
 
 
 @dataclass(frozen=True, slots=True)
@@ -711,7 +715,7 @@ class TiedArrayResampledVoltageReceiver:
             cbf.init_sensors[f"{stream_name}.destination"].value.decode()
         )
         self.n_chans: int = cbf.init_sensors[f"{stream_name}.n-chans"].value
-        self.pol_ordering: list[str] = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value.decode())
+        self.pol_ordering: list[str] = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value)
         self.n_threads = self.n_chans * len(self.pol_ordering)
         self.veng_out_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.veng-out-bits-per-sample"].value
 
@@ -729,6 +733,28 @@ class TiedArrayResampledVoltageReceiver:
         self._packet_size = math.ceil(self.n_samples_per_frame * self.veng_out_bits_per_sample) // 8 + 32
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
         self.samples_per_frame_bytes = math.ceil(self.n_samples_per_frame * self.veng_out_bits_per_sample) // 8
+        # The V-engine applies DSP filters, and unlike the F-engine, the
+        # timestamp used for the output corresponds to the centre input sample.
+        # That means that to ensure a frame contains only samples after a
+        # certain input timestamp, we need to add half the filter length to
+        # the target output timestamp.
+        fir_taps: int = cbf.init_sensors[f"{stream_name}.fir-taps"].value
+        sideband_taps: int = cbf.init_sensors[f"{stream_name}.sideband-taps"].value
+        src_streams: list[str] = cbf.config["outputs"][stream_name]["src_streams"]
+        src_bandwidth: float = cbf.init_sensors[f"{src_streams[0]}.bandwidth"].value
+        src_channels: int = cbf.init_sensors[f"{src_streams[0]}.n-chans"].value
+        bandwidth_ratio = Fraction(src_bandwidth) / Fraction(self.bandwidth)
+        # The inverse FFT takes an input spectrum with timestamp t and
+        # generates time-domain samples with timestamps t, t+1, t+2, ... so we
+        # need to include the length of one spectrum, which is just the inverse
+        # of the channel bandwidth (src_channels - 1 might be sufficient, but
+        # it's safe to be conservative).
+        filter_shift = src_channels / src_bandwidth
+        # fir_taps is for scipy.signal.upfirdn, and the units are in samples of
+        # the upsampled signal.
+        filter_shift += fir_taps / 2 / bandwidth_ratio.denominator / src_bandwidth
+        filter_shift += sideband_taps / 2 / self.bandwidth
+        self.filter_shift = TimeDelta(filter_shift, format="sec", scale="tai")
 
         if sock is None:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -764,7 +790,7 @@ class TiedArrayResampledVoltageReceiver:
             is_complex = sample_bits_thread_id >> 15
             assert not is_complex
 
-        timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch)
+        timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch, frame_rate=self.frame_rate)
         frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=packet[8:])
         assert length == self.samples_per_frame_bytes
         if seq_id >= self.min_seq_id:
@@ -779,11 +805,11 @@ class TiedArrayResampledVoltageReceiver:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
         # TODO: log or record invalid frames
 
-    def _calc_min_frame(self, min_time: Time, ref_epoch: int, frame_rate: int) -> int:
+    def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
         """Compute the minimum linearised frame number that is at least `min_time`."""
-        ref_time = VDIFTimestamp(0, 0, ref_epoch).timestamp(frame_rate)
+        ref_time = VDIFTimestamp(0, 0, ref_epoch, frame_rate=self.frame_rate).timestamp
         to_wait_sec = (min_time - ref_time).sec
-        return math.ceil(to_wait_sec * frame_rate)
+        return math.ceil(to_wait_sec * self.frame_rate)
 
     async def complete_framesets(
         self,
@@ -819,11 +845,7 @@ class TiedArrayResampledVoltageReceiver:
         )
 
         vlbi_delay = await self.cbf.product_controller_client.sensor_value(f"{self.stream_name}.delay", float)
-        # TODO: The V-engine has filters which take input data from either side
-        # of the nominal output timestamp. We need to establish an upper bound
-        # on how far back in time they reach, probably based on sensors.
-        vlbi_delay += 1e-3
-        min_time += TimeDelta(vlbi_delay, format="sec", scale="tai")
+        min_time += TimeDelta(vlbi_delay, format="sec", scale="tai") + self.filter_shift
 
         # Computing timestamps is expensive. So once we know the frame rate and
         # ref epoch, we can convert it into a minimum linearised frame number.
@@ -836,7 +858,7 @@ class TiedArrayResampledVoltageReceiver:
                     if self.buffer:
                         frame0 = self.buffer[0]
                         if min_frame is None:
-                            min_frame = self._calc_min_frame(min_time, frame0.timestamp.ref_epoch, self.frame_rate)
+                            min_frame = self._calc_min_frame(min_time, frame0.timestamp.ref_epoch)
                         if frame0.seq_id <= self.min_seq_id and len(self.buffer) >= self.n_threads:
                             prefix = self.buffer[: self.n_threads]
                             if all(
@@ -846,7 +868,7 @@ class TiedArrayResampledVoltageReceiver:
                                 # Make sure we don't re-accept these packets
                                 self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
                                 prefix.sort(key=lambda frame: frame.thread_id)
-                                frame0_nr = frame0.timestamp.linear(self.frame_rate)
+                                frame0_nr = frame0.timestamp.linear
                                 if frame0_nr >= min_frame:
                                     logger.debug("Yielding frame %d", frame0_nr)
                                     yield VDIFFrameset(prefix)
