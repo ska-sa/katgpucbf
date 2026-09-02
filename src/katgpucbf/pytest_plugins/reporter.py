@@ -198,6 +198,18 @@ class Reporter:
             value["data"] = data
         self._cur_step.append(value)
 
+    def spead2_statistics(self, name: str, stats: dict[str, int]) -> None:
+        """Add record of statistics from spead2's receive system.
+
+        Parameters
+        ----------
+        name
+            The receiver for which statistics are being reported.
+        stats
+            Statistics returned by :func:`qualification.recv.diff_stats`.
+        """
+        self._data.append({"$msg_type": "spead2_statistics", "name": name, "stats": stats})
+
 
 def custom_report_log(pytestconfig: pytest.Config, data) -> None:
     """Log a custom JSON line in the report log."""

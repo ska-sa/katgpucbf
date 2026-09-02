@@ -20,6 +20,7 @@ import asyncio
 import math
 from ast import literal_eval
 from collections.abc import Callable
+from contextlib import aclosing
 
 import numpy as np
 import pytest
@@ -78,17 +79,10 @@ async def test_delay_application_time(
         target_ts = round(receiver.time_converter.unix_to_adc(target))
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
         acc = None
-        async for timestamp, chunk in receiver.complete_chunks(min_timestamp=target_acc_ts, time_limit=10.0):
-            with chunk:
-                pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
-                total = np.sum(chunk.data[:, bl_idx, :], axis=0)  # Sum over channels
-                if timestamp == target_acc_ts:
-                    acc = total
-                if timestamp >= target_acc_ts:
-                    break
-        else:
-            pdf_report.detail("Did not reach the target timestamp within 10s.")
-        if acc is not None:
+        timestamp, data = await receiver.next_complete_chunk(min_timestamp=target_acc_ts, timeout=10.0)
+        pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
+        if timestamp == target_acc_ts:
+            acc = np.sum(data[:, bl_idx, :], axis=0)  # Sum over channels
             break
 
         pdf_report.detail("Did not receive all the expected chunks; reset delay and try again.")
@@ -706,6 +700,39 @@ async def test_group_delay(
     await pcc.request("delays", "antenna-channelised-voltage", receiver.sync_time, *delay_models)
     pdf_report.detail(f"Set delays to {delay_model} for all inputs.")
 
+    def compute_delay(
+        rel_freqs: tuple[float, float], first_timestamp: int, raw_data: np.ndarray
+    ) -> tuple[float, float, float]:
+        """Process the data collected by :func:`measure_once` to get the result.
+
+        This is split into a helper function so that it can be dispatched to
+        a worker thread to avoid blocking the event loop.
+        """
+        # Convert Gaussian integers to complex128
+        data = raw_data.astype(np.float64).view(np.complex128)[..., 0]
+        phase = np.angle(data[1] * data[0].conj())  # Takes the difference between phases
+        del data  # Free up some memory
+        # Pick a reference timestamp at which we know the dsim will be outputting
+        # both signals with phase 0.
+        ref_timestamp = first_timestamp // dsim_period * dsim_period
+        # Phase-rotate everything to be referenced to ref_timestamp
+        rel_timestamps = np.arange(n_spectra) * receiver.n_samples_between_spectra + (first_timestamp - ref_timestamp)
+        rel_times = rel_timestamps / receiver.scale_factor_timestamp
+        delta = rel_freqs[1] - rel_freqs[0]
+        phase -= 2 * np.pi * delta * rel_times[np.newaxis, :]
+        # The phases should all be similar, but we need to avoid steps of 2pi.
+        # np.unwrap is problematic since it accumulates rounding errors. The
+        # following is good enough as long as all phases are within pi of each
+        # other.
+        phase = wrap_angle(phase - phase[0, 0]) + phase[0, 0]
+        mean_phase = wrap_angle(np.mean(phase))
+        std_phase = np.std(phase) / np.sqrt(phase.size - 1)
+        scale = receiver.scale_factor_timestamp / (2 * np.pi * delta)
+        delay = -mean_phase * scale
+        period = 2 * np.pi * scale
+        std = std_phase * scale
+        return delay, period, std
+
     async def measure_once(rel_freqs: tuple[float, float]) -> tuple[float, float, float]:
         """Estimate group delay for a single pair of frequency offsets.
 
@@ -749,8 +776,8 @@ async def test_group_delay(
         # First axis corresponds to the 2 signals we're comparing.
         raw_data = np.ones((2, n_channels, n_spectra, COMPLEX), np.int8)
         try:
-            async with asyncio.timeout(acc_time * 3 + 10.0):
-                async for timestamp, chunk in receiver.complete_chunks():
+            async with asyncio.timeout(acc_time * 3 + 10.0), aclosing(receiver.complete_chunks()) as it:
+                async for timestamp, chunk in it:
                     with chunk:
                         if i == 0 or timestamp != first_timestamp + i * chunk_timestamp_step:
                             first_timestamp = timestamp
@@ -766,29 +793,8 @@ async def test_group_delay(
         except TimeoutError:
             pytest.fail("Timed out.")
 
-        # Convert Gaussian integers to complex128
-        data = raw_data.astype(np.float64).view(np.complex128)[..., 0]
-        phase = np.angle(data[1] * data[0].conj())  # Takes the difference between phases
-        del data  # Free up some memory
-        # Pick a reference timestamp at which we know the dsim will be outputting
-        # both signals with phase 0.
-        ref_timestamp = first_timestamp // dsim_period * dsim_period
-        # Phase-rotate everything to be referenced to ref_timestamp
-        rel_timestamps = np.arange(n_spectra) * receiver.n_samples_between_spectra + (first_timestamp - ref_timestamp)
-        rel_times = rel_timestamps / receiver.scale_factor_timestamp
-        delta = rel_freqs[1] - rel_freqs[0]
-        phase -= 2 * np.pi * delta * rel_times[np.newaxis, :]
-        # The phases should all be similar, but we need to avoid steps of 2pi.
-        # np.unwrap is problematic since it accumulates rounding errors. The
-        # following is good enough as long as all phases are within pi of each
-        # other.
-        phase = wrap_angle(phase - phase[0, 0]) + phase[0, 0]
-        mean_phase = wrap_angle(np.mean(phase))
-        std_phase = np.std(phase) / np.sqrt(phase.size - 1)
-        scale = receiver.scale_factor_timestamp / (2 * np.pi * delta)
-        delay = -mean_phase * scale
-        period = 2 * np.pi * scale
-        std = std_phase * scale
+        loop = asyncio.get_event_loop()
+        delay, period, std = await loop.run_in_executor(None, compute_delay, rel_freqs, first_timestamp, raw_data)
         pdf_report.detail(f"Delay is {delay} + k*{period} ± {std} samples.")
         return delay, period, std
 
