@@ -704,6 +704,7 @@ class TiedArrayResampledVoltageReceiver:
         cbf: CBFRemoteControl,
         stream_name: str,
         interface_address: str,
+        sock: socket.socket | None = None,
     ) -> None:
         self.stream_name = stream_name
         self.multicast_groups = endpoint_list_parser(DEFAULT_VTP_PORT)(
@@ -729,15 +730,17 @@ class TiedArrayResampledVoltageReceiver:
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
         self.samples_per_frame_bytes = math.ceil(self.n_samples_per_frame * self.veng_out_bits_per_sample) // 8
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
-        self.sock.bind(("", port))
-        for multicast_group in self.multicast_groups:
-            mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
-            self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        self.sock.setblocking(False)
+        if sock is None:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
+            sock.bind(("", port))
+            for multicast_group in self.multicast_groups:
+                mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            sock.setblocking(False)
+        self.sock = sock
         self.buffer: list[VDIFFrame] = []  # Kept sorted by sequence ID
         self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
         self.reorder_window = 32  # TODO: make a parameter
