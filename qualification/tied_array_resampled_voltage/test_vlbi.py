@@ -186,5 +186,6 @@ async def test_mean_power(
             mean_power_sensor_readings[i, : total_retries + 1, 1],
             label=name,
         )
+    time.sleep(300)
     ax.legend()
     pdf_report.figure(fig)
