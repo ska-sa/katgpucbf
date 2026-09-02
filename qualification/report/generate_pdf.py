@@ -375,6 +375,7 @@ class Result:
     blurb: str = ""
     requirements: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
+    spead2_statistics: dict[str, dict[str, int]] = field(default_factory=dict)
     outcome: Literal["passed", "failed", "skipped", "xfail"] = "failed"
     xfail_reason: str | None = None
     failure_messages: list[str] = field(default_factory=list)
@@ -507,6 +508,8 @@ def _parse_report_data(result: Result, msg: dict) -> None:
         if "correlator" in msg:  # Backwards compatibility: handle this old name
             msg["cbf"] = msg.pop("correlator")
         result.config.update(msg)
+    elif msg_type == "spead2_statistics":
+        result.spead2_statistics[msg["name"]] = msg["stats"]
     else:
         raise ValueError(f"Do not know how to parse $msg_type of {msg_type!r}")
 
@@ -1122,6 +1125,23 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
         with section.create(LstListing()) as failure_message:
             for message in result.failure_messages:
                 failure_message.append(message)
+
+    if result.spead2_statistics:
+        stat_names = {
+            "Heaps": "heaps",
+            "Too old": "too_old_heaps",
+            "Incomplete": "incomplete_heaps_evicted",
+            "Worker blocked": "worker_blocked",
+        }
+        with section.create(LongTable(r"|l|" + "r|" * len(stat_names))) as stats_table:
+            stats_table.add_hline()
+            stats_table.add_row((MultiColumn(len(stat_names) + 1, align="|c|", data=bold("spead2 statistics")),))
+            stats_table.add_hline()
+            stats_table.add_row([bold("Stream")] + [bold(name) for name in stat_names])
+            stats_table.add_hline()
+            for name, stats in result.spead2_statistics.items():
+                stats_table.add_row([name] + [stats.get(value, "-") for value in stat_names.values()])
+                stats_table.add_hline()
 
 
 def _doc_result_set(

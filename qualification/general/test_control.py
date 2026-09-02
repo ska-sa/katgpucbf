@@ -20,6 +20,7 @@ import asyncio
 import math
 import time
 from collections.abc import AsyncGenerator, Awaitable
+from contextlib import aclosing
 
 import aiokatcp
 import numpy as np
@@ -81,9 +82,10 @@ async def consume_chunks(receiver: XBReceiver, timestamps: list[int]) -> None:
     The timestamps of the complete chunks are appended to `timestamps`.
     """
     max_delay = math.ceil(MAX_DELAY * receiver.scale_factor_timestamp)
-    async for timestamp, chunk in receiver.complete_chunks(max_delay=max_delay):
-        with chunk:
-            timestamps.append(timestamp)
+    async with aclosing(receiver.complete_chunks(max_delay=max_delay)) as it:
+        async for timestamp, chunk in it:
+            with chunk:
+                timestamps.append(timestamp)
 
 
 async def control_acv_delays(rng: np.random.Generator, cbf: CBFRemoteControl, pdf_report: Reporter, name: str) -> None:

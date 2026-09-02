@@ -66,7 +66,7 @@ class DiscardingIterator[T](AsyncIterator[T]):
     may iterate one more item if it is ready).
 
     The implementation is currently not robust against the base iterator
-    raising exceptions. The exception will be logged by it will terminate
+    raising exceptions. The exception will be logged but it will terminate
     iteration.
     """
 

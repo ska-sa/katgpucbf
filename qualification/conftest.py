@@ -40,6 +40,7 @@ from .recv import (
     BaselineCorrelationProductsReceiver,
     TiedArrayChannelisedVoltageReceiver,
     TiedArrayResampledVoltageReceiver,
+    diff_stats,
 )
 
 pytest_plugins = ["katgpucbf.pytest_plugins.numpy_dump", "katgpucbf.pytest_plugins.reporter_plugin"]
@@ -649,7 +650,8 @@ def pass_channels(band: str, narrowband_decimation: int, vlbi: bool, pass_bandwi
 async def receive_baseline_correlation_products(
     cbf: CBFRemoteControl,
     capture_start_streams: list[str],
-) -> BaselineCorrelationProductsReceiver:
+    pdf_report: Reporter,
+) -> AsyncGenerator[BaselineCorrelationProductsReceiver, None]:
     """Get the spead2 receive stream for ingesting X-engine output."""
     receiver = cbf.baseline_correlation_products_receiver
     assert receiver is not None
@@ -659,14 +661,17 @@ async def receive_baseline_correlation_products(
     # data flowing at the start.
     if "baseline-correlation_products" in capture_start_streams:
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
-    return receiver
+    with diff_stats(receiver.stream_group) as delta_stats:
+        yield receiver
+    pdf_report.spead2_statistics("baseline_correlation_products", delta_stats)
 
 
 @pytest.fixture
 async def receive_tied_array_channelised_voltage(
     cbf: CBFRemoteControl,
     capture_start_streams: list[str],
-) -> TiedArrayChannelisedVoltageReceiver:
+    pdf_report: Reporter,
+) -> AsyncGenerator[TiedArrayChannelisedVoltageReceiver, None]:
     """Get the spead2 receive stream for ingesting the tied-array-channelised-voltage streams."""
     receiver = cbf.tied_array_channelised_voltage_receiver
     assert receiver is not None
@@ -680,7 +685,9 @@ async def receive_tied_array_channelised_voltage(
         if config["type"] == "gpucbf.tied_array_channelised_voltage"
     ):
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
-    return receiver
+    with diff_stats(receiver.stream_group) as delta_stats:
+        yield receiver
+    pdf_report.spead2_statistics("tied_array_channelised_voltage", delta_stats)
 
 
 @pytest.fixture
