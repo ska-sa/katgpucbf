@@ -1126,20 +1126,33 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
                 failure_message.append(message)
 
     if result.spead2_statistics:
-        stat_names = {
-            "Heaps": "heaps",
+        heap_stat_names = {
+            "Total": "heaps",
             "Too old": "too_old_heaps",
             "Incomplete": "incomplete_heaps_evicted",
+        }
+        other_stat_names = {
+            "Incomplete chunks": "incomplete_chunks",
             "Worker blocked": "worker_blocked",
         }
-        with section.create(LongTable(r"|l|" + "r|" * len(stat_names))) as stats_table:
+        all_stat_names = {**heap_stat_names, **other_stat_names}
+        n_stats = len(all_stat_names)
+        with (
+            section.create(SmallText()) as small_text,
+            small_text.create(LongTable(r"|l|" + "r|" * n_stats)) as stats_table,
+        ):
             stats_table.add_hline()
-            stats_table.add_row((MultiColumn(len(stat_names) + 1, align="|c|", data=bold("spead2 statistics")),))
+            stats_table.add_row((MultiColumn(n_stats + 1, align="|c|", data=bold("spead2 statistics")),))
             stats_table.add_hline()
-            stats_table.add_row([bold("Stream")] + [bold(name) for name in stat_names])
+            stats_table.add_row(
+                [MultiRow(2, data=bold("Stream")), MultiColumn(len(heap_stat_names), align="c|", data=bold("Heaps"))]
+                + [MultiRow(2, data=bold(name)) for name in other_stat_names]
+            )
+            stats_table.add_hline(2, len(heap_stat_names) + 1)
+            stats_table.add_row([""] + [bold(name) for name in heap_stat_names] + [""] * len(other_stat_names))
             stats_table.add_hline()
             for name, stats in result.spead2_statistics.items():
-                stats_table.add_row([name] + [stats.get(value, "-") for value in stat_names.values()])
+                stats_table.add_row([name] + [stats.get(value, "-") for value in all_stat_names.values()])
                 stats_table.add_hline()
 
 
