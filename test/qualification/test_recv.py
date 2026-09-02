@@ -300,23 +300,56 @@ class TestTiedArrayResampledVoltageReceiver:
         assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0)
         assert len(framesets[0].frames) == 4
 
+    async def test_receive_framesets_allows_duplicate_timestamps(
+        self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
+    ) -> None:
+        """Duplicate timestamps are allowed to be returned between framesets."""
+        receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
+        mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
+            make_vtp_packet(8, frame_nr=10, seconds=98, thread_id=0),
+            make_vtp_packet(9, frame_nr=10, seconds=98, thread_id=1),
+            make_vtp_packet(10, frame_nr=10, seconds=98, thread_id=2),
+            make_vtp_packet(11, frame_nr=10, seconds=98, thread_id=3),
+            make_vtp_packet(12, frame_nr=10, seconds=98, thread_id=0),
+            make_vtp_packet(13, frame_nr=10, seconds=98, thread_id=1),
+            make_vtp_packet(14, frame_nr=10, seconds=98, thread_id=2),
+            make_vtp_packet(15, frame_nr=10, seconds=98, thread_id=3),
+            make_vtp_packet(1000, frame_nr=0, seconds=101, thread_id=0),
+        ]
+        framesets = []
+        with pytest.raises(RuntimeError):
+            async for frameset in receiver.complete_framesets():
+                framesets.append(frameset)
+
+        assert len(framesets) == 2
+        assert framesets[0].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0)
+        assert len(framesets[0].frames) == 4
+        assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0)
+        assert len(framesets[1].frames) == 4
+
     async def test_timestamp_leap_seconds(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
         """Timestamp is calculated correctly from the epoch."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
-            make_vtp_packet(0, frame_nr=1, seconds=15897600, thread_id=0, ref_epoch=33),
-            make_vtp_packet(1, frame_nr=1, seconds=15897700, thread_id=1, ref_epoch=33),
-            make_vtp_packet(2, frame_nr=1, seconds=100, thread_id=2, ref_epoch=34),
+            make_vtp_packet(
+                0, frame_nr=1, seconds=15897600, thread_id=0, ref_epoch=33
+            ),  # moment right before leap second, but with ref epoch before the leap second. (2016-12-31 23:59:60)
+            make_vtp_packet(
+                1, frame_nr=1, seconds=15897700, thread_id=1, ref_epoch=33
+            ),  # 100 seconds after leap second, but with ref epoch still before the leap second. (2017-01-01 00:01:39)
+            make_vtp_packet(
+                2, frame_nr=1, seconds=100, thread_id=2, ref_epoch=34
+            ),  # 100 seconds after the leap second start, with ref epoch after the leap second. (2017-01-01 00:01:40)
         ]
         await receiver._next_packet()
         await receiver._next_packet()
         await receiver._next_packet()
         ref_time = receiver.buffer[2].timestamp.timestamp(receiver.frame_rate).unix
         assert ref_time - receiver.buffer[1].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(1), (
-            "should have a leap second difference"
+            "should have a leap second difference between 2017-01-01 00:01:40 and 2017-01-01 00:01:39"
         )
         assert ref_time - receiver.buffer[0].timestamp.timestamp(receiver.frame_rate).unix == pytest.approx(101), (
-            "should have a difference of 101 seconds"
+            "should have a difference of 101 seconds between 2016-12-31 23:59:60 and 2017-01-01 00:01:40"
         )
 
     async def test_close_clears_state(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
