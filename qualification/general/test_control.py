@@ -244,10 +244,12 @@ def check_vdif_timestamps(
     with check:
         assert elapsed >= min_time, f"Less than {min_time}s of data received for {name}."
     with check:
-        assert timestamps == sorted(timestamps, key=lambda t: t.timestamp), "Framesets sequenced out of time order."
+        sorted_timestamps = sorted(timestamps, key=lambda t: t.timestamp)
+        assert timestamps == sorted_timestamps, "Framesets sequenced out of time order."
+    timestamps = sorted_timestamps  # To allow us to keep going if the above check failed
+
     with check:
         assert len(timestamps) == len(set(timestamps)), "Duplicate timestamps found."
-    timestamps.sort(key=lambda t: t.timestamp)  # To allow us to keep going if the above check failed
     # Linearise the timestamps
     frame_nrs = [t.seconds * receiver.frame_rate + t.frame_nr for t in timestamps]
     expected = frame_nrs[-1] - frame_nrs[0] + 1
