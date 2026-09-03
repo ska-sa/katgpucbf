@@ -171,7 +171,7 @@ six==1.17.0
     # via
     #   katsdptelstate
     #   python-dateutil
-spead2==4.4.1
+spead2==4.5.0b1
     # via katgpucbf (pyproject.toml)
 telnetlib3==2.0.8
     # via aiomonitor
