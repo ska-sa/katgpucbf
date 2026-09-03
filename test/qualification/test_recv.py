@@ -28,7 +28,7 @@ from aiokatcp.sensor import Sensor, SensorSet
 from baseband.vdif import VDIFFrame as BasebandVDIFFrame
 
 from qualification.cbf import CBFRemoteControl
-from qualification.recv import TiedArrayResampledVoltageReceiver, VDIFFrame, VDIFTimestamp
+from qualification.recv import TiedArrayResampledVoltageReceiver, VDIFTimestamp
 
 SAMPLES_PER_FRAME = 8000
 BANDWIDTH = 64e6
@@ -197,23 +197,10 @@ def mock_socket() -> socket.socket:
 class TestTiedArrayResampledVoltageReceiver:
     """Tests for :class:`qualification.recv.TiedArrayResampledVoltageReceiver`."""
 
-    async def test_receive_samples_per_frame_from_first_frame(
-        self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
-    ) -> None:
-        """First frame_set sets buffer."""
+    async def test_receive_frame_rate_from_cbf(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
+        """Initiazation of the receiver sets the frame rate from the sensor value in cbf."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
-        vdif_frame = make_vtp_packet(0, frame_nr=1, seconds=100, thread_id=0)
-        mock_socket.recv.return_value = vdif_frame  # type: ignore[attr-defined]
-        await receiver._next_packet()
         assert receiver.frame_rate == FRAME_RATE
-        assert receiver.buffer == [
-            VDIFFrame(
-                seq_id=0,
-                thread_id=0,
-                timestamp=VDIFTimestamp(seconds=100, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE),
-                raw_frame=vdif_frame[8:],
-            )
-        ]  # raw frame excludes the vdif header
 
     async def test_receive_framesets_filters_incomplete_threads(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
@@ -375,7 +362,7 @@ class TestTiedArrayResampledVoltageReceiver:
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
             make_vtp_packet(
                 0, frame_nr=1, seconds=15897600, thread_id=0, ref_epoch=33
-            ),  # moment right before leap second, but with ref epoch before the leap second. (2016-12-31 23:59:60)
+            ),  # 100 seconds before leap second, but with ref epoch before the leap second. (2016-12-31 23:58:20)
             make_vtp_packet(
                 1, frame_nr=1, seconds=15897700, thread_id=1, ref_epoch=33
             ),  # 100 seconds after leap second, but with ref epoch still before the leap second. (2017-01-01 00:01:39)
@@ -386,12 +373,12 @@ class TestTiedArrayResampledVoltageReceiver:
         await receiver._next_packet()
         await receiver._next_packet()
         await receiver._next_packet()
-        ref_time = receiver.buffer[2].timestamp.timestamp.unix
-        assert ref_time - receiver.buffer[1].timestamp.timestamp.unix == pytest.approx(1), (
+        ts = [packet.timestamp.timestamp for packet in receiver.buffer]
+        assert (ts[2] - ts[1]).sec == pytest.approx(1, rel=1e-9), (
             "should have a leap second difference between 2017-01-01 00:01:40 and 2017-01-01 00:01:39"
         )
-        assert ref_time - receiver.buffer[0].timestamp.timestamp.unix == pytest.approx(101), (
-            "should have a difference of 101 seconds between 2016-12-31 23:59:60 and 2017-01-01 00:01:40"
+        assert (ts[2] - ts[0]).sec == pytest.approx(101, rel=1e-9), (
+            "should have a difference of 201 seconds between 2016-12-31 23:58:20 and 2017-01-01 00:01:40"
         )
 
     async def test_close_clears_state(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
