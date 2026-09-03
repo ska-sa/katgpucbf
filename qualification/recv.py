@@ -98,6 +98,7 @@ class XBReceiver:
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
         self.cbf = cbf
         self._acv_name = acv_name
+        self.incomplete_chunks = 0
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
         """Check whether this chunk is complete (no missing data)."""
@@ -134,6 +135,7 @@ class XBReceiver:
                 logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
             elif not self.is_complete_chunk(chunk):
                 logger.debug("Incomplete chunk %d", chunk.chunk_id)
+                self.incomplete_chunks += 1
             else:
                 chunk.timestamp = timestamp
                 return timestamp, chunk
@@ -699,7 +701,7 @@ def create_tied_array_channelised_voltage_receive_stream_group(
 
 
 @contextlib.contextmanager
-def diff_stats(stream_group: spead2.recv.ChunkStreamRingGroup) -> Generator[dict[str, int], None, None]:
+def diff_stats(receiver: XBReceiver) -> Generator[dict[str, int], None, None]:
     """Collect stream group statistics on entry and exit and return differences.
 
     The context manager value is a dictionary of statistics. Only "counter"
@@ -707,10 +709,14 @@ def diff_stats(stream_group: spead2.recv.ChunkStreamRingGroup) -> Generator[dict
     meaningfully differenced. Note that the dictionary is only populated on
     exit from the context manager.
     """
+    stream_group = receiver.stream_group
     delta_stats: dict[str, int] = {}
     init_stats = functools.reduce(operator.add, [stream.stats for stream in stream_group])
+    init_incomplete_chunks = receiver.incomplete_chunks
     yield delta_stats
     final_stats = functools.reduce(operator.add, [stream.stats for stream in stream_group])
+    final_incomplete_chunks = receiver.incomplete_chunks
     for stat in final_stats.config:
         if stat.mode == spead2.recv.StreamStatConfig.Mode.COUNTER:
             delta_stats[stat.name] = final_stats[stat.name] - init_stats[stat.name]
+    delta_stats["incomplete_chunks"] = final_incomplete_chunks - init_incomplete_chunks
