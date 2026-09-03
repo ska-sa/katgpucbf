@@ -427,7 +427,7 @@ class TimeConverter:
         return (timestamp - self.sync_time) * self.adc_sample_rate
 
     def adc_to_unix(self, samples: float) -> float:
-        """Convert an ADC sample count to a UNIX timstamp."""
+        """Convert an ADC sample count to a UNIX timestamp (seconds)."""
         return samples / self.adc_sample_rate + self.sync_time
 
 
