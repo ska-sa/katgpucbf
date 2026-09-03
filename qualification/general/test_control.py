@@ -269,7 +269,7 @@ def check_vdif_timestamps(
         )
 
     pdf_report.detail(f"{name}: missed {missing} of {expected} framesets.")
-    pdf_report.detail(f"{name}: last complete frameset timestamp: {timestamps[-1]}")
+    pdf_report.detail(f"{name}: last complete frameset frame number: {timestamps[-1].frame_nr}")
 
     with check:
         assert missing <= 2, f"{missing} of {expected} framesets missing for {name}."

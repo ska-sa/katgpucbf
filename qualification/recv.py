@@ -782,6 +782,7 @@ class TiedArrayResampledVoltageReceiver:
         # event loop from ever getting a chance to run. sleep(0) allows this.
         await asyncio.sleep(0)
         packet = await asyncio.get_event_loop().sock_recv(self.sock, self._packet_size)
+        assert len(packet) == self._packet_size
         # Using baseband to parse the header is expensive. We extract
         # words from the header then slice out the fields we want.
         (seq_id, seconds, ref_epoch_frame_nr, length, sample_bits_thread_id) = struct.unpack("<QIIIxxH", packet[:24])
