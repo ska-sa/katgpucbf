@@ -244,16 +244,31 @@ def check_vdif_timestamps(
     with check:
         assert elapsed >= min_time, f"Less than {min_time}s of data received for {name}."
     with check:
-        assert timestamps == sorted(timestamps), "Framesets sequenced out of time order."
+        assert timestamps == sorted(timestamps, key=lambda t: t.timestamp), "Framesets sequenced out of time order."
     with check:
         assert len(timestamps) == len(set(timestamps)), "Duplicate timestamps found."
-    timestamps.sort()  # To allow us to keep going if the above check failed
+    timestamps.sort(key=lambda t: t.timestamp)  # To allow us to keep going if the above check failed
     # Linearise the timestamps
     frame_nrs = [t.seconds * receiver.frame_rate + t.frame_nr for t in timestamps]
     expected = frame_nrs[-1] - frame_nrs[0] + 1
     missing = expected - len(frame_nrs)
+    if missing > 0 and len(frame_nrs) >= 2:
+        for i in range(len(frame_nrs) - 2, 0, -1):
+            if frame_nrs[i + 1] - frame_nrs[i] > 1:
+                missing_frame_nr = frame_nrs[i] - 1
+                missing_timestamp = VDIFTimestamp(
+                    seconds=timestamps[i].seconds,
+                    frame_nr=missing_frame_nr,
+                    ref_epoch=timestamps[i].ref_epoch,
+                    frame_rate=receiver.frame_rate,
+                )
+                break
+    elif missing > 0 and len(frame_nrs) < 2:
+        pdf_report.detail(f"{name}: not enough framesets to check for missing framesets.")
+
     pdf_report.detail(f"{name}: missed {missing} of {expected} framesets.")
     pdf_report.detail(f"{name}: last complete frameset timestamp: {timestamps[-1]}")
+    pdf_report.detail(f"{name}: last frameset absent: frame_number: {missing}, timestamp: {missing_timestamp}")
     with check:
         assert missing <= 2, f"{missing} of {expected} framesets missing for {name}."
 
