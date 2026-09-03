@@ -489,7 +489,6 @@ def dig_rms_dbfs_status(
     dig_rms_dbfs_high_error: float,
 ) -> aiokatcp.Sensor.Status:
     """Compute status for dig-rms-dbfs sensor."""
-    print(f"VINC : {value} : {dig_rms_dbfs_low_error} {dig_rms_dbfs_low} {dig_rms_dbfs_high} {dig_rms_dbfs_high_error}")
     if dig_rms_dbfs_low <= value <= dig_rms_dbfs_high:
         return aiokatcp.Sensor.Status.NOMINAL
     elif dig_rms_dbfs_low_error < value < dig_rms_dbfs_high_error:
