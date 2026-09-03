@@ -83,7 +83,9 @@ async def max_retry_test(
 
 
 @pytest.mark.name("VLBI mean power")
+@pytest.mark.parametrize("execution_number", range(5))
 async def test_mean_power(
+    execution_number: int,
     pdf_report: Reporter,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver | None,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
