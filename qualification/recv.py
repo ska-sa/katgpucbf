@@ -703,6 +703,9 @@ class VDIFFrameset:
 class TiedArrayResampledVoltageReceiver:
     """Receive tied-array-resampled-voltage streams from the V-engines."""
 
+    VTP_HEADER_SIZE = 8
+    VDIF_HEADER_SIZE = 32
+
     def __init__(
         self,
         cbf: CBFRemoteControl,
@@ -728,11 +731,12 @@ class TiedArrayResampledVoltageReceiver:
         self.scale_factor_timestamp: float = cbf.init_sensors[f"{stream_name}.scale-factor-timestamp"].value
         self.power_int_time: float = cbf.init_sensors[f"{stream_name}.power-int-time"].value
         self.bandwidth: float = cbf.init_sensors[f"{stream_name}.bandwidth"].value
-        self.n_samples_per_frame: float = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
+        self.n_samples_per_frame: int = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
         self.frame_rate = round(self.bandwidth / self.n_samples_per_frame)
-        self._packet_size = math.ceil(self.n_samples_per_frame * self.veng_out_bits_per_sample) // 8 + 32
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
-        self.samples_per_frame_bytes = math.ceil(self.n_samples_per_frame * self.veng_out_bits_per_sample) // 8
+        self.sample_bytes_per_frame = self.n_samples_per_frame * self.veng_out_bits_per_sample // 8
+        self._packet_size = self.sample_bytes_per_frame + self.VDIF_HEADER_SIZE + self.VTP_HEADER_SIZE
+
         # The V-engine applies DSP filters, and unlike the F-engine, the
         # timestamp used for the output corresponds to the centre input sample.
         # That means that to ensure a frame contains only samples after a
@@ -785,14 +789,14 @@ class TiedArrayResampledVoltageReceiver:
         ref_epoch = (ref_epoch_frame_nr >> 24) & 0x3F
         frame_nr = ref_epoch_frame_nr & 0xFF_FFFF
         thread_id = sample_bits_thread_id & 0x3F
-        length = (length & 0xFF_FFFF) * 8 - 32  # Raw value includes the header
+        length = (length & 0xFF_FFFF) * 8 - self.VDIF_HEADER_SIZE  # Raw value includes the header
         if frame_nr == 0:
             is_complex = sample_bits_thread_id >> 15
             assert not is_complex
 
         timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch, frame_rate=self.frame_rate)
         frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=packet[8:])
-        assert length == self.samples_per_frame_bytes
+        assert length == self.sample_bytes_per_frame
         if seq_id >= self.min_seq_id:
             self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
             # Insert the new frame into its sorted position
