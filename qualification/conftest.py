@@ -642,7 +642,7 @@ async def receive_baseline_correlation_products(
     # data flowing at the start.
     if "baseline-correlation_products" in capture_start_streams:
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
-    with diff_stats(receiver.stream_group) as delta_stats:
+    with diff_stats(receiver) as delta_stats:
         yield receiver
     pdf_report.spead2_statistics("baseline_correlation_products", delta_stats)
 
@@ -666,6 +666,6 @@ async def receive_tied_array_channelised_voltage(
         if config["type"] == "gpucbf.tied_array_channelised_voltage"
     ):
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
-    with diff_stats(receiver.stream_group) as delta_stats:
+    with diff_stats(receiver) as delta_stats:
         yield receiver
     pdf_report.spead2_statistics("tied_array_channelised_voltage", delta_stats)
