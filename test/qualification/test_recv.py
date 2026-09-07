@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Unit tests for :class:`qualification.recv.TiedArrayResampledVoltageReceiver`."""
+"""Unit tests for module `qualification.recv`."""
 
 import io
 import socket
@@ -113,7 +113,7 @@ def mock_cbf() -> CBFRemoteControl:
     )
     cbf.init_sensors.add(
         Sensor(
-            float,
+            int,
             "stream0.n-samples-per-frame",
             "Number of samples per frame",
             "",
