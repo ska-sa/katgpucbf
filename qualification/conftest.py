@@ -24,7 +24,8 @@ import math
 import os
 import subprocess
 from collections import deque, namedtuple
-from collections.abc import AsyncGenerator, Iterable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -36,6 +37,7 @@ from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
 
 from .cbf import CBFCache, CBFRemoteControl, FailedCBF
 from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver, diff_stats
+from .types import AsyncRunner
 
 pytest_plugins = ["katgpucbf.pytest_plugins.numpy_dump", "katgpucbf.pytest_plugins.reporter_plugin"]
 logger = logging.getLogger(__name__)
@@ -532,6 +534,36 @@ def core_allocator(cores: list[int]) -> CoreAllocator:
     # but that is harmless.
     os.sched_setaffinity(0, alloc.allocate(1))
     return alloc
+
+
+@pytest.fixture
+def run_async(
+    core_allocator: CoreAllocator,
+) -> Generator[AsyncRunner, None, None]:
+    """Function for running work in a helper thread.
+
+    Use this as a fixture and invoke it as
+
+    .. code-block: python
+
+       result = await run_async(func, *args)
+
+    This use a thread pool executor with a single thread, so it is only intended to serial use.
+    """
+
+    def initializer(cores: Sequence[int]) -> None:
+        os.sched_setaffinity(0, cores)
+        try:
+            os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+        except PermissionError:
+            logger.warning("Idle scheduling priority could not be set (permission denied)")
+
+    def runner[*A, R](func: Callable[[*A], R], *args: *A) -> Awaitable[R]:
+        return asyncio.get_running_loop().run_in_executor(executor, func, *args)
+
+    cores = core_allocator.allocate(1)
+    with ThreadPoolExecutor(max_workers=1, initializer=initializer, initargs=(cores,)) as executor:
+        yield runner
 
 
 @pytest.fixture
