@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Unit tests for module `qualification.recv`."""
+"""Unit tests for module :mod:`qualification.recv`."""
 
 import io
 import random
@@ -70,7 +70,7 @@ def mock_cbf() -> CBFRemoteControl:
     cbf = mock.Mock(spec=CBFRemoteControl)
     cbf.init_sensors = SensorSet()
     cbf.init_sensors.add(
-        Sensor(int, "stream0.n-chans", "Number of channels", "chans", default=2, initial_status=Sensor.Status.NOMINAL)
+        Sensor(int, "stream0.n-chans", "Number of channels", "", default=2, initial_status=Sensor.Status.NOMINAL)
     )
     cbf.init_sensors.add(
         Sensor(
@@ -78,7 +78,7 @@ def mock_cbf() -> CBFRemoteControl:
             "stream0.pol-ordering",
             "Polarisation ordering",
             "",
-            default="""["V", "H"]""",
+            default='["V", "H"]',
             initial_status=Sensor.Status.NOMINAL,
         )
     )
@@ -123,10 +123,10 @@ def mock_cbf() -> CBFRemoteControl:
         )
     )
     cbf.init_sensors.add(
-        Sensor(float, "stream0.bandwidth", "Bandwidth", "", default=64e6, initial_status=Sensor.Status.NOMINAL)
+        Sensor(float, "stream0.bandwidth", "Bandwidth", "Hz", default=64e6, initial_status=Sensor.Status.NOMINAL)
     )
     cbf.init_sensors.add(
-        Sensor(float, "stream0.sync-time", "Sync time", "", default=100.0, initial_status=Sensor.Status.NOMINAL)
+        Sensor(float, "stream0.sync-time", "Sync time", "s", default=100.0, initial_status=Sensor.Status.NOMINAL)
     )
     cbf.init_sensors.add(
         Sensor(
@@ -199,7 +199,7 @@ class TestTiedArrayResampledVoltageReceiver:
     """Tests for :class:`qualification.recv.TiedArrayResampledVoltageReceiver`."""
 
     async def test_receive_frame_rate_from_cbf(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
-        """Initiazation of the receiver sets the frame rate from the sensor value in cbf."""
+        """Initialisation of the receiver sets the frame rate from the sensor value in cbf."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         assert receiver.frame_rate == FRAME_RATE
 
@@ -222,7 +222,7 @@ class TestTiedArrayResampledVoltageReceiver:
         with pytest.raises(RuntimeError):
             await anext(receiver.complete_framesets())
 
-    async def test_receive_framesets_filters_untill_delay(
+    async def test_receive_framesets_filters_until_delay(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
     ) -> None:
         """
@@ -298,6 +298,7 @@ class TestTiedArrayResampledVoltageReceiver:
             make_vtp_packet(11, frame_nr=1, seconds=98, thread_id=2),
             make_vtp_packet(5, frame_nr=0, seconds=98, thread_id=1),
             make_vtp_packet(7, frame_nr=0, seconds=98, thread_id=3),
+            # ensure that buffered frames are flushed
             make_vtp_packet(1000, frame_nr=0, seconds=101, thread_id=0),
         ]
         framesets = []
