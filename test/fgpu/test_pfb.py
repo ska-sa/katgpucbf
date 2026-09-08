@@ -27,11 +27,11 @@ from .. import unpackbits
 
 pytestmark = [pytest.mark.cuda_only]
 TAPS = 16
-SPECTRA = 3123
+SPECTRA = 3128
 CHANNELS = 4096
 
 
-def pfb_fir_host_real(data, channels, input_sample_bits, unzip_factor, weights):
+def pfb_fir_host_real(data, channels, input_sample_bits, unzip_factor, total_power_spectra, weights):
     """Apply a PFB-FIR filter to a set of packed real data on the host."""
     step = 2 * channels
     assert len(weights) % step == 0
@@ -47,7 +47,9 @@ def pfb_fir_host_real(data, channels, input_sample_bits, unzip_factor, weights):
     out = out.reshape(n_pols, -1, channels // unzip_factor, unzip_factor, 2)
     out = out.swapaxes(2, 3)
     out = out.reshape(n_pols, -1, step)
-    total_power = np.sum(np.square(decoded[:, step * (taps - 1) :].astype(np.int64)), axis=1)
+    power_samples = decoded[:, step * (taps - 1) :]
+    power_samples = power_samples.reshape(n_pols, -1, step * total_power_spectra)
+    total_power = np.sum(np.square(power_samples.astype(np.int64)), axis=2)
     return out, total_power
 
 
@@ -87,21 +89,30 @@ def _pfb_fir(fn: pfb.PFBFIR, h_in: np.ndarray, weights: np.ndarray, step: int) -
 
 
 @pytest.mark.combinations(
-    "input_sample_bits,unzip_factor",
+    "input_sample_bits,unzip_factor,total_power_spectra",
     DIG_SAMPLE_BITS_VALID,
     [1, 2, 4],
+    [1, 8, 17],  # Must divide into SPECTRA
 )
 def test_pfb_fir_real(
-    context: AbstractContext, command_queue: AbstractCommandQueue, input_sample_bits: int, unzip_factor: int
+    context: AbstractContext,
+    command_queue: AbstractCommandQueue,
+    input_sample_bits: int,
+    unzip_factor: int,
+    total_power_spectra: int,
 ) -> None:
     """Test the real GPU PFB-FIR for numerical correctness."""
     samples = 2 * CHANNELS * (SPECTRA + TAPS - 1)
     rng = np.random.default_rng(seed=1)
     h_in = rng.integers(0, 256, (N_POLS, samples * input_sample_bits // BYTE_BITS), np.uint8)
     weights = rng.uniform(-1.0, 1.0, (2 * CHANNELS * TAPS,)).astype(np.float32)
-    expected_out, expected_total_power = pfb_fir_host_real(h_in, CHANNELS, input_sample_bits, unzip_factor, weights)
+    expected_out, expected_total_power = pfb_fir_host_real(
+        h_in, CHANNELS, input_sample_bits, unzip_factor, total_power_spectra, weights
+    )
 
-    template = pfb.PFBFIRTemplate(context, TAPS, CHANNELS, input_sample_bits, unzip_factor, n_pols=N_POLS)
+    template = pfb.PFBFIRTemplate(
+        context, TAPS, CHANNELS, input_sample_bits, unzip_factor, n_pols=N_POLS, total_power_spectra=total_power_spectra
+    )
     fn = template.instantiate(command_queue, samples, SPECTRA)
     fn.ensure_all_bound()
     fn.buffer("total_power").zero(command_queue)

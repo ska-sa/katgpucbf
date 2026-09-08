@@ -485,9 +485,9 @@ count each sample exactly once. Coarse delay changes will cause some samples
 to be counted twice or not at all, but these are sufficiently rare that it is
 not likely to affect the statistics.
 
-Average power is updated at the granularity of output chunks. The PFB kernel
-updates a total power accumulator stored in the output item. This is performed
-using (64-bit) integer arithmetic, as this avoids the pitfalls of
+Average power is updated at the granularity of output batches. The PFB kernel
+updates an array of total power accumulators stored in the output item. This
+is performed using (64-bit) integer arithmetic, as this avoids the pitfalls of
 floating-point precision when accumulating a large number of samples.
 
 Network transmit

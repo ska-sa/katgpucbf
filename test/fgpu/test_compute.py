@@ -68,7 +68,9 @@ def test_compute(context: AbstractContext, command_queue: AbstractCommandQueue, 
     else:
         raise RuntimeError("unexpected mode")
 
-    template = compute.ComputeTemplate(context, pfb_taps, channels, dig_sample_bits, out_bits, dither, narrowband)
+    template = compute.ComputeTemplate(
+        context, pfb_taps, channels, dig_sample_bits, out_bits, dither, narrowband, spectra_per_heap
+    )
     # The sample count is large enough to produce the required number of
     # output spectra for both narrowband modes. For wideband there is more
     # headroom.

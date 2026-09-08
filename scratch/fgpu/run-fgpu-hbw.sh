@@ -28,7 +28,9 @@ exec spead2_net_raw taskset -c $other_affinity fgpu \
     --send-interface $iface1,$iface2 --send-ibv \
     --recv-affinity $recv_affinity --recv-comp-vector=$recv_comp \
     --send-affinity $send_affinity --send-comp-vector=$send_comp \
-    --adc-sample-rate ${adc_sample_rate:-7000000000} \
+    --adc-sample-rate ${adc_sample_rate:-5992000000} \
+    --dig-sample-bits ${dig_sample_bits:-6} \
+    --recv-packet-samples ${dig_heap_samples:-8192} \
     --jones-per-batch ${jones_per_batch:-1048576} \
     --katcp-port $katcp_port \
     --prometheus-port $prom_port \

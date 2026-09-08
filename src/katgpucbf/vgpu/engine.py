@@ -21,7 +21,6 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import override
 
 import aiokatcp
 import cupy as cp
@@ -43,20 +42,12 @@ from astropy.time import Time, TimeDelta
 from .. import COMPLEX, N_POLS
 from .. import recv as base_recv
 from ..monitor import Monitor
-from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN
+from ..recv import RECV_SENSOR_TIMEOUT_CHUNKS, RECV_SENSOR_TIMEOUT_MIN, DiscardingChunkIterator
 from ..ringbuffer import ChunkRingbuffer
-from ..utils import DiscardingIterator, Engine, TimeConverter
+from ..utils import Engine, TimeConverter
 from . import N_SIDEBANDS, recv, send
 
 logger = logging.getLogger(__name__)
-
-
-class DiscardingChunkIterator(DiscardingIterator[recv.Chunk]):
-    """Specialise :class:`.DiscardingIterator` to discard chunks by recycling them."""
-
-    @override
-    def discard(self, item: recv.Chunk) -> None:
-        item.recycle()
 
 
 class RecvStream:

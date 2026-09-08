@@ -54,7 +54,7 @@ repos:
             'pytest==9.0.3',
             'pytest-asyncio==1.4.0',
             'redis==7.1.0',  # Indirect dependency of katsdptelstate
-            'spead2==4.4.1',
+            'spead2==4.5.0',
             'types-decorator==5.2.0.20251101',
             'types-docutils==0.21.0.20250809',
             'types-six==1.17.0.20251009',

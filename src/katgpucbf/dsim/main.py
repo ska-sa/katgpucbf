@@ -32,7 +32,7 @@ import numpy as np
 import pyparsing as pp
 from katsdptelstate.endpoint import endpoint_list_parser
 
-from .. import BYTE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
+from .. import BYTE_BITS, DEFAULT_DIG_HEAP_SAMPLES, DEFAULT_DIG_SAMPLE_BITS, SPEAD_DESCRIPTOR_INTERVAL_S
 from ..main import add_common_arguments, add_send_arguments, add_time_converter_arguments, engine_main
 from ..send import DescriptorSender
 from ..utils import TimeConverter
@@ -52,8 +52,12 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Specification for the signals to generate (see the usage guide). "
         "The specification must produce either a single signal, or one per output stream. [%(default)s]",
     )
-    parser.add_argument("--heap-samples", type=int, default=4096, help="Number of samples per heap [%(default)s]")
-    parser.add_argument("--sample-bits", type=int, default=10, help="Number of bits per sample [%(default)s]")
+    parser.add_argument(
+        "--heap-samples", type=int, default=DEFAULT_DIG_HEAP_SAMPLES, help="Number of samples per heap [%(default)s]"
+    )
+    parser.add_argument(
+        "--sample-bits", type=int, default=DEFAULT_DIG_SAMPLE_BITS, help="Number of bits per sample [%(default)s]"
+    )
     parser.add_argument("--first-id", type=int, default=0, help="Digitiser ID for first stream [%(default)s]")
     add_send_arguments(parser, prefix="", rate_factor=False)
     parser.add_argument(

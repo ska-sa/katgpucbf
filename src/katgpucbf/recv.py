@@ -24,7 +24,7 @@ import weakref
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Self, override
 
 import aiokatcp
 import numba.core.ccallback
@@ -37,7 +37,13 @@ from prometheus_client import REGISTRY, CollectorRegistry, Counter, Metric
 from prometheus_client.core import CounterMetricFamily
 from prometheus_client.registry import Collector
 
-from .utils import DeviceStatusSensor, TimeConverter, TimeoutSensorStatusObserver, make_rate_limited_sensor
+from .utils import (
+    DeviceStatusSensor,
+    DiscardingIterator,
+    TimeConverter,
+    TimeoutSensorStatusObserver,
+    make_rate_limited_sensor,
+)
 
 logger = logging.getLogger(__name__)
 user_data_type = types.Record.make_c_struct(
@@ -720,3 +726,11 @@ async def iter_chunks(
             yield chunk
     finally:
         stats_collector.update()  # Ensure final stats updates are captured
+
+
+class DiscardingChunkIterator(DiscardingIterator[Chunk]):
+    """Specialise :class:`.DiscardingIterator` to discard chunks by recycling them."""
+
+    @override
+    def discard(self, item: Chunk) -> None:
+        item.recycle()

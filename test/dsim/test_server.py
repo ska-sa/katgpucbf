@@ -23,7 +23,7 @@ import aiokatcp
 import numpy as np
 import pytest
 
-from katgpucbf import DIG_HEAP_SAMPLES, DIG_SAMPLE_BITS
+from katgpucbf import DEFAULT_DIG_HEAP_SAMPLES, DEFAULT_DIG_SAMPLE_BITS
 from katgpucbf.dsim.send import HeapSet, Sender
 from katgpucbf.dsim.server import DEngine
 from katgpucbf.dsim.signal import parse_signals
@@ -45,7 +45,7 @@ async def engine(
         descriptor_sender=descriptor_sender,
         heap_sets=heap_sets,
         adc_sample_rate=ADC_SAMPLE_RATE,
-        sample_bits=DIG_SAMPLE_BITS,
+        sample_bits=DEFAULT_DIG_SAMPLE_BITS,
         dither_seed=dither_seed,
         host="127.0.0.1",
         port=0,
@@ -61,8 +61,8 @@ async def test_sensors(engine_client: aiokatcp.Client) -> None:
     assert await engine_client.sensor_value("signals-orig", str) == "cw(0.2, 123); cw(0.3, 456);"
     assert await engine_client.sensor_value("signals", str) == "cw(0.2, 123); cw(0.3, 456);"
     assert await engine_client.sensor_value("adc-sample-rate") == ADC_SAMPLE_RATE
-    assert await engine_client.sensor_value("sample-bits") == DIG_SAMPLE_BITS
-    assert await engine_client.sensor_value("max-period") == DIG_HEAP_SAMPLES * SIGNAL_HEAPS
+    assert await engine_client.sensor_value("sample-bits") == DEFAULT_DIG_SAMPLE_BITS
+    assert await engine_client.sensor_value("max-period") == DEFAULT_DIG_HEAP_SAMPLES * SIGNAL_HEAPS
     assert await engine_client.sensor_value("period") == SIGNAL_HEAPS
 
 
@@ -98,13 +98,13 @@ async def test_signals(
     )
     if period is None:  # The tests below depend on having enough unique data
         # Check that pol 1 is saturated about as much as expected
-        assert np.mean(status.isel(pol=1).data >> 32) / DIG_HEAP_SAMPLES == pytest.approx(2 / 3, abs=0.01)
+        assert np.mean(status.isel(pol=1).data >> 32) / DEFAULT_DIG_HEAP_SAMPLES == pytest.approx(2 / 3, abs=0.01)
         # Check that some heaps are entirely unsaturated, so that the
         # saturation flag consistency test is not vacuous.
         assert not np.all(status.isel(pol=1).data & (1 << DIGITISER_STATUS_SATURATION_FLAG_BIT))
     # Check that sensors were updated
     assert await engine_client.sensor_value("signals-orig", str) == signals_str
-    assert await engine_client.sensor_value("period") == (period or DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
+    assert await engine_client.sensor_value("period") == (period or DEFAULT_DIG_HEAP_SAMPLES * SIGNAL_HEAPS)
     assert parse_signals(await engine_client.sensor_value("signals", str)) == parse_signals(signals_str)
 
 

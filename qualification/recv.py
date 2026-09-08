@@ -19,14 +19,18 @@
 import ast
 import asyncio
 import bisect
+import contextlib
 import ctypes
+import functools
 import json
 import logging
 import math
+import operator
 import os
 import socket
 import struct
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Generator, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING, Any, Literal, overload
@@ -45,7 +49,8 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
-from katgpucbf import COMPLEX, DEFAULT_RECV_BUFFER_SIZE, DEFAULT_VTP_PORT, DIG_SAMPLE_BITS
+from katgpucbf import COMPLEX, DEFAULT_DIG_SAMPLE_BITS, DEFAULT_RECV_BUFFER_SIZE, DEFAULT_VTP_PORT
+from katgpucbf.recv import DiscardingChunkIterator
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
 
@@ -63,6 +68,7 @@ class XBReceiver:
     # Attributes instantiated by the derived classes
     stream_group: spead2.recv.ChunkStreamRingGroup
     timestamp_step: int  # Step (in ADC samples) between chunk timestamps
+    _chunk_iter: DiscardingChunkIterator
 
     def __init__(self, cbf: CBFRemoteControl, stream_names: Sequence[str]) -> None:
         # Some metadata we know already from the config.
@@ -101,10 +107,51 @@ class XBReceiver:
         self.time_converter = TimeConverter(self.sync_time, self.scale_factor_timestamp)
         self.cbf = cbf
         self._acv_name = acv_name
+        self.incomplete_chunks = 0
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
         """Check whether this chunk is complete (no missing data)."""
         return bool(np.all(chunk.present))
+
+    # The overloads ensure that when all_timestamps is known to be False, the
+    # returned chunks are inferred to not be optional.
+    @overload
+    async def _next_complete_chunk(
+        self, min_timestamp: int, *, all_timestamps: Literal[False] = False
+    ) -> tuple[int, katgpucbf.recv.Chunk]: ...
+
+    @overload
+    async def _next_complete_chunk(
+        self, min_timestamp: int, *, all_timestamps: bool = False
+    ) -> tuple[int, katgpucbf.recv.Chunk | None]: ...
+
+    async def _next_complete_chunk(self, min_timestamp, *, all_timestamps=False):
+        """Return the data from the next complete chunk from the stream.
+
+        This implements the functionality of :meth:`next_complete_chunk`, but
+        the caller is responsible for computing `min_timestamp`, putting the
+        iterator into capturing mode, and recycling the returned chunk.
+
+        Raises
+        ------
+        StopAsyncIteration
+            If the stream closed or was interrupted before we received a complete chunk.
+        """
+        while True:
+            chunk = await anext(self._chunk_iter)
+            timestamp = chunk.chunk_id * self.timestamp_step
+            if min_timestamp is not None and timestamp < min_timestamp:
+                logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
+            elif not self.is_complete_chunk(chunk):
+                logger.debug("Incomplete chunk %d", chunk.chunk_id)
+                self.incomplete_chunks += 1
+            else:
+                chunk.timestamp = timestamp
+                return timestamp, chunk
+            # If we get here, the chunk is ignored.
+            chunk.recycle()
+            if all_timestamps:
+                return timestamp, None
 
     # The overloads ensure that when all_timestamps is known to be False, the
     # returned chunks are inferred to not be optional.
@@ -142,6 +189,10 @@ class XBReceiver:
 
         Each yielded value is a ``(timestamp, chunk)`` pair.
 
+        It is important that this asynchronous generator is closed as soon as
+        it is no longer needed, for example, by using
+        :func:`contextlib.aclosing`.
+
         Parameters
         ----------
         min_timestamp
@@ -162,24 +213,14 @@ class XBReceiver:
         if min_timestamp is None:
             min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
 
-        data_ringbuffer = self.stream_group.data_ringbuffer
-        assert isinstance(data_ringbuffer, spead2.recv.asyncio.ChunkRingbuffer)
         try:
             async with asyncio.timeout(time_limit) as timer:
-                async for chunk in data_ringbuffer:
-                    assert isinstance(chunk, katgpucbf.recv.Chunk)  # keeps mypy happy
-                    timestamp = chunk.chunk_id * self.timestamp_step
-                    if min_timestamp is not None and timestamp < min_timestamp:
-                        logger.debug("Skipping chunk with timestamp %d (< %d)", timestamp, min_timestamp)
-                    elif not self.is_complete_chunk(chunk):
-                        logger.debug("Incomplete chunk %d", chunk.chunk_id)
-                    else:
-                        yield timestamp, chunk
-                        continue
-                    # If we get here, the chunk is ignored
-                    chunk.recycle()
-                    if all_timestamps:
-                        yield timestamp, None
+                with self._chunk_iter:
+                    while True:
+                        try:
+                            yield await self._next_complete_chunk(min_timestamp, all_timestamps=all_timestamps)
+                        except StopAsyncIteration:
+                            break
         except TimeoutError:
             if not timer.expired():
                 raise  # The TimeoutError came from something else
@@ -209,11 +250,16 @@ class XBReceiver:
         RuntimeError
             If the stream is stopped before a complete chunk is received
         """
+        if min_timestamp is None:
+            min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
         async with asyncio.timeout(timeout):
-            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
+            with self._chunk_iter:
+                try:
+                    timestamp, chunk = await self._next_complete_chunk(min_timestamp)
+                except StopAsyncIteration:
+                    raise RuntimeError("stream was shut down before we received a complete chunk") from None
                 with chunk:
                     return timestamp, np.array(chunk.data)  # Makes a copy before we return the chunk
-        raise RuntimeError("stream was shut down before we received a complete chunk")
 
     async def wait_complete_chunk(
         self,
@@ -242,11 +288,16 @@ class XBReceiver:
         RuntimeError
             If the stream is stopped before a complete chunk is received
         """
+        if min_timestamp is None:
+            min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
         async with asyncio.timeout(timeout):
-            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, max_delay=max_delay):
+            with self._chunk_iter:
+                try:
+                    timestamp, chunk = await self._next_complete_chunk(min_timestamp)
+                except StopAsyncIteration:
+                    raise RuntimeError("stream was shut down before we received a complete chunk") from None
                 chunk.recycle()
                 return timestamp
-        raise RuntimeError("stream was shut down before we received a complete chunk")
 
     async def consecutive_chunks(
         self,
@@ -266,8 +317,11 @@ class XBReceiver:
            with enough chunks and update this comment.
         """
         chunks: list[tuple[int, katgpucbf.recv.Chunk]] = []
-        async with asyncio.timeout(timeout):
-            async for timestamp, chunk in self.complete_chunks(min_timestamp=min_timestamp, all_timestamps=True):
+        async with (
+            asyncio.timeout(timeout),
+            aclosing(self.complete_chunks(min_timestamp=min_timestamp, all_timestamps=True)) as it,
+        ):
+            async for timestamp, chunk in it:
                 if chunk is None:
                     # Throw away failed attempt at getting an adjacent set
                     for _, old_chunk in chunks:
@@ -315,7 +369,7 @@ class XBReceiver:
             the target. The target may also be reduced if necessary to avoid
             saturating the X-engine output.
         """
-        dig_max = 2 ** (DIG_SAMPLE_BITS - 1) - 1
+        dig_max = 2 ** (DEFAULT_DIG_SAMPLE_BITS - 1) - 1
         # The PFB is scaled for fixed incoherent gain, but we need to be concerned
         # about coherent gain to avoid overflowing the F-engine output. Coherent gain
         # scales approximately with sqrt(bw / chan_bw / 2).
@@ -359,6 +413,7 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
+        self._chunk_iter = DiscardingChunkIterator(self.stream_group.data_ringbuffer)  # type: ignore
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
         if not super().is_complete_chunk(chunk):
@@ -420,6 +475,7 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             decimation_factor=self.decimation_factor,
             use_ibv=use_ibv,
         )
+        self._chunk_iter = DiscardingChunkIterator(self.stream_group.data_ringbuffer)  # type: ignore
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
         return super().is_complete_chunk(chunk) and (chunk.extra is None or np.min(chunk.extra) == self.n_ants)
@@ -651,6 +707,28 @@ def create_tied_array_channelised_voltage_receive_stream_group(
             sink=stream_group,
         ),
     )
+
+
+@contextlib.contextmanager
+def diff_stats(receiver: XBReceiver) -> Generator[dict[str, int], None, None]:
+    """Collect stream group statistics on entry and exit and return differences.
+
+    The context manager value is a dictionary of statistics. Only "counter"
+    mode statistics are returned, as maximum-value statistics cannot be
+    meaningfully differenced. Note that the dictionary is only populated on
+    exit from the context manager.
+    """
+    stream_group = receiver.stream_group
+    delta_stats: dict[str, int] = {}
+    init_stats = functools.reduce(operator.add, [stream.stats for stream in stream_group])
+    init_incomplete_chunks = receiver.incomplete_chunks
+    yield delta_stats
+    final_stats = functools.reduce(operator.add, [stream.stats for stream in stream_group])
+    final_incomplete_chunks = receiver.incomplete_chunks
+    for stat in final_stats.config:
+        if stat.mode == spead2.recv.StreamStatConfig.Mode.COUNTER:
+            delta_stats[stat.name] = final_stats[stat.name] - init_stats[stat.name]
+    delta_stats["incomplete_chunks"] = final_incomplete_chunks - init_incomplete_chunks
 
 
 @dataclass(frozen=True, order=True)

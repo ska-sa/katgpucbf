@@ -22,7 +22,7 @@ from fractions import Fraction
 import numpy as np
 from katsdpsigproc import accel
 
-from katgpucbf import DIG_SAMPLE_BITS, N_POLS
+from katgpucbf import DEFAULT_DIG_SAMPLE_BITS, N_POLS
 from katgpucbf.fgpu.ddc import DDCTemplate
 from katgpucbf.fgpu.main import DEFAULT_DDC_TAPS_RATIO
 
@@ -32,7 +32,7 @@ def main():
     parser.add_argument("--taps", type=int)  # Default is computed
     parser.add_argument("--subsampling", type=int, default=8)
     parser.add_argument("--samples", type=int, default=32 * 1024 * 1024)
-    parser.add_argument("--input-sample-bits", type=int, default=DIG_SAMPLE_BITS)
+    parser.add_argument("--input-sample-bits", type=int, default=DEFAULT_DIG_SAMPLE_BITS)
     parser.add_argument("--pols", type=int, default=N_POLS)
     parser.add_argument("--passes", type=int, default=1000)
     args = parser.parse_args()
