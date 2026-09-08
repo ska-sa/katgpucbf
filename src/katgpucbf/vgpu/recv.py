@@ -17,6 +17,7 @@
 """Handle receiving tied-array-channelised-voltage data."""
 
 import functools
+import math
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
@@ -37,8 +38,8 @@ from ..spead import BEAM_ANTS_ID, FREQUENCY_ID, TIMESTAMP_ID
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
-#: Number of chunks to allow to be under construction
-MAX_CHUNKS = 2  # TODO: may need to increase to tolerate reordering
+#: Number of bytes to allow for chunks under construction
+REORDER_BYTES = 64 * 1024 * 1024
 
 counters = Counters(
     heaps=Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE),
@@ -208,6 +209,7 @@ def make_stream_group(
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     recv_affinity: int,
     pol_labels: Sequence[str],
+    reorder_tol_bytes: int,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a stream group for receiving dual-polarised beam data.
 
@@ -226,6 +228,9 @@ def make_stream_group(
         Use -1 to indicate no affinity.
     pol_labels
         Prometheus labels to apply to the polarisations (must have length 2).
+    reorder_tol_bytes
+        Maximum tolerance for input data reordering, expressed in terms of
+        bytes in the reordering buffer.
     """
     # Reference counters to make the labels exist before the first scrape
     assert len(pol_labels) == N_POLS
@@ -234,10 +239,14 @@ def make_stream_group(
 
     user_data = np.zeros(N_POLS, dtype=user_data_type.dtype)
     user_data["pol"] = np.arange(N_POLS)
+    # The + 1 is because we want the distance from the end of the oldest chunk
+    # to the start of the newest chunk (a distance of n-1 chunks) to be at
+    # least REORDER_BYTES.
+    max_active_chunks = math.ceil(reorder_tol_bytes / layout.chunk_bytes) + 1
     group = base_recv.make_stream_group(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FREQUENCY_ID, BEAM_ANTS_ID, spead2.HEAP_LENGTH_ID],
-        max_active_chunks=MAX_CHUNKS,
+        max_active_chunks=max_active_chunks,
         data_ringbuffer=data_ringbuffer,
         free_ringbuffer=free_ringbuffer,
         affinity=[recv_affinity] * N_POLS,

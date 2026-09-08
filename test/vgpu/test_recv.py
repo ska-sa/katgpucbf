@@ -16,6 +16,7 @@
 
 """Unit tests for :mod:`katgpucbf.vgpu.recv`."""
 
+import math
 from collections.abc import Generator
 from unittest import mock
 
@@ -98,7 +99,11 @@ def stream_group(
     It is connected to the :func:`queues` fixture for input and
     :func:`data_ringbuffer` for output.
     """
-    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, -1, POL_LABELS)
+    # We want this to be larger than the entire input in test_recv, so that
+    # the test doesn't depend on the two receiving threads making progress at
+    # the same rate.
+    reorder_tol_bytes = math.ceil(30 / layout.chunk_batches) * layout.chunk_bytes
+    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, -1, POL_LABELS, reorder_tol_bytes)
     for _ in range(free_ringbuffer.maxsize):
         data = np.empty(
             (N_POLS, layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8
@@ -180,15 +185,6 @@ class TestStreamGroup:
         # This is an async fixture because make_sensors requires a running event loop
         # Large timeout so that it doesn't affect the test
         return make_sensors(sensor_timeout=1e6, prefixes=[f"{pol}." for pol in POL_LABELS])
-
-    @pytest.fixture(autouse=True)
-    def patch_max_chunks(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Replace MAX_CHUNKS with a large number.
-
-        This prevents heaps being evicted if one of the receiving threads runs
-        faster than the other.
-        """
-        monkeypatch.setattr("katgpucbf.vgpu.recv.MAX_CHUNKS", 10)
 
     @pytest.mark.parametrize("missing", [pytest.param(False, id="nomissing"), pytest.param(True, id="missing")])
     @pytest.mark.parametrize("reorder", [pytest.param(False, id="noreorder"), pytest.param(True, id="reorder")])

@@ -159,6 +159,7 @@ class RecvConfig:
     comp_vector: int
     buffer_size: int
     pols: tuple[str, str]
+    reorder_tol_bytes: int
 
     @property
     def pol_labels(self) -> list[str]:
@@ -362,7 +363,12 @@ class VEngine(Engine):
         layout = config.recv_config.layout
         dtype = np.dtype(f"int{layout.sample_bits}")
         recv_group = recv.make_stream_group(
-            layout, data_ringbuffer, free_ringbuffer, config.recv_config.affinity, config.recv_config.pol_labels
+            layout,
+            data_ringbuffer,
+            free_ringbuffer,
+            config.recv_config.affinity,
+            config.recv_config.pol_labels,
+            config.recv_config.reorder_tol_bytes,
         )
         for _ in range(recv_chunks):
             chunk = recv.Chunk(
