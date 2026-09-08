@@ -355,12 +355,14 @@ class VEngine(Engine):
     def _init_recv(self) -> None:
         """Initialise the receiver state."""
         config = self.config
-        recv_chunks = 4  # TODO: may need tuning?
-        data_ringbuffer = ChunkRingbuffer(
-            recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
-        )
-        free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
         layout = config.recv_config.layout
+        data_ringbuffer_chunks = 2  # TODO: may need tuning
+        max_active_chunks = recv.max_active_chunks(layout, config.recv_config.reorder_tol_bytes)
+        total_chunks = data_ringbuffer_chunks + max_active_chunks
+        data_ringbuffer = ChunkRingbuffer(
+            data_ringbuffer_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
+        )
+        free_ringbuffer = spead2.recv.ChunkRingbuffer(total_chunks)
         dtype = np.dtype(f"int{layout.sample_bits}")
         recv_group = recv.make_stream_group(
             layout,
@@ -370,7 +372,7 @@ class VEngine(Engine):
             config.recv_config.pol_labels,
             config.recv_config.reorder_tol_bytes,
         )
-        for _ in range(recv_chunks):
+        for _ in range(total_chunks):
             chunk = recv.Chunk(
                 present=np.empty(
                     (N_POLS, layout.n_batches_per_chunk, layout.n_pol_substreams),

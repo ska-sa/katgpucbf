@@ -203,6 +203,14 @@ class Layout(BaseLayout):
         return chunk_place_impl
 
 
+def max_active_chunks(layout: Layout, reorder_tol_bytes: int) -> int:
+    """Compute the number of chunks for the reordering buffer."""
+    # The + 1 is because we want the distance from the end of the oldest chunk
+    # to the start of the newest chunk (a distance of n-1 chunks) to be at
+    # least REORDER_BYTES.
+    return math.ceil(reorder_tol_bytes / layout.chunk_bytes) + 1
+
+
 def make_stream_group(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
@@ -239,14 +247,10 @@ def make_stream_group(
 
     user_data = np.zeros(N_POLS, dtype=user_data_type.dtype)
     user_data["pol"] = np.arange(N_POLS)
-    # The + 1 is because we want the distance from the end of the oldest chunk
-    # to the start of the newest chunk (a distance of n-1 chunks) to be at
-    # least REORDER_BYTES.
-    max_active_chunks = math.ceil(reorder_tol_bytes / layout.chunk_bytes) + 1
     group = base_recv.make_stream_group(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FREQUENCY_ID, BEAM_ANTS_ID, spead2.HEAP_LENGTH_ID],
-        max_active_chunks=max_active_chunks,
+        max_active_chunks=max_active_chunks(layout, reorder_tol_bytes),
         data_ringbuffer=data_ringbuffer,
         free_ringbuffer=free_ringbuffer,
         affinity=[recv_affinity] * N_POLS,
