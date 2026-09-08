@@ -17,6 +17,7 @@
 """Unit tests for module `qualification.recv`."""
 
 import io
+import random
 import socket
 import struct
 from unittest import mock
@@ -207,7 +208,6 @@ class TestTiedArrayResampledVoltageReceiver:
     ) -> None:
         """Incomplete thread sets are recorded as invalid framesets."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
-        # 2 threads of data only
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
             make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0),
             make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=1),
@@ -230,6 +230,8 @@ class TestTiedArrayResampledVoltageReceiver:
 
         When no min_timestamp is provided, the delay used is provided by the CBF's steady_state_timestamp method.
         """
+        fuzzy_second = random.randint(0, 1000)
+        fuzzy_ref_epoch = random.randint(0, 50)
         # delay time is relative to sync time, so set a known sync time to be relative to the first frame.
         mock_cbf.init_sensors.add(
             Sensor(
@@ -237,7 +239,7 @@ class TestTiedArrayResampledVoltageReceiver:
                 "stream0.sync-time",
                 "Sync time",
                 "sync-time",
-                default=VDIFTimestamp(0, 0, 0, frame_rate=FRAME_RATE).timestamp.unix,
+                default=VDIFTimestamp(fuzzy_second, 0, fuzzy_ref_epoch, frame_rate=FRAME_RATE).timestamp.unix,
                 initial_status=Sensor.Status.NOMINAL,
             )
         )
@@ -246,19 +248,21 @@ class TestTiedArrayResampledVoltageReceiver:
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
             # these frames are still before the steady state timestamp value.
-            make_vtp_packet(0, frame_nr=8, seconds=0, thread_id=0),
-            make_vtp_packet(1, frame_nr=8, seconds=0, thread_id=1),
-            make_vtp_packet(2, frame_nr=8, seconds=0, thread_id=2),
-            make_vtp_packet(3, frame_nr=8, seconds=0, thread_id=3),
+            make_vtp_packet(0, frame_nr=8, seconds=fuzzy_second, thread_id=0, ref_epoch=fuzzy_ref_epoch),
+            make_vtp_packet(1, frame_nr=8, seconds=fuzzy_second, thread_id=1, ref_epoch=fuzzy_ref_epoch),
+            make_vtp_packet(2, frame_nr=8, seconds=fuzzy_second, thread_id=2, ref_epoch=fuzzy_ref_epoch),
+            make_vtp_packet(3, frame_nr=8, seconds=fuzzy_second, thread_id=3, ref_epoch=fuzzy_ref_epoch),
             # these frames are after the steady state timestamp value.
-            make_vtp_packet(4, frame_nr=100, seconds=0, thread_id=0),
-            make_vtp_packet(5, frame_nr=100, seconds=0, thread_id=1),
-            make_vtp_packet(6, frame_nr=100, seconds=0, thread_id=2),
-            make_vtp_packet(7, frame_nr=100, seconds=0, thread_id=3),
+            make_vtp_packet(4, frame_nr=100, seconds=fuzzy_second, thread_id=0, ref_epoch=fuzzy_ref_epoch),
+            make_vtp_packet(5, frame_nr=100, seconds=fuzzy_second, thread_id=1, ref_epoch=fuzzy_ref_epoch),
+            make_vtp_packet(6, frame_nr=100, seconds=fuzzy_second, thread_id=2, ref_epoch=fuzzy_ref_epoch),
+            make_vtp_packet(7, frame_nr=100, seconds=fuzzy_second, thread_id=3, ref_epoch=fuzzy_ref_epoch),
         ]
         frameset = await anext(receiver.complete_framesets())
         # The first frameset is the one after the steady state timestamp value.
-        assert frameset.timestamp == VDIFTimestamp(seconds=0, frame_nr=100, ref_epoch=0, frame_rate=receiver.frame_rate)
+        assert frameset.timestamp == VDIFTimestamp(
+            seconds=fuzzy_second, frame_nr=100, ref_epoch=fuzzy_ref_epoch, frame_rate=receiver.frame_rate
+        )
         assert len(frameset.frames) == 4
 
     async def test_receive_framesets_filters_duplicate_seq_ids(
@@ -310,7 +314,7 @@ class TestTiedArrayResampledVoltageReceiver:
     async def test_receive_framesets_duplicate_timestamps_within_frameset_ignored(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
     ) -> None:
-        """Duplicate packets are ignored."""
+        """Duplicate timestamps are ignored."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
             make_vtp_packet(7, frame_nr=10, seconds=98, thread_id=0),
@@ -362,7 +366,7 @@ class TestTiedArrayResampledVoltageReceiver:
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
             make_vtp_packet(
                 0, frame_nr=1, seconds=15897600, thread_id=0, ref_epoch=33
-            ),  # 100 seconds before leap second, but with ref epoch before the leap second. (2016-12-31 23:58:20)
+            ),  # right before the leap second (2017-01-01 00:00:00)
             make_vtp_packet(
                 1, frame_nr=1, seconds=15897700, thread_id=1, ref_epoch=33
             ),  # 100 seconds after leap second, but with ref epoch still before the leap second. (2017-01-01 00:01:39)
@@ -378,7 +382,7 @@ class TestTiedArrayResampledVoltageReceiver:
             "should have a leap second difference between 2017-01-01 00:01:40 and 2017-01-01 00:01:39"
         )
         assert (ts[2] - ts[0]).sec == pytest.approx(101, rel=1e-9), (
-            "should have a difference of 201 seconds between 2016-12-31 23:58:20 and 2017-01-01 00:01:40"
+            "should have a difference of 101 seconds between 2016-12-31 24:00:00 and 2017-01-01 00:01:40"
         )
 
     async def test_close_clears_state(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:

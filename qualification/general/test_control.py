@@ -251,24 +251,16 @@ def check_vdif_timestamps(
     with check:
         assert len(timestamps) == len(set(timestamps)), "Duplicate timestamps found."
     # Linearise the timestamps
-    frame_nrs = [t.seconds * receiver.frame_rate + t.frame_nr for t in timestamps]
-    expected = frame_nrs[-1] - frame_nrs[0] + 1
-    missing = expected - len(frame_nrs)
+    frame_pos = [t.linear for t in timestamps]
+    expected = frame_pos[-1] - frame_pos[0] + 1
+    missing = expected - len(frame_pos)
     if missing > 0:
-        for i in range(len(frame_nrs) - 2, 0, -1):
-            if frame_nrs[i + 1] - frame_nrs[i] > 1:
-                missing_frame_nr = frame_nrs[i] - 1
-                missing_timestamp = VDIFTimestamp(
-                    seconds=timestamps[i].seconds,
-                    frame_nr=missing_frame_nr,
-                    ref_epoch=timestamps[i].ref_epoch,
-                    frame_rate=receiver.frame_rate,
-                )
+        for i in range(len(frame_pos) - 2, 0, -1):
+            if frame_pos[i + 1] - frame_pos[i] > 1:
+                missing_frame_pos = frame_pos[i + 1] - 1
                 break
-        seconds_after_start = (missing_timestamp.timestamp - timestamps[0].timestamp).sec
-        pdf_report.detail(
-            f"{name}: last incomplete frameset is #{missing_frame_nr} ({seconds_after_start:.6f} s after start)."
-        )
+        seconds_after_start = (missing_frame_pos - timestamps[0].linear) / receiver.frame_rate
+        pdf_report.detail(f"{name}: last incomplete frameset was at ({seconds_after_start:.6f} s after start).")
 
     pdf_report.detail(f"{name}: missed {missing} of {expected} framesets.")
     pdf_report.detail(f"{name}: last complete frameset frame number: {timestamps[-1].frame_nr}")
