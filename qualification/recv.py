@@ -712,6 +712,7 @@ class TiedArrayResampledVoltageReceiver:
         stream_name: str,
         interface_address: str,
         sock: socket.socket | None = None,
+        reorder_window: int = 32,
     ) -> None:
         self.stream_name = stream_name
         self.multicast_groups = endpoint_list_parser(DEFAULT_VTP_PORT)(
@@ -773,7 +774,7 @@ class TiedArrayResampledVoltageReceiver:
         self.sock = sock
         self.buffer: list[VDIFFrame] = []  # Kept sorted by sequence ID
         self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
-        self.reorder_window = 32  # TODO: make a parameter
+        self.reorder_window = reorder_window
 
         self.cbf = cbf
 
@@ -808,7 +809,6 @@ class TiedArrayResampledVoltageReceiver:
                 logger.warning("Duplicate sequence ID: %d", seq_id)
         else:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
-        # TODO: log or record invalid frames
 
     def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
         """Compute the minimum linearised frame number that is at least `min_time`."""
@@ -884,6 +884,7 @@ class TiedArrayResampledVoltageReceiver:
 
                         if frame0.seq_id <= self.min_seq_id - self.n_threads:
                             # If this frameset isn't complete now, it never will be. Drop the frame.
+                            logger.debug("Dropping frame due to incomplete frameset: %d", frame0.timestamp.linear)
                             del self.buffer[0]
                             continue
 
@@ -893,18 +894,18 @@ class TiedArrayResampledVoltageReceiver:
             if not timer.expired():
                 raise  # The TimeoutError came from something else
 
-    async def next_complete_frameset(self) -> VDIFFrameset:
+    async def next_complete_frameset(self, min_timestamp: int | None = None) -> VDIFFrameset:
         """Listen until a single complete VDIF frameset is available, then return it."""
-        # TODO: needs a min_timestamp option?
-        async for frameset in self.complete_framesets():
+        async for frameset in self.complete_framesets(min_timestamp=min_timestamp):
             return frameset
         raise RuntimeError("stream was shut down before we received a complete frameset")
 
-    async def wait_complete_frameset(self, timeout: float | None = DEFAULT_TIMEOUT) -> VDIFTimestamp:
+    async def wait_complete_frameset(
+        self, min_timestamp: int | None = None, *, timeout: float | None = DEFAULT_TIMEOUT
+    ) -> VDIFTimestamp:
         """Wait until a complete VDIF frameset is available and return the timestamp."""
-        # TODO: needs a min_timestamp option?
         async with asyncio.timeout(timeout):
-            return (await self.next_complete_frameset()).timestamp
+            return (await self.next_complete_frameset(min_timestamp=min_timestamp)).timestamp
 
     def close(self) -> None:
         """Close the socket."""

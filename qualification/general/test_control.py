@@ -250,14 +250,13 @@ def check_vdif_timestamps(
 
     with check:
         assert len(timestamps) == len(set(timestamps)), "Duplicate timestamps found."
-    # Linearise the timestamps
-    frame_pos = [t.linear for t in timestamps]
-    expected = frame_pos[-1] - frame_pos[0] + 1
-    missing = expected - len(frame_pos)
+
+    expected = timestamps[-1].linear - timestamps[0].linear + 1
+    missing = expected - len(timestamps)
     if missing > 0:
-        for i in range(len(frame_pos) - 2, 0, -1):
-            if frame_pos[i + 1] - frame_pos[i] > 1:
-                missing_frame_pos = frame_pos[i + 1] - 1
+        for i in range(len(timestamps) - 2, 0, -1):
+            if timestamps[i + 1].linear - timestamps[i].linear > 1:
+                missing_frame_pos = timestamps[i + 1].linear - 1
                 break
         seconds_after_start = (missing_frame_pos - timestamps[0].linear) / receiver.frame_rate
         pdf_report.detail(f"{name}: last incomplete frameset was at ({seconds_after_start:.6f} s after start).")
