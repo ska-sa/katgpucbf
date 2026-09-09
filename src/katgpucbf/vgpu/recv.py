@@ -17,7 +17,6 @@
 """Handle receiving tied-array-channelised-voltage data."""
 
 import functools
-import math
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
@@ -37,9 +36,6 @@ from ..recv import BaseLayout, Chunk, Counters, StatsCollector
 from ..spead import BEAM_ANTS_ID, FREQUENCY_ID, TIMESTAMP_ID
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
-
-#: Number of bytes to allow for chunks under construction
-REORDER_BYTES = 64 * 1024 * 1024
 
 counters = Counters(
     heaps=Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE),
@@ -203,21 +199,13 @@ class Layout(BaseLayout):
         return chunk_place_impl
 
 
-def max_active_chunks(layout: Layout, reorder_tol_bytes: int) -> int:
-    """Compute the number of chunks for the reordering buffer."""
-    # The + 1 is because we want the distance from the end of the oldest chunk
-    # to the start of the newest chunk (a distance of n-1 chunks) to be at
-    # least REORDER_BYTES.
-    return math.ceil(reorder_tol_bytes / layout.chunk_bytes) + 1
-
-
 def make_stream_group(
     layout: Layout,
     data_ringbuffer: spead2.recv.asyncio.ChunkRingbuffer,
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     recv_affinity: int,
     pol_labels: Sequence[str],
-    reorder_tol_bytes: int,
+    max_active_chunks: int,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a stream group for receiving dual-polarised beam data.
 
@@ -236,9 +224,8 @@ def make_stream_group(
         Use -1 to indicate no affinity.
     pol_labels
         Prometheus labels to apply to the polarisations (must have length 2).
-    reorder_tol_bytes
-        Maximum tolerance for input data reordering, expressed in terms of
-        bytes in the reordering buffer.
+    max_active_chunks
+        Maximum number of chunks that can be under construction at a time.
     """
     # Reference counters to make the labels exist before the first scrape
     assert len(pol_labels) == N_POLS
@@ -250,7 +237,7 @@ def make_stream_group(
     group = base_recv.make_stream_group(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FREQUENCY_ID, BEAM_ANTS_ID, spead2.HEAP_LENGTH_ID],
-        max_active_chunks=max_active_chunks(layout, reorder_tol_bytes),
+        max_active_chunks=max_active_chunks,
         data_ringbuffer=data_ringbuffer,
         free_ringbuffer=free_ringbuffer,
         affinity=[recv_affinity] * N_POLS,

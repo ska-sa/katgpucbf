@@ -102,8 +102,8 @@ def stream_group(
     # We want this to be larger than the entire input in test_recv, so that
     # the test doesn't depend on the two receiving threads making progress at
     # the same rate.
-    reorder_tol_bytes = math.ceil(30 / layout.chunk_batches) * layout.chunk_bytes
-    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, -1, POL_LABELS, reorder_tol_bytes)
+    max_active_chunks = math.ceil(30 / layout.chunk_batches)
+    stream_group = recv.make_stream_group(layout, data_ringbuffer, free_ringbuffer, -1, POL_LABELS, max_active_chunks)
     for _ in range(free_ringbuffer.maxsize):
         data = np.empty(
             (N_POLS, layout.n_batches_per_chunk, layout.n_channels, layout.n_spectra_per_heap, COMPLEX), np.int8

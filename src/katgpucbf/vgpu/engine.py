@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+import math
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -354,10 +355,13 @@ class VEngine(Engine):
 
     def _init_recv(self) -> None:
         """Initialise the receiver state."""
-        config = self.config
-        layout = config.recv_config.layout
+        recv_config = self.config.recv_config
+        layout = recv_config.layout
         data_ringbuffer_chunks = 2  # TODO: may need tuning
-        max_active_chunks = recv.max_active_chunks(layout, config.recv_config.reorder_tol_bytes)
+        # The + 1 is because we want the distance from the end of the oldest chunk
+        # to the start of the newest chunk (a distance of n-1 chunks) to be at
+        # least REORDER_BYTES.
+        max_active_chunks = math.ceil(recv_config.reorder_tol_bytes / layout.chunk_bytes) + 1
         total_chunks = data_ringbuffer_chunks + max_active_chunks
         data_ringbuffer = ChunkRingbuffer(
             data_ringbuffer_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
@@ -368,9 +372,9 @@ class VEngine(Engine):
             layout,
             data_ringbuffer,
             free_ringbuffer,
-            config.recv_config.affinity,
-            config.recv_config.pol_labels,
-            config.recv_config.reorder_tol_bytes,
+            recv_config.affinity,
+            recv_config.pol_labels,
+            max_active_chunks,
         )
         for _ in range(total_chunks):
             chunk = recv.Chunk(
@@ -389,11 +393,11 @@ class VEngine(Engine):
         for i, stream in enumerate(recv_group):
             base_recv.add_reader(
                 stream,
-                src=config.recv_config.srcs[i],
-                interface=config.recv_config.interface,
-                ibv=config.recv_config.ibv,
-                comp_vector=config.recv_config.comp_vector,
-                buffer_size=config.recv_config.buffer_size // len(recv_group),
+                src=recv_config.srcs[i],
+                interface=recv_config.interface,
+                ibv=recv_config.ibv,
+                comp_vector=recv_config.comp_vector,
+                buffer_size=recv_config.buffer_size // len(recv_group),
             )
 
         self._recv_group = recv_group
@@ -402,8 +406,8 @@ class VEngine(Engine):
                 data_ringbuffer,
                 layout,
                 self.sensors,
-                config.recv_config.time_converter,
-                config.recv_config.pol_labels,
+                recv_config.time_converter,
+                recv_config.pol_labels,
             )
         )
 
