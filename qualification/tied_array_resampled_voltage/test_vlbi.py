@@ -17,7 +17,6 @@
 """Test for tied-array-resampled-voltage stream."""
 
 import asyncio
-import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -61,7 +60,7 @@ async def max_retry_test(
         start_time = loop.time()
         if await test_procedure(attempt_num):
             return True, attempt_num
-        sleep_period = retry_interval - (time.time() - start_time)
+        sleep_period = retry_interval - (loop.time() - start_time)
         await asyncio.sleep(sleep_period)
     return False, attempt_num
 
