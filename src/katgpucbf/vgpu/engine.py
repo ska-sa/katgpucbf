@@ -123,7 +123,7 @@ class RecvStream:
                 yield arr
 
 
-class DummyStream(AsyncIterator[xr.DataArray]):
+class DummyRecvStream(AsyncIterator[xr.DataArray]):
     """Provide the same iteration interface as RecvStream, but with dummy data."""
 
     def __init__(self, arr: xr.DataArray, time_base: Time, time_scale: Fraction) -> None:
@@ -396,7 +396,7 @@ class VEngine(Engine):
         # scope of leap second tables.
         time_base = Time("2020-01-01T00:00:00", scale="utc")
         time_scale = Fraction(samples_between_spectra) / Fraction(recv_config.time_converter.adc_sample_rate)
-        it = DummyStream(arr, time_base, time_scale)
+        it = DummyRecvStream(arr, time_base, time_scale)
         dummy_sensors = aiokatcp.SensorSet()
         # Use a large value for sensor timeout, since we're not actually interested
         self._populate_sensors(dummy_sensors, recv_config.pol_labels, self.config.send_config.pols, 1e6)
