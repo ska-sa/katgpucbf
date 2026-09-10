@@ -129,10 +129,10 @@ class RecvStream:
                 # running by injecting zero data into the stream.
                 while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
                     last_chunk_id += 1
-                    zero_arr = xr.zeros_like(arr)
+                    nan_arr = xr.full_like(arr, np.nan + np.nan * 1j)
                     timestamp = last_chunk_id * self._layout.chunk_timestamp_step
-                    zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
-                    yield zero_arr
+                    nan_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
+                    yield nan_arr
                 last_chunk_id = chunk.chunk_id
                 yield arr
 
