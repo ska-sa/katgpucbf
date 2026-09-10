@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+import math
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -159,6 +160,7 @@ class RecvConfig:
     comp_vector: int
     buffer_size: int
     pols: tuple[str, str]
+    reorder_tol_bytes: int
 
     @property
     def pol_labels(self) -> list[str]:
@@ -353,18 +355,28 @@ class VEngine(Engine):
 
     def _init_recv(self) -> None:
         """Initialise the receiver state."""
-        config = self.config
-        recv_chunks = 4  # TODO: may need tuning?
+        recv_config = self.config.recv_config
+        layout = recv_config.layout
+        data_ringbuffer_chunks = 2  # TODO: may need tuning
+        # The + 1 is because we want the distance from the end of the oldest chunk
+        # to the start of the newest chunk (a distance of n-1 chunks) to be at
+        # least REORDER_BYTES.
+        max_active_chunks = math.ceil(recv_config.reorder_tol_bytes / layout.chunk_bytes) + 1
+        total_chunks = data_ringbuffer_chunks + max_active_chunks
         data_ringbuffer = ChunkRingbuffer(
-            recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
+            data_ringbuffer_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
         )
-        free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
-        layout = config.recv_config.layout
+        free_ringbuffer = spead2.recv.ChunkRingbuffer(total_chunks)
         dtype = np.dtype(f"int{layout.sample_bits}")
         recv_group = recv.make_stream_group(
-            layout, data_ringbuffer, free_ringbuffer, config.recv_config.affinity, config.recv_config.pol_labels
+            layout,
+            data_ringbuffer,
+            free_ringbuffer,
+            recv_config.affinity,
+            recv_config.pol_labels,
+            max_active_chunks,
         )
-        for _ in range(recv_chunks):
+        for _ in range(total_chunks):
             chunk = recv.Chunk(
                 present=np.empty(
                     (N_POLS, layout.n_batches_per_chunk, layout.n_pol_substreams),
@@ -381,11 +393,11 @@ class VEngine(Engine):
         for i, stream in enumerate(recv_group):
             base_recv.add_reader(
                 stream,
-                src=config.recv_config.srcs[i],
-                interface=config.recv_config.interface,
-                ibv=config.recv_config.ibv,
-                comp_vector=config.recv_config.comp_vector,
-                buffer_size=config.recv_config.buffer_size // len(recv_group),
+                src=recv_config.srcs[i],
+                interface=recv_config.interface,
+                ibv=recv_config.ibv,
+                comp_vector=recv_config.comp_vector,
+                buffer_size=recv_config.buffer_size // len(recv_group),
             )
 
         self._recv_group = recv_group
@@ -394,8 +406,8 @@ class VEngine(Engine):
                 data_ringbuffer,
                 layout,
                 self.sensors,
-                config.recv_config.time_converter,
-                config.recv_config.pol_labels,
+                recv_config.time_converter,
+                recv_config.pol_labels,
             )
         )
 
