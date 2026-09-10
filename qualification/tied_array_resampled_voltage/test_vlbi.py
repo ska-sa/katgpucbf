@@ -40,20 +40,20 @@ async def max_retry_test(
 
     Parameters
     ----------
-        test_procedure
-            An asynchronous subroutine that takes an integer indicating the attempt number
-            and returns a boolean `True` if the test passed or `False` if the test failed.
-        max_attempts
-            The maximum number of attempts.
-        retry_interval
-           The retry interval in seconds.
+    test_procedure
+        An asynchronous subroutine that takes an integer indicating the attempt number
+        and returns a boolean `True` if the test passed or `False` if the test failed.
+    max_attempts
+        The maximum number of attempts.
+    retry_interval
+        The retry interval in seconds.
 
     Returns
     -------
-        bool
-            Whether the test passed.
-        int
-            Zero-indexed attempt index upon completion.
+    bool
+        Whether the test passed.
+    int
+        Zero-indexed attempt index upon completion.
     """
     loop = asyncio.get_running_loop()
     for attempt_num in range(max_attempts):
@@ -155,7 +155,7 @@ async def test_mean_power(
         f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, total_retries, 0]), UTC)}"
         f" in {total_retries + 1} steps."
     )
-    mean_power_sensor_readings[:, :, 0] = mean_power_sensor_readings[:, :, 0] - mean_power_sensor_readings[:, :1, 0]
+    mean_power_sensor_readings[:, :, 0] -= mean_power_sensor_readings[:, :1, 0]
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
