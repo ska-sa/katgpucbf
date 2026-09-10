@@ -514,7 +514,7 @@ def _create_receive_stream_group(
     chunk_factory
         Factory function to initialise the chunks.
     """
-    n_extra_chunks = 2  # Chunks that are being processed
+    n_extra_chunks = max(2, max_chunks)  # Chunks that are being processed
     free_ringbuffer = spead2.recv.ChunkRingbuffer(max_chunks + n_extra_chunks)
     data_ringbuffer = spead2.recv.asyncio.ChunkRingbuffer(n_extra_chunks)
     group_config = spead2.recv.ChunkStreamGroupConfig(
