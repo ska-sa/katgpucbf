@@ -86,7 +86,6 @@ class RecvStream:
             with chunk:
                 if chunk.timestamp < self._min_timestamp:
                     continue
-                # TODO: need to do something with the presence flags
                 # TODO: pipeline these transfers (but keeping in mind
                 # that we need to recycle the chunk only when the transfer
                 # is complete).
@@ -103,6 +102,22 @@ class RecvStream:
                 # (N_POLS, n_spectra_per_chunk, channels, COMPLEX)
                 # Convert Gaussian integers to complex
                 data = cp.ascontiguousarray(data.astype(np.float32)).view(np.complex64)[..., 0]
+                # Marking NaNs in data is done here as NaNs are not compatible with
+                # the chunk.data.dtype received above.
+                zero_data_indices = np.argwhere(chunk.present == 0)
+                for zero_data_index in zero_data_indices:
+                    pol, batch, substream = zero_data_index
+                    logger.warning(
+                        "Missing data for pol %s, batch %d, substream %d at timestamp %d",
+                        pol,
+                        batch,
+                        substream,
+                        chunk.timestamp,
+                    )
+                    first_affected_spectra = batch * self._layout.n_spectra_per_heap
+                    last_affected_spectra = first_affected_spectra + self._layout.n_spectra_per_heap
+                    data[pol, first_affected_spectra:last_affected_spectra, ...] = np.nan + np.nan * 1j
+
                 arr = xr.DataArray(
                     data,
                     dims=("pol", "time", "channel"),
@@ -114,10 +129,10 @@ class RecvStream:
                 # running by injecting zero data into the stream.
                 while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
                     last_chunk_id += 1
-                    zero_arr = xr.zeros_like(arr)
+                    nan_arr = xr.full_like(arr, np.nan + np.nan * 1j)
                     timestamp = last_chunk_id * self._layout.chunk_timestamp_step
-                    zero_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
-                    yield zero_arr
+                    nan_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
+                    yield nan_arr
                 last_chunk_id = chunk.chunk_id
                 yield arr
 
