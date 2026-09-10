@@ -89,6 +89,13 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         required=True,
         help="Input polarisations (±x, ±y, ±L or ±R)",
     )
+    parser.add_argument(
+        "--recv-reorder-tol-bytes",
+        type=int,
+        metavar="BYTES",
+        default=128 * 1024 * 1024,
+        help="Size of reorder buffer for handling out-of-order incoming data",
+    )
     parser.add_argument("--send-bandwidth", type=float, metavar="HZ", required=True, help="Output bandwidth")
     parser.add_argument(
         "--send-pols",
@@ -190,6 +197,7 @@ def make_engine(args: argparse.Namespace) -> VEngine:
         comp_vector=args.recv_comp_vector,
         buffer_size=args.recv_buffer,
         pols=tuple(args.recv_pols),
+        reorder_tol_bytes=args.recv_reorder_tol_bytes,
     )
     send_config = SendConfig(
         pols=tuple(args.send_pols),
