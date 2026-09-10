@@ -461,9 +461,8 @@ class VEngine(Engine):
                 recv_config.pol_labels,
             )
         )
-
-        for stream in recv_group:
-            stream.start()
+        # We do not start the streams yet; that's done in start() so that
+        # it's done only once we're 100% ready to start receiving data.
 
     def _populate_sensors(
         self,
@@ -499,6 +498,8 @@ class VEngine(Engine):
     @override
     async def start(self) -> None:
         await self._prime_memory_pool()
+        for stream in self._recv_group:
+            stream.start()
         await super().start()
 
     @override
