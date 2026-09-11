@@ -261,7 +261,9 @@ def check_vdif_timestamps(
                 missing_frame_pos = timestamps[i + 1].linear - 1
                 break
         seconds_after_start = (missing_frame_pos - timestamps[0].linear) / receiver.frame_rate
-        pdf_report.detail(f"{name}: last incomplete frameset was at ({seconds_after_start:.6f} s after start).")
+        pdf_report.detail(
+            f"{name}: last incomplete frameset was at {missing_frame_pos} ({seconds_after_start:.6f} s after start)."
+        )
 
     pdf_report.detail(f"{name}: missed {missing} of {expected} framesets.")
     pdf_report.detail(f"{name}: last complete frameset frame number: {timestamps[-1].frame_nr}")

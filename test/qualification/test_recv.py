@@ -17,7 +17,6 @@
 """Unit tests for module :mod:`qualification.recv`."""
 
 import io
-import random
 import socket
 import struct
 from unittest import mock
@@ -209,18 +208,24 @@ class TestTiedArrayResampledVoltageReceiver:
         """Incomplete thread sets are recorded as invalid framesets."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
+            # 4 threads but only 3 unique thread ids
             make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0),
             make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=1),
             make_vtp_packet(2, frame_nr=1, seconds=100, thread_id=0),
             make_vtp_packet(3, frame_nr=1, seconds=100, thread_id=1),
             make_vtp_packet(4, frame_nr=1, seconds=100, thread_id=2),
             make_vtp_packet(5, frame_nr=1, seconds=100, thread_id=0),
+            # complete frameset after the incomplete frameset
             make_vtp_packet(100, frame_nr=0, seconds=101, thread_id=0),
+            make_vtp_packet(101, frame_nr=0, seconds=101, thread_id=1),
+            make_vtp_packet(102, frame_nr=0, seconds=101, thread_id=2),
+            make_vtp_packet(103, frame_nr=0, seconds=101, thread_id=3),
+            make_vtp_packet(200, frame_nr=0, seconds=201, thread_id=0),
         ]
-        # 4 threads but only 3 unique thread ids
 
-        with pytest.raises(RuntimeError):
-            await anext(receiver.complete_framesets())
+        frameset = await anext(receiver.complete_framesets())
+        assert len(frameset.frames) == 4
+        assert frameset.timestamp == VDIFTimestamp(seconds=101, frame_nr=0, ref_epoch=0, frame_rate=receiver.frame_rate)
 
     async def test_receive_framesets_filters_until_delay(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
@@ -230,8 +235,8 @@ class TestTiedArrayResampledVoltageReceiver:
 
         When no min_timestamp is provided, the delay used is provided by the CBF's steady_state_timestamp method.
         """
-        fuzzy_second = random.randint(0, 1000)
-        fuzzy_ref_epoch = random.randint(0, 50)
+        fuzzy_second = 123
+        fuzzy_ref_epoch = 34
         # delay time is relative to sync time, so set a known sync time to be relative to the first frame.
         mock_cbf.init_sensors.add(
             Sensor(
@@ -367,13 +372,13 @@ class TestTiedArrayResampledVoltageReceiver:
         mock_socket.recv.side_effect = [  # type: ignore[attr-defined]
             make_vtp_packet(
                 0, frame_nr=1, seconds=15897600, thread_id=0, ref_epoch=33
-            ),  # right before the leap second (2017-01-01 00:00:00)
+            ),  # right before the leap second (2016-12-31 23:59:60)
             make_vtp_packet(
                 1, frame_nr=1, seconds=15897700, thread_id=1, ref_epoch=33
             ),  # 100 seconds after leap second, but with ref epoch still before the leap second. (2017-01-01 00:01:39)
             make_vtp_packet(
                 2, frame_nr=1, seconds=100, thread_id=2, ref_epoch=34
-            ),  # 100 seconds after the leap second start, with ref epoch after the leap second. (2017-01-01 00:01:40)
+            ),  # 100 seconds after the leap second end, with ref epoch after the leap second. (2017-01-01 00:01:40)
         ]
         await receiver._next_packet()
         await receiver._next_packet()
