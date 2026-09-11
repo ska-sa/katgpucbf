@@ -388,7 +388,7 @@ class TestTiedArrayResampledVoltageReceiver:
             "should have a leap second difference between 2017-01-01 00:01:40 and 2017-01-01 00:01:39"
         )
         assert (ts[2] - ts[0]).sec == pytest.approx(101, rel=1e-9), (
-            "should have a difference of 101 seconds between 2016-12-31 24:00:00 and 2017-01-01 00:01:40"
+            "should have a difference of 101 seconds between 2016-12-31 23:59:60 and 2017-01-01 00:01:40"
         )
 
     async def test_close_clears_state(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
