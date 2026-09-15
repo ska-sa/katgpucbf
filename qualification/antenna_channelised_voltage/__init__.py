@@ -138,13 +138,13 @@ async def sample_tone_response(
             for i in range(len(tasks)):
                 signal = tasks[i][1] * N_POLS
                 tg.create_task(pcc.request("dsim-signals", receiver.cbf.dsim_names[i], signal))
-        _, data = await receiver.next_complete_chunk_data()
-        # strict=False because we might not have a task for every dsim
-        for task, bl_idx in zip(tasks, corrs, strict=False):
-            # In the absence of noise this should be purely real, but
-            # due to quantization noise it is complex. Take the absolute
-            # value.
-            np.hypot(data[:, bl_idx, 0], data[:, bl_idx, 1], out=out[task[0]])
+        with await receiver.next_complete_chunk() as chunk:
+            # strict=False because we might not have a task for every dsim
+            for task, bl_idx in zip(tasks, corrs, strict=False):
+                # In the absence of noise this should be purely real, but
+                # due to quantization noise it is complex. Take the absolute
+                # value.
+                np.hypot(chunk.data[:, bl_idx, 0], chunk.data[:, bl_idx, 1], out=out[task[0]])
 
     with np.nditer([freqs, amplitude], flags=["multi_index"]) as it:
         for f, a in it:
