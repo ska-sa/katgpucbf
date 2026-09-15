@@ -210,6 +210,18 @@ class Reporter:
         """
         self._data.append({"$msg_type": "spead2_statistics", "name": name, "stats": stats})
 
+    def net_device_statistics(self, name: str, stats: dict[str, int]) -> None:
+        """Add record of statistics from the network device.
+
+        Parameters
+        ----------
+        name
+            The device for which statistics are being reported.
+        stats
+            Dictionary of statistics.
+        """
+        self._data.append({"$msg_type": "net_device_statistics", "name": name, "stats": stats})
+
 
 def custom_report_log(pytestconfig: pytest.Config, data) -> None:
     """Log a custom JSON line in the report log."""

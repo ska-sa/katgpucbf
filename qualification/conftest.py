@@ -26,6 +26,7 @@ import subprocess
 from collections import deque, namedtuple
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -566,6 +567,28 @@ def run_async(
         yield runner
 
 
+def _out_of_buffer_path(device: str) -> Path:
+    """Find the path in :file:`/sys` containing the RDMA out-of-buffer counter."""
+    # This is loosely based on the ibdev2netdev script provided by NVIDIA,
+    # although it doesn't handle all the cases that script does (Infiniband,
+    # legacy drivers etc).
+    base = Path("/sys/class/infiniband")
+    with os.scandir(base) as dev_scanner:
+        for dev in dev_scanner:
+            if not dev.is_dir():
+                continue
+            ports_path = base / dev.name / "ports"
+            with os.scandir(ports_path) as port_scanner:
+                for port in port_scanner:
+                    if not port.is_dir():
+                        continue
+                    port_path = ports_path / port.name
+                    ndev_path = port_path / "gid_attrs" / "ndevs" / "0"
+                    if ndev_path.exists() and ndev_path.read_text("ascii").strip() == device:
+                        return port_path / "hw_counters" / "out_of_buffer"
+    raise RuntimeError(f"Could not find infiniband device corresponding to {device}")
+
+
 @pytest.fixture
 async def cbf(
     pytestconfig: pytest.Config,
@@ -583,9 +606,14 @@ async def cbf(
     The returned CBF might not be specific to this test, but it will have
     been reset to a default state, with the dsim outputting zeros.
     """
-    interface_address = get_interface_address(pytestconfig.getini("interface"))
+    interface = pytestconfig.getini("interface")
+    interface_address = get_interface_address(interface)
     # This will require running pytest with spead2_net_raw which is unusual.
     use_ibv = pytestconfig.getini("use_ibv")
+    out_of_buffer_path: Path | None = None
+    if use_ibv:
+        out_of_buffer_path = _out_of_buffer_path(interface)
+        out_of_buffer_start = int(out_of_buffer_path.read_text("ascii"))
 
     cbf = await cbf_cache.get_cbf(cbf_config, cbf_mode_config)
     pdf_report.config(cbf=str(cbf.uuid))
@@ -638,6 +666,13 @@ async def cbf(
 
     for name in capture_stop_streams:
         await pcc.request("capture-stop", name)
+
+    if out_of_buffer_path is not None:
+        out_of_buffer_end = int(out_of_buffer_path.read_text("ascii"))
+        out_of_buffer = out_of_buffer_end - out_of_buffer_start
+        pdf_report.net_device_statistics(interface, {"out_of_buffer": out_of_buffer})
+        if out_of_buffer > 0:
+            logger.warning("RDMA out-of-buffer errors: %d", out_of_buffer)
 
 
 @pytest.fixture

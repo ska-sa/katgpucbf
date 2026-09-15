@@ -375,6 +375,7 @@ class Result:
     requirements: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
     spead2_statistics: dict[str, dict[str, int]] = field(default_factory=dict)
+    net_device_statistics: dict[str, dict[str, int]] = field(default_factory=dict)
     outcome: Literal["passed", "failed", "skipped", "xfail"] = "failed"
     xfail_reason: str | None = None
     failure_messages: list[str] = field(default_factory=list)
@@ -509,6 +510,8 @@ def _parse_report_data(result: Result, msg: dict) -> None:
         result.config.update(msg)
     elif msg_type == "spead2_statistics":
         result.spead2_statistics[msg["name"]] = msg["stats"]
+    elif msg_type == "net_device_statistics":
+        result.net_device_statistics[msg["name"]] = msg["stats"]
     else:
         raise ValueError(f"Do not know how to parse $msg_type of {msg_type!r}")
 
@@ -1135,25 +1138,51 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             "Incomplete chunks": "incomplete_chunks",
             "Worker blocked": "worker_blocked",
         }
-        all_stat_names = {**heap_stat_names, **other_stat_names}
+        net_device_stat_names = {"Out of buffer": "out_of_buffer"}
+        spead2_stat_names = {**heap_stat_names, **other_stat_names}
+        all_stat_names = {**spead2_stat_names, **net_device_stat_names}
         n_stats = len(all_stat_names)
         with (
             section.create(SmallText()) as small_text,
             small_text.create(LongTable(r"|l|" + "r|" * n_stats)) as stats_table,
         ):
             stats_table.add_hline()
-            stats_table.add_row((MultiColumn(n_stats + 1, align="|c|", data=bold("spead2 statistics")),))
+            stats_table.add_row((MultiColumn(n_stats + 1, align="|c|", data=bold("network receiver statistics")),))
             stats_table.add_hline()
             stats_table.add_row(
                 [MultiRow(2, data=bold("Stream")), MultiColumn(len(heap_stat_names), align="c|", data=bold("Heaps"))]
                 + [MultiRow(2, data=bold(name)) for name in other_stat_names]
+                + [MultiRow(2, data=bold(name)) for name in net_device_stat_names]
             )
             stats_table.add_hline(2, len(heap_stat_names) + 1)
-            stats_table.add_row([""] + [bold(name) for name in heap_stat_names] + [""] * len(other_stat_names))
+            stats_table.add_row(
+                [""]
+                + [bold(name) for name in heap_stat_names]
+                + [""] * (len(other_stat_names) + len(net_device_stat_names))
+            )
             stats_table.add_hline()
-            for name, stats in result.spead2_statistics.items():
-                stats_table.add_row([name] + [stats.get(value, "-") for value in all_stat_names.values()])
-                stats_table.add_hline()
+            n_streams = len(result.spead2_statistics)
+            for i, (name, stats) in enumerate(result.spead2_statistics.items()):
+                row = [name] + [stats.get(value, "-") for value in spead2_stat_names.values()]
+                if i == 0:
+                    for value in net_device_stat_names.values():
+                        if not result.net_device_statistics:
+                            text = "-"
+                        else:
+                            text = str(
+                                sum(
+                                    net_device_stats.get(value, 0)
+                                    for net_device_stats in result.net_device_statistics.values()
+                                )
+                            )
+                        row.append(MultiRow(n_streams, data=text))
+                else:
+                    row.extend([""] * len(net_device_stat_names))
+                stats_table.add_row(row)
+                if i < n_streams - 1:
+                    stats_table.add_hline(1, len(spead2_stat_names) + 1)
+                else:
+                    stats_table.add_hline()
 
 
 def _doc_result_set(
