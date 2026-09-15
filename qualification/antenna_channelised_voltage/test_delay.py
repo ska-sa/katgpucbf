@@ -619,7 +619,7 @@ async def test_group_delay(
     receiver = receive_tied_array_channelised_voltage
     pcc = cbf.product_controller_client
     # Nominally in sigma, but the test has lots of non-Gaussian things going on,
-    # channel leakages and so, so the measured value tends to exceeed 5 sigma
+    # channel leakages and so, so the measured value tends to exceed 5 sigma
     # every now and then.
     tolerance = 7.0
 
