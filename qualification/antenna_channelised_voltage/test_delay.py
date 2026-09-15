@@ -322,6 +322,7 @@ async def _test_delay_phase_fixed(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
     delay_phases: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
     report_residual: bool,
@@ -333,7 +334,7 @@ async def _test_delay_phase_fixed(
 
     Parameters
     ----------
-    cbf, receive_baseline_correlation_products, pdf_report, pass_channels
+    cbf, receive_baseline_correlation_products, pdf_report, pass_channels, run_async
         Fixtures
     delay_phases
         Pairs of (delay, phase) to test
@@ -372,8 +373,8 @@ async def _test_delay_phase_fixed(
 
     pdf_report.step("Verify results")
     pdf_report.detail("Receive an accumulation")
-    _, chunk_data = await receiver.next_complete_chunk_data()
-    actual = np.arctan2(chunk_data[..., 1], chunk_data[..., 0])
+    with await receiver.next_complete_chunk() as chunk:
+        actual = await run_async(np.arctan2, chunk.data[..., 1], chunk.data[..., 0])
 
     for i, (delay, phase) in enumerate(delay_phases):
         caption = caption_cb(delay, phase)
@@ -392,7 +393,7 @@ async def _test_delay_phase_fixed(
         # The delay in the dsim will affect the phase of the centre frequency,
         # which the delay compensation won't correct.
         expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.center_freq
-        check_phases(pdf_report, actual[:, bl_idx], expected, pass_channels, caption)
+        await run_async(check_phases, pdf_report, actual[:, bl_idx], expected, pass_channels, caption)
 
 
 async def _test_delay_phase_rate(
@@ -400,6 +401,7 @@ async def _test_delay_phase_rate(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
     rates: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
 ) -> None:
@@ -410,7 +412,7 @@ async def _test_delay_phase_rate(
 
     Parameters
     ----------
-    cbf, receive_baseline_correlation_products, pdf_report, pass_channels
+    cbf, receive_baseline_correlation_products, pdf_report, pass_channels, run_async
         Fixtures
     rates
         Pairs of (delay_rate, phase_rate) to test
@@ -446,7 +448,7 @@ async def _test_delay_phase_rate(
     for chunk in await receiver.consecutive_chunks(2):
         with chunk:
             timestamps.append(chunk.timestamp)
-            phases.append(np.arctan2(chunk.data[..., 1], chunk.data[..., 0]))
+            phases.append(await run_async(np.arctan2, chunk.data[..., 1], chunk.data[..., 0]))
     elapsed = timestamps[1] - timestamps[0]
     elapsed_s = elapsed / receiver.scale_factor_timestamp
     pdf_report.detail(f"Timestamps are {timestamps[0]}, {timestamps[1]} with difference {elapsed} ({elapsed_s:.3f} s).")
@@ -462,7 +464,7 @@ async def _test_delay_phase_rate(
         expected = delay_phase(receiver, delay_rate * elapsed) + phase_rate * elapsed_s
         # Allow 2° rather than 1° because we're taking the difference between
         # two phases which each have a 1° tolerance.
-        check_phases(pdf_report, actual, expected, pass_channels, caption, tolerance_deg=2)
+        await run_async(check_phases, pdf_report, actual, expected, pass_channels, caption, 2)
 
 
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
@@ -471,6 +473,7 @@ async def test_delay(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test performance of delay compensation with a fixed delay.
 
@@ -489,6 +492,7 @@ async def test_delay(
         receive_baseline_correlation_products,
         pdf_report,
         pass_channels,
+        run_async,
         [(delay, 0.0) for delay in delays],
         lambda delay, phase: f"delay {delay * 1e12:.2f}ps",
         True,
@@ -501,6 +505,7 @@ async def test_delay_rate(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test performance of delay compensation with a delay rate.
 
@@ -518,6 +523,7 @@ async def test_delay_rate(
         receive_baseline_correlation_products,
         pdf_report,
         pass_channels,
+        run_async,
         [(delay_rate, 0.0) for delay_rate in rates],
         lambda delay_rate, phase_rate: f"delay rate {delay_rate}",
     )
@@ -529,6 +535,7 @@ async def test_delay_phase(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test performance of delay tracking with a fixed phase.
 
@@ -545,6 +552,7 @@ async def test_delay_phase(
         receive_baseline_correlation_products,
         pdf_report,
         pass_channels,
+        run_async,
         [(0.0, phase) for phase in phases],
         lambda delay, phase: f"phase {phase:.4f} rad ({np.rad2deg(phase):.2f}°)",
         False,
@@ -558,6 +566,7 @@ async def test_phase_rate(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test performance of delay tracking with a phase rate.
 
@@ -575,6 +584,7 @@ async def test_phase_rate(
         receive_baseline_correlation_products,
         pdf_report,
         pass_channels,
+        run_async,
         [(0.0, phase_rate) for phase_rate in rates],
         lambda delay_rate, phase_rate: f"phase rate {phase_rate}",
     )
