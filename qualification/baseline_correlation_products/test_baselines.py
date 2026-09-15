@@ -78,7 +78,7 @@ async def test_baseline_correlation_products(
         gain_non_zero = input_gains > 0
         expected_non_zero = gain_non_zero[a_idx, :] & gain_non_zero[b_idx, :]
 
-        _, data = await receiver.next_complete_chunk()
+        _, data = await receiver.next_complete_chunk_data()
         assert data.shape == (receiver.n_chans, receiver.n_bls, 2)
 
         # confirm the signals are in baselines as expected

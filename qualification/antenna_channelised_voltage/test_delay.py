@@ -61,7 +61,7 @@ async def test_delay_application_time(
     pdf_report.step("Inject correlated white noise signal.")
     await pcc.request("dsim-signals", cbf.dsim_names[0], "common=nodither(wgn(0.1)); common; common;")
     pdf_report.detail("Wait for updated signal to propagate through the pipeline.")
-    await receiver.next_complete_chunk()
+    await receiver.wait_complete_chunk()
 
     attempts = 5
     advance = 0.2
@@ -79,7 +79,7 @@ async def test_delay_application_time(
         target_ts = round(receiver.time_converter.unix_to_adc(target))
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
         acc = None
-        timestamp, data = await receiver.next_complete_chunk(min_timestamp=target_acc_ts, timeout=10.0)
+        timestamp, data = await receiver.next_complete_chunk_data(min_timestamp=target_acc_ts, timeout=10.0)
         pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
         if timestamp == target_acc_ts:
             acc = np.sum(data[:, bl_idx, :], axis=0)  # Sum over channels
@@ -125,7 +125,7 @@ async def test_delay_enable_disable(
 
     async def measure_phase() -> float:
         """Retrieve the phase of the chosen channel from the next chunk."""
-        _, data = await receiver.next_complete_chunk()
+        _, data = await receiver.next_complete_chunk_data()
         value = data[channel, bl_idx, :]
         phase = np.arctan2(value[1], value[0])
         return phase
@@ -250,7 +250,7 @@ async def test_delay_sensors(
             assert value[1:] == (0.0, 0.0, 0.0, 0.0)
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
-    await receiver.next_complete_chunk(min_timestamp=load_ts)
+    await receiver.wait_complete_chunk(min_timestamp=load_ts)
     sensor_values = np.empty((len(receiver.input_labels), 5), np.float64)
     expected_values = np.empty((len(receiver.input_labels), 5), np.float64)
     for idx, (expected, label) in enumerate(zip(delay_tuples, receiver.input_labels, strict=True)):
@@ -371,7 +371,7 @@ async def _test_delay_phase_fixed(
 
     pdf_report.step("Verify results")
     pdf_report.detail("Receive an accumulation")
-    _, chunk_data = await receiver.next_complete_chunk()
+    _, chunk_data = await receiver.next_complete_chunk_data()
     actual = np.arctan2(chunk_data[..., 1], chunk_data[..., 0])
 
     for i, (delay, phase) in enumerate(delay_phases):
@@ -442,9 +442,9 @@ async def _test_delay_phase_rate(
     pdf_report.step("Collect two consecutive accumulations.")
     timestamps = []
     phases = []
-    for timestamp, chunk in await receiver.consecutive_chunks(2):
+    for chunk in await receiver.consecutive_chunks(2):
         with chunk:
-            timestamps.append(timestamp)
+            timestamps.append(chunk.timestamp)
             phases.append(np.arctan2(chunk.data[..., 1], chunk.data[..., 0]))
     elapsed = timestamps[1] - timestamps[0]
     elapsed_s = elapsed / receiver.scale_factor_timestamp
@@ -777,10 +777,10 @@ async def test_group_delay(
         raw_data = np.ones((2, n_channels, n_spectra, COMPLEX), np.int8)
         try:
             async with asyncio.timeout(acc_time * 3 + 10.0), aclosing(receiver.complete_chunks()) as it:
-                async for timestamp, chunk in it:
+                async for chunk in it:
                     with chunk:
-                        if i == 0 or timestamp != first_timestamp + i * chunk_timestamp_step:
-                            first_timestamp = timestamp
+                        if i == 0 or chunk.timestamp != first_timestamp + i * chunk_timestamp_step:
+                            first_timestamp = chunk.timestamp
                             i = 0  # If we had a gap, start from the beginning again
                             attempts += 1
                         start_spectrum = i * receiver.n_spectra_per_heap

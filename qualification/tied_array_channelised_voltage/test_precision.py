@@ -52,7 +52,7 @@ async def test_precision(
     pdf_report.detail(f"Weights for {receiver.stream_names[0]} set to {weights}.")
 
     pdf_report.step("Collect and validate a chunk.")
-    timestamp, data = await receiver.next_complete_chunk()
+    timestamp, data = await receiver.next_complete_chunk_data()
     pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
     unique_values = np.unique(data)
     pdf_report.detail(f"{len(unique_values)} unique values observed.")

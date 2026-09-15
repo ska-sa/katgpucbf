@@ -109,7 +109,7 @@ async def test_delay_small(
         beam_delays[delay_input_idx] = f"{-delay}:{-phase}"
         await client.request("beam-delays", receiver.stream_names[delay_beam], *beam_delays)
         pdf_report.detail(f"Set beam {delay_beam} delays to {beam_delays}")
-        timestamp, data = await receiver.next_complete_chunk()
+        timestamp, data = await receiver.next_complete_chunk_data()
         pdf_report.detail(f"Received chunk with timestamp {timestamp}")
         # Need more precision to avoid overflows when subtracting
         data = data.astype(np.int16)
@@ -172,7 +172,7 @@ async def test_delay(
         pdf_report.step(f"Test with delay {delay * 1e12} ps and phase {phase}.")
         await client.request("beam-delays", delay_name, *([f"{delay}:{phase}"] * n_indices))
         pdf_report.detail(f"Set beam delays on {delay_name} to {delay}:{phase} on all inputs.")
-        timestamp, data = await receiver.next_complete_chunk()
+        timestamp, data = await receiver.next_complete_chunk_data()
         pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
 
         data = data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
@@ -188,7 +188,7 @@ async def test_delay(
         # Collect more chunks so that quantisation effects average out
         n_chunks = 10
         for _ in range(n_chunks - 1):
-            timestamp, data = await receiver.next_complete_chunk()
+            timestamp, data = await receiver.next_complete_chunk_data()
             data = data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
             corr += np.sum(data[delay_beam] * data[ref_beam].conj(), axis=1)
         pdf_report.detail(f"Correlated delay and reference beams over {n_chunks} chunks.")

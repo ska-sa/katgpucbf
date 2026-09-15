@@ -46,7 +46,7 @@ async def test_gains(
     """
 
     async def next_chunk_data() -> NDArray[np.complex128]:
-        _, chunk_data = await receiver.next_complete_chunk()
+        _, chunk_data = await receiver.next_complete_chunk_data()
         # Turn 2-element axis into complex number
         data = chunk_data.astype(np.float64).view(np.complex128)[..., 0]
         return data
@@ -165,7 +165,7 @@ async def test_gains_capture_start(
     await pcc.request("capture-start", "baseline-correlation-products")
     # We use dsim_timestamp as a minimum to ensure that we're not receiving
     # data from a *previous* capture-start/stop.
-    _, data = await receiver.next_complete_chunk(min_timestamp=dsim_timestamp)
+    _, data = await receiver.next_complete_chunk_data(min_timestamp=dsim_timestamp)
     bls_idx = receiver.bls_ordering.index((label, label))
     data = data[:, bls_idx, 0]  # 0 to take just the real part (these are auto-correlations)
     np.testing.assert_equal(data[cut:], 0)

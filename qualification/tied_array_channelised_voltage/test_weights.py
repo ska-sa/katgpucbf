@@ -99,7 +99,7 @@ async def test_weight_mapping(
                 await pcc.request("beam-weights", stream_name, *inv_weights)
                 pdf_report.detail(f"Set beam-weights for {stream_name} to {inv_weights}")
 
-        timestamp, data = await receiver.next_complete_chunk()
+        timestamp, data = await receiver.next_complete_chunk_data()
         pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
         with check:
             assert np.sum(np.abs(data[test_beam, channel_to_test])) > 0
