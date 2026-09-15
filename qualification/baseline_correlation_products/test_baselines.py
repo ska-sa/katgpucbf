@@ -24,6 +24,7 @@ from katgpucbf.pytest_plugins.reporter import Reporter
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
+from ..types import AsyncRunner
 
 
 @pytest.mark.requirements("CBF-REQ-0087,CBF-REQ-0104")
@@ -31,6 +32,7 @@ async def test_baseline_correlation_products(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    run_async: AsyncRunner,
 ) -> None:
     """Test that the baseline ordering indicated in the sensor matches the output data.
 
@@ -74,21 +76,25 @@ async def test_baseline_correlation_products(
         for i, channel_gains in enumerate(input_gains.tolist()):
             await pcc.request("gain", "antenna-channelised-voltage", receiver.input_labels[i], *channel_gains)
 
-        # Compute which visibilities have non-zero total gain
-        gain_non_zero = input_gains > 0
-        expected_non_zero = gain_non_zero[a_idx, :] & gain_non_zero[b_idx, :]
+        with await receiver.next_complete_chunk() as chunk:
+            assert chunk.data.shape == (receiver.n_chans, receiver.n_bls, 2)
 
-        _, data = await receiver.next_complete_chunk_data()
-        assert data.shape == (receiver.n_chans, receiver.n_bls, 2)
+            # confirm the signals are in baselines as expected
+            with check:
+                pdf_report.detail(
+                    "Compare output nonzero correlation values to expected antenna gain configuration for this range."
+                )
 
-        # confirm the signals are in baselines as expected
-        with check:
-            pdf_report.detail(
-                "Compare output nonzero correlation values to expected antenna gain configuration for this range."
-            )
-            np.testing.assert_array_equal(
-                data[1:, :, 0] > 0,
-                expected_non_zero.T[1:, :],
-                err_msg="output nonzero correlation values doesn't match the "
-                + f"expected antenna gain configuration for channels 1 to {receiver.n_chans}",
-            )
+                def check_equal(data, input_gains):
+                    # Compute which visibilities have non-zero total gain
+                    gain_non_zero = input_gains > 0
+                    expected_non_zero = gain_non_zero[a_idx, :] & gain_non_zero[b_idx, :]
+                    np.testing.assert_array_equal(
+                        data[1:, :, 0] > 0,
+                        expected_non_zero.T[1:, :],
+                        err_msg="output nonzero correlation values doesn't match the "
+                        + f"expected antenna gain configuration for channels 1 to {receiver.n_chans}",
+                    )
+
+                # Run it in a separate thread to avoid blocking the event loop
+                await run_async(check_equal, chunk.data, input_gains)
