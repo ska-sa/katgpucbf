@@ -33,6 +33,7 @@ from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter, plot_focus
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+from ..types import AsyncRunner
 
 MAX_DELAY = 79.53e-6  # seconds
 MAX_DELAY_RATE = 2.56e-9
@@ -585,6 +586,7 @@ async def test_group_delay(
     pdf_report: Reporter,
     pass_channels: slice,
     vlbi: bool,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test the ``filter-group-delay`` sensor.
 
@@ -793,8 +795,7 @@ async def test_group_delay(
         except TimeoutError:
             pytest.fail("Timed out.")
 
-        loop = asyncio.get_event_loop()
-        delay, period, std = await loop.run_in_executor(None, compute_delay, rel_freqs, first_timestamp, raw_data)
+        delay, period, std = await run_async(compute_delay, rel_freqs, first_timestamp, raw_data)
         pdf_report.detail(f"Delay is {delay} + k*{period} ± {std} samples.")
         return delay, period, std
 
