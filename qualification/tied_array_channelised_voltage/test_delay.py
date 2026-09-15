@@ -28,6 +28,7 @@ from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter, plot_focus
 
 from ..cbf import CBFRemoteControl
 from ..recv import TiedArrayChannelisedVoltageReceiver
+from ..types import AsyncRunner
 
 
 @pytest.mark.requirements("CBF-REQ-0220")
@@ -125,6 +126,7 @@ async def test_delay(
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test beam steering delay application.
 
@@ -217,7 +219,7 @@ async def test_delay(
         ax_err.xaxis.set_major_locator(POTLocator())
         plot_focus(ax_err, pass_channels, x, np.rad2deg(delta))
 
-        pdf_report.figure(fig)
+        await run_async(pdf_report.figure, fig)
 
 
 @pytest.mark.requirements("CBF-REQ-0076")
