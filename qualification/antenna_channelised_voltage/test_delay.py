@@ -674,11 +674,12 @@ async def test_group_delay(
     gains = [[0.0] * receiver.n_chans for _ in range(n_dsims)]
     for i, channel in enumerate(channels):
         gains[i % n_dsims][channel] = gain
-    async with asyncio.TaskGroup() as tg:
-        for i, g in enumerate(gains):
-            for j in range(2):
-                input_label = receiver.input_labels[2 * i + j]
-                tg.create_task(pcc.request("gain", "antenna-channelised-voltage", input_label, *g))
+    # Note: it's faster to launch all the gain requests in parallel, but it
+    # hogs the CPU and causes packet drops. So we do it serially.
+    for i, g in enumerate(gains):
+        for j in range(2):
+            input_label = receiver.input_labels[2 * i + j]
+            await pcc.request("gain", "antenna-channelised-voltage", input_label, *g)
     pdf_report.detail(f"Set gain to {gain} on chosen antenna/channel pairs.")
 
     # Collect about 2^27 samples, to improve SNR. However, for VLBI mode this

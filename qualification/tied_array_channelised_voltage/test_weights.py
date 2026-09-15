@@ -16,8 +16,6 @@
 
 """Weights test."""
 
-import asyncio
-
 import numpy as np
 import pytest
 from pytest_check import check
@@ -63,12 +61,13 @@ async def test_weight_mapping(
     pdf_report.detail(f"Set dsim signals to {signals!r}.")
 
     pdf_report.step("Set eq gains to select one channel per input.")
-    async with asyncio.TaskGroup() as tg:
-        for input_label, channel in zip(receiver.input_labels, all_channels_under_test, strict=True):
-            gains = [0.0] * receiver.n_chans
-            gains[channel] = 1.0
-            tg.create_task(pcc.request("gain", "antenna-channelised-voltage", input_label, *gains))
-            pdf_report.detail(f"Set input {input_label} to pass through only channel {channel}.")
+    # Note: it's faster to launch all the gain requests in parallel, but it
+    # hogs the CPU and causes packet drops. So we do it serially.
+    for input_label, channel in zip(receiver.input_labels, all_channels_under_test, strict=True):
+        gains = [0.0] * receiver.n_chans
+        gains[channel] = 1.0
+        await pcc.request("gain", "antenna-channelised-voltage", input_label, *gains)
+        pdf_report.detail(f"Set input {input_label} to pass through only channel {channel}.")
 
     pdf_report.step("Test a random selection of inputs.")
     # NOTE: A full sweep of `all_channels_under_test` takes up too much time during the qualification run.
