@@ -102,8 +102,9 @@ allocations are fast.
 
 To ensure that these first slow allocations are not taking place while we're
 trying to keep up with a data stream, the engine startup creates a dummy
-version of the pipeline and pushes arbitrary data through it until results
-start emerging on the other side. This "primes" the memory pool with
-allocations that are highly likely to be reused when processing the real data.
+version of the pipeline and provides arbitrary data to it. We retrieve a
+single VDIF frameset, which ensures that the entire pipeline has been
+exercised. This "primes" the memory pool with allocations that are highly
+likely to be reused when processing the real data.
 
 .. _VDIF: https://vlbi.org/vlbi-standards/vdif/
