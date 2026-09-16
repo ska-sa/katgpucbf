@@ -110,7 +110,7 @@ async def test_mean_power(
     min_sensor_time = steady_state_unix + receiver.power_int_time
 
     sensor_names = [
-        f"{receiver.stream_names[0]}.{receiver.pol_ordering[0]}{chan}.mean-power" for chan in range(receiver.n_chans)
+        f"{receiver.stream_names[0]}.{receiver.pol_ordering[1]}{chan}.mean-power" for chan in range(receiver.n_chans)
     ]
 
     pdf_report.step("Measure power from tied-array channelised voltage.")
@@ -150,7 +150,7 @@ async def test_mean_power(
 
     pdf_report.step("Y polarity mean power sensors should be zero.")
     for chan in range(receiver.n_chans):
-        sensor_name = f"{receiver.stream_names[0]}.{receiver.pol_ordering[1]}{chan}.mean-power"
+        sensor_name = f"{receiver.stream_names[0]}.{receiver.pol_ordering[0]}{chan}.mean-power"
         reading = await pcc.sensor_reading(sensor_name, float)
         with check:
             assert reading.value == pytest.approx(0.0, rel=5e-3), (
