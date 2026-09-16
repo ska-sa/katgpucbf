@@ -1,14 +1,11 @@
 *.egg-info
 *.eggs
 .coverage
-.env
-.venv
 /build
 /htmlcov
 /reports
 __pycache__
 coverage.xml
 report.json
-demo.json
 result.xml
 arrays
