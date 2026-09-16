@@ -92,4 +92,18 @@ milliseconds, during which no packets were being transmitted. Instead,
 :class:`.VDIFSender` uses a queue of packets and a background task to service
 them concurrently with data processing.
 
+Startup
+-------
+The F- and XB-engines use katsdpsigproc and pycuda, and explicitly manage all
+their GPU memory; but katcbf-vlbi-resample uses cupy and memory allocation is
+implicit. Since cupy uses a memory pool, the first pass tends to be quite slow
+as memory is allocated, but after that it is retained in the pool and so
+allocations are fast.
+
+To ensure that these first slow allocations are not taking place while we're
+trying to keep up with a data stream, the engine startup creates a dummy
+version of the pipeline and pushes arbitrary data through it until results
+start emerging on the other side. This "primes" the memory pool with
+allocations that are highly likely to be reused when processing the real data.
+
 .. _VDIF: https://vlbi.org/vlbi-standards/vdif/
