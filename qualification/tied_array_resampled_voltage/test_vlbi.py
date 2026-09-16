@@ -82,7 +82,7 @@ async def test_mean_power(
     Wait until each ``mean-power`` sensor timestamp is after the system steady-state timestamp
     (plus one ``power-int-time`` so the averaging window is entirely post-steady-state).
     Measure mean power from the tied-array channelised voltage stream `v polarity` over the
-    passband channels, and compare against ``x polarity mean-power`` sensor.
+    passband channels, and compare against x polarity ``mean-power`` sensor.
     The values must agree to within 0.5%.
     """
     receiver = receive_tied_array_resampled_voltage
