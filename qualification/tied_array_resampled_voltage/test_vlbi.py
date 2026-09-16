@@ -53,7 +53,7 @@ async def max_retry_test(
     bool
         Whether the test passed.
     int
-        Zero-indexed attempt index upon completion.
+        Zero-indexed attempt of the last attempt (whether successful or not).
     """
     loop = asyncio.get_running_loop()
     for attempt_num in range(max_attempts):
