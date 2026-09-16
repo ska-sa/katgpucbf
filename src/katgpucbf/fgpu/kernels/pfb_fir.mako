@@ -77,18 +77,17 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     int out_stride,                       // Offset to `out` between pols
     int in_stride,                        // Offset to `in` between pols
     int n,                                // Size of the `out` array (in spectra), to avoid going out-of-bounds.
-    int stepy,                            // Size of data (in spectra) that will be worked on by a single thread-block.
+    int work_spectra,                     // Size of data (in spectra) that will be worked on by each workitem.
 % for pol in range(n_pols):
     int in_offset${pol},                  // Number of samples to skip from the start of *in
 % endfor
-    // Number of samples to skip from the start of *out.
-    // Must be a multiple of `step` to make sense.
+    // Number of spectra to skip from the start of *out.
     int out_offset
 )
 {
     const unsigned int step = 2 * CHANNELS;
     // Figure out where our thread block has to work.
-    int group_y = get_group_id(1) * stepy;
+    int group_spectrum = get_group_id(0) * work_spectra;
     int pol = get_group_id(2);
     int in_offset;
     switch (pol)
@@ -102,11 +101,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
 
     // Figure out where this thread has to work.
     int lid = get_local_id(0);
-    // pos is the position within the step (i.e. spectrum) that this thread will work on.
-    int pos = get_group_id(0) * WGS + lid;
+    // pos is the position within the spectrum that this thread will work on.
+    int pos = get_group_id(1) * WGS + lid;
 
     // can't skip individual (input) samples with pointer arithmetic, so track in_offset
-    in_offset += group_y * step + pos;
+    in_offset += group_spectrum * step + pos;
     in += pol * in_stride;
 
     // Increment this pointer because this thread may not need to write to the
@@ -115,7 +114,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
 % if not complex_input:
     out_total_power += pol * out_total_power_stride;
 % endif
-    int spectrum0 = group_y + out_offset;
+    int spectrum0 = group_spectrum + out_offset;
 
     /* Here we fill up the taps of the FIR before we bother to do any outputs.
      * We assume we are not interested in the initial transient spectra.
@@ -148,7 +147,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
         rweights[i] = weights[(i * step + pos) >> WEIGHT_INDEX_SHIFT];
 
     // This thread will process up to (but excluding) spectrum `n`.
-    n = min(n, spectrum0 + stepy);
+    n = min(n, spectrum0 + work_spectra);
 
     // We'll be at our most memory-bandwidth-efficient if rows >> TAPS.
     // Launching ~256K threads should ensure this.

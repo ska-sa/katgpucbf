@@ -304,20 +304,26 @@ class PFBFIR(accel.Operation):
         if self.out_offset + self.spectra > out_buffer.shape[1]:
             raise IndexError("Output buffer does not contain sufficient spectra")
 
-        # Try to ensure that each workitem has enough work to do to amortise
-        # the overhead of loading the initial taps. Each workitem should
-        # contribute to work_spectra outputs.
-        work_spectra = self.template.taps * 8
-        # Number of workgroups along the time axis to match this
-        groupsy = accel.divup(self.spectra, work_spectra)
+        # Along the spectra axis, we will have `spectra_groups` workgroups, and
+        # each of them will process `work_spectra` spectra. Thus, we require
+        # work_spectra * spectra_groups >= self.spectra.
+        #
+        # If work_spectra is too small, the overheads in the kernel to compute
+        # addresses and load initial taps becomes significant. If
+        # spectra_groups is too small, we might not have enough work to
+        # saturate the GPU, or tail effects might be significant. The code
+        # below tries to ensure that neither is too small.
+
+        work_spectra = self.template.taps  # Initial lower bound
+        spectra_groups = accel.divup(self.spectra, work_spectra)
         # Keep a minimum of 128K workitems (across all pols), to avoid starving
         # the GPU for work.
-        groupsy = max(groupsy, accel.divup(128 * 1024 // self.template.n_pols, real_step))
+        spectra_groups = max(spectra_groups, accel.divup(128 * 1024 // self.template.n_pols, real_step))
         # Re-compute work_spectra to balance the load
-        work_spectra = accel.divup(self.spectra, groupsy)
+        work_spectra = accel.divup(self.spectra, spectra_groups)
         # Rounding up may have left some workgroups with nothing to do, so recalculate
-        # groupsy again.
-        groupsy = accel.divup(self.spectra, work_spectra)
+        # spectra_groups again.
+        spectra_groups = accel.divup(self.spectra, work_spectra)
 
         raw_in_offset = (self.in_offset * rps).astype(np.int32)
         out_buffer = self.buffer("out")
@@ -345,9 +351,12 @@ class PFBFIR(accel.Operation):
                 np.int32(total_power_buffer.padded_shape[1]),
             ]
 
+        groups = (spectra_groups, real_step // self.template.wgs, self.template.n_pols)
+        local_size = (self.template.wgs, 1, 1)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             kernel_args,
-            global_size=(real_step, groupsy, self.template.n_pols),
-            local_size=(self.template.wgs, 1, 1),
+            # Compute global_size from groups and local_size
+            global_size=tuple(g * ls for g, ls in zip(groups, local_size, strict=True)),
+            local_size=local_size,
         )
