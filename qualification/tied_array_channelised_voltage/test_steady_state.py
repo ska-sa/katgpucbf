@@ -104,7 +104,7 @@ async def _test_capture_start(
             tg.create_task(pcc.request("capture-start", stream))
     # We use dsim_timestamp as a minimum to ensure that we're not receiving
     # data from a *previous* capture-start/stop.
-    _, data = await receiver.next_complete_chunk(min_timestamp=dsim_timestamp)
+    _, data = await receiver.next_complete_chunk_data(min_timestamp=dsim_timestamp)
     return data
 
 

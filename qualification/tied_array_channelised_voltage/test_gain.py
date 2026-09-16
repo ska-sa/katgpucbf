@@ -65,7 +65,7 @@ async def test_gain(
         pdf_report.detail(f"Set gain for {stream_name} to {gain}.")
 
     pdf_report.step("Collect data.")
-    timestamp, data = await receiver.next_complete_chunk()
+    timestamp, data = await receiver.next_complete_chunk_data()
     pdf_report.detail(f"Received chunk with timestamp {timestamp}.")
 
     pdf_report.step("Check power level of each beam.")

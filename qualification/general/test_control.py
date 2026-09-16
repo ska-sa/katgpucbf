@@ -89,9 +89,9 @@ async def consume_chunks(receiver: XBReceiver, timestamps: list[int]) -> None:
     """
     max_delay = math.ceil(MAX_DELAY * receiver.scale_factor_timestamp)
     async with aclosing(receiver.complete_chunks(max_delay=max_delay)) as it:
-        async for timestamp, chunk in it:
+        async for chunk in it:
             with chunk:
-                timestamps.append(timestamp)
+                timestamps.append(chunk.timestamp)
 
 
 async def consume_vlbi_framesets(receiver: TiedArrayResampledVoltageReceiver, timestamps: list[VDIFTimestamp]) -> None:
