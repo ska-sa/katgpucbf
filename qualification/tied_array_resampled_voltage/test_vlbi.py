@@ -77,13 +77,13 @@ async def test_mean_power(
 
     Verification method
     -------------------
-    Verified by means of test. Inject a white noise signal and set beam weights
-    so that a single antenna contributes to the resampled voltages. Wait until each
-    ``mean-power`` sensor timestamp is after the system steady-state timestamp
+    Verified by means of test. Inject a white noise signal on the v polarity dsim stream
+    and set beam weights so that a single antenna contributes to the resampled voltages.
+    Wait until each ``mean-power`` sensor timestamp is after the system steady-state timestamp
     (plus one ``power-int-time`` so the averaging window is entirely post-steady-state).
-    Measure mean power from the tied-array channelised voltage stream over the
-    passband channels, and compare against each ``mean-power`` sensor. The values
-    must agree to within 0.5%.
+    Measure mean power from the tied-array channelised voltage stream `v polarity` over the
+    passband channels, and compare against ``x polarity mean-power`` sensor.
+    The values must agree to within 0.5%.
     """
     receiver = receive_tied_array_resampled_voltage
     pcc = cbf.product_controller_client
@@ -98,7 +98,7 @@ async def test_mean_power(
     pdf_report.detail("Beam weights set to use antenna 0.")
 
     pdf_report.step("Inject white noise signal.")
-    dsim_signals = "wgn(0.02);0;"
+    dsim_signals = "0;wgn(0.02);"  # [h, v] pol ordering
     async with asyncio.TaskGroup() as tg:
         for dsim_name in cbf.dsim_names:
             tg.create_task(pcc.request("dsim-signals", dsim_name, dsim_signals))
@@ -109,48 +109,51 @@ async def test_mean_power(
     steady_state_unix = time_converter.adc_to_unix(await cbf.steady_state_timestamp())
     min_sensor_time = steady_state_unix + receiver.power_int_time
 
-    sensor_names = [
-        f"{receiver.stream_names[0]}.{receiver.pol_ordering[1]}{chan}.mean-power" for chan in range(receiver.n_chans)
-    ]
+    sensor_names = [f"{receiver.stream_names[0]}.x{chan}.mean-power" for chan in range(receiver.n_chans)]
 
     pdf_report.step("Measure power from tied-array channelised voltage.")
     _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk()
     tacv_data = tacv_data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
     # Only use the pass channels for beam zero for the power calculation.
-    tacv_data = tacv_data[0][pass_channels]
+    tacv_data = tacv_data[1][pass_channels]  # the first baseline's `v polarity` data.
     tacv_power = (np.square(tacv_data.real) + np.square(tacv_data.imag)).mean()
     pdf_report.detail(f"Mean TACV power over passband channels: {tacv_power}.")
 
     # TODO: See NGC-2099 & 1689: Because the data is zero for the first several seconds,
     # for now just retry with .2 second intervals (sample rate of 5) since steady state is
     # not known beforehand.
-    sample_rate = 5  # TODO: NGC-2099 These are arbitrary values to get data for plotting mean power values.
+    sample_rate = 5  # TODO: NGC-2099 & 1689: These are arbitrary values to get data for plotting mean power values.
     samples = int(1e2 * sample_rate)
-    mean_power_sensor_readings = np.zeros(shape=(len(sensor_names), samples, 2), dtype=np.float64)
+    mean_power_sensor_readings = np.zeros(
+        shape=(len(sensor_names), samples),
+        dtype=np.dtype([("timestamp", np.float64), ("value", np.float64)]),
+    )
 
     async def wait_mean_power_steady_state(j: int) -> bool:
         for i, name in enumerate(sensor_names):
             reading = await pcc.sensor_reading(name, float)
-            mean_power_sensor_readings[i, j, 0] = reading.timestamp
+            mean_power_sensor_readings[i, j]["timestamp"] = reading.timestamp
             if reading.status.valid_value():
-                mean_power_sensor_readings[i, j, 1] = reading.value
+                mean_power_sensor_readings[i, j]["value"] = reading.value
             else:
-                mean_power_sensor_readings[i, j, 1] = np.nan
+                mean_power_sensor_readings[i, j]["value"] = np.nan
 
         return bool(
-            np.all(mean_power_sensor_readings[:, j, 0] >= min_sensor_time)
-            and np.all(mean_power_sensor_readings[:, j, 1] == pytest.approx(tacv_power, rel=5e-3))
+            np.all(mean_power_sensor_readings["timestamp"][:, j] >= min_sensor_time)
+            and np.all(mean_power_sensor_readings["value"][:, j] == pytest.approx(tacv_power, rel=5e-3))
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
     test_passed, total_retries = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
     with check:
-        assert test_passed, f"X Polarity Mean Power does not agree to within 0.5% after {samples} retries."
+        assert test_passed, (
+            f"X polarity mean power does not agree to within 0.5% of TACV v polarity power after {samples} retries."
+        )
         assert tacv_power > 0.0
 
     pdf_report.step("Y polarity mean power sensors should be zero.")
     for chan in range(receiver.n_chans):
-        sensor_name = f"{receiver.stream_names[0]}.{receiver.pol_ordering[0]}{chan}.mean-power"
+        sensor_name = f"{receiver.stream_names[0]}.y{chan}.mean-power"
         reading = await pcc.sensor_reading(sensor_name, float)
         with check:
             assert reading.value == pytest.approx(0.0, rel=5e-3), (
@@ -158,11 +161,13 @@ async def test_mean_power(
             )
 
     pdf_report.detail(
-        f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_readings[:, 0, 0]), UTC)}"
-        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, total_retries, 0]), UTC)}"
+        f"Mean power sensor readings from {
+            datetime.fromtimestamp(np.min(mean_power_sensor_readings['timestamp'][:, 0]), UTC)
+        }"
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings['timestamp'][:, total_retries]), UTC)}"
         f" in {total_retries + 1} steps."
     )
-    mean_power_sensor_readings[:, :, 0] -= mean_power_sensor_readings[:, :1, 0]
+    mean_power_sensor_readings["timestamp"] -= mean_power_sensor_readings["timestamp"][:, :1]
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
@@ -173,8 +178,8 @@ async def test_mean_power(
         plot_focus(
             ax,
             slice(0, total_retries + 1),
-            mean_power_sensor_readings[i, : total_retries + 1, 0],
-            mean_power_sensor_readings[i, : total_retries + 1, 1],
+            mean_power_sensor_readings["timestamp"][i, : total_retries + 1],
+            mean_power_sensor_readings["value"][i, : total_retries + 1],
             label=name,
         )
     ax.legend()
