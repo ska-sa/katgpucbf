@@ -88,7 +88,7 @@ multidict==6.7.0
     # via
     #   aiohttp
     #   yarl
-netifaces==0.11.0
+netifaces-plus==0.12.5
     # via katsdpservices
 numba==0.63.1
     # via
