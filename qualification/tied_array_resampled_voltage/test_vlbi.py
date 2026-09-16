@@ -81,7 +81,7 @@ async def test_mean_power(
     and set beam weights so that a single antenna contributes to the resampled voltages.
     Wait until each ``mean-power`` sensor timestamp is after the system steady-state timestamp
     (plus one ``power-int-time`` so the averaging window is entirely post-steady-state).
-    Measure mean power from the tied-array channelised voltage stream `v polarity` over the
+    Measure mean power from the tied-array channelised voltage stream v polarity over the
     passband channels, and compare against x polarity ``mean-power`` sensor.
     The values must agree to within 0.5%.
     """
@@ -157,7 +157,7 @@ async def test_mean_power(
         reading = await pcc.sensor_reading(sensor_name, float)
         with check:
             assert reading.value == pytest.approx(0.0, rel=5e-3), (
-                f"Y Polarity Mean Power for channel {chan} is not zero: {reading.value}"
+                f"Y polarity mean power for channel {chan} is not zero: {reading.value}"
             )
 
     pdf_report.detail(
