@@ -18,15 +18,21 @@
 
 import ast
 import asyncio
+import bisect
 import contextlib
 import ctypes
 import functools
+import json
 import logging
 import math
 import operator
 import os
+import socket
+import struct
 from collections.abc import AsyncGenerator, Callable, Generator, Sequence
 from contextlib import aclosing
+from dataclasses import dataclass
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numba
@@ -35,6 +41,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
+from astropy.time import Time, TimeDelta
 from katsdptelstate.endpoint import endpoint_list_parser
 from numba import types
 from numpy.typing import NDArray
@@ -42,7 +49,7 @@ from spead2.numba import intp_to_voidptr
 from spead2.recv.numba import chunk_place_data
 
 import katgpucbf.recv
-from katgpucbf import COMPLEX, DEFAULT_DIG_SAMPLE_BITS, DEFAULT_RECV_BUFFER_SIZE
+from katgpucbf import COMPLEX, DEFAULT_DIG_SAMPLE_BITS, DEFAULT_RECV_BUFFER_SIZE, DEFAULT_VTP_PORT
 from katgpucbf.recv import DiscardingChunkIterator
 from katgpucbf.spead import BEAM_ANTS_ID, DEFAULT_PORT, FREQUENCY_ID, TIMESTAMP_ID
 from katgpucbf.utils import TimeConverter
@@ -50,6 +57,8 @@ from katgpucbf.utils import TimeConverter
 from .cbf import DEFAULT_MAX_DELAY, CBFRemoteControl
 
 DEFAULT_TIMEOUT = 10.0
+IP_MULTICAST_ALL = 49
+
 logger = logging.getLogger(__name__)
 
 
@@ -720,3 +729,264 @@ def diff_stats(receiver: XBReceiver) -> Generator[dict[str, int], None, None]:
         if stat.mode == spead2.recv.StreamStatConfig.Mode.COUNTER:
             delta_stats[stat.name] = final_stats[stat.name] - init_stats[stat.name]
     delta_stats["incomplete_chunks"] = final_incomplete_chunks - init_incomplete_chunks
+
+
+@dataclass(frozen=True, order=True)
+class VDIFTimestamp:
+    """Identifier of an VDIF frameset."""
+
+    seconds: int
+    frame_nr: int
+    ref_epoch: int
+    frame_rate: int
+
+    @property
+    def timestamp(self) -> Time:
+        """Timestamp of the VDIF frameset."""
+        # ref_epoch is the number of half-years since 2000-01-01.
+        ref_time = Time(
+            dict(year=2000 + self.ref_epoch // 2, month=self.ref_epoch % 2 * 6 + 1), format="ymdhms", scale="utc"
+        )
+        seconds = self.seconds + self.frame_nr / self.frame_rate
+        return ref_time + TimeDelta(seconds, format="sec", scale="tai")
+
+    @property
+    def linear(self) -> int:
+        """Linear frame number counting from the ref epoch."""
+        return self.seconds * self.frame_rate + self.frame_nr
+
+
+@dataclass(frozen=True, slots=True)
+class VDIFFrame:
+    """Holds low-level information about a single VDIF frame."""
+
+    seq_id: int
+    thread_id: int
+    timestamp: VDIFTimestamp
+    raw_frame: bytes  #: VDIF frame (including VDIF header but without VTP sequence header)
+
+
+@dataclass(slots=True)
+class VDIFFrameset:
+    """Data for a VDIF frameset."""
+
+    frames: Sequence[VDIFFrame]
+
+    @property
+    def timestamp(self) -> VDIFTimestamp:
+        """Get the common timestamp of the frames."""
+        return self.frames[0].timestamp
+
+
+class TiedArrayResampledVoltageReceiver:
+    """Receive tied-array-resampled-voltage streams from the V-engines."""
+
+    VTP_HEADER_SIZE = 8
+    VDIF_HEADER_SIZE = 32
+
+    def __init__(
+        self,
+        cbf: CBFRemoteControl,
+        stream_name: str,
+        interface_address: str,
+        sock: socket.socket | None = None,
+        reorder_window: int = 32,
+    ) -> None:
+        self.stream_name = stream_name
+        self.multicast_groups = endpoint_list_parser(DEFAULT_VTP_PORT)(
+            cbf.init_sensors[f"{stream_name}.destination"].value.decode()
+        )
+        self.n_chans: int = cbf.init_sensors[f"{stream_name}.n-chans"].value
+        self.pol_ordering: list[str] = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value)
+        self.n_threads = self.n_chans * len(self.pol_ordering)
+        self.veng_out_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.veng-out-bits-per-sample"].value
+
+        # all multicast groups must use the same port
+        port = self.multicast_groups[0].port
+        for multicast_group in self.multicast_groups:
+            if multicast_group.port != port:
+                raise ValueError("All multicast groups must use the same port")
+
+        self.scale_factor_timestamp: float = cbf.init_sensors[f"{stream_name}.scale-factor-timestamp"].value
+        self.power_int_time: float = cbf.init_sensors[f"{stream_name}.power-int-time"].value
+        self.bandwidth: float = cbf.init_sensors[f"{stream_name}.bandwidth"].value
+        self.n_samples_per_frame: int = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
+        self.frame_rate = round(self.bandwidth / self.n_samples_per_frame)
+        self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
+        self.sample_bytes_per_frame = self.n_samples_per_frame * self.veng_out_bits_per_sample // 8
+        self._packet_size = self.sample_bytes_per_frame + self.VDIF_HEADER_SIZE + self.VTP_HEADER_SIZE
+
+        # The V-engine applies DSP filters, and unlike the F-engine, the
+        # timestamp used for the output corresponds to the centre input sample.
+        # That means that to ensure a frame contains only samples after a
+        # certain input timestamp, we need to add half the filter length to
+        # the target output timestamp.
+        fir_taps: int = cbf.init_sensors[f"{stream_name}.fir-taps"].value
+        sideband_taps: int = cbf.init_sensors[f"{stream_name}.sideband-taps"].value
+        src_streams: list[str] = cbf.config["outputs"][stream_name]["src_streams"]
+        src_bandwidth: float = cbf.init_sensors[f"{src_streams[0]}.bandwidth"].value
+        src_channels: int = cbf.init_sensors[f"{src_streams[0]}.n-chans"].value
+        bandwidth_ratio = Fraction(src_bandwidth) / Fraction(self.bandwidth)
+        # The inverse FFT takes an input spectrum with timestamp t and
+        # generates time-domain samples with timestamps t, t+1, t+2, ... so we
+        # need to include the length of one spectrum, which is just the inverse
+        # of the channel bandwidth (src_channels - 1 might be sufficient, but
+        # it's safe to be conservative).
+        filter_shift = src_channels / src_bandwidth
+        # fir_taps is for scipy.signal.upfirdn, and the units are in samples of
+        # the upsampled signal.
+        filter_shift += fir_taps / 2 / bandwidth_ratio.denominator / src_bandwidth
+        filter_shift += sideband_taps / 2 / self.bandwidth
+        self.filter_shift = TimeDelta(filter_shift, format="sec", scale="tai")
+
+        if sock is None:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024 * 1024)
+            sock.bind(("", port))
+            for multicast_group in self.multicast_groups:
+                mreq = socket.inet_aton(multicast_group.host) + socket.inet_aton(interface_address)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            sock.setblocking(False)
+        self.sock = sock
+        self.buffer: list[VDIFFrame] = []  # Kept sorted by sequence ID
+        self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
+        self.reorder_window = reorder_window
+
+        self.cbf = cbf
+
+    async def _next_packet(self) -> None:
+        # sock_recv will work synchronously if it can, but that can prevent the
+        # event loop from ever getting a chance to run. sleep(0) allows this.
+        await asyncio.sleep(0)
+        packet = await asyncio.get_event_loop().sock_recv(self.sock, self._packet_size)
+        assert len(packet) == self._packet_size
+        # Using baseband to parse the header is expensive. We extract
+        # words from the header then slice out the fields we want.
+        (seq_id, seconds, ref_epoch_frame_nr, length, sample_bits_thread_id) = struct.unpack("<QIIIxxH", packet[:24])
+        seconds = seconds & 0x3FFF_FFFF
+        ref_epoch = (ref_epoch_frame_nr >> 24) & 0x3F
+        frame_nr = ref_epoch_frame_nr & 0xFF_FFFF
+        thread_id = sample_bits_thread_id & 0x3F
+        length = (length & 0xFF_FFFF) * 8 - self.VDIF_HEADER_SIZE  # Raw value includes the header
+        if frame_nr == 0:
+            is_complex = sample_bits_thread_id >> 15
+            assert not is_complex
+
+        timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch, frame_rate=self.frame_rate)
+        frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=packet[8:])
+        assert length == self.sample_bytes_per_frame
+        if seq_id >= self.min_seq_id:
+            self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
+            # Insert the new frame into its sorted position
+            pos = bisect.bisect_left(self.buffer, seq_id, key=lambda f: f.seq_id)
+            if pos == len(self.buffer) or self.buffer[pos].seq_id != seq_id:
+                self.buffer.insert(pos, frame)
+            else:
+                logger.warning("Duplicate sequence ID: %d", seq_id)
+        else:
+            logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
+
+    def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
+        """Compute the minimum linearised frame number that is at least `min_time`."""
+        ref_time = VDIFTimestamp(0, 0, ref_epoch, frame_rate=self.frame_rate).timestamp
+        to_wait_sec = (min_time - ref_time).sec
+        return math.ceil(to_wait_sec * self.frame_rate)
+
+    async def complete_framesets(
+        self,
+        min_timestamp: int | None = None,
+        *,
+        max_delay: int = DEFAULT_MAX_DELAY,
+        time_limit: float | None = None,
+    ) -> AsyncGenerator[VDIFFrameset, None]:
+        """Yield complete framesets.
+
+        Note that this iterator is only suitable for a single capture session.
+        If the stream is stopped then restarted, create a new iterator.
+
+        Parameters
+        ----------
+        min_timestamp
+            Framesets that incorporate ADC samples dated prior to this time
+            (after F-engine delay is applied) will be discarded. If the default
+            of ``None`` is used, a value is computed via
+            :meth:`CBFRemoteControl.steady_state_timestamp`.
+        max_delay
+            An upper bound on the delay set on any F-engine. This is used in
+            the calculation of `min_timestamp` when no value is provided.
+        time_limit
+            If a floating-point value is given, the iteration will end after
+            this many seconds. Note that no :exc:`asyncio.TimeoutError` will be
+            raised.
+        """
+        if min_timestamp is None:
+            min_timestamp = await self.cbf.steady_state_timestamp(max_delay=max_delay)
+        min_time = Time(self.sync_time, format="unix", scale="utc") + TimeDelta(
+            min_timestamp / self.scale_factor_timestamp, format="sec", scale="tai"
+        )
+
+        vlbi_delay = await self.cbf.product_controller_client.sensor_value(f"{self.stream_name}.delay", float)
+        min_time += TimeDelta(vlbi_delay, format="sec", scale="tai") + self.filter_shift
+
+        # Computing timestamps is expensive. So once we know the frame rate and
+        # ref epoch, we can convert it into a minimum linearised frame number.
+        min_frame: int | None = None
+
+        try:
+            async with asyncio.timeout(time_limit) as timer:
+                while True:
+                    # Check if we have a complete frameset at the start of the buffer.
+                    if self.buffer:
+                        frame0 = self.buffer[0]
+                        if min_frame is None:
+                            min_frame = self._calc_min_frame(min_time, frame0.timestamp.ref_epoch)
+                        if frame0.seq_id <= self.min_seq_id and len(self.buffer) >= self.n_threads:
+                            prefix = self.buffer[: self.n_threads]
+                            if all(
+                                frame.timestamp == frame0.timestamp and frame.seq_id < frame0.seq_id + self.n_threads
+                                for frame in prefix
+                            ) and sorted(frame.thread_id for frame in prefix) == list(range(self.n_threads)):
+                                # Make sure we don't re-accept these packets
+                                self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
+                                prefix.sort(key=lambda frame: frame.thread_id)
+                                frame0_nr = frame0.timestamp.linear
+                                if frame0_nr >= min_frame:
+                                    logger.debug("Yielding frame %d", frame0_nr)
+                                    yield VDIFFrameset(prefix)
+                                else:
+                                    logger.debug("Skipping frame %d < %d", frame0_nr, min_frame)
+                                del self.buffer[: self.n_threads]
+                                continue
+
+                        if frame0.seq_id <= self.min_seq_id - self.n_threads:
+                            # If this frameset isn't complete now, it never will be. Drop the frame.
+                            logger.debug("Dropping frame due to incomplete frameset: %d", frame0.timestamp.linear)
+                            del self.buffer[0]
+                            continue
+
+                    # If we didn't hit a continue above, we need more data from the network
+                    await self._next_packet()
+        except TimeoutError:
+            if not timer.expired():
+                raise  # The TimeoutError came from something else
+
+    async def next_complete_frameset(self, min_timestamp: int | None = None) -> VDIFFrameset:
+        """Listen until a single complete VDIF frameset is available, then return it."""
+        async for frameset in self.complete_framesets(min_timestamp=min_timestamp):
+            return frameset
+        raise RuntimeError("stream was shut down before we received a complete frameset")
+
+    async def wait_complete_frameset(
+        self, min_timestamp: int | None = None, *, timeout: float | None = DEFAULT_TIMEOUT
+    ) -> VDIFTimestamp:
+        """Wait until a complete VDIF frameset is available and return the timestamp."""
+        async with asyncio.timeout(timeout):
+            return (await self.next_complete_frameset(min_timestamp=min_timestamp)).timestamp
+
+    def close(self) -> None:
+        """Close the socket."""
+        self.sock.close()
+        self.buffer.clear()
+        self.min_seq_id = 0

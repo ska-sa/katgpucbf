@@ -72,6 +72,7 @@ test = [
     "pytest-custom_exit_code",
     "pytest-mock",
     "pytest-reportlog",
+    "prometheus_api_client"
 ]
 
 qualification = [

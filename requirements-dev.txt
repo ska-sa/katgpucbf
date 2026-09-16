@@ -91,6 +91,8 @@ dask==2025.12.0
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
+dateparser==1.4.2
+    # via prometheus-api-client
 decorator==5.2.1
     # via
     #   -c requirements.txt
@@ -280,6 +282,8 @@ pluggy==1.6.0
     #   pytest-cov
 pre-commit==4.6.1
     # via -r requirements-dev.in
+prometheus-api-client==0.7.2
+    # via katgpucbf (pyproject.toml)
 prometheus-async==26.1.0
     # via
     #   -c requirements.txt
@@ -367,6 +371,7 @@ pytest-xdist==3.8.0
 python-dateutil==2.9.0.post0
     # via
     #   -c requirements.txt
+    #   dateparser
     #   matplotlib
     #   pandas
 python-discovery==1.5.1
@@ -378,6 +383,7 @@ pytools==2025.2.5
 pytz==2025.2
     # via
     #   -c requirements.txt
+    #   dateparser
     #   pandas
 pyyaml==6.0.3
     # via
@@ -390,8 +396,12 @@ redis==7.1.0
     # via
     #   -c requirements.txt
     #   katsdptelstate
+regex==2026.7.19
+    # via dateparser
 requests==2.34.2
-    # via sphinx
+    # via
+    #   prometheus-api-client
+    #   sphinx
 roman-numerals==4.1.0
     # via roman-numerals-py
 roman-numerals-py==4.1.0
@@ -489,6 +499,8 @@ tzdata==2025.3
     # via
     #   -c requirements.txt
     #   pandas
+tzlocal==5.4.4
+    # via dateparser
 urllib3==2.7.0
     # via requests
 uv==0.12.2
