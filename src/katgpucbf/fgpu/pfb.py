@@ -314,7 +314,7 @@ class PFBFIR(accel.Operation):
         # saturate the GPU, or tail effects might be significant. The code
         # below tries to ensure that neither is too small.
 
-        work_spectra = self.template.taps  # Initial lower bound
+        work_spectra = self.template.taps * 8  # Initial lower bound
         spectra_groups = accel.divup(self.spectra, work_spectra)
         # Keep a minimum of 128K workitems (across all pols), to avoid starving
         # the GPU for work.
