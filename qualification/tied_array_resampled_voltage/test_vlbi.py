@@ -98,7 +98,7 @@ async def test_mean_power(
     pdf_report.detail("Beam weights set to use antenna 0.")
 
     pdf_report.step("Inject white noise signal.")
-    dsim_signals = "common=wgn(0.02);common;common;"
+    dsim_signals = "wgn(0.02);0;"
     async with asyncio.TaskGroup() as tg:
         for dsim_name in cbf.dsim_names:
             tg.create_task(pcc.request("dsim-signals", dsim_name, dsim_signals))
@@ -110,9 +110,7 @@ async def test_mean_power(
     min_sensor_time = steady_state_unix + receiver.power_int_time
 
     sensor_names = [
-        f"{receiver.stream_names[0]}.{pol}{chan}.mean-power"
-        for pol in receiver.pol_ordering
-        for chan in range(receiver.n_chans)
+        f"{receiver.stream_names[0]}.{receiver.pol_ordering[0]}{chan}.mean-power" for chan in range(receiver.n_chans)
     ]
 
     pdf_report.step("Measure power from tied-array channelised voltage.")
@@ -147,8 +145,17 @@ async def test_mean_power(
     pdf_report.step("Compare mean-power sensors against TACV power.")
     test_passed, total_retries = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
     with check:
-        assert test_passed, f"Power does not agree to within 0.5% after {samples} retries."
+        assert test_passed, f"X Polarity Mean Power does not agree to within 0.5% after {samples} retries."
         assert tacv_power > 0.0
+
+    pdf_report.step("Y polarity mean power sensors should be zero.")
+    for chan in range(receiver.n_chans):
+        sensor_name = f"{receiver.stream_names[0]}.{receiver.pol_ordering[1]}{chan}.mean-power"
+        reading = await pcc.sensor_reading(sensor_name, float)
+        with check:
+            assert reading.value == pytest.approx(0.0, rel=5e-3), (
+                f"Y Polarity Mean Power for channel {chan} is not zero: {reading.value}"
+            )
 
     pdf_report.detail(
         f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_readings[:, 0, 0]), UTC)}"
