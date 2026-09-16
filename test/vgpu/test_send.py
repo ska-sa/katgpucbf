@@ -30,7 +30,7 @@ import numpy as np
 import pytest
 import pytest_mock
 
-from katgpucbf.vgpu.main import VTP_DEFAULT_PORT
+from katgpucbf import DEFAULT_VTP_PORT
 from katgpucbf.vgpu.send import RateLimiter, VDIFFrame, VDIFSender
 
 pytestmark = pytest.mark.use_async_solipsism
@@ -148,7 +148,7 @@ class TestVDIFSender:
             return sock
 
         with mock.patch("socket.socket", autospec=True, side_effect=make_socket):
-            return self._make_sender([(f"239.102.0.{i}", VTP_DEFAULT_PORT) for i in range(4)])
+            return self._make_sender([(f"239.102.0.{i}", DEFAULT_VTP_PORT) for i in range(4)])
 
     async def test_settings(self, sender: VDIFSender) -> None:
         """Test that the sockets are correctly initialised."""
@@ -160,12 +160,12 @@ class TestVDIFSender:
             sock.setsockopt.assert_any_call(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, self.TTL)  # type: ignore
             sock.setsockopt.assert_any_call(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, multicast_if[i % 2])  # type: ignore
             sock.setsockopt.assert_any_call(socket.SOL_SOCKET, socket.SO_SNDBUF, self.BUFFER)  # type: ignore
-            sock.connect.assert_called_with((f"239.102.0.{i}", VTP_DEFAULT_PORT))  # type: ignore
+            sock.connect.assert_called_with((f"239.102.0.{i}", DEFAULT_VTP_PORT))  # type: ignore
 
     async def test_non_multicast_destination(self) -> None:
         """Test the exception raised if a destination is not a multicast address."""
         with pytest.raises(ValueError, match=r"Destination address 1\.2\.3\.4 is not a multicast address"):
-            self._make_sender([("1.2.3.4", VTP_DEFAULT_PORT)])
+            self._make_sender([("1.2.3.4", DEFAULT_VTP_PORT)])
 
     async def test_sndbuf_failed(self, caplog: pytest.LogCaptureFixture) -> None:
         """Test the logging if setting the socket buffer size fails."""
@@ -182,7 +182,7 @@ class TestVDIFSender:
 
         with caplog.at_level(logging.WARNING, "katgpucbf.vgpu.send"):
             with mock.patch("socket.socket", autospec=True, side_effect=make_socket):
-                self._make_sender(dsts=[("239.102.0.0", VTP_DEFAULT_PORT)])
+                self._make_sender(dsts=[("239.102.0.0", DEFAULT_VTP_PORT)])
         assert f"Failed to set socket buffer size to {self.BUFFER}: [Errno 1] Operation not permitted" in caplog.text
         assert f"Requested socket buffer size {self.BUFFER} but actual size is 1024" in caplog.text
 
