@@ -37,9 +37,6 @@ from ..spead import BEAM_ANTS_ID, FREQUENCY_ID, TIMESTAMP_ID
 from ..utils import TimeConverter
 from . import METRIC_NAMESPACE
 
-#: Number of chunks to allow to be under construction
-MAX_CHUNKS = 2  # TODO: may need to increase to tolerate reordering
-
 counters = Counters(
     heaps=Counter("input_heaps", "number of heaps received", ["pol"], namespace=METRIC_NAMESPACE),
     chunks=Counter("input_chunks", "number of chunks received", namespace=METRIC_NAMESPACE),
@@ -208,6 +205,7 @@ def make_stream_group(
     free_ringbuffer: spead2.recv.ChunkRingbuffer,
     recv_affinity: int,
     pol_labels: Sequence[str],
+    max_active_chunks: int,
 ) -> spead2.recv.ChunkStreamRingGroup:
     """Create a stream group for receiving dual-polarised beam data.
 
@@ -226,6 +224,8 @@ def make_stream_group(
         Use -1 to indicate no affinity.
     pol_labels
         Prometheus labels to apply to the polarisations (must have length 2).
+    max_active_chunks
+        Maximum number of chunks that can be under construction at a time.
     """
     # Reference counters to make the labels exist before the first scrape
     assert len(pol_labels) == N_POLS
@@ -237,7 +237,7 @@ def make_stream_group(
     group = base_recv.make_stream_group(
         layout=layout,
         spead_items=[TIMESTAMP_ID, FREQUENCY_ID, BEAM_ANTS_ID, spead2.HEAP_LENGTH_ID],
-        max_active_chunks=MAX_CHUNKS,
+        max_active_chunks=max_active_chunks,
         data_ringbuffer=data_ringbuffer,
         free_ringbuffer=free_ringbuffer,
         affinity=[recv_affinity] * N_POLS,

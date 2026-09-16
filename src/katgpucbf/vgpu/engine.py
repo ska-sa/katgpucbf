@@ -18,9 +18,11 @@
 
 import asyncio
 import logging
+import math
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
+from typing import override
 
 import aiokatcp
 import cupy as cp
@@ -121,6 +123,24 @@ class RecvStream:
                 yield arr
 
 
+class DummyRecvStream(AsyncIterator[xr.DataArray]):
+    """Provide the same iteration interface as RecvStream, but with dummy data."""
+
+    def __init__(self, arr: xr.DataArray, time_base: Time, time_scale: Fraction) -> None:
+        self._arr = arr
+        self._next_time_bias = arr.attrs["time_bias"]
+        self.channels = arr.sizes["channel"]
+        self.is_cupy = True
+        self.time_base = time_base
+        self.time_scale = time_scale
+
+    async def __anext__(self) -> xr.DataArray:
+        arr = self._arr.copy(deep=False)
+        arr.attrs["time_bias"] = self._next_time_bias
+        self._next_time_bias += arr.sizes["time"]
+        return arr
+
+
 class RecordPower(katcbf_vlbi_resample.power.RecordPower):
     """Record power levels to sensors."""
 
@@ -159,6 +179,7 @@ class RecvConfig:
     comp_vector: int
     buffer_size: int
     pols: tuple[str, str]
+    reorder_tol_bytes: int
 
     @property
     def pol_labels(self) -> list[str]:
@@ -257,16 +278,39 @@ class _CaptureSession:
         """
         pass
 
+    @staticmethod
+    def frameset_iterator(
+        config: CaptureConfig, sensors: aiokatcp.SensorSet, it: katcbf_vlbi_resample.stream.Stream[xr.DataArray]
+    ) -> katcbf_vlbi_resample.stream.Stream[list[katcbf_vlbi_resample.vdif_writer.VDIFFrame]]:
+        """Generate nested iterators to build the data processing pipeline."""
+        # Copy some references just to make the code shorter
+        recv_config = config.recv_config
+        send_config = config.send_config
+        it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
+        it = katcbf_vlbi_resample.resample.IFFT(it)
+        it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(
+            it, config.pol_matrix, recv_config.pols, send_config.pols
+        )
+        it = katcbf_vlbi_resample.resample.Resample(send_config.bandwidth, 0.0, config.resample_parameters, it)
+        it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
+        it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
+        it_rms = RecordPower(it_rms, sensors=sensors)
+        it = katcbf_vlbi_resample.power.NormalisePower(it_rms, 1.0)
+        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(
+            it, samples_per_frame=send_config.n_samples_per_frame, threshold=config.threshold
+        )
+        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
+        return katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
+            it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
+        )
+
     async def _capture(self) -> None:
         """Do all the primary work of the engine.
 
         This is an asyncio task that runs as a service task of the device server.
         """
-        # Copy some references just to make the code shorter
-        config = self.config
-        recv_config = config.recv_config
-        send_config = config.send_config
-
+        # Copy a reference just to make the code shorter
+        recv_config = self.config.recv_config
         it: katcbf_vlbi_resample.stream.Stream[xr.DataArray] = RecvStream(
             recv_config.layout,
             recv_config.time_converter,
@@ -276,23 +320,7 @@ class _CaptureSession:
             recv_config.pols,
             self._min_timestamp,
         )
-        it = katcbf_vlbi_resample.cupy_bridge.AsCupy(it)
-        it = katcbf_vlbi_resample.resample.IFFT(it)
-        it = katcbf_vlbi_resample.polarisation.ConvertPolarisation(
-            it, config.pol_matrix, recv_config.pols, send_config.pols
-        )
-        it = katcbf_vlbi_resample.resample.Resample(send_config.bandwidth, 0.0, config.resample_parameters, it)
-        it = katcbf_vlbi_resample.rechunk.Rechunk.align_utc_seconds(it)
-        it_rms: katcbf_vlbi_resample.stream.Stream[xr.Dataset] = katcbf_vlbi_resample.power.MeasurePower(it)
-        it_rms = RecordPower(it_rms, sensors=self._sensors)
-        it = katcbf_vlbi_resample.power.NormalisePower(it_rms, 1.0)
-        it = katcbf_vlbi_resample.vdif_writer.VDIFEncode2Bit(
-            it, samples_per_frame=send_config.n_samples_per_frame, threshold=config.threshold
-        )
-        it = katcbf_vlbi_resample.cupy_bridge.AsNumpy(it)
-        frameset_it = katcbf_vlbi_resample.vdif_writer.VDIFFormatter(
-            it, config.threads, station=send_config.station, samples_per_frame=send_config.n_samples_per_frame
-        )
+        frameset_it = self.frameset_iterator(self.config, self._sensors, it)
         async for frameset in frameset_it:
             await self._sender.send(frameset)
         self._recv_iter.start_discarding()
@@ -351,20 +379,55 @@ class VEngine(Engine):
         for pol in recv_config.pol_labels:
             recv.counters.labels(str(pol))
 
+    async def _prime_memory_pool(self) -> None:
+        """Run a dummy capture session to force memory to be allocated."""
+        recv_config = self.config.recv_config
+        layout = recv_config.layout
+        n_spectra_per_chunk = layout.n_spectra_per_heap * layout.chunk_batches
+        samples_between_spectra = layout.heap_timestamp_step // layout.n_spectra_per_heap
+        data = cp.zeros((N_POLS, n_spectra_per_chunk, layout.n_channels), np.complex64)
+        arr = xr.DataArray(
+            data,
+            dims=("pol", "time", "channel"),
+            coords={"pol": list(recv_config.pols)},
+            attrs={"time_bias": 0},
+        )
+        # It's arbitrary, but needs to be in the past so that it's in the
+        # scope of leap second tables.
+        time_base = Time("2020-01-01T00:00:00", scale="utc")
+        time_scale = Fraction(samples_between_spectra) / Fraction(recv_config.time_converter.adc_sample_rate)
+        it = DummyRecvStream(arr, time_base, time_scale)
+        dummy_sensors = aiokatcp.SensorSet()
+        # Use a large value for sensor timeout, since we're not actually interested
+        self._populate_sensors(dummy_sensors, recv_config.pol_labels, self.config.send_config.pols, 1e6)
+        frameset_it = _CaptureSession.frameset_iterator(self.config, dummy_sensors, it)
+        # Run it until we start getting some output
+        await anext(aiter(frameset_it))
+
     def _init_recv(self) -> None:
         """Initialise the receiver state."""
-        config = self.config
-        recv_chunks = 4  # TODO: may need tuning?
+        recv_config = self.config.recv_config
+        layout = recv_config.layout
+        data_ringbuffer_chunks = 2  # TODO: may need tuning
+        # The + 1 is because we want the distance from the end of the oldest chunk
+        # to the start of the newest chunk (a distance of n-1 chunks) to be at
+        # least REORDER_BYTES.
+        max_active_chunks = math.ceil(recv_config.reorder_tol_bytes / layout.chunk_bytes) + 1
+        total_chunks = data_ringbuffer_chunks + max_active_chunks
         data_ringbuffer = ChunkRingbuffer(
-            recv_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
+            data_ringbuffer_chunks, name="recv_data_ringbuffer", task_name="run", monitor=self.monitor
         )
-        free_ringbuffer = spead2.recv.ChunkRingbuffer(recv_chunks)
-        layout = config.recv_config.layout
+        free_ringbuffer = spead2.recv.ChunkRingbuffer(total_chunks)
         dtype = np.dtype(f"int{layout.sample_bits}")
         recv_group = recv.make_stream_group(
-            layout, data_ringbuffer, free_ringbuffer, config.recv_config.affinity, config.recv_config.pol_labels
+            layout,
+            data_ringbuffer,
+            free_ringbuffer,
+            recv_config.affinity,
+            recv_config.pol_labels,
+            max_active_chunks,
         )
-        for _ in range(recv_chunks):
+        for _ in range(total_chunks):
             chunk = recv.Chunk(
                 present=np.empty(
                     (N_POLS, layout.n_batches_per_chunk, layout.n_pol_substreams),
@@ -381,11 +444,11 @@ class VEngine(Engine):
         for i, stream in enumerate(recv_group):
             base_recv.add_reader(
                 stream,
-                src=config.recv_config.srcs[i],
-                interface=config.recv_config.interface,
-                ibv=config.recv_config.ibv,
-                comp_vector=config.recv_config.comp_vector,
-                buffer_size=config.recv_config.buffer_size // len(recv_group),
+                src=recv_config.srcs[i],
+                interface=recv_config.interface,
+                ibv=recv_config.ibv,
+                comp_vector=recv_config.comp_vector,
+                buffer_size=recv_config.buffer_size // len(recv_group),
             )
 
         self._recv_group = recv_group
@@ -394,13 +457,12 @@ class VEngine(Engine):
                 data_ringbuffer,
                 layout,
                 self.sensors,
-                config.recv_config.time_converter,
-                config.recv_config.pol_labels,
+                recv_config.time_converter,
+                recv_config.pol_labels,
             )
         )
-
-        for stream in recv_group:
-            stream.start()
+        # We do not start the streams yet; that's done in start() so that
+        # it's done only once we're 100% ready to start receiving data.
 
     def _populate_sensors(
         self,
@@ -433,7 +495,15 @@ class VEngine(Engine):
         for sensor in base_recv.make_sensors(recv_sensor_timeout, prefixes).values():
             sensors.add(sensor)
 
-    async def on_stop(self) -> None:  # noqa: D102
+    @override
+    async def start(self) -> None:
+        await self._prime_memory_pool()
+        for stream in self._recv_group:
+            stream.start()
+        await super().start()
+
+    @override
+    async def on_stop(self) -> None:
         if self._capture is not None:
             await self._stop_capture()
         self._recv_group.stop()

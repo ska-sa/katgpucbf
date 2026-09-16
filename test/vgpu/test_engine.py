@@ -122,6 +122,7 @@ class TestVEngine:
             f"--recv-samples-between-spectra={NB_DECIMATION * RECV_CHANNELS * 2}",
             "--recv-jones-per-batch=16384",  # Reduce batch sizes to speed up test
             "--recv-batches-per-chunk=1",  # Reduce chunk sizes to speed up test
+            "--recv-reorder-tol-bytes=131072",  # Reduce to match other reductions
             "--send-interface=lo",
             f"--send-bandwidth={SEND_BANDWIDTH}",
             "--send-pols=x,y",
