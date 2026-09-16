@@ -185,16 +185,16 @@ class Reporter:
         """
         if self._cur_step is None:
             raise ValueError("Cannot have figure without a current step")
-        data = []
-        for ax in figure.axes:
-            for line in ax.get_lines():
-                data.append(np.asarray(line.get_xydata()).tolist())
         content = io.BytesIO()
         figure.savefig(content, format="pdf", backend="pdf")
         # The .decode converts from bytes to str
         content_b64 = base64.standard_b64encode(content.getvalue()).decode()
         value: dict[str, Any] = {"$msg_type": "binary_figure", "content": content_b64, "type": "pdf"}
         if self._raw_data:
+            data = []
+            for ax in figure.axes:
+                for line in ax.get_lines():
+                    data.append(np.asarray(line.get_xydata()).tolist())
             value["data"] = data
         self._cur_step.append(value)
 
@@ -209,6 +209,18 @@ class Reporter:
             Statistics returned by :func:`qualification.recv.diff_stats`.
         """
         self._data.append({"$msg_type": "spead2_statistics", "name": name, "stats": stats})
+
+    def net_device_statistics(self, name: str, stats: dict[str, int]) -> None:
+        """Add record of statistics from the network device.
+
+        Parameters
+        ----------
+        name
+            The device for which statistics are being reported.
+        stats
+            Dictionary of statistics.
+        """
+        self._data.append({"$msg_type": "net_device_statistics", "name": name, "stats": stats})
 
 
 def custom_report_log(pytestconfig: pytest.Config, data) -> None:

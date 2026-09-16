@@ -158,6 +158,9 @@ class CBFRemoteControl(CBFBase):
         if self.tied_array_channelised_voltage_receiver is not None:
             self.tied_array_channelised_voltage_receiver.stream_group.stop()
             self.tied_array_channelised_voltage_receiver = None  # Break reference cycle
+        if self.tied_array_resampled_voltage_receiver is not None:
+            self.tied_array_resampled_voltage_receiver.close()
+            self.tied_array_resampled_voltage_receiver = None  # Break reference cycle
         self.product_controller_client.close()
         await self.product_controller_client.wait_closed()
         if master_controller_client is not None:

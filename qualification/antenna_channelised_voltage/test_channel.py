@@ -25,6 +25,7 @@ from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
+from ..types import AsyncRunner
 from . import sample_tone_response_hdr
 
 
@@ -64,6 +65,7 @@ async def test_channelisation_and_sfdr(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test channel position and measure SFDR per channel under test.
 
@@ -160,7 +162,7 @@ async def test_channelisation_and_sfdr(
             horizontalalignment="right",
             verticalalignment="top",
         )
-    pdf_report.figure(fig)
+    await run_async(pdf_report.figure, fig)
 
     zoom_plot_range = 3
 
@@ -189,4 +191,4 @@ async def test_channelisation_and_sfdr(
             horizontalalignment="right",
             verticalalignment="top",
         )
-    pdf_report.figure(fig)
+    await run_async(pdf_report.figure, fig)

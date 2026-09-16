@@ -78,7 +78,7 @@ async def _test_linearity(
         for (_, scale), beam_name in zip(batch, receiver.stream_names, strict=False):
             await set_variable(client, beam_name, scale)
             pdf_report.detail(f"Set {variable} to {scale} on {beam_name}.")
-        _, data = await receiver.next_complete_chunk()
+        _, data = await receiver.next_complete_chunk_data()
         pdf_report.detail("Received chunk.")
         for (i, _), d, beam_name in zip(batch, data, receiver.stream_names, strict=False):
             powers[i] = np.sum(np.square(d.astype(np.float64)))

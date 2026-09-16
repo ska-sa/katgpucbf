@@ -109,10 +109,10 @@ async def test_mean_power(
     steady_state_unix = time_converter.adc_to_unix(await cbf.steady_state_timestamp())
     min_sensor_time = steady_state_unix + receiver.power_int_time
 
-    sensor_names = [f"{receiver.stream_names[0]}.x{chan}.mean-power" for chan in range(receiver.n_chans)]
+    sensor_names = [f"{receiver.stream_name}.x{chan}.mean-power" for chan in range(receiver.n_chans)]
 
     pdf_report.step("Measure power from tied-array channelised voltage.")
-    _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk()
+    _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk_data()
     tacv_data = tacv_data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
     # Only use the pass channels for beam zero for the power calculation.
     tacv_data = tacv_data[1][pass_channels]  # the first baseline's `v polarity` data.
@@ -153,7 +153,7 @@ async def test_mean_power(
 
     pdf_report.step("Y polarity mean power sensors should be zero.")
     for chan in range(receiver.n_chans):
-        sensor_name = f"{receiver.stream_names[0]}.y{chan}.mean-power"
+        sensor_name = f"{receiver.stream_name}.y{chan}.mean-power"
         reading = await pcc.sensor_reading(sensor_name, float)
         with check:
             assert reading.value == pytest.approx(0.0, rel=5e-3), (
@@ -184,3 +184,24 @@ async def test_mean_power(
         )
     ax.legend()
     pdf_report.figure(fig)
+
+
+@pytest.mark.name("VLBI VDIF output")
+async def test_vlbi_vdif(
+    pdf_report: Reporter,
+    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
+) -> None:
+    """Test VDIF frame output.
+
+    Verification method
+    -------------------
+    Verified by means of test.
+    Collect a valid VDIF frameset.
+    """
+    assert receive_tied_array_resampled_voltage is not None
+    receiver = receive_tied_array_resampled_voltage
+    pdf_report.step("Collect a valid VDIF frameset.")
+    frameset = await receiver.next_complete_frameset()
+    pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
+    with check:
+        assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)

@@ -27,6 +27,21 @@ from katgpucbf.pytest_plugins.reporter import Reporter
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
+from ..types import AsyncRunner
+
+
+def make_random_gains(shape: tuple[int, int]) -> tuple[NDArray[np.complex128], list[list[str]]]:
+    """Generate random gains with magnitude between 0.5 and 2.0.
+
+    It returns both the gains as an array and a nested list of strings to
+    pass to the product controller.
+    """
+    rng = np.random.default_rng(seed=2)
+    mag = rng.uniform(0.5, 2.0, size=shape)
+    phase = rng.uniform(-np.pi, np.pi, size=shape)
+    gains = mag * np.exp(1j * phase)
+    gains_text = [[f"{gain.real}{gain.imag:+}j" for gain in input_gain] for input_gain in gains]
+    return gains, gains_text
 
 
 @pytest.mark.requirements("CBF-REQ-0119")
@@ -35,6 +50,7 @@ async def test_gains(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test that gains can be applied.
 
@@ -46,10 +62,10 @@ async def test_gains(
     """
 
     async def next_chunk_data() -> NDArray[np.complex128]:
-        _, chunk_data = await receiver.next_complete_chunk()
-        # Turn 2-element axis into complex number
-        data = chunk_data.astype(np.float64).view(np.complex128)[..., 0]
-        return data
+        with await receiver.next_complete_chunk() as chunk:
+            # Turn 2-element axis into complex number
+            data = chunk.data.astype(np.float64).view(np.complex128)[..., 0]
+            return data
 
     receiver = receive_baseline_correlation_products
     pcc = cbf.product_controller_client
@@ -70,13 +86,8 @@ async def test_gains(
     orig = await next_chunk_data()
 
     pdf_report.step("Set random gains.")
-    shape = (receiver.n_inputs, receiver.n_chans)
-    rng = np.random.default_rng(seed=2)
-    mag = rng.uniform(0.5, 2.0, size=shape)
-    phase = rng.uniform(-np.pi, np.pi, size=shape)
-    gains = mag * np.exp(1j * phase)
-    gains_text = [[f"{gain.real}{gain.imag:+}j" for gain in input_gain] for input_gain in gains]
 
+    gains, gains_text = await run_async(make_random_gains, (receiver.n_inputs, receiver.n_chans))
     loop = asyncio.get_running_loop()
     start_time = loop.time()
     for input_gain, input_label in zip(gains_text, receiver.input_labels, strict=True):
@@ -104,6 +115,7 @@ async def test_gains(
         expected = orig[:, i] * expected_gain
         rel_error = np.abs(data[:, i] - expected) / np.abs(expected)
         max_rel_error = max(max_rel_error, np.max(rel_error[pass_channels]))
+        await asyncio.sleep(0)  # Give the event loop a chance to run
     pdf_report.detail(f"Maximum relative error: {max_rel_error}.")
     # 10^-0.05 ~= 0.9, so a relative error of <0.1 implies that the gain is
     # accurate to 0.5 dB (in power - there is no spec for phase), and hence
@@ -163,11 +175,11 @@ async def test_gains_capture_start(
 
     pdf_report.step("Capture and verify output")
     await pcc.request("capture-start", "baseline-correlation-products")
+    bls_idx = receiver.bls_ordering.index((label, label))
     # We use dsim_timestamp as a minimum to ensure that we're not receiving
     # data from a *previous* capture-start/stop.
-    _, data = await receiver.next_complete_chunk(min_timestamp=dsim_timestamp)
-    bls_idx = receiver.bls_ordering.index((label, label))
-    data = data[:, bls_idx, 0]  # 0 to take just the real part (these are auto-correlations)
+    with await receiver.next_complete_chunk(min_timestamp=dsim_timestamp) as chunk:
+        data = chunk.data[:, bls_idx, 0].copy()  # 0 to take just the real part (these are auto-correlations)
     np.testing.assert_equal(data[cut:], 0)
     # It's random, so technically it's possible for any of the values to be
     # zero, but exceedingly unlikely.
