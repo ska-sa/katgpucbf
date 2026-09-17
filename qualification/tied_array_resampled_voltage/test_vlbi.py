@@ -28,6 +28,7 @@ from pytest_check import check
 from katgpucbf.pytest_plugins.reporter import Reporter, plot_focus
 from katgpucbf.utils import TimeConverter
 from qualification.cbf import CBFRemoteControl
+from qualification.types import AsyncRunner
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
 
@@ -53,7 +54,7 @@ async def max_retry_test(
     bool
         Whether the test passed.
     int
-        Zero-indexed attempt of the last attempt (whether successful or not).
+        Zero-index attempt (whether successful or not).
     """
     loop = asyncio.get_running_loop()
     for attempt_num in range(max_attempts):
@@ -72,6 +73,7 @@ async def test_mean_power(
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     cbf: CBFRemoteControl,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     """Test mean-power sensor values against tied-array channelised voltage.
 
@@ -83,7 +85,8 @@ async def test_mean_power(
     (plus one ``power-int-time`` so the averaging window is entirely post-steady-state).
     Measure mean power from the tied-array channelised voltage stream v polarity over the
     passband channels, and compare against x polarity ``mean-power`` sensor.
-    The values must agree to within 0.5%.
+    The values must agree to within 0.5%. During the test the mean power for the y polarity
+    is verified to be zero.
     """
     receiver = receive_tied_array_resampled_voltage
     pcc = cbf.product_controller_client
@@ -114,37 +117,37 @@ async def test_mean_power(
     pdf_report.step("Measure power from tied-array channelised voltage.")
     _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk_data()
     tacv_data = tacv_data.astype(np.float64).view(np.complex128)[..., 0]  # Convert to complex128
-    # Only use the pass channels for beam zero for the power calculation.
-    tacv_data = tacv_data[1][pass_channels]  # the first baseline's `v polarity` data.
+    # Only use the passband channels for beam zero for the power calculation and the first beam's `v polarity` data.
+    tacv_data = tacv_data[1][pass_channels]
     tacv_power = (np.square(tacv_data.real) + np.square(tacv_data.imag)).mean()
     pdf_report.detail(f"Mean TACV power over passband channels: {tacv_power}.")
 
     # TODO: See NGC-2099 & 1689: Because the data is zero for the first several seconds,
     # for now just retry with .2 second intervals (sample rate of 5) since steady state is
     # not known beforehand.
-    sample_rate = 5  # TODO: NGC-2099 & 1689: These are arbitrary values to get data for plotting mean power values.
+    sample_rate = 5
     samples = int(1e2 * sample_rate)
-    mean_power_sensor_readings = np.zeros(
-        shape=(len(sensor_names), samples),
+    mean_power_sensor_readings = np.recarray(
+        (len(sensor_names), samples),
         dtype=np.dtype([("timestamp", np.float64), ("value", np.float64)]),
     )
 
     async def wait_mean_power_steady_state(j: int) -> bool:
         for i, name in enumerate(sensor_names):
             reading = await pcc.sensor_reading(name, float)
-            mean_power_sensor_readings[i, j]["timestamp"] = reading.timestamp
+            mean_power_sensor_readings[i, j].timestamp = reading.timestamp  # type: ignore[attr-defined]
             if reading.status.valid_value():
-                mean_power_sensor_readings[i, j]["value"] = reading.value
+                mean_power_sensor_readings[i, j].value = reading.value  # type: ignore[attr-defined]
             else:
-                mean_power_sensor_readings[i, j]["value"] = np.nan
+                mean_power_sensor_readings[i, j].value = np.nan  # type: ignore[attr-defined]
 
         return bool(
-            np.all(mean_power_sensor_readings["timestamp"][:, j] >= min_sensor_time)
-            and np.all(mean_power_sensor_readings["value"][:, j] == pytest.approx(tacv_power, rel=5e-3))
+            np.all(mean_power_sensor_readings[:, j].timestamp >= min_sensor_time)  # type: ignore[attr-defined]
+            and np.all(mean_power_sensor_readings[:, j].value == pytest.approx(tacv_power, rel=5e-3))  # type: ignore[attr-defined]
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
-    test_passed, total_retries = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
+    test_passed, last_attempts = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
     with check:
         assert test_passed, (
             f"X polarity mean power does not agree to within 0.5% of TACV v polarity power after {samples} retries."
@@ -162,13 +165,14 @@ async def test_mean_power(
 
     pdf_report.detail(
         f"Mean power sensor readings from {
-            datetime.fromtimestamp(np.min(mean_power_sensor_readings['timestamp'][:, 0]), UTC)
+            datetime.fromtimestamp(np.min(mean_power_sensor_readings[:, 0].timestamp), UTC)  # type: ignore[attr-defined]
         }"
-        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings['timestamp'][:, total_retries]), UTC)}"
-        f" in {total_retries + 1} steps."
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, last_attempts].timestamp), UTC)}"  # type: ignore[attr-defined]
+        f" in {last_attempts + 1} steps."
     )
-    mean_power_sensor_readings["timestamp"] -= mean_power_sensor_readings["timestamp"][:, :1]
 
+    # Subtract time of first reading to make time relative to first reading
+    mean_power_sensor_readings.timestamp -= mean_power_sensor_readings[:, :1].timestamp  # type: ignore[attr-defined]
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
     ax.set_xlabel("Timestamp (s)")
@@ -177,13 +181,13 @@ async def test_mean_power(
     for i, name in enumerate(sensor_names):
         plot_focus(
             ax,
-            slice(0, total_retries + 1),
-            mean_power_sensor_readings["timestamp"][i, : total_retries + 1],
-            mean_power_sensor_readings["value"][i, : total_retries + 1],
+            slice(0, last_attempts + 1),
+            mean_power_sensor_readings[: last_attempts + 1, i].timestamp,  # type: ignore[attr-defined]
+            mean_power_sensor_readings[: last_attempts + 1, i].value,  # type: ignore[attr-defined]
             label=name,
         )
     ax.legend()
-    pdf_report.figure(fig)
+    await run_async(pdf_report.figure, fig)
 
 
 @pytest.mark.name("VLBI VDIF output")
