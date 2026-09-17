@@ -182,8 +182,8 @@ async def test_mean_power(
         plot_focus(
             ax,
             slice(0, last_attempts + 1),
-            mean_power_sensor_readings[: last_attempts + 1, i].timestamp,  # type: ignore[attr-defined]
-            mean_power_sensor_readings[: last_attempts + 1, i].value,  # type: ignore[attr-defined]
+            mean_power_sensor_readings[i, : last_attempts + 1].timestamp,  # type: ignore[attr-defined]
+            mean_power_sensor_readings[i, : last_attempts + 1].value,  # type: ignore[attr-defined]
             label=name,
         )
     ax.legend()
