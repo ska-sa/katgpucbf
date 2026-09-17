@@ -127,7 +127,7 @@ async def test_gains(
 
 
 @pytest.mark.name("Ordering of gains and capture-start")
-@pytest.mark.no_capture_start("baseline-correlation-products")
+@pytest.mark.no_capture_start("gpucbf.baseline_correlation_products")
 async def test_gains_capture_start(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,

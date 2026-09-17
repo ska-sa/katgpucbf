@@ -109,7 +109,7 @@ async def _test_capture_start(
 
 
 @pytest.mark.name("Ordering of beam-quant-gains and capture-start")
-@pytest.mark.no_capture_start
+@pytest.mark.no_capture_start("gpucbf.tied_array_channelised_voltage")
 async def test_beam_quant_gains_capture_start(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
@@ -140,7 +140,7 @@ async def test_beam_quant_gains_capture_start(
 
 
 @pytest.mark.name("Ordering of beam-weights and capture-start")
-@pytest.mark.no_capture_start
+@pytest.mark.no_capture_start("gpucbf.tied_array_channelised_voltage")
 async def test_beam_weights_capture_start(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
@@ -172,7 +172,7 @@ async def test_beam_weights_capture_start(
 
 
 @pytest.mark.name("Ordering of beam-delays and capture-start")
-@pytest.mark.no_capture_start
+@pytest.mark.no_capture_start("gpucbf.tied_array_channelised_voltage")
 async def test_beam_delays_capture_start(
     cbf: CBFRemoteControl,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,

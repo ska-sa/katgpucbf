@@ -456,7 +456,9 @@ async def capture_stop_streams(cbf_config: dict) -> list[str]:
 
 
 @pytest.fixture
-async def capture_start_streams(request: pytest.FixtureRequest, capture_stop_streams: list[str]) -> list[str]:
+async def capture_start_streams(
+    request: pytest.FixtureRequest, capture_stop_streams: list[str], cbf_config: dict
+) -> list[str]:
     """List of streams for which capture-start will automatically be issued."""
     no_capture_start: set[str] = set()
     for marker in request.node.iter_markers("no_capture_start"):
@@ -465,8 +467,10 @@ async def capture_start_streams(request: pytest.FixtureRequest, capture_stop_str
         no_capture_start.update(marker.args)
 
     out = []
-    for name in capture_stop_streams:
-        if name not in no_capture_start:
+    for name, conf in cbf_config["outputs"].items():
+        if name not in capture_stop_streams:
+            continue
+        if conf["type"] not in no_capture_start:
             out.append(name)
     return out
 
