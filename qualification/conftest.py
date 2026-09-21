@@ -133,7 +133,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "no_vlbi: do not run the test in VLBI narrowband configurations")
     config.addinivalue_line("markers", "vlbi_only: only run the test in VLBI narrowband configurations")
     config.addinivalue_line(
-        "markers", "no_capture_start([stream, ...]): do not issue capture-start (on all streams if none specified)"
+        "markers", "no_capture_start(stream_type, ...): do not issue capture-start to certain stream types"
     )
     for option in ini_options:
         assert config.getini(option.name) is not None, f"{option.name} missing from pytest.ini"
@@ -463,14 +463,12 @@ async def capture_start_streams(
     no_capture_start: set[str] = set()
     for marker in request.node.iter_markers("no_capture_start"):
         if marker.args == ():
-            return []  # Requests no streams be automatically started
+            raise RuntimeError("no_capture_start must list at least one stream type")
         no_capture_start.update(marker.args)
 
     out = []
-    for name, conf in cbf_config["outputs"].items():
-        if name not in capture_stop_streams:
-            continue
-        if conf["type"] not in no_capture_start:
+    for name in capture_stop_streams:
+        if cbf_config["outputs"][name]["type"] not in no_capture_start:
             out.append(name)
     return out
 
