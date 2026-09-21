@@ -107,5 +107,5 @@ async def test_weight_mapping(
         data[test_beam, channel_to_test] = 0
 
         with check:
-            np.testing.assert_array_equal(data[test_beam, channel_to_test], 0)
+            np.testing.assert_array_equal(data[:, channel_to_test], 0)
             pdf_report.detail("All other beams have no signal in the channel.")
