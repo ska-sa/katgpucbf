@@ -145,7 +145,7 @@ async def test_mean_power(
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
-    test_passed, last_attempts = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
+    test_passed, last_attempt = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
     with check:
         assert test_passed, (
             f"X polarity mean power does not agree to within 0.5% of TACV v polarity power after {samples} retries."
@@ -163,8 +163,8 @@ async def test_mean_power(
 
     pdf_report.detail(
         f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_timestamps[:, 0]), UTC)}"
-        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_timestamps[:, last_attempts]), UTC)}"
-        f" in {last_attempts + 1} steps."
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_timestamps[:, last_attempt]), UTC)}"
+        f" in {last_attempt + 1} steps."
     )
 
     # Subtract time of first reading to make time relative to first reading
@@ -177,9 +177,9 @@ async def test_mean_power(
     for i, name in enumerate(sensor_names):
         plot_focus(
             ax,
-            slice(0, last_attempts + 1),
-            mean_power_sensor_timestamps[i, : last_attempts + 1],
-            mean_power_sensor_values[i, : last_attempts + 1],
+            slice(0, last_attempt + 1),
+            mean_power_sensor_timestamps[i, : last_attempt + 1],
+            mean_power_sensor_values[i, : last_attempt + 1],
             label=name,
         )
     ax.legend()
