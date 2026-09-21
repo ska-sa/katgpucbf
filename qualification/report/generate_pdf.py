@@ -892,6 +892,7 @@ def _doc_cbfs(section: Container, cbfs: Sequence[CBFConfiguration]) -> None:
         ("F-engine {i}", re.compile(r"f\.(?:wideband-)?antenna-channelised-voltage\.(\d+)")),
         ("XB-engine {i}", re.compile(r"xb\.baseline-correlation-products\.(\d+)")),
         ("WB XB-engine {i}", re.compile(r"xb\.wideband-baseline-correlation-products\.(\d+)")),
+        ("V-engine", re.compile(r"v.tied-array-resampled-voltage")),
     ]
     for cbf in cbfs:
         with section.create(Subsection(cbf.title)) as subsec:
