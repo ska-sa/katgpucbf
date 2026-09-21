@@ -54,7 +54,7 @@ async def max_retry_test(
     bool
         Whether the test passed.
     int
-        Zero-index attempt (whether successful or not).
+        Zero-indexed attempt (whether successful or not).
     """
     loop = asyncio.get_running_loop()
     for attempt_num in range(max_attempts):
@@ -127,27 +127,25 @@ async def test_mean_power(
     # not known beforehand.
     sample_rate = 5
     samples = int(1e2 * sample_rate)
-    mean_power_sensor_readings = np.recarray(
-        (len(sensor_names), samples),
-        dtype=np.dtype([("timestamp", np.float64), ("value", np.float64)]),
-    )
+    mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples), float)
+    mean_power_sensor_values = np.zeros_like(mean_power_sensor_timestamps)
 
     async def wait_mean_power_steady_state(j: int) -> bool:
         for i, name in enumerate(sensor_names):
             reading = await pcc.sensor_reading(name, float)
-            mean_power_sensor_readings[i, j].timestamp = reading.timestamp  # type: ignore[attr-defined]
+            mean_power_sensor_timestamps[i, j] = reading.timestamp
             if reading.status.valid_value():
-                mean_power_sensor_readings[i, j].value = reading.value  # type: ignore[attr-defined]
+                mean_power_sensor_values[i, j] = reading.value
             else:
-                mean_power_sensor_readings[i, j].value = np.nan  # type: ignore[attr-defined]
+                mean_power_sensor_values[i, j] = np.nan
 
         return bool(
-            np.all(mean_power_sensor_readings[:, j].timestamp >= min_sensor_time)  # type: ignore[attr-defined]
-            and np.all(mean_power_sensor_readings[:, j].value == pytest.approx(tacv_power, rel=5e-3))  # type: ignore[attr-defined]
+            np.all(mean_power_sensor_timestamps[:, j] >= min_sensor_time)
+            and np.all(mean_power_sensor_values[:, j] == pytest.approx(tacv_power, rel=5e-3))
         )
 
     pdf_report.step("Compare mean-power sensors against TACV power.")
-    test_passed, last_attempts = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
+    test_passed, last_attempt = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
     with check:
         assert test_passed, (
             f"X polarity mean power does not agree to within 0.5% of TACV v polarity power after {samples} retries."
@@ -164,15 +162,13 @@ async def test_mean_power(
             )
 
     pdf_report.detail(
-        f"Mean power sensor readings from {
-            datetime.fromtimestamp(np.min(mean_power_sensor_readings[:, 0].timestamp), UTC)  # type: ignore[attr-defined]
-        }"
-        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_readings[:, last_attempts].timestamp), UTC)}"  # type: ignore[attr-defined]
-        f" in {last_attempts + 1} steps."
+        f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_timestamps[:, 0]), UTC)}"
+        f" to {datetime.fromtimestamp(np.max(mean_power_sensor_timestamps[:, last_attempt]), UTC)}"
+        f" in {last_attempt + 1} steps."
     )
 
     # Subtract time of first reading to make time relative to first reading
-    mean_power_sensor_readings.timestamp -= mean_power_sensor_readings[:, :1].timestamp  # type: ignore[attr-defined]
+    mean_power_sensor_timestamps -= mean_power_sensor_timestamps[:, :1]
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
     ax.set_xlabel("Timestamp (s)")
@@ -181,9 +177,9 @@ async def test_mean_power(
     for i, name in enumerate(sensor_names):
         plot_focus(
             ax,
-            slice(0, last_attempts + 1),
-            mean_power_sensor_readings[i, : last_attempts + 1].timestamp,  # type: ignore[attr-defined]
-            mean_power_sensor_readings[i, : last_attempts + 1].value,  # type: ignore[attr-defined]
+            slice(0, last_attempt + 1),
+            mean_power_sensor_timestamps[i, : last_attempt + 1],
+            mean_power_sensor_values[i, : last_attempt + 1],
             label=name,
         )
     ax.legend()
