@@ -98,7 +98,9 @@ class PFBFIRTemplate:
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
-        self.wgs = 128
+        self.wgs_x = 32
+        self.wgs_y = 16
+        self.amp_y = 9
         self.taps = taps
         self.channels = channels
         self.input_sample_bits = input_sample_bits
@@ -117,8 +119,8 @@ class PFBFIRTemplate:
         else:
             if input_sample_bits not in DIG_SAMPLE_BITS_VALID:
                 raise ValueError("input_sample_bits must be 2-10, 12 or 16 when complex_input is false")
-        if (2 * channels) % self.wgs != 0:
-            raise ValueError(f"2*channels must be a multiple of {self.wgs}")
+        if (2 * channels) % self.wgs_x != 0:
+            raise ValueError(f"2*channels must be a multiple of {self.wgs_x}")
         if channels <= 1 or channels & (channels - 1):
             raise ValueError("channels must be an even power of 2")
         if channels % unzip_factor != 0:
@@ -128,7 +130,9 @@ class PFBFIRTemplate:
                 context,
                 "kernels/pfb_fir.mako",
                 {
-                    "wgs": self.wgs,
+                    "wgs_x": self.wgs_x,
+                    "wgs_y": self.wgs_y,
+                    "amp_y": self.amp_y,
                     "taps": self.taps,
                     "channels": channels,
                     "input_sample_bits": input_sample_bits,
@@ -304,20 +308,8 @@ class PFBFIR(accel.Operation):
         if self.out_offset + self.spectra > out_buffer.shape[1]:
             raise IndexError("Output buffer does not contain sufficient spectra")
 
-        # Try to ensure that each workitem has enough work to do to amortise
-        # the overhead of loading the initial taps. Each workitem should
-        # contribute to work_spectra outputs.
-        work_spectra = self.template.taps * 8
-        # Number of workgroups along the time axis to match this
-        groupsy = accel.divup(self.spectra, work_spectra)
-        # Keep a minimum of 128K workitems (across all pols), to avoid starving
-        # the GPU for work.
-        groupsy = max(groupsy, accel.divup(128 * 1024 // self.template.n_pols, real_step))
-        # Re-compute work_spectra to balance the load
-        work_spectra = accel.divup(self.spectra, groupsy)
-        # Rounding up may have left some workgroups with nothing to do, so recalculate
-        # groupsy again.
-        groupsy = accel.divup(self.spectra, work_spectra)
+        rows_out = self.template.wgs_y * self.template.amp_y - self.template.taps + 1
+        groups_y = accel.divup(self.spectra, rows_out)
 
         raw_in_offset = (self.in_offset * rps).astype(np.int32)
         out_buffer = self.buffer("out")
@@ -330,7 +322,6 @@ class PFBFIR(accel.Operation):
                 np.int32(out_buffer.padded_shape[1] * out_buffer.padded_shape[2] * rps),
                 np.int32(in_buffer.padded_shape[1] * rps),
                 np.int32(self.spectra + self.out_offset),
-                np.int32(work_spectra),
             ]
             + list(raw_in_offset)
             + [
@@ -348,6 +339,6 @@ class PFBFIR(accel.Operation):
         self.command_queue.enqueue_kernel(
             self.template.kernel,
             kernel_args,
-            global_size=(real_step, groupsy, self.template.n_pols),
-            local_size=(self.template.wgs, 1, 1),
+            global_size=(real_step, groups_y * self.template.wgs_y, self.template.n_pols),
+            local_size=(self.template.wgs_x, self.template.wgs_y, 1),
         )
