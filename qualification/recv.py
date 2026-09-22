@@ -840,6 +840,8 @@ class TiedArrayResampledVoltageReceiver:
         self.sample_bytes_per_frame = self.n_samples_per_frame * self.veng_out_bits_per_sample // 8
         packet_size = self.sample_bytes_per_frame + self.VDIF_HEADER_SIZE + self.VTP_HEADER_SIZE
         self._packet = bytearray(packet_size)
+        # Number of times we've received a packet without sleeping
+        self._sync_packets = 0
 
         # The V-engine applies DSP filters, and unlike the F-engine, the
         # timestamp used for the output corresponds to the centre input sample.
@@ -882,9 +884,16 @@ class TiedArrayResampledVoltageReceiver:
         self.cbf = cbf
 
     async def _next_packet(self) -> None:
-        # sock_recv will work synchronously if it can, but that can prevent the
-        # event loop from ever getting a chance to run. sleep(0) allows this.
-        await asyncio.sleep(0)
+        # sock_recv_into will work synchronously if it can, but that can
+        # prevent the event loop from ever getting a chance to run.
+        # sleep(0) allows this. Performance is better if we don't sleep(0)
+        # every time, so we pick a tuning number to balance responsiveness
+        # with performance.
+        self._sync_packets += 1
+        if self._sync_packets == 16:
+            await asyncio.sleep(0)
+            self._sync_packets = 0
+
         packet = self._packet
         packet_size = await asyncio.get_event_loop().sock_recv_into(self.sock, packet)
         assert packet_size == len(packet)
