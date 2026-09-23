@@ -246,7 +246,7 @@ def check_vdif_timestamps(
     with check:
         assert elapsed >= min_time, f"Less than {min_time}s of data received for {name}."
     with check:
-        sorted_timestamps = sorted(timestamps, key=lambda t: t.timestamp)
+        sorted_timestamps = sorted(timestamps, key=lambda t: t.linear)
         assert timestamps == sorted_timestamps, "Framesets sequenced out of time order."
     timestamps = sorted_timestamps  # To allow us to keep going if the above check failed
 
