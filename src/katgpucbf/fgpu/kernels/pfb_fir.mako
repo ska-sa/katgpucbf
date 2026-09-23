@@ -52,6 +52,21 @@ DEVICE_FN static unsigned int shuffle_index(unsigned int idx)
     return (idx & ~mask) | swapped;
 }
 
+/* Reduce a 54-bit value across the warp.
+ *
+ * The implementation splits it into two 27-bit values, which can be
+ * added with __reduce_add_sync without overflow. The results are then
+ * combined.
+ */
+DEVICE_FN static unsigned long reduce_long(unsigned long long value)
+{
+    unsigned int low = value & ((1 << 27) - 1);
+    unsigned int high = value >> 27;
+    low = __reduce_add_sync(0xffffffff, low);
+    high = __reduce_add_sync(0xffffffff, high);
+    return ((unsigned long long) high << 27) + low;
+}
+
 /* Each work-item is responsible for a run of input values with stride `step`.
  * WGS_Y work-items will collaboratively load the necessary data.
  *
@@ -179,7 +194,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
     {
         {  // Block just to balance things with the not complex_input case.
 % else:
-    unsigned int total_power = 0;
+    unsigned long long total_power = 0;
     int out_y = out_start_y;
     // Note: this while loop may be executed different numbers of times
     // for different lid_y values, and hence must not contain and BARRIER
@@ -216,7 +231,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
             out[i * step] = sum;
         }
 % if do_total_power:
-        total_power = __reduce_add_sync(0xffffffff, total_power);
+        total_power = reduce_long(total_power);
         if (lid_x == 0)
             atomicAdd(&out_total_power[out_y / TOTAL_POWER_SPECTRA], total_power);
         total_power = 0;
