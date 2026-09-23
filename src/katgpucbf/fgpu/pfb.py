@@ -98,9 +98,9 @@ class PFBFIRTemplate:
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
-        self.wgs_x = 32
-        self.wgs_y = 16
-        self.amp_y = 9
+        self.wgs_x = 32  # Must equal warp size!
+        self.wgs_y = 8
+        self.amp_y = 17
         self.taps = taps
         self.channels = channels
         self.input_sample_bits = input_sample_bits

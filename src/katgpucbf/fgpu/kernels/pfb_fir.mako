@@ -35,9 +35,6 @@
 % else:
 
 <%include file="unpack.mako"/>
-<%namespace name="wg_reduce" file="/wg_reduce.mako"/>
-${wg_reduce.define_scratch('unsigned long long', wgs_x * wgs_y, 'scratch_t', allow_shuffle=True)}
-${wg_reduce.define_function('unsigned long long', wgs_x * wgs_y, 'reduce', 'scratch_t', wg_reduce.op_plus, allow_shuffle=True, broadcast=False)}
 
 % endif
 
@@ -89,13 +86,13 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
 )
 {
     const unsigned int step = 2 * CHANNELS;
-    const unsigned int rows_in = WGS_Y * AMP_Y;
-    const unsigned int rows_out = rows_in - (TAPS - 1);
+    const unsigned int max_rows_in = WGS_Y * AMP_Y;
+    const unsigned int max_rows_out = max_rows_in - (TAPS - 1);
 
-    LOCAL_DECL short int raw_samples[rows_in][WGS_X];
+    LOCAL_DECL short int raw_samples[max_rows_in][WGS_X];
 
     // Figure out where our thread block has to work.
-    int group_y = get_group_id(1) * rows_out;
+    int group_y = get_group_id(1) * max_rows_out;
     int pol = get_group_id(2);
     int in_offset;
     switch (pol)
@@ -106,6 +103,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
         break;
 % endfor
     }
+    int out_group_start_y = group_y + out_offset;  // first spectrum number to write in output
+    int out_group_stop_y = min(n, out_group_start_y + max_rows_out);
+    int group_rows_out = out_group_stop_y - out_group_start_y;
+    int group_rows_in = group_rows_out + (TAPS - 1);
 
     // Figure out where this thread has to work.
     int lid_x = get_local_id(0);
@@ -113,11 +114,6 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
     // pos is the position within the step (i.e. spectrum) that this thread will work on.
     // This is equivalent to get_global_id(0) but reuses known values
     int pos = get_group_id(0) * WGS_X + lid_x;
-
-    // can't skip individual (input) samples with pointer arithmetic, so track in_offset
-    // (the first sample to be loaded by this thread)
-    in_offset += (group_y + lid_y) * step + pos;
-    in += pol * in_stride;
 
     // Increment this pointer because this thread may not need to write to the
     // beginning of the block.
@@ -127,7 +123,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
 % endif
 
     /* Load the data. There are probably a few ways to optimise this:
-     * - Convert to float here, so that we don't have to the (expensive)
+     * - Convert to float here, so that we don't have to do the (expensive)
      *   int->float conversion multiple times. That will double storage.
      * - On the other extreme, could just load the raw bytes (with a
      *   tensor memory unit if available) to save memory, and do all
@@ -136,13 +132,18 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
      *   use finer-grained split barriers.
      */
     unpack_t unpack;
-    unpack_init(&unpack, in, in_offset);
-    for (int i = 0; i < rows_in; i += WGS_Y)
+    unpack_init(&unpack, in + pol * in_stride, in_offset + (group_y + lid_y) * step + pos);
+    for (int i = lid_y; i < group_rows_in; i += WGS_Y)
     {
-        raw_samples[i + lid_y][lid_x] = unpack_read(&unpack); // TODO: avoid reading past the end
+        raw_samples[i][lid_x] = unpack_read(&unpack);
         unpack_advance(&unpack, step * WGS_Y);
     }
     BARRIER();
+
+    // This work-item will process this range of spectra
+    int amp_y = (group_rows_out + WGS_Y - 1) / WGS_Y;
+    int out_start_y = out_group_start_y + lid_y * amp_y;
+    int out_stop_y = min(out_group_stop_y, out_start_y + amp_y);
 
     /* Here we fill up the taps of the FIR before we bother to do any outputs.
      * We assume we are not interested in the initial transient spectra.
@@ -155,7 +156,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
      * case not worth worrying about).
      */
     float samples[TAPS];
-    int local_row = lid_y * AMP_Y;
+    int local_row = lid_y * amp_y;
 
 #pragma unroll
     for (int i = 0; i < TAPS - 1; i++)
@@ -173,31 +174,23 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
     for (int i = 0; i < TAPS; i++)
         rweights[i] = weights[(i * step + pos) >> WEIGHT_INDEX_SHIFT];
 
-    // This work-group will process up to (but excluding) this spectrum.
-    int out_group_start_y = group_y + out_offset;  // first spectrum number to write in output
-    int out_group_stop_y = min(n, out_group_start_y + rows_out);
-    // This work-item will process this range of spectra
-    // TODO: rebalance the work since rows_out < rows_in?
-    int out_start_y = out_group_start_y + lid_y * AMP_Y;
-    int out_stop_y = min(out_group_stop_y, out_start_y + AMP_Y);
-
 % if not do_total_power:
     for (int i = out_start_y; i < out_stop_y; i++)
     {
         {  // Block just to balance things with the not complex_input case.
 % else:
-    unsigned long long total_power = 0;
-    // Note: this while loop must be group-uniform, because we do a group-wise
-    // reduction inside it
-    int out_group_y = out_group_start_y;
-    while (out_group_y < out_group_stop_y)
+    unsigned int total_power = 0;
+    int out_y = out_start_y;
+    // Note: this while loop may be executed different numbers of times
+    // for different lid_y values, and hence must not contain and BARRIER
+    // instructions.
+    while (out_y < out_stop_y)
     {
         // Determine the next boundary at which we need to emit
         // accumulated total_power.
         // TODO: rewrite without using division
-        int group_stop = min(out_group_stop_y, (out_group_y / TOTAL_POWER_SPECTRA + 1) * TOTAL_POWER_SPECTRA);
-        int stop = min(group_stop, out_stop_y);
-        for (int i = max(out_start_y, out_group_y); i < stop; i++)
+        int stop = min(out_stop_y, (out_y / TOTAL_POWER_SPECTRA + 1) * TOTAL_POWER_SPECTRA);
+        for (int i = out_y; i < stop; i++)
         {
 % endif
             // Load the raw data for the sample
@@ -223,15 +216,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
             out[i * step] = sum;
         }
 % if do_total_power:
-        // Reduce total_power across work items, to reduce the number of atomics needed.
-        // TODO: use 32-bit reduction when sample_bits is small enough.
-        LOCAL_DECL scratch_t scratch;
-        int lid = lid_y * WGS_X + lid_x;
-        total_power = reduce(total_power, lid, &scratch);
-        if (lid == 0)
-            atomicAdd(&out_total_power[out_group_y / TOTAL_POWER_SPECTRA], total_power);
+        total_power = __reduce_add_sync(0xffffffff, total_power);
+        if (lid_x == 0)
+            atomicAdd(&out_total_power[out_y / TOTAL_POWER_SPECTRA], total_power);
         total_power = 0;
-        out_group_y = group_stop;
+        out_y = stop;
 % endif
     }
 }
