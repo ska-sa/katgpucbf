@@ -459,7 +459,8 @@ class VEngine(Engine):
                 self.sensors,
                 recv_config.time_converter,
                 recv_config.pol_labels,
-            )
+            ),
+            name="recv iterator",
         )
         # We do not start the streams yet; that's done in start() so that
         # it's done only once we're 100% ready to start receiving data.

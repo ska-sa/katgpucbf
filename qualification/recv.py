@@ -437,7 +437,10 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
-        self._chunk_iter = DiscardingChunkIterator(self.stream_group.data_ringbuffer)  # type: ignore
+        self._chunk_iter = DiscardingChunkIterator(
+            self.stream_group.data_ringbuffer,  # type: ignore
+            name="baseline-correlation-products iterator",
+        )
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
         if not super().is_complete_chunk(chunk):
@@ -499,7 +502,10 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             decimation_factor=self.decimation_factor,
             use_ibv=use_ibv,
         )
-        self._chunk_iter = DiscardingChunkIterator(self.stream_group.data_ringbuffer)  # type: ignore
+        self._chunk_iter = DiscardingChunkIterator(
+            self.stream_group.data_ringbuffer,  # type: ignore
+            name="tied-array-channelised-voltage iterator",
+        )
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
         return super().is_complete_chunk(chunk) and (chunk.extra is None or np.min(chunk.extra) == self.n_ants)
