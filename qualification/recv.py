@@ -900,12 +900,13 @@ class TiedArrayResampledVoltageReceiver:
             await asyncio.sleep(0)
             self._sync_packets = 0
 
-        packet = self._packet
-        packet_size = await asyncio.get_event_loop().sock_recv_into(self.sock, packet)
-        assert packet_size == len(packet)
+        packet_size = await asyncio.get_event_loop().sock_recv_into(self.sock, self._packet)
+        assert packet_size == len(self._packet)
         # Using baseband to parse the header is expensive. We extract
         # words from the header then slice out the fields we want.
-        (seq_id, seconds, ref_epoch_frame_nr, length, sample_bits_thread_id) = struct.unpack_from("<QIIIxxH", packet)
+        (seq_id, seconds, ref_epoch_frame_nr, length, sample_bits_thread_id) = struct.unpack_from(
+            "<QIIIxxH", self._packet
+        )
         seconds = seconds & 0x3FFF_FFFF
         ref_epoch = (ref_epoch_frame_nr >> 24) & 0x3F
         frame_nr = ref_epoch_frame_nr & 0xFF_FFFF
@@ -916,7 +917,7 @@ class TiedArrayResampledVoltageReceiver:
             assert not is_complex
 
         timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch, frame_rate=self.frame_rate)
-        frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=packet[8:])
+        frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=self._packet[8:])
         assert length == self.sample_bytes_per_frame
         if seq_id >= self.min_seq_id:
             self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
