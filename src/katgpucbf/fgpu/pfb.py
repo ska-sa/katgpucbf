@@ -20,14 +20,21 @@ These classes handle the operation of the GPU in performing the PFB-FIR part
 through a mako-templated kernel.
 """
 
+from collections.abc import Callable
 from importlib import resources
+from typing import TypedDict, cast
 
 import numpy as np
-from katsdpsigproc import accel
+from katsdpsigproc import accel, tune
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import BYTE_BITS
 from . import DIG_SAMPLE_BITS_VALID, INPUT_CHUNK_PADDING
+
+
+class _TuningDict(TypedDict):
+    wgs_y: int
+    max_rows_out: int
 
 
 class PFBFIRTemplate:
@@ -84,6 +91,8 @@ class PFBFIRTemplate:
         128).
     """
 
+    autotune_version = 1
+
     def __init__(
         self,
         context: AbstractContext,
@@ -95,12 +104,15 @@ class PFBFIRTemplate:
         complex_input: bool = False,
         n_pols: int,
         total_power_spectra: int = 1,
+        tuning: _TuningDict | None = None,
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
+        if tuning is None:
+            tuning = self.autotune(context, taps, channels, input_sample_bits, complex_input)
         self.wgs_x = 32  # Must equal warp size!
-        self.wgs_y = 8
-        self.max_rows_out = 128
+        self.wgs_y = tuning["wgs_y"]
+        self.max_rows_out = tuning["max_rows_out"]
         self.taps = taps
         self.channels = channels
         self.input_sample_bits = input_sample_bits
@@ -144,6 +156,62 @@ class PFBFIRTemplate:
                 extra_dirs=[str(resource_dir)],
             )
         self.kernel = program.get_kernel("pfb_fir")
+
+    @classmethod
+    @tune.autotuner(test={"wgs_y": 8, "max_rows_out": 64})
+    def autotune(
+        cls, context: AbstractContext, taps: int, channels: int, input_sample_bits: int, complex_input: bool
+    ) -> _TuningDict:
+        """Determine tuning parameters."""
+        queue = context.create_tuning_command_queue()
+        step = channels if complex_input else 2 * channels
+        spectra = max(1, 16 * 1024 * 1024 // step)
+        samples = (spectra + taps - 1) * step
+        n_pols = 2
+        total_power_spectra = 1048576 // channels
+        # Create one just to get buffer sizes and padding
+        dummy_fn = cls(
+            context,
+            taps,
+            channels,
+            input_sample_bits,
+            complex_input=complex_input,
+            n_pols=n_pols,
+            total_power_spectra=total_power_spectra,
+            tuning={"wgs_y": 1, "max_rows_out": 1},
+        ).instantiate(queue, samples, spectra)
+        dummy_fn.ensure_all_bound()
+        data = {"in": dummy_fn.buffer("in"), "out": dummy_fn.buffer("out"), "weights": dummy_fn.buffer("weights")}
+        if not complex_input:
+            data["total_power"] = dummy_fn.buffer("total_power")
+        data["in"].zero(queue)
+
+        def generate(wgs_y: int, max_rows_out: int) -> Callable[[int], float] | None:
+            if wgs_y > max_rows_out:
+                # Such configurations are highly unlikely to be optimal as some
+                # warps will have no work to do.
+                return None
+            with context:
+                fn = cls(
+                    context,
+                    taps,
+                    channels,
+                    input_sample_bits,
+                    unzip_factor=4,
+                    complex_input=complex_input,
+                    n_pols=n_pols,
+                    total_power_spectra=1048576 // channels,
+                    tuning={"wgs_y": wgs_y, "max_rows_out": max_rows_out},
+                ).instantiate(queue, samples, spectra)
+                fn.bind(**data)
+                return tune.make_measure(queue, fn)
+
+        tuning = tune.autotune(
+            generate,
+            wgs_y=[1, 2, 3, 4, 6, 8, 12, 16, 24, 32],
+            max_rows_out=[8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+        )
+        return cast(_TuningDict, tuning)
 
     def instantiate(
         self,
