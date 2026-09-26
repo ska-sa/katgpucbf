@@ -19,7 +19,8 @@
 <% do_total_power = not complex_input %>
 #define WGS_X ${wgs_x}
 #define WGS_Y ${wgs_y}
-#define AMP_Y ${amp_y}
+#define MAX_ROWS_OUT ${max_rows_out}
+#define MAX_ROWS_IN ${max_rows_out + taps - 1}
 #define TAPS ${taps}
 #define CHANNELS ${channels}
 #define TOTAL_POWER_SPECTRA ${total_power_spectra}
@@ -101,13 +102,11 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
 )
 {
     const unsigned int step = 2 * CHANNELS;
-    const unsigned int max_rows_in = WGS_Y * AMP_Y;
-    const unsigned int max_rows_out = max_rows_in - (TAPS - 1);
 
-    LOCAL_DECL sample_t raw_samples[max_rows_in][WGS_X];
+    LOCAL_DECL sample_t raw_samples[MAX_ROWS_IN][WGS_X];
 
     // Figure out where our thread block has to work.
-    int group_y = get_group_id(1) * max_rows_out;
+    int group_y = get_group_id(1) * MAX_ROWS_OUT;
     int pol = get_group_id(2);
     int in_offset;
     switch (pol)
@@ -119,7 +118,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
 % endfor
     }
     int out_group_start_y = group_y + out_offset;  // first spectrum number to write in output
-    int out_group_stop_y = min(n, out_group_start_y + max_rows_out);
+    int out_group_stop_y = min(n, out_group_start_y + MAX_ROWS_OUT);
     int group_rows_out = out_group_stop_y - out_group_start_y;
     int group_rows_in = group_rows_out + (TAPS - 1);
 
@@ -156,7 +155,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
     BARRIER();
 
     // This work-item will process this range of spectra
-    int amp_y = (group_rows_out + WGS_Y - 1) / WGS_Y;
+    int amp_y = (group_rows_out + (WGS_Y - 1)) / WGS_Y;
     int out_start_y = out_group_start_y + lid_y * amp_y;
     int out_stop_y = min(out_group_stop_y, out_start_y + amp_y);
 

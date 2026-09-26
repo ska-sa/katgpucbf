@@ -100,7 +100,7 @@ class PFBFIRTemplate:
             raise ValueError("taps must be at least 1")
         self.wgs_x = 32  # Must equal warp size!
         self.wgs_y = 8
-        self.amp_y = 17
+        self.max_rows_out = 128
         self.taps = taps
         self.channels = channels
         self.input_sample_bits = input_sample_bits
@@ -132,7 +132,7 @@ class PFBFIRTemplate:
                 {
                     "wgs_x": self.wgs_x,
                     "wgs_y": self.wgs_y,
-                    "amp_y": self.amp_y,
+                    "max_rows_out": self.max_rows_out,
                     "taps": self.taps,
                     "channels": channels,
                     "input_sample_bits": input_sample_bits,
@@ -308,8 +308,7 @@ class PFBFIR(accel.Operation):
         if self.out_offset + self.spectra > out_buffer.shape[1]:
             raise IndexError("Output buffer does not contain sufficient spectra")
 
-        rows_out = self.template.wgs_y * self.template.amp_y - self.template.taps + 1
-        groups_y = accel.divup(self.spectra, rows_out)
+        groups_y = accel.divup(self.spectra, self.template.max_rows_out)
 
         raw_in_offset = (self.in_offset * rps).astype(np.int32)
         out_buffer = self.buffer("out")
