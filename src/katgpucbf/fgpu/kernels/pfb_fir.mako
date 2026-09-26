@@ -168,12 +168,26 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
         raw_samples[i][lid_x] = unpack_read(&unpack);
         unpack_advance(&unpack, step * WGS_Y);
     }
-    BARRIER();
+
+    // Split barrier for the writes to raw_samples
+    auto token = block_group.barrier_arrive();
 
     // This work-item will process this range of spectra
     int amp_y = (group_rows_out + (WGS_Y - 1)) / WGS_Y;
     int out_start_y = out_group_start_y + lid_y * amp_y;
     int out_stop_y = min(out_group_stop_y, out_start_y + amp_y);
+
+    // Load the relevant weights for this branch of the PFB-FIR.
+    // With complex_input, we shift the index to allow a single weight
+    // to apply to both the real and imaginary components.
+    // TODO: could load them through shared memory first?
+    float rweights[TAPS];
+#pragma unroll
+    for (int i = 0; i < TAPS; i++)
+        rweights[i] = weights[(i * step + pos) >> WEIGHT_INDEX_SHIFT];
+
+    // Wait until raw_samples has been completely written
+    block_group.barrier_wait(std::move(token));
 
     /* Here we fill up the taps of the FIR before we bother to do any outputs.
      * We assume we are not interested in the initial transient spectra.
@@ -194,15 +208,6 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
         // Load the sample (write to i + 1 because we start the main loop by shuffling down)
         samples[i + 1] = raw_samples[local_row++][lid_x];
     }
-
-    // Load the relevant weights for this branch of the PFB-FIR.
-    // With complex_input, we shift the index to allow a single weight
-    // to apply to both the real and imaginary components.
-    // TODO: could load them through shared memory first?
-    float rweights[TAPS];
-#pragma unroll
-    for (int i = 0; i < TAPS; i++)
-        rweights[i] = weights[(i * step + pos) >> WEIGHT_INDEX_SHIFT];
 
 % if not do_total_power:
     for (int i = out_start_y; i < out_stop_y; i++)
