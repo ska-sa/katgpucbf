@@ -33,6 +33,7 @@ from . import DIG_SAMPLE_BITS_VALID, INPUT_CHUNK_PADDING
 
 
 class _TuningDict(TypedDict):
+    wgs_x: int
     wgs_y: int
     max_rows_out: int
 
@@ -110,7 +111,7 @@ class PFBFIRTemplate:
             raise ValueError("taps must be at least 1")
         if tuning is None:
             tuning = self.autotune(context, taps, channels, input_sample_bits, complex_input)
-        self.wgs_x = 32  # Must equal warp size!
+        self.wgs_x = tuning["wgs_x"]
         self.wgs_y = tuning["wgs_y"]
         self.max_rows_out = tuning["max_rows_out"]
         self.taps = taps
@@ -158,7 +159,7 @@ class PFBFIRTemplate:
         self.kernel = program.get_kernel("pfb_fir")
 
     @classmethod
-    @tune.autotuner(test={"wgs_y": 8, "max_rows_out": 64})
+    @tune.autotuner(test={"wgs_x": 64, "wgs_y": 8, "max_rows_out": 64})
     def autotune(
         cls, context: AbstractContext, taps: int, channels: int, input_sample_bits: int, complex_input: bool
     ) -> _TuningDict:
@@ -178,7 +179,7 @@ class PFBFIRTemplate:
             complex_input=complex_input,
             n_pols=n_pols,
             total_power_spectra=total_power_spectra,
-            tuning={"wgs_y": 1, "max_rows_out": 1},
+            tuning={"wgs_x": 32, "wgs_y": 1, "max_rows_out": 1},
         ).instantiate(queue, samples, spectra)
         dummy_fn.ensure_all_bound()
         data = {"in": dummy_fn.buffer("in"), "out": dummy_fn.buffer("out"), "weights": dummy_fn.buffer("weights")}
@@ -186,10 +187,14 @@ class PFBFIRTemplate:
             data["total_power"] = dummy_fn.buffer("total_power")
         data["in"].zero(queue)
 
-        def generate(wgs_y: int, max_rows_out: int) -> Callable[[int], float] | None:
+        def generate(wgs_x: int, wgs_y: int, max_rows_out: int) -> Callable[[int], float] | None:
             if wgs_y > max_rows_out:
                 # Such configurations are highly unlikely to be optimal as some
                 # warps will have no work to do.
+                return None
+            if wgs_x * wgs_y > 256:
+                # Probably too big to be optimal, and in extreme cases can lead
+                # to warnings from nvcc.
                 return None
             with context:
                 fn = cls(
@@ -201,13 +206,14 @@ class PFBFIRTemplate:
                     complex_input=complex_input,
                     n_pols=n_pols,
                     total_power_spectra=1048576 // channels,
-                    tuning={"wgs_y": wgs_y, "max_rows_out": max_rows_out},
+                    tuning={"wgs_x": wgs_x, "wgs_y": wgs_y, "max_rows_out": max_rows_out},
                 ).instantiate(queue, samples, spectra)
                 fn.bind(**data)
                 return tune.make_measure(queue, fn)
 
         tuning = tune.autotune(
             generate,
+            wgs_x=[32, 64, 128],
             wgs_y=[1, 2, 3, 4, 6, 8, 12, 16, 24, 32],
             max_rows_out=[8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
         )

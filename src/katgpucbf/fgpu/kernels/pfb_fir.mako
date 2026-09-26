@@ -16,6 +16,13 @@
 
 <%include file="/port.mako"/>
 
+extern "C++"
+{
+#include <cooperative_groups.h>
+#include <cooperative_groups/reduce.h>
+
+namespace cg = cooperative_groups;
+
 <% do_total_power = not complex_input %>
 #define WGS_X ${wgs_x}
 #define WGS_Y ${wgs_y}
@@ -53,20 +60,25 @@ DEVICE_FN static unsigned int shuffle_index(unsigned int idx)
     return (idx & ~mask) | swapped;
 }
 
-/* Sum a 54-bit value across the warp.
+/* Sum a 48-bit value across the warp.
  *
- * The implementation splits it into two 27-bit values, which can be
+ * The implementation splits it into two 24-bit values, which can be
  * added with __reduce_add_sync without overflow. The results are then
  * combined.
+ *
+ * TODO: use a 32-bit reduction where possible.
  */
-DEVICE_FN static unsigned long long reduce_long(unsigned long long value)
+template<typename G>
+DEVICE_FN static unsigned long long reduce_long(G &group, unsigned long long value)
 {
-    unsigned int low = value & ((1 << 27) - 1);
-    unsigned int high = value >> 27;
-    low = __reduce_add_sync(0xffffffff, low);
-    high = __reduce_add_sync(0xffffffff, high);
-    return ((unsigned long long) high << 27) + low;
+    unsigned int low = value & ((1 << 24) - 1);
+    unsigned int high = value >> 24;
+    low = cg::reduce(group, low, cg::plus<unsigned int>());
+    high = cg::reduce(group, high, cg::plus<unsigned int>());
+    return ((unsigned long long) high << 24) + low;
 }
+
+} // extern "C++"
 
 /* Each work-item is responsible for a run of input values with stride `step`.
  * WGS_Y work-items will collaboratively load the necessary data.
@@ -104,6 +116,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
     const unsigned int step = 2 * CHANNELS;
 
     LOCAL_DECL sample_t raw_samples[MAX_ROWS_IN][WGS_X];
+    LOCAL_DECL cg::block_tile_memory<WGS_X * WGS_Y> block_tile_memory;
+
+    cg::thread_block block_group = cg::this_thread_block(block_tile_memory);
+    auto row_group = cg::tiled_partition<WGS_X>(block_group);
 
     // Figure out where our thread block has to work.
     int group_y = get_group_id(1) * MAX_ROWS_OUT;
@@ -230,7 +246,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
             out[i * step] = sum;
         }
 % if do_total_power:
-        total_power = reduce_long(total_power);
+        total_power = reduce_long(row_group, total_power);
         if (lid_x == 0)
             atomicAdd(&out_total_power[out_y / TOTAL_POWER_SPECTRA], total_power);
         total_power = 0;
