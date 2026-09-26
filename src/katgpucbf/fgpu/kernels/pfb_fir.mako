@@ -189,25 +189,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
     // Wait until raw_samples has been completely written
     block_group.barrier_wait(std::move(token));
 
-    /* Here we fill up the taps of the FIR before we bother to do any outputs.
-     * We assume we are not interested in the initial transient spectra.
-     * We prime all but one of the taps with samples of data. The last one will
-     * be filled in later as part of the main loop.
-     *
-     * These samples are deliberately not included in total_power, because they
-     * have already been counted by a previous workgroup (except for the very
-     * first samples in the stream, or after lost data, but that's a corner
-     * case not worth worrying about).
-     */
-    float samples[TAPS];
     int local_row = lid_y * amp_y;
-
-#pragma unroll
-    for (int i = 0; i < TAPS - 1; i++)
-    {
-        // Load the sample (write to i + 1 because we start the main loop by shuffling down)
-        samples[i + 1] = raw_samples[local_row++][lid_x];
-    }
 
 % if not do_total_power:
     for (int i = out_start_y; i < out_stop_y; i++)
@@ -227,26 +209,16 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
         int stop = min(out_stop_y, (out_y / TOTAL_POWER_SPECTRA + 1) * TOTAL_POWER_SPECTRA);
         for (int i = out_y; i < stop; i++)
         {
-% endif
             // Load the raw data for the sample
-            sample_t sample = raw_samples[local_row++][lid_x];
-            // Shuffle down the samples to make room for the new one
-            for (int j = 0; j < TAPS - 1; j++)
-                samples[j] = samples[j + 1];
-
-            /* Each FIR output sample only needs one new sample, and TAPS-1 old
-             * ones. Read the new one into the array, and also use it to compute
-             * total power.
-             */
-% if do_total_power:
+            sample_t sample = raw_samples[local_row + (TAPS - 1)][lid_x];
             total_power += sample * sample;
 % endif
-            samples[TAPS - 1] = (float) sample;
 
             // Implement the actual FIR filter by multiplying samples by weights and summing.
-            float sum = rweights[0] * samples[0];
+            float sum = rweights[0] * raw_samples[local_row][lid_x];
             for (int j = 1; j < TAPS; j++)
-                sum += rweights[j] * samples[j];
+                sum += rweights[j] * raw_samples[local_row + j][lid_x];
+            local_row++;
             // Sum written out to global memory.
             out[i * step] = sum;
         }
