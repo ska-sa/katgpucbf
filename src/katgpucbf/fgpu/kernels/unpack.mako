@@ -21,7 +21,7 @@
  * for example 10-bit samples are guaranteed to be 2-bit aligned.
  */
 
-typedef int sample_t;  // Type returned by unpack_read
+typedef short int sample_t;  // Type returned by unpack_read
 
 /* Return the byte index in the chunk where the start of a sample will
  * be. The sample may be spread over two successive bytes but we just need to
@@ -99,7 +99,7 @@ DEVICE_FN sample_t unpack_read(const unpack_t *unpack)
         return *(const GLOBAL char *) unpack->ptr;
     else
     {
-        int raw;
+        sample_t raw;
         if (INPUT_SAMPLE_BITS == 2 || INPUT_SAMPLE_BITS == 4)
             raw = unpack->ptr[0];
         else

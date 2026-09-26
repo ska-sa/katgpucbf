@@ -52,13 +52,13 @@ DEVICE_FN static unsigned int shuffle_index(unsigned int idx)
     return (idx & ~mask) | swapped;
 }
 
-/* Reduce a 54-bit value across the warp.
+/* Sum a 54-bit value across the warp.
  *
  * The implementation splits it into two 27-bit values, which can be
  * added with __reduce_add_sync without overflow. The results are then
  * combined.
  */
-DEVICE_FN static unsigned long reduce_long(unsigned long long value)
+DEVICE_FN static unsigned long long reduce_long(unsigned long long value)
 {
     unsigned int low = value & ((1 << 27) - 1);
     unsigned int high = value >> 27;
@@ -104,7 +104,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
     const unsigned int max_rows_in = WGS_Y * AMP_Y;
     const unsigned int max_rows_out = max_rows_in - (TAPS - 1);
 
-    LOCAL_DECL short int raw_samples[max_rows_in][WGS_X];
+    LOCAL_DECL sample_t raw_samples[max_rows_in][WGS_X];
 
     // Figure out where our thread block has to work.
     int group_y = get_group_id(1) * max_rows_out;
