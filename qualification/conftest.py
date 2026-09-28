@@ -19,10 +19,12 @@
 import ast
 import asyncio
 import copy
+import gc
 import logging
 import math
 import os
 import subprocess
+import time
 from collections import deque, namedtuple
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -258,6 +260,38 @@ def quiet_spead2(caplog: pytest.LogCaptureFixture) -> None:
     """
     if logging.getLogger("spead2").getEffectiveLevel() < logging.WARN:
         caplog.set_level(logging.WARN, logger="spead2")
+
+
+@pytest.fixture(autouse=True)
+def gc_control() -> Generator[None, None, None]:
+    """Tweak garbage collection to reduce GC time.
+
+    Also warn if garbage collection is slow.
+    """
+    start_time = 0.0
+
+    def callback(phase: str, info: dict) -> None:
+        nonlocal start_time
+        if phase == "start":
+            start_time = time.monotonic()
+        else:
+            started = start_time  # Copy as early as possible, before any more GC can happen
+            elapsed = time.monotonic() - started
+            if elapsed > 0.05:
+                logger.warning("Slow generation %d GC: %.3fs", info["generation"], elapsed)
+
+    # Run a collection now to avoid freezing any garbage into place
+    gc.collect(2)
+    # Freeze current allocations, so that we don't have to spend time
+    # walk them when doing GC.
+    gc.freeze()
+    gc.callbacks.append(callback)
+
+    yield
+
+    # Clean up
+    gc.callbacks.remove(callback)
+    gc.unfreeze()
 
 
 @pytest.fixture

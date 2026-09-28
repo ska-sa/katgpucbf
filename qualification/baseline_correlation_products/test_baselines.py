@@ -73,8 +73,8 @@ async def test_baseline_correlation_products(
             input_gains[b_idx[i], channel] = 1.0
 
         pdf_report.detail("Set gains.")
-        for i, channel_gains in enumerate(input_gains.tolist()):
-            await pcc.request("gain", "antenna-channelised-voltage", receiver.input_labels[i], *channel_gains)
+        for i, channel_gains in enumerate(input_gains):
+            await pcc.request("gain", "antenna-channelised-voltage", receiver.input_labels[i], *channel_gains.tolist())
 
         with await receiver.next_complete_chunk() as chunk:
             assert chunk.data.shape == (receiver.n_chans, receiver.n_bls, 2)

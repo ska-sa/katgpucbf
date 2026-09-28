@@ -29,7 +29,7 @@ import operator
 import os
 import socket
 import struct
-from collections.abc import AsyncGenerator, Callable, Generator, Sequence
+from collections.abc import AsyncGenerator, Buffer, Callable, Generator, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass
 from fractions import Fraction
@@ -437,7 +437,10 @@ class BaselineCorrelationProductsReceiver(XBReceiver):
             n_samples_between_spectra=self.n_samples_between_spectra,
             use_ibv=use_ibv,
         )
-        self._chunk_iter = DiscardingChunkIterator(self.stream_group.data_ringbuffer)  # type: ignore
+        self._chunk_iter = DiscardingChunkIterator(
+            self.stream_group.data_ringbuffer,  # type: ignore
+            name="baseline-correlation-products iterator",
+        )
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
         if not super().is_complete_chunk(chunk):
@@ -499,7 +502,10 @@ class TiedArrayChannelisedVoltageReceiver(XBReceiver):
             decimation_factor=self.decimation_factor,
             use_ibv=use_ibv,
         )
-        self._chunk_iter = DiscardingChunkIterator(self.stream_group.data_ringbuffer)  # type: ignore
+        self._chunk_iter = DiscardingChunkIterator(
+            self.stream_group.data_ringbuffer,  # type: ignore
+            name="tied-array-channelised-voltage iterator",
+        )
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:  # noqa: D102
         return super().is_complete_chunk(chunk) and (chunk.extra is None or np.min(chunk.extra) == self.n_ants)
@@ -755,7 +761,7 @@ def diff_stats(receiver: XBReceiver) -> Generator[dict[str, int], None, None]:
     delta_stats["incomplete_chunks"] = final_incomplete_chunks - init_incomplete_chunks
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True, order=True, slots=True)
 class VDIFTimestamp:
     """Identifier of an VDIF frameset."""
 
@@ -787,7 +793,7 @@ class VDIFFrame:
     seq_id: int
     thread_id: int
     timestamp: VDIFTimestamp
-    raw_frame: bytes  #: VDIF frame (including VDIF header but without VTP sequence header)
+    raw_frame: Buffer  #: VDIF frame (including VDIF header but without VTP sequence header)
 
 
 @dataclass(slots=True)
@@ -838,7 +844,10 @@ class TiedArrayResampledVoltageReceiver:
         self.frame_rate = round(self.bandwidth / self.n_samples_per_frame)
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
         self.sample_bytes_per_frame = self.n_samples_per_frame * self.veng_out_bits_per_sample // 8
-        self._packet_size = self.sample_bytes_per_frame + self.VDIF_HEADER_SIZE + self.VTP_HEADER_SIZE
+        packet_size = self.sample_bytes_per_frame + self.VDIF_HEADER_SIZE + self.VTP_HEADER_SIZE
+        self._packet = bytearray(packet_size)
+        # Number of times we've received a packet without sleeping
+        self._sync_packets = 0
 
         # The V-engine applies DSP filters, and unlike the F-engine, the
         # timestamp used for the output corresponds to the centre input sample.
@@ -881,14 +890,23 @@ class TiedArrayResampledVoltageReceiver:
         self.cbf = cbf
 
     async def _next_packet(self) -> None:
-        # sock_recv will work synchronously if it can, but that can prevent the
-        # event loop from ever getting a chance to run. sleep(0) allows this.
-        await asyncio.sleep(0)
-        packet = await asyncio.get_event_loop().sock_recv(self.sock, self._packet_size)
-        assert len(packet) == self._packet_size
+        # sock_recv_into will work synchronously if it can, but that can
+        # prevent the event loop from ever getting a chance to run.
+        # sleep(0) allows this. Performance is better if we don't sleep(0)
+        # every time, so we pick a tuning number to balance responsiveness
+        # with performance.
+        self._sync_packets += 1
+        if self._sync_packets == 16:
+            await asyncio.sleep(0)
+            self._sync_packets = 0
+
+        packet_size = await asyncio.get_event_loop().sock_recv_into(self.sock, self._packet)
+        assert packet_size == len(self._packet)
         # Using baseband to parse the header is expensive. We extract
         # words from the header then slice out the fields we want.
-        (seq_id, seconds, ref_epoch_frame_nr, length, sample_bits_thread_id) = struct.unpack("<QIIIxxH", packet[:24])
+        (seq_id, seconds, ref_epoch_frame_nr, length, sample_bits_thread_id) = struct.unpack_from(
+            "<QIIIxxH", self._packet
+        )
         seconds = seconds & 0x3FFF_FFFF
         ref_epoch = (ref_epoch_frame_nr >> 24) & 0x3F
         frame_nr = ref_epoch_frame_nr & 0xFF_FFFF
@@ -899,7 +917,7 @@ class TiedArrayResampledVoltageReceiver:
             assert not is_complex
 
         timestamp = VDIFTimestamp(seconds=seconds, frame_nr=frame_nr, ref_epoch=ref_epoch, frame_rate=self.frame_rate)
-        frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=packet[8:])
+        frame = VDIFFrame(seq_id=seq_id, thread_id=thread_id, timestamp=timestamp, raw_frame=self._packet[8:])
         assert length == self.sample_bytes_per_frame
         if seq_id >= self.min_seq_id:
             self.min_seq_id = max(self.min_seq_id, seq_id - self.reorder_window)
