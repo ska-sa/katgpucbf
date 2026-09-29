@@ -115,7 +115,8 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
 {
     const unsigned int step = 2 * CHANNELS;
 
-    LOCAL_DECL sample_t raw_samples[MAX_ROWS_IN][WGS_X];
+    // Round up to multiple of WGS_Y so that we can statically unroll loops
+    LOCAL_DECL sample_t raw_samples[(MAX_ROWS_IN + WGS_Y - 1) / WGS_Y * WGS_Y][WGS_X];
     LOCAL_DECL cg::block_tile_memory<WGS_X * WGS_Y> block_tile_memory;
 
     cg::thread_block block_group = cg::this_thread_block(block_tile_memory);
