@@ -163,16 +163,16 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
      */
     unpack_t unpack;
     unpack_init(&unpack, in + pol * in_stride, in_offset + (group_y + lid_y) * step + pos);
-    sample_t buffer[MAX_ROWS_IN];
+    raw_sample_t buffer[MAX_ROWS_IN];
 #pragma unroll
     for (int i = 0; i < MAX_ROWS_IN; i += WGS_Y)
     {
-        buffer[i] = (i < group_rows_in - lid_y) ? unpack_read(&unpack) : 0;
+        buffer[i] = (i < group_rows_in - lid_y) ? unpack_fetch(&unpack) : raw_sample_t{};
         unpack_advance(&unpack, step * WGS_Y);
     }
 #pragma unroll
     for (int i = 0; i < MAX_ROWS_IN; i += WGS_Y)
-        raw_samples[i + lid_y][lid_x] = buffer[i];
+        raw_samples[i + lid_y][lid_x] = unpack_decode(&unpack, buffer[i]);
 
     // Split barrier for the writes to raw_samples
     auto token = block_group.barrier_arrive();

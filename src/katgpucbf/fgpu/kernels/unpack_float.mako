@@ -18,7 +18,8 @@
  * in float32.
  */
 
-typedef float sample_t;  // type returned by unpack_read
+typedef float sample_t;  // type returned by unpack_fetch
+typedef float raw_sample_t;  // type returned by unpack_load
 
 /* An "address" for a sample. */
 struct unpack_t
@@ -34,10 +35,15 @@ DEVICE_FN void unpack_init(unpack_t *unpack, const GLOBAL sample_t *in, unsigned
     unpack->ptr = in + idx;
 }
 
-// Dereference an unpack_t to get the sample value
-DEVICE_FN sample_t unpack_read(const unpack_t *unpack)
+DEVICE_FN raw_sample_t unpack_fetch(const unpack_t *unpack)
 {
     return *unpack->ptr;
+}
+
+// Dereference an unpack_t to get the sample value
+DEVICE_FN sample_t unpack_decode(const unpack_t *unpack, raw_sample_t raw)
+{
+    return raw;
 }
 
 // Increment an unpack_t by a given number of samples.
