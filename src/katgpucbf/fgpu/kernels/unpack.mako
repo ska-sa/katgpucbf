@@ -21,7 +21,8 @@
  * for example 10-bit samples are guaranteed to be 2-bit aligned.
  */
 
-typedef short int sample_t;  // Type returned by unpack_read
+typedef short int sample_t;  // Type returned by unpack_decode
+typedef uchar2 raw_sample_t;  // Type returned by unpack_load
 
 /* Return the byte index in the chunk where the start of a sample will
  * be. The sample may be spread over two successive bytes but we just need to
@@ -92,19 +93,27 @@ DEVICE_FN void unpack_init(unpack_t *unpack, const GLOBAL unsigned char *in, uns
     unpack->ptr = in + samples_to_bytes(idx);
 }
 
-// Dereference an unpack_t to get the sample value
-DEVICE_FN sample_t unpack_read(const unpack_t *unpack)
+DEVICE_FN raw_sample_t unpack_fetch(const unpack_t *unpack)
+{
+    uchar2 out;
+    out.x = unpack->ptr[0];
+    if (INPUT_SAMPLE_BITS != 2 && INPUT_SAMPLE_BITS != 4 && INPUT_SAMPLE_BITS != 8)
+        out.y = unpack->ptr[1];
+    return out;
+}
+
+DEVICE_FN sample_t unpack_decode(const unpack_t *unpack, raw_sample_t raw)
 {
     if (INPUT_SAMPLE_BITS == 8)
-        return *(const GLOBAL char *) unpack->ptr;
+        return (char) raw.x;
     else
     {
-        sample_t raw;
+        sample_t wide;
         if (INPUT_SAMPLE_BITS == 2 || INPUT_SAMPLE_BITS == 4)
-            raw = unpack->ptr[0];
+            wide = raw.x;
         else
-            raw = (unpack->ptr[0] << 8) + unpack->ptr[1];
-        return extract_bits(raw, unpack->shift);
+            wide = (raw.x << 8) + raw.y;
+        return extract_bits(wide, unpack->shift);
     }
 }
 
