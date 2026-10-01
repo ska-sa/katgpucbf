@@ -33,6 +33,7 @@ from katgpucbf.pytest_plugins.reporter import POTLocator, Reporter, plot_focus
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver
+from ..types import AsyncRunner
 
 MAX_DELAY = 79.53e-6  # seconds
 MAX_DELAY_RATE = 2.56e-9
@@ -61,7 +62,7 @@ async def test_delay_application_time(
     pdf_report.step("Inject correlated white noise signal.")
     await pcc.request("dsim-signals", cbf.dsim_names[0], "common=nodither(wgn(0.1)); common; common;")
     pdf_report.detail("Wait for updated signal to propagate through the pipeline.")
-    await receiver.next_complete_chunk()
+    await receiver.wait_complete_chunk()
 
     attempts = 5
     advance = 0.2
@@ -79,7 +80,7 @@ async def test_delay_application_time(
         target_ts = round(receiver.time_converter.unix_to_adc(target))
         target_acc_ts = target_ts // receiver.timestamp_step * receiver.timestamp_step
         acc = None
-        timestamp, data = await receiver.next_complete_chunk(min_timestamp=target_acc_ts, timeout=10.0)
+        timestamp, data = await receiver.next_complete_chunk_data(min_timestamp=target_acc_ts, timeout=10.0)
         pdf_report.detail(f"Received chunk with timestamp {timestamp}, target is {target_acc_ts}.")
         if timestamp == target_acc_ts:
             acc = np.sum(data[:, bl_idx, :], axis=0)  # Sum over channels
@@ -125,7 +126,7 @@ async def test_delay_enable_disable(
 
     async def measure_phase() -> float:
         """Retrieve the phase of the chosen channel from the next chunk."""
-        _, data = await receiver.next_complete_chunk()
+        _, data = await receiver.next_complete_chunk_data()
         value = data[channel, bl_idx, :]
         phase = np.arctan2(value[1], value[0])
         return phase
@@ -250,7 +251,7 @@ async def test_delay_sensors(
             assert value[1:] == (0.0, 0.0, 0.0, 0.0)
     pdf_report.step("Wait for load time and check sensors.")
     pdf_report.detail(f"Wait for an accumulation with timestamp >= {load_ts}.")
-    await receiver.next_complete_chunk(min_timestamp=load_ts)
+    await receiver.wait_complete_chunk(min_timestamp=load_ts)
     sensor_values = np.empty((len(receiver.input_labels), 5), np.float64)
     expected_values = np.empty((len(receiver.input_labels), 5), np.float64)
     for idx, (expected, label) in enumerate(zip(delay_tuples, receiver.input_labels, strict=True)):
@@ -321,6 +322,7 @@ async def _test_delay_phase_fixed(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
     delay_phases: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
     report_residual: bool,
@@ -332,7 +334,7 @@ async def _test_delay_phase_fixed(
 
     Parameters
     ----------
-    cbf, receive_baseline_correlation_products, pdf_report, pass_channels
+    cbf, receive_baseline_correlation_products, pdf_report, pass_channels, run_async
         Fixtures
     delay_phases
         Pairs of (delay, phase) to test
@@ -371,8 +373,8 @@ async def _test_delay_phase_fixed(
 
     pdf_report.step("Verify results")
     pdf_report.detail("Receive an accumulation")
-    _, chunk_data = await receiver.next_complete_chunk()
-    actual = np.arctan2(chunk_data[..., 1], chunk_data[..., 0])
+    with await receiver.next_complete_chunk() as chunk:
+        actual = await run_async(np.arctan2, chunk.data[..., 1], chunk.data[..., 0])
 
     for i, (delay, phase) in enumerate(delay_phases):
         caption = caption_cb(delay, phase)
@@ -391,7 +393,7 @@ async def _test_delay_phase_fixed(
         # The delay in the dsim will affect the phase of the centre frequency,
         # which the delay compensation won't correct.
         expected += 2 * np.pi * delay_samples[i] / receiver.scale_factor_timestamp * receiver.center_freq
-        check_phases(pdf_report, actual[:, bl_idx], expected, pass_channels, caption)
+        await run_async(check_phases, pdf_report, actual[:, bl_idx], expected, pass_channels, caption)
 
 
 async def _test_delay_phase_rate(
@@ -399,6 +401,7 @@ async def _test_delay_phase_rate(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
     rates: list[tuple[float, float]],
     caption_cb: Callable[[float, float], str],
 ) -> None:
@@ -409,7 +412,7 @@ async def _test_delay_phase_rate(
 
     Parameters
     ----------
-    cbf, receive_baseline_correlation_products, pdf_report, pass_channels
+    cbf, receive_baseline_correlation_products, pdf_report, pass_channels, run_async
         Fixtures
     rates
         Pairs of (delay_rate, phase_rate) to test
@@ -442,10 +445,10 @@ async def _test_delay_phase_rate(
     pdf_report.step("Collect two consecutive accumulations.")
     timestamps = []
     phases = []
-    for timestamp, chunk in await receiver.consecutive_chunks(2):
+    for chunk in await receiver.consecutive_chunks(2):
         with chunk:
-            timestamps.append(timestamp)
-            phases.append(np.arctan2(chunk.data[..., 1], chunk.data[..., 0]))
+            timestamps.append(chunk.timestamp)
+            phases.append(await run_async(np.arctan2, chunk.data[..., 1], chunk.data[..., 0]))
     elapsed = timestamps[1] - timestamps[0]
     elapsed_s = elapsed / receiver.scale_factor_timestamp
     pdf_report.detail(f"Timestamps are {timestamps[0]}, {timestamps[1]} with difference {elapsed} ({elapsed_s:.3f} s).")
@@ -461,7 +464,7 @@ async def _test_delay_phase_rate(
         expected = delay_phase(receiver, delay_rate * elapsed) + phase_rate * elapsed_s
         # Allow 2° rather than 1° because we're taking the difference between
         # two phases which each have a 1° tolerance.
-        check_phases(pdf_report, actual, expected, pass_channels, caption, tolerance_deg=2)
+        await run_async(check_phases, pdf_report, actual, expected, pass_channels, caption, 2)
 
 
 @pytest.mark.requirements("CBF-REQ-0128,CBF-REQ-0185")
@@ -470,6 +473,7 @@ async def test_delay(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test performance of delay compensation with a fixed delay.
 
@@ -488,6 +492,7 @@ async def test_delay(
         receive_baseline_correlation_products,
         pdf_report,
         pass_channels,
+        run_async,
         [(delay, 0.0) for delay in delays],
         lambda delay, phase: f"delay {delay * 1e12:.2f}ps",
         True,
@@ -500,6 +505,7 @@ async def test_delay_rate(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test performance of delay compensation with a delay rate.
 
@@ -517,6 +523,7 @@ async def test_delay_rate(
         receive_baseline_correlation_products,
         pdf_report,
         pass_channels,
+        run_async,
         [(delay_rate, 0.0) for delay_rate in rates],
         lambda delay_rate, phase_rate: f"delay rate {delay_rate}",
     )
@@ -528,6 +535,7 @@ async def test_delay_phase(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test performance of delay tracking with a fixed phase.
 
@@ -544,6 +552,7 @@ async def test_delay_phase(
         receive_baseline_correlation_products,
         pdf_report,
         pass_channels,
+        run_async,
         [(0.0, phase) for phase in phases],
         lambda delay, phase: f"phase {phase:.4f} rad ({np.rad2deg(phase):.2f}°)",
         False,
@@ -557,6 +566,7 @@ async def test_phase_rate(
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
     pass_channels: slice,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test performance of delay tracking with a phase rate.
 
@@ -574,6 +584,7 @@ async def test_phase_rate(
         receive_baseline_correlation_products,
         pdf_report,
         pass_channels,
+        run_async,
         [(0.0, phase_rate) for phase_rate in rates],
         lambda delay_rate, phase_rate: f"phase rate {phase_rate}",
     )
@@ -585,6 +596,7 @@ async def test_group_delay(
     pdf_report: Reporter,
     pass_channels: slice,
     vlbi: bool,
+    run_async: AsyncRunner,
 ) -> None:
     r"""Test the ``filter-group-delay`` sensor.
 
@@ -619,7 +631,7 @@ async def test_group_delay(
     receiver = receive_tied_array_channelised_voltage
     pcc = cbf.product_controller_client
     # Nominally in sigma, but the test has lots of non-Gaussian things going on,
-    # channel leakages and so, so the measured value tends to exceeed 5 sigma
+    # channel leakages and so, so the measured value tends to exceed 5 sigma
     # every now and then.
     tolerance = 7.0
 
@@ -672,11 +684,12 @@ async def test_group_delay(
     gains = [[0.0] * receiver.n_chans for _ in range(n_dsims)]
     for i, channel in enumerate(channels):
         gains[i % n_dsims][channel] = gain
-    async with asyncio.TaskGroup() as tg:
-        for i, g in enumerate(gains):
-            for j in range(2):
-                input_label = receiver.input_labels[2 * i + j]
-                tg.create_task(pcc.request("gain", "antenna-channelised-voltage", input_label, *g))
+    # Note: it's faster to launch all the gain requests in parallel, but it
+    # hogs the CPU and causes packet drops. So we do it serially.
+    for i, g in enumerate(gains):
+        for j in range(2):
+            input_label = receiver.input_labels[2 * i + j]
+            await pcc.request("gain", "antenna-channelised-voltage", input_label, *g)
     pdf_report.detail(f"Set gain to {gain} on chosen antenna/channel pairs.")
 
     # Collect about 2^27 samples, to improve SNR. However, for VLBI mode this
@@ -777,10 +790,10 @@ async def test_group_delay(
         raw_data = np.ones((2, n_channels, n_spectra, COMPLEX), np.int8)
         try:
             async with asyncio.timeout(acc_time * 3 + 10.0), aclosing(receiver.complete_chunks()) as it:
-                async for timestamp, chunk in it:
+                async for chunk in it:
                     with chunk:
-                        if i == 0 or timestamp != first_timestamp + i * chunk_timestamp_step:
-                            first_timestamp = timestamp
+                        if i == 0 or chunk.timestamp != first_timestamp + i * chunk_timestamp_step:
+                            first_timestamp = chunk.timestamp
                             i = 0  # If we had a gap, start from the beginning again
                             attempts += 1
                         start_spectrum = i * receiver.n_spectra_per_heap
@@ -793,8 +806,7 @@ async def test_group_delay(
         except TimeoutError:
             pytest.fail("Timed out.")
 
-        loop = asyncio.get_event_loop()
-        delay, period, std = await loop.run_in_executor(None, compute_delay, rel_freqs, first_timestamp, raw_data)
+        delay, period, std = await run_async(compute_delay, rel_freqs, first_timestamp, raw_data)
         pdf_report.detail(f"Delay is {delay} + k*{period} ± {std} samples.")
         return delay, period, std
 

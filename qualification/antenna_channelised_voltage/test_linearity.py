@@ -23,6 +23,7 @@ from katgpucbf.pytest_plugins.reporter import Reporter
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
+from ..types import AsyncRunner
 from . import sample_tone_response
 
 
@@ -30,6 +31,7 @@ async def test_linearity(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    run_async: AsyncRunner,
 ) -> None:
     """Test that baseline Correlation Products are linear when input CW is scaled.
 
@@ -92,4 +94,4 @@ async def test_linearity(
     ax.legend()
     ax.set_xticks(xticks)
     ax.set_xticklabels(labels)
-    pdf_report.figure(fig)
+    await run_async(pdf_report.figure, fig)

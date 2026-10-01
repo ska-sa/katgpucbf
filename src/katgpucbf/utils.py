@@ -68,9 +68,16 @@ class DiscardingIterator[T](AsyncIterator[T]):
     The implementation is currently not robust against the base iterator
     raising exceptions. The exception will be logged but it will terminate
     iteration.
+
+    Parameters
+    ----------
+    base
+        Underlying iterable
+    name
+        Name for the background asyncio task
     """
 
-    def __init__(self, base: AsyncIterable[T]) -> None:
+    def __init__(self, base: AsyncIterable[T], *, name: str | None = None) -> None:
         self._base = aiter(base)
         # This class is a state machine with several states:
         # 1. Discarding: _discarding is True, _future is None
@@ -84,7 +91,7 @@ class DiscardingIterator[T](AsyncIterator[T]):
         self._discarding = True
         # Set when we need to wake up _run, namely when we switch to state 1 or 2.
         self._ready = asyncio.Event()
-        self._run_task = asyncio.create_task(self._run())
+        self._run_task = asyncio.create_task(self._run(), name=name)
         self._run_task.add_done_callback(self._cleanup)
 
     async def _run(self) -> None:
@@ -427,7 +434,7 @@ class TimeConverter:
         return (timestamp - self.sync_time) * self.adc_sample_rate
 
     def adc_to_unix(self, samples: float) -> float:
-        """Convert an ADC sample count to a UNIX timstamp."""
+        """Convert an ADC sample count to a UNIX timestamp (seconds)."""
         return samples / self.adc_sample_rate + self.sync_time
 
 

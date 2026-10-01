@@ -26,6 +26,7 @@ from katgpucbf.pytest_plugins.reporter import Reporter
 
 from ..cbf import CBFRemoteControl
 from ..recv import BaselineCorrelationProductsReceiver
+from ..types import AsyncRunner
 from . import sample_tone_response_hdr
 
 
@@ -64,6 +65,7 @@ async def test_channel_shape(
     cbf: CBFRemoteControl,
     receive_baseline_correlation_products: BaselineCorrelationProductsReceiver,
     pdf_report: Reporter,
+    run_async: AsyncRunner,
 ) -> None:
     """Test the shape of the response to a single channel.
 
@@ -142,7 +144,7 @@ async def test_channel_shape(
                     horizontalalignment="right",
                     verticalalignment="top",
                 )
-        pdf_report.figure(fig)
+        await run_async(pdf_report.figure, fig)
 
     pdf_report.step("Check attenuation bandwidth.")
     width_3db = cutoff_bandwidth(db, -3, 1 / resolution)

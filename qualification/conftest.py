@@ -19,12 +19,16 @@
 import ast
 import asyncio
 import copy
+import gc
 import logging
 import math
 import os
 import subprocess
+import time
 from collections import deque, namedtuple
-from collections.abc import AsyncGenerator, Iterable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -35,13 +39,24 @@ from katgpucbf.meerkat import BANDS
 from katgpucbf.pytest_plugins.reporter import Reporter, custom_report_log
 
 from .cbf import CBFCache, CBFRemoteControl, FailedCBF
-from .recv import DEFAULT_TIMEOUT, BaselineCorrelationProductsReceiver, TiedArrayChannelisedVoltageReceiver, diff_stats
+from .recv import (
+    DEFAULT_TIMEOUT,
+    BaselineCorrelationProductsReceiver,
+    TiedArrayChannelisedVoltageReceiver,
+    TiedArrayResampledVoltageReceiver,
+    diff_stats,
+)
+from .types import AsyncRunner
 
 pytest_plugins = ["katgpucbf.pytest_plugins.numpy_dump", "katgpucbf.pytest_plugins.reporter_plugin"]
 logger = logging.getLogger(__name__)
 FULL_ANTENNAS = [1, 4, 8, 20, 32, 40, 64, 80]
 MAX_PASS_FRACTION = 0.7  # Maximum fraction of total narrowband bandwidth to use as pass_bandwidth
-_CAPTURE_TYPES = {"gpucbf.baseline_correlation_products", "gpucbf.tied_array_channelised_voltage"}
+_CAPTURE_TYPES = {
+    "gpucbf.baseline_correlation_products",
+    "gpucbf.tied_array_channelised_voltage",
+    "gpucbf.tied_array_resampled_voltage",
+}
 
 # Storing ini options this way makes pytest.ini easier to validate up-front.
 IniOption = namedtuple("IniOption", ["name", "help", "type", "default"], defaults=[None])
@@ -120,7 +135,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "no_vlbi: do not run the test in VLBI narrowband configurations")
     config.addinivalue_line("markers", "vlbi_only: only run the test in VLBI narrowband configurations")
     config.addinivalue_line(
-        "markers", "no_capture_start([stream, ...]): do not issue capture-start (on all streams if none specified)"
+        "markers", "no_capture_start(stream_type, ...): do not issue capture-start to certain stream types"
     )
     for option in ini_options:
         assert config.getini(option.name) is not None, f"{option.name} missing from pytest.ini"
@@ -245,6 +260,38 @@ def quiet_spead2(caplog: pytest.LogCaptureFixture) -> None:
     """
     if logging.getLogger("spead2").getEffectiveLevel() < logging.WARN:
         caplog.set_level(logging.WARN, logger="spead2")
+
+
+@pytest.fixture(autouse=True)
+def gc_control() -> Generator[None, None, None]:
+    """Tweak garbage collection to reduce GC time.
+
+    Also warn if garbage collection is slow.
+    """
+    start_time = 0.0
+
+    def callback(phase: str, info: dict) -> None:
+        nonlocal start_time
+        if phase == "start":
+            start_time = time.monotonic()
+        else:
+            started = start_time  # Copy as early as possible, before any more GC can happen
+            elapsed = time.monotonic() - started
+            if elapsed > 0.05:
+                logger.warning("Slow generation %d GC: %.3fs", info["generation"], elapsed)
+
+    # Run a collection now to avoid freezing any garbage into place
+    gc.collect(2)
+    # Freeze current allocations, so that we don't have to spend time
+    # walk them when doing GC.
+    gc.freeze()
+    gc.callbacks.append(callback)
+
+    yield
+
+    # Clean up
+    gc.callbacks.remove(callback)
+    gc.unfreeze()
 
 
 @pytest.fixture
@@ -443,17 +490,19 @@ async def capture_stop_streams(cbf_config: dict) -> list[str]:
 
 
 @pytest.fixture
-async def capture_start_streams(request: pytest.FixtureRequest, capture_stop_streams: list[str]) -> list[str]:
+async def capture_start_streams(
+    request: pytest.FixtureRequest, capture_stop_streams: list[str], cbf_config: dict
+) -> list[str]:
     """List of streams for which capture-start will automatically be issued."""
     no_capture_start: set[str] = set()
     for marker in request.node.iter_markers("no_capture_start"):
         if marker.args == ():
-            return []  # Requests no streams be automatically started
+            raise RuntimeError("no_capture_start must list at least one stream type")
         no_capture_start.update(marker.args)
 
     out = []
     for name in capture_stop_streams:
-        if name not in no_capture_start:
+        if cbf_config["outputs"][name]["type"] not in no_capture_start:
             out.append(name)
     return out
 
@@ -535,6 +584,58 @@ def core_allocator(cores: list[int]) -> CoreAllocator:
 
 
 @pytest.fixture
+def run_async(
+    core_allocator: CoreAllocator,
+) -> Generator[AsyncRunner, None, None]:
+    """Function for running work in a helper thread.
+
+    Use this as a fixture and invoke it as
+
+    .. code-block: python
+
+       result = await run_async(func, *args)
+
+    This use a thread pool executor with a single thread, so it is only intended to serial use.
+    """
+
+    def initializer(cores: Sequence[int]) -> None:
+        os.sched_setaffinity(0, cores)
+        try:
+            os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
+        except PermissionError:
+            logger.warning("Idle scheduling priority could not be set (permission denied)")
+
+    def runner[*A, R](func: Callable[[*A], R], *args: *A) -> Awaitable[R]:
+        return asyncio.get_running_loop().run_in_executor(executor, func, *args)
+
+    cores = core_allocator.allocate(1)
+    with ThreadPoolExecutor(max_workers=1, initializer=initializer, initargs=(cores,)) as executor:
+        yield runner
+
+
+def _out_of_buffer_path(device: str) -> Path:
+    """Find the path in :file:`/sys` containing the RDMA out-of-buffer counter."""
+    # This is loosely based on the ibdev2netdev script provided by NVIDIA,
+    # although it doesn't handle all the cases that script does (Infiniband,
+    # legacy drivers etc).
+    base = Path("/sys/class/infiniband")
+    with os.scandir(base) as dev_scanner:
+        for dev in dev_scanner:
+            if not dev.is_dir():
+                continue
+            ports_path = base / dev.name / "ports"
+            with os.scandir(ports_path) as port_scanner:
+                for port in port_scanner:
+                    if not port.is_dir():
+                        continue
+                    port_path = ports_path / port.name
+                    ndev_path = port_path / "gid_attrs" / "ndevs" / "0"
+                    if ndev_path.exists() and ndev_path.read_text("ascii").strip() == device:
+                        return port_path / "hw_counters" / "out_of_buffer"
+    raise RuntimeError(f"Could not find infiniband device corresponding to {device}")
+
+
+@pytest.fixture
 async def cbf(
     pytestconfig: pytest.Config,
     cbf_cache: CBFCache,
@@ -544,6 +645,7 @@ async def cbf(
     capture_start_streams: list[str],
     capture_stop_streams: list[str],
     tied_array_channelised_voltage_receive_streams: list[str],
+    vlbi: bool,
     pdf_report: Reporter,
 ) -> AsyncGenerator[CBFRemoteControl, None]:
     """Set up a CBF for a single test.
@@ -551,9 +653,14 @@ async def cbf(
     The returned CBF might not be specific to this test, but it will have
     been reset to a default state, with the dsim outputting zeros.
     """
-    interface_address = get_interface_address(pytestconfig.getini("interface"))
+    interface = pytestconfig.getini("interface")
+    interface_address = get_interface_address(interface)
     # This will require running pytest with spead2_net_raw which is unusual.
     use_ibv = pytestconfig.getini("use_ibv")
+    out_of_buffer_path: Path | None = None
+    if use_ibv:
+        out_of_buffer_path = _out_of_buffer_path(interface)
+        out_of_buffer_start = int(out_of_buffer_path.read_text("ascii"))
 
     cbf = await cbf_cache.get_cbf(cbf_config, cbf_mode_config)
     pdf_report.config(cbf=str(cbf.uuid))
@@ -580,6 +687,13 @@ async def cbf(
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
+    if cbf.tied_array_resampled_voltage_receiver is None and vlbi:
+        logger.info("Subscribing to tied-array-resampled-voltage")
+        cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
+            cbf=cbf,
+            stream_name="tied-array-resampled-voltage",
+            interface_address=interface_address,
+        )
 
     # Reset the CBF to default state
     pcc = cbf.product_controller_client
@@ -598,6 +712,8 @@ async def cbf(
             await pcc.request("beam-quant-gains", name, 1.0)
             await pcc.request("beam-delays", name, *(("0:0",) * n_inputs))
             await pcc.request("beam-weights", name, *((1.0,) * n_inputs))
+        elif conf["type"] == "gpucbf.tied_array_resampled_voltage":
+            await pcc.request("vlbi-delay", name, "0.0")
 
     for name in capture_start_streams:
         await pcc.request("capture-start", name)
@@ -606,6 +722,13 @@ async def cbf(
 
     for name in capture_stop_streams:
         await pcc.request("capture-stop", name)
+
+    if out_of_buffer_path is not None:
+        out_of_buffer_end = int(out_of_buffer_path.read_text("ascii"))
+        out_of_buffer = out_of_buffer_end - out_of_buffer_start
+        pdf_report.net_device_statistics(interface, {"out_of_buffer": out_of_buffer})
+        if out_of_buffer > 0:
+            logger.warning("RDMA out-of-buffer errors: %d", out_of_buffer)
 
 
 @pytest.fixture
@@ -669,3 +792,17 @@ async def receive_tied_array_channelised_voltage(
     with diff_stats(receiver) as delta_stats:
         yield receiver
     pdf_report.spead2_statistics("tied_array_channelised_voltage", delta_stats)
+
+
+@pytest.fixture
+async def receive_tied_array_resampled_voltage(
+    cbf: CBFRemoteControl,
+    capture_start_streams: list[str],
+) -> TiedArrayResampledVoltageReceiver | None:
+    """Get the receiver for ingesting the tied-array-resampled-voltage streams."""
+    receiver = cbf.tied_array_resampled_voltage_receiver
+    # Receiver is only created when vlbi is enabled.
+    if "tied-array-resampled-voltage" in capture_start_streams:
+        assert receiver is not None
+        await receiver.wait_complete_frameset(timeout=3 * DEFAULT_TIMEOUT)
+    return receiver

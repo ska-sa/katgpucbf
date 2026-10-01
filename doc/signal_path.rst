@@ -94,6 +94,31 @@ double precision then reduced to single precision for application. Conversion
 of the delay to a per-channel phase correction, and of phases to complex
 phasors are done in single precision.
 
+The interface to provide a delay model specifies a "load time" which is the
+point in time from which the delay model is applied, and is also the reference
+point from which the delay rate (and phase rate) polynomials are computed.
+This is specified as a UNIX timestamp but then converted to the nearest ADC
+sample. It should be noted that the UNIX timestamp is processed as a
+double-precision float, which in the current era has a resolution of 238ns.
+The rounding involved in computing the UNIX timestamp is thus expected to
+greatly exceed the error from rounding to the nearest ADC sample.
+
+For each output spectrum we compute a single delay to apply for the spectrum.
+Let
+
+- :math:`t_0` be the load time discussed above (after rounding to the nearest
+  ADC sample);
+- :math:`d_0` be the fixed delay from the delay polynomial;
+- :math:`d'` be the rate of change of delay; and
+- :math:`t` be the timestamp associated with an output spectrum, which
+  in turn is the (post-delay) timestamp of the *first* input sample that is used in
+  the polyphase filter-bank (see below).
+
+Then the computed delay is :math:`d_0 + (t-t_0)d'`, and similarly for phase.
+Note that because each spectrum is computed with a fixed delay, delay
+correction does not correct for Doppler shift caused by different velocities
+of the antenna and the delay reference point.
+
 Polyphase filter bank (PFB)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 A finite impulse response (FIR) filter is applied to the signal to condition

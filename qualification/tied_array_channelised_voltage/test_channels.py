@@ -67,7 +67,7 @@ async def test_channels(
     pdf_report.detail(f"Set quantisation gain to {gain} for all beams")
 
     pdf_report.step("Check results")
-    _, data = await receiver.next_complete_chunk()
+    _, data = await receiver.next_complete_chunk_data()
     for i, beam in enumerate(receiver.stream_names):
         beam_data = data[i]
         # Sum over polarisation and real/imag, but not channel

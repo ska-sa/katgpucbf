@@ -72,28 +72,29 @@ async def test_accum_power(
 
     pdf_report.step("Collect two dumps and check the timestamp difference.")
     chunks = await receiver.consecutive_chunks(2)
-    pdf_report.detail(f"Timestamps are {chunks[0][0]}, {chunks[1][0]}.")
-    delta = chunks[1][0] - chunks[0][0]
-    delta_s = delta / receiver.scale_factor_timestamp
-    pdf_report.detail(f"Difference is {delta} samples, {delta_s * 1000:.3f} ms.")
-    with check:
-        # pytest.approx just to allow for floating-point rounding
-        assert delta_s == pytest.approx(receiver.int_time, rel=1e-15)
+    with chunks[0], chunks[1]:
+        pdf_report.detail(f"Timestamps are {chunks[0].timestamp}, {chunks[1].timestamp}.")
+        delta = chunks[1].timestamp - chunks[0].timestamp
+        delta_s = delta / receiver.scale_factor_timestamp
+        pdf_report.detail(f"Difference is {delta} samples, {delta_s * 1000:.3f} ms.")
+        with check:
+            # pytest.approx just to allow for floating-point rounding
+            assert delta_s == pytest.approx(receiver.int_time, rel=1e-15)
 
-    pdf_report.step("Compare power against expected value.")
-    # Sum over channels, but use only one baseline and real part because
-    # the input signals are the same for all antennas.
-    assert isinstance(chunks[1][1].data, np.ndarray)
-    total_power = np.sum(chunks[1][1].data[pass_channels, 0, 0], dtype=np.int64)
-    acc_len = round(
-        receiver.int_time * receiver.scale_factor_timestamp / (2 * receiver.n_chans * receiver.decimation_factor)
-    )
-    expected_power = acc_len * (pass_channels.stop - pass_channels.start) * (level * level)
-    pdf_report.detail(f"Total power: {total_power}; expected: {expected_power}.")
-    # Statistical analysis of total_power is quite tricky because there is
-    # quantisation and saturation in both the time and frequency domain, and
-    # the values are not fully independent in either time or channel. But 1%
-    # variation seems safe.
-    with check:
-        assert total_power == pytest.approx(expected_power, rel=0.01)
-    pdf_report.detail("Power agrees to within 1%.")
+        pdf_report.step("Compare power against expected value.")
+        # Sum over channels, but use only one baseline and real part because
+        # the input signals are the same for all antennas.
+        assert isinstance(chunks[1].data, np.ndarray)
+        total_power = np.sum(chunks[1].data[pass_channels, 0, 0], dtype=np.int64)
+        acc_len = round(
+            receiver.int_time * receiver.scale_factor_timestamp / (2 * receiver.n_chans * receiver.decimation_factor)
+        )
+        expected_power = acc_len * (pass_channels.stop - pass_channels.start) * (level * level)
+        pdf_report.detail(f"Total power: {total_power}; expected: {expected_power}.")
+        # Statistical analysis of total_power is quite tricky because there is
+        # quantisation and saturation in both the time and frequency domain, and
+        # the values are not fully independent in either time or channel. But 1%
+        # variation seems safe.
+        with check:
+            assert total_power == pytest.approx(expected_power, rel=0.01)
+        pdf_report.detail("Power agrees to within 1%.")

@@ -1,0 +1,26 @@
+################################################################################
+# Copyright (c) 2026, National Research Foundation (SARAO)
+#
+# Licensed under the BSD 3-Clause License (the "License"); you may not use
+# this file except in compliance with the License. You may obtain a copy
+# of the License at
+#
+#   https://opensource.org/licenses/BSD-3-Clause
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+"""Fixtures and options for testing of tied-array-resampled-voltage streams."""
+
+import pytest
+
+_vlbi_only = pytest.mark.vlbi_only
+
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Apply vlbi_only before parametrisation in the parent conftest."""
+    metafunc.definition.add_marker(_vlbi_only)
