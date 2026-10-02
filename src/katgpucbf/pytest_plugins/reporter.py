@@ -63,18 +63,12 @@ class POTLocator(matplotlib.ticker.Locator):
         return self.tick_values(vmin, vmax)
 
     def nonsingular(
-        self,
-        vmin: float,
-        vmax: float,
-        expander:float = 0.001,
-        tiny:float = 1e-15,
-        increasing:Bool = True
-        ) -> float, float:
-        """
-        Modify the endpoints of a range as needed to avoid singularities.
+        self, vmin: float, vmax: float, expander: float = 0.001, tiny: float = 1e-15, increasing: bool = True
+    ) -> tuple[float, float]:
+        """Modify the endpoints of a range as needed to avoid singularities.
+
         This is an exact copy of matplotlib.transforms.nonsingular.
         """
-
         if (not np.isfinite(vmin)) or (not np.isfinite(vmax)):
             return -expander, expander
 
@@ -95,8 +89,8 @@ class POTLocator(matplotlib.ticker.Locator):
                 vmin = -expander
                 vmax = expander
             else:
-                vmin -= expander*abs(vmin)
-                vmax += expander*abs(vmax)
+                vmin -= expander * abs(vmin)
+                vmax += expander * abs(vmax)
 
         if swapped and not increasing:
             vmin, vmax = vmax, vmin
