@@ -376,6 +376,7 @@ class Result:
     requirements: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
     spead2_statistics: dict[str, dict[str, int]] = field(default_factory=dict)
+    vdif_statistics: dict[str, dict[str, int]] = field(default_factory=dict)
     net_device_statistics: dict[str, dict[str, int]] = field(default_factory=dict)
     outcome: Literal["passed", "failed", "skipped", "xfail"] = "failed"
     xfail_reason: str | None = None
@@ -511,6 +512,8 @@ def _parse_report_data(result: Result, msg: dict) -> None:
         result.config.update(msg)
     elif msg_type == "spead2_statistics":
         result.spead2_statistics[msg["name"]] = msg["stats"]
+    elif msg_type == "vdif_statistics":
+        result.vdif_statistics[msg["name"]] = msg["stats"]
     elif msg_type == "net_device_statistics":
         result.net_device_statistics[msg["name"]] = msg["stats"]
     else:
@@ -1165,7 +1168,7 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             stats_table.add_hline()
             n_streams = len(result.spead2_statistics)
             for i, (name, stats) in enumerate(result.spead2_statistics.items()):
-                row = [name] + [stats.get(value, "-") for value in spead2_stat_names.values()]
+                row = list([name] + [stats.get(value, "-") for value in spead2_stat_names.values()])
                 if i == 0:
                     for value in net_device_stat_names.values():
                         if not result.net_device_statistics:
@@ -1183,6 +1186,34 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
                 stats_table.add_row(row)
                 if i < n_streams - 1:
                     stats_table.add_hline(1, len(spead2_stat_names) + 1)
+                else:
+                    stats_table.add_hline()
+
+    if result.vdif_statistics:
+        vdif_stat_names = {
+            "Missed": "missed_frames",
+            "Dropped": "dropped_frames",
+        }
+        n_stats = len(vdif_stat_names)
+        with (
+            section.create(SmallText()) as small_text,
+            small_text.create(LongTable(r"|l|" + "r|" * n_stats)) as stats_table,
+        ):
+            stats_table.add_hline()
+            stats_table.add_row((MultiColumn(n_stats + 1, align="|c|", data=bold("VDIF receiver statistics")),))
+            stats_table.add_hline()
+            stats_table.add_row(
+                [MultiRow(2, data=bold("Stream")), MultiColumn(len(vdif_stat_names), align="c|", data=bold("Frames"))]
+            )
+            stats_table.add_hline(2, len(vdif_stat_names) + 1)
+            stats_table.add_row([""] + [bold(name) for name in vdif_stat_names])
+            stats_table.add_hline()
+            n_streams = len(result.vdif_statistics)
+            for i in range(n_streams):
+                row = list([name] + [stats.get(value, "-") for value in vdif_stat_names.values()])
+                stats_table.add_row(row)
+                if i < n_streams - 1:
+                    stats_table.add_hline(1, len(vdif_stat_names) + 1)
                 else:
                     stats_table.add_hline()
 

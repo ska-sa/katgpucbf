@@ -809,6 +809,6 @@ async def receive_tied_array_resampled_voltage(
         await receiver.wait_complete_frameset(timeout=3 * DEFAULT_TIMEOUT)
         with diff_framesets(receiver) as delta_stats:
             yield receiver
-        pdf_report.spead2_statistics("tied_array_resampled_voltage", delta_stats)
+        pdf_report.vdif_statistics("tied_array_resampled_voltage", delta_stats)
     else:
         yield None
