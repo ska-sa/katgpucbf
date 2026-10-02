@@ -62,8 +62,48 @@ class POTLocator(matplotlib.ticker.Locator):
         vmin, vmax = self.axis.get_view_interval()
         return self.tick_values(vmin, vmax)
 
+    def nonsingular(
+        self,
+        vmin: float,
+        vmax: float,
+        expander:float = 0.001,
+        tiny:float = 1e-15,
+        increasing:Bool = True
+        ) -> float, float:
+        """
+        Modify the endpoints of a range as needed to avoid singularities.
+        This is an exact copy of matplotlib.transforms.nonsingular.
+        """
+
+        if (not np.isfinite(vmin)) or (not np.isfinite(vmax)):
+            return -expander, expander
+
+        swapped = False
+        if vmax < vmin:
+            vmin, vmax = vmax, vmin
+            swapped = True
+
+        vmin, vmax = map(float, [vmin, vmax])
+
+        maxabsvalue = max(abs(vmin), abs(vmax))
+        if maxabsvalue < (1e6 / tiny) * np.finfo(float).tiny:
+            vmin = -expander
+            vmax = expander
+
+        elif vmax - vmin <= maxabsvalue * tiny:
+            if vmax == 0 and vmin == 0:
+                vmin = -expander
+                vmax = expander
+            else:
+                vmin -= expander*abs(vmin)
+                vmax += expander*abs(vmax)
+
+        if swapped and not increasing:
+            vmin, vmax = vmax, vmin
+        return vmin, vmax
+
     def tick_values(self, vmin: float, vmax: float) -> Sequence[float]:  # noqa: D102
-        vmin, vmax = matplotlib.transforms.nonsingular(vmin, vmax, expander=1e-13, tiny=1e-14)
+        vmin, vmax = self.nonsingular(vmin, vmax, expander=1e-13, tiny=1e-14)
         step = 2 ** np.ceil(np.log2((vmax - vmin) / self._nbins))
         # Note: MultipleLocator uses a private helper class to ensure that
         # floating-point rounding issues don't get in the way. For the
