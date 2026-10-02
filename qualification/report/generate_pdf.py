@@ -1191,8 +1191,9 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
 
     if result.vdif_statistics:
         vdif_stat_names = {
-            "Missed": "missed_frames",
-            "Dropped": "dropped_frames",
+            "Missed frames": "missed_frames",
+            "Dropped frames": "dropped_frames",
+            # todo: add total frames
         }
         n_stats = len(vdif_stat_names)
         with (
@@ -1203,11 +1204,9 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             stats_table.add_row((MultiColumn(n_stats + 1, align="|c|", data=bold("VDIF receiver statistics")),))
             stats_table.add_hline()
             stats_table.add_row(
-                [MultiRow(2, data=bold("Stream")), MultiColumn(len(vdif_stat_names), align="c|", data=bold("Frames"))]
+                [MultiRow(2, data=bold("Stream"))] + [MultiRow(2, data=bold(name)) for name in vdif_stat_names]
             )
             stats_table.add_hline(2, len(vdif_stat_names) + 1)
-            stats_table.add_row([""] + [bold(name) for name in vdif_stat_names])
-            stats_table.add_hline()
             for i, (name, stats) in enumerate(result.vdif_statistics.items()):
                 row = list([name] + [stats.get(value, "-") for value in vdif_stat_names.values()])
                 stats_table.add_row(row)
