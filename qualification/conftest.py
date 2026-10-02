@@ -44,6 +44,7 @@ from .recv import (
     BaselineCorrelationProductsReceiver,
     TiedArrayChannelisedVoltageReceiver,
     TiedArrayResampledVoltageReceiver,
+    diff_framesets,
     diff_stats,
 )
 from .types import AsyncRunner
@@ -798,11 +799,16 @@ async def receive_tied_array_channelised_voltage(
 async def receive_tied_array_resampled_voltage(
     cbf: CBFRemoteControl,
     capture_start_streams: list[str],
-) -> TiedArrayResampledVoltageReceiver | None:
+    pdf_report: Reporter,
+) -> AsyncGenerator[TiedArrayResampledVoltageReceiver | None, None]:
     """Get the receiver for ingesting the tied-array-resampled-voltage streams."""
     receiver = cbf.tied_array_resampled_voltage_receiver
     # Receiver is only created when vlbi is enabled.
     if "tied-array-resampled-voltage" in capture_start_streams:
         assert receiver is not None
         await receiver.wait_complete_frameset(timeout=3 * DEFAULT_TIMEOUT)
-    return receiver
+        with diff_framesets(receiver) as delta_stats:
+            yield receiver
+        pdf_report.spead2_statistics("tied_array_resampled_voltage", delta_stats)
+    else:
+        yield None
