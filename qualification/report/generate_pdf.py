@@ -1208,8 +1208,7 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             stats_table.add_hline(2, len(vdif_stat_names) + 1)
             stats_table.add_row([""] + [bold(name) for name in vdif_stat_names])
             stats_table.add_hline()
-            n_streams = len(result.vdif_statistics)
-            for i in range(n_streams):
+            for i, (name, stats) in enumerate(result.vdif_statistics.items()):
                 row = list([name] + [stats.get(value, "-") for value in vdif_stat_names.values()])
                 stats_table.add_row(row)
                 if i < n_streams - 1:
