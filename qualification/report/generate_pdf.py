@@ -1203,17 +1203,12 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             stats_table.add_hline()
             stats_table.add_row((MultiColumn(n_stats + 1, align="|c|", data=bold("VDIF receiver statistics")),))
             stats_table.add_hline()
-            stats_table.add_row(
-                [MultiRow(2, data=bold("Stream"))] + [MultiRow(2, data=bold(name)) for name in vdif_stat_names]
-            )
-            stats_table.add_hline(2, len(vdif_stat_names) + 1)
-            for i, (name, stats) in enumerate(result.vdif_statistics.items()):
+            stats_table.add_row([bold("Stream")] + [bold(name) for name in vdif_stat_names])
+            stats_table.add_hline()
+            for name, stats in result.vdif_statistics.items():
                 row = list([name] + [stats.get(value, "-") for value in vdif_stat_names.values()])
                 stats_table.add_row(row)
-                if i < n_streams - 1:
-                    stats_table.add_hline(1, len(vdif_stat_names) + 1)
-                else:
-                    stats_table.add_hline()
+                stats_table.add_hline()
 
 
 def _doc_result_set(
