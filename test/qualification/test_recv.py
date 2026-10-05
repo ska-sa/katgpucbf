@@ -499,7 +499,7 @@ class TestTiedArrayResampledVoltageReceiver:
             async for _ in receiver.complete_framesets():
                 pass
 
-        assert receiver.total_frames == 1
+        assert receiver.total_frames == 4
 
     async def test_close_clears_state(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
         """clear() resets all buffered state."""

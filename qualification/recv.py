@@ -889,7 +889,7 @@ class TiedArrayResampledVoltageReceiver:
         self.dropped_frames = 0
         self.missed_frames = 0
         self.total_frames = 0
-        self.last_frame_nr = None
+        self.last_seq_nr = None
 
         self.cbf = cbf
 
@@ -998,19 +998,18 @@ class TiedArrayResampledVoltageReceiver:
                                 # Make sure we don't re-accept these packets
                                 self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
                                 prefix.sort(key=lambda frame: frame.thread_id)
-                                frame0_nr = frame0.timestamp.linear
-                                if frame0_nr >= min_frame:
-                                    logger.debug("Yielding frameset %d", frame0_nr)
+                                frame0_linear = frame0.timestamp.linear
+                                if frame0_linear >= min_frame:
+                                    logger.debug("Yielding frameset %d", frame0_linear)
                                     yield VDIFFrameset(prefix)
-                                    if self.last_frame_nr is not None:
-                                        n_frames = frame0_nr - self.last_frame_nr - 1
+                                    if self.last_seq_nr is not None:
+                                        n_frames = frame0.seq_id - self.last_seq_nr - 1
                                         self.missed_frames += n_frames
-                                        self.total_frames += n_frames
-                                        self.total_frames += self.n_threads
-                                    self.last_frame_nr = frame0_nr + self.n_threads - 1
+                                        self.total_frames += n_frames + self.n_threads
+                                    self.last_seq_nr = frame0.seq_id + self.n_threads - 1
                                 else:
                                     logger.debug(
-                                        "Skipping frameset because of min_timestamp: %d < %d", frame0_nr, min_frame
+                                        "Skipping frameset because of min_timestamp: %d < %d", frame0_linear, min_frame
                                     )
                                     self.total_frames += self.n_threads
                                 del self.buffer[: self.n_threads]
