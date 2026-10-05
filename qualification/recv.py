@@ -888,6 +888,7 @@ class TiedArrayResampledVoltageReceiver:
         self.reorder_window = reorder_window
         self.dropped_frames = 0
         self.missed_frames = 0
+        self.total_frames = 0
         self.last_frame_nr = None
 
         self.cbf = cbf
@@ -1002,10 +1003,16 @@ class TiedArrayResampledVoltageReceiver:
                                     logger.debug("Yielding frameset %d", frame0_nr)
                                     yield VDIFFrameset(prefix)
                                     if self.last_frame_nr is not None:
-                                        self.missed_frames += frame0_nr - self.last_frame_nr - 1
+                                        n_frames = frame0_nr - self.last_frame_nr - 1
+                                        self.missed_frames += n_frames
+                                        self.total_frames += n_frames
+                                        self.total_frames += self.n_threads
                                     self.last_frame_nr = frame0_nr + self.n_threads - 1
                                 else:
-                                    logger.debug("Skipping frame %d < %d", frame0_nr, min_frame)
+                                    logger.debug(
+                                        "Skipping frameset because of min_timestamp: %d < %d", frame0_nr, min_frame
+                                    )
+                                    self.total_frames += self.n_threads
                                 del self.buffer[: self.n_threads]
                                 continue
 
@@ -1041,6 +1048,7 @@ class TiedArrayResampledVoltageReceiver:
         self.buffer.clear()
         self.dropped_frames = 0
         self.min_seq_id = 0
+        self.total_frames = 0
 
 
 @contextlib.contextmanager
@@ -1055,8 +1063,11 @@ def diff_framesets(receiver: TiedArrayResampledVoltageReceiver) -> Generator[dic
     delta_stats: dict[str, int] = {}
     init_missed_frames = receiver.missed_frames
     init_dropped_frames = receiver.dropped_frames
+    init_total_frames = receiver.total_frames
     yield delta_stats
     final_missed_frames = receiver.missed_frames
     final_dropped_frames = receiver.dropped_frames
+    final_total_frames = receiver.total_frames
     delta_stats["missed_frames"] = final_missed_frames - init_missed_frames
     delta_stats["dropped_frames"] = final_dropped_frames - init_dropped_frames
+    delta_stats["total_frames"] = final_total_frames - init_total_frames

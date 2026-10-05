@@ -1193,7 +1193,7 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
         vdif_stat_names = {
             "Missed frames": "missed_frames",
             "Dropped frames": "dropped_frames",
-            # todo: add total frames
+            "Total frames": "total_frames",
         }
         n_stats = len(vdif_stat_names)
         with (
