@@ -216,4 +216,6 @@ async def test_vlbi_vdif(
     with check:
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
-        assert receiver.total_frames == (frameset_count - 1) * receiver.n_threads  # last frameset is not counted
+        assert (
+            receiver.total_frames == (frameset_count - 2) * receiver.n_threads
+        )  # first and last frameset are not counted
