@@ -64,7 +64,7 @@ katcbf-vlbi-resample==0.5.2
     # via katgpucbf (pyproject.toml)
 katcp-codec==0.2.2
     # via aiokatcp
-katsdpservices==1.4
+katsdpservices==1.5
     # via katgpucbf (pyproject.toml)
 katsdpsigproc==1.10.0
     # via katgpucbf (pyproject.toml)

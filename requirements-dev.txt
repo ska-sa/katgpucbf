@@ -163,7 +163,7 @@ katcp-codec==0.2.2
     # via
     #   -c requirements.txt
     #   aiokatcp
-katsdpservices==1.4
+katsdpservices==1.5
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
