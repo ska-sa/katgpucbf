@@ -1046,9 +1046,6 @@ class TiedArrayResampledVoltageReceiver:
         """Close the socket."""
         self.sock.close()
         self.buffer.clear()
-        self.dropped_frames = 0
-        self.min_seq_id = 0
-        self.total_frames = 0
 
 
 @contextlib.contextmanager

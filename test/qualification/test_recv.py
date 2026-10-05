@@ -472,6 +472,8 @@ class TestTiedArrayResampledVoltageReceiver:
         assert framesets[0].timestamp == VDIFTimestamp(seconds=101, frame_nr=0, ref_epoch=0, frame_rate=FRAME_RATE)
         assert framesets[1].timestamp == VDIFTimestamp(seconds=101, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE)
 
+        receiver.close()
+        # even after closing the receiver, the stats are still available.
         assert receiver.dropped_frames == 4
         assert receiver.missed_frames == FRAME_RATE - 8 + FRAME_RATE - 4
         assert receiver.total_frames == FRAME_RATE * 2
@@ -489,6 +491,3 @@ class TestTiedArrayResampledVoltageReceiver:
         receiver.close()
         assert receiver.buffer == []
         assert receiver.sock.close.call_count == 1  # type: ignore[attr-defined]
-        assert receiver.total_frames == 0
-        assert receiver.dropped_frames == 0
-        assert receiver.missed_frames == 0
