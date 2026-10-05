@@ -205,14 +205,15 @@ async def test_vlbi_vdif(
     pdf_report.step("Collect a valid VDIF frameset.")
     # capture a few valid framests
     framesets = np.empty(FRAMESETS_TO_CAPTURE, dtype=object)
-    frameset_index = 0
+    frameset_count = 0
     async for frameset in receiver.complete_framesets():
-        if frameset_index >= FRAMESETS_TO_CAPTURE:
+        frameset_count += 1
+        framesets[frameset_count - 1] = frameset
+        if frameset_count == FRAMESETS_TO_CAPTURE:
             break
-        framesets[frameset_index] = frameset
-        frameset_index += 1
+
     pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
     with check:
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
-        assert receiver.total_frames == frameset_index * receiver.n_threads
+        assert receiver.total_frames == (frameset_count - 1) * receiver.n_threads  # last frameset is not counted
