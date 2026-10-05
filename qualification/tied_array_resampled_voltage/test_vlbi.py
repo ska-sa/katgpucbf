@@ -32,6 +32,8 @@ from qualification.types import AsyncRunner
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
 
+FRAMESETS_TO_CAPTURE = 10
+
 
 async def max_retry_test(
     test_procedure: Callable[[int], Awaitable[bool]], max_attempts: int, retry_interval: float
@@ -196,12 +198,21 @@ async def test_vlbi_vdif(
     Verification method
     -------------------
     Verified by means of test.
-    Collect a valid VDIF frameset.
+    Collect FRAMESETS_TO_CAPTURE valid VDIF framesets.
     """
     assert receive_tied_array_resampled_voltage is not None
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frameset.")
-    frameset = await receiver.next_complete_frameset()
+    # capture a few valid framests
+    framesets = np.empty(FRAMESETS_TO_CAPTURE, dtype=object)
+    frameset_index = 0
+    async for frameset in receiver.complete_framesets():
+        if frameset_index >= FRAMESETS_TO_CAPTURE:
+            break
+        framesets[frameset_index] = frameset
+        frameset_index += 1
     pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
     with check:
-        assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
+        for frameset in framesets:
+            assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
+        assert receiver.total_frames == frameset_index * receiver.n_threads

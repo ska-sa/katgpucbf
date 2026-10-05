@@ -428,7 +428,7 @@ class TestTiedArrayResampledVoltageReceiver:
             "should have a difference of 101 seconds between 2016-12-31 23:59:60 and 2017-01-01 00:01:40"
         )
 
-    async def test_recieve_complete_framesets_missed_frames(
+    async def test_recieve_complete_framesets_stats(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
     ) -> None:
         """Missed and dropped frames are counted respectively."""
@@ -472,11 +472,34 @@ class TestTiedArrayResampledVoltageReceiver:
         assert framesets[0].timestamp == VDIFTimestamp(seconds=101, frame_nr=0, ref_epoch=0, frame_rate=FRAME_RATE)
         assert framesets[1].timestamp == VDIFTimestamp(seconds=101, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE)
 
-        receiver.close()
-        # even after closing the receiver, the stats are still available.
         assert receiver.dropped_frames == 4
         assert receiver.missed_frames == FRAME_RATE - 8 + FRAME_RATE - 4
         assert receiver.total_frames == FRAME_RATE * 2
+
+    async def test_recieve_complete_framesets_total_frames(
+        self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
+    ) -> None:
+        """Missed and dropped frames are counted respectively."""
+        receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
+        mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
+            [
+                # Frame with sequence ID 0 is dropped.
+                make_vtp_packet(0, frame_nr=0, seconds=101, thread_id=0),
+                make_vtp_packet(1, frame_nr=0, seconds=101, thread_id=1),
+                make_vtp_packet(2, frame_nr=0, seconds=101, thread_id=2),
+                make_vtp_packet(3, frame_nr=0, seconds=101, thread_id=3),
+                make_vtp_packet(4, frame_nr=1, seconds=101, thread_id=0),
+                make_vtp_packet(5, frame_nr=1, seconds=101, thread_id=1),
+                make_vtp_packet(6, frame_nr=1, seconds=101, thread_id=2),
+                make_vtp_packet(7, frame_nr=1, seconds=101, thread_id=3),
+                make_vtp_packet(FRAME_RATE, frame_nr=0, seconds=102, thread_id=0),
+            ]
+        )
+        with pytest.raises(ConnectionResetError):
+            async for _ in receiver.complete_framesets():
+                pass
+
+        assert receiver.total_frames == 1
 
     async def test_close_clears_state(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
         """clear() resets all buffered state."""
