@@ -163,7 +163,7 @@ katcp-codec==0.2.2
     # via
     #   -c requirements.txt
     #   aiokatcp
-katsdpservices==1.4
+katsdpservices==1.5
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
@@ -210,7 +210,7 @@ multidict==6.7.0
     #   -c requirements.txt
     #   aiohttp
     #   yarl
-netifaces==0.11.0
+netifaces-plus==0.12.5
     # via
     #   -c requirements.txt
     #   katsdpservices

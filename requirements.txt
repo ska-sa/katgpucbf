@@ -64,7 +64,7 @@ katcbf-vlbi-resample==0.5.2
     # via katgpucbf (pyproject.toml)
 katcp-codec==0.2.2
     # via aiokatcp
-katsdpservices==1.4
+katsdpservices==1.5
     # via katgpucbf (pyproject.toml)
 katsdpsigproc==1.10.0
     # via katgpucbf (pyproject.toml)
@@ -88,7 +88,7 @@ multidict==6.7.0
     # via
     #   aiohttp
     #   yarl
-netifaces==0.11.0
+netifaces-plus==0.12.5
     # via katsdpservices
 numba==0.63.1
     # via
