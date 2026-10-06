@@ -494,8 +494,6 @@ class BSend(Send):
         chunk = await self._chunks_queue.get()
         try:
             await chunk.future
-        except asyncio.CancelledError:
-            raise
         except Exception:
             logger.exception("Error sending chunk")
         return chunk
