@@ -1070,13 +1070,13 @@ def diff_framesets(receiver: TiedArrayResampledVoltageReceiver) -> Generator[dic
     exit from the context manager.
     """
     delta_stats: dict[str, int] = {}
-    init_missed_frames = receiver.missed_framesets
+    init_missed_framesets = receiver.missed_framesets
     init_dropped_frames = receiver.dropped_frames
-    init_total_frames = receiver.total_framesets
+    init_total_framesets = receiver.total_framesets
     yield delta_stats
-    final_missed_frames = receiver.missed_framesets
+    final_missed_framesets = receiver.missed_framesets
     final_dropped_frames = receiver.dropped_frames
-    final_total_frames = receiver.total_framesets
-    delta_stats["missed_frames"] = final_missed_frames - init_missed_frames
+    final_total_framesets = receiver.total_framesets
+    delta_stats["missed_framesets"] = final_missed_framesets - init_missed_framesets
     delta_stats["dropped_frames"] = final_dropped_frames - init_dropped_frames
-    delta_stats["total_frames"] = final_total_frames - init_total_frames
+    delta_stats["total_framesets"] = final_total_framesets - init_total_framesets

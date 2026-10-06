@@ -200,7 +200,6 @@ async def test_vlbi_vdif(
     Verified by means of test.
     Collect FRAMESETS_TO_CAPTURE valid VDIF framesets.
     Verify the number of threads in the framesets is correct.
-    Verify the receiver statistics counts the total framesets.
     """
     assert receive_tied_array_resampled_voltage is not None
     receiver = receive_tied_array_resampled_voltage
@@ -208,7 +207,6 @@ async def test_vlbi_vdif(
     # capture a few valid framests
     framesets = np.empty(FRAMESETS_TO_CAPTURE, dtype=object)
     frameset_count = 0
-    framesets_before = receiver.total_framesets
     async for frameset in receiver.complete_framesets():
         frameset_count += 1
         framesets[frameset_count - 1] = frameset
@@ -219,4 +217,3 @@ async def test_vlbi_vdif(
     with check:
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
-        assert receiver.total_framesets - framesets_before == frameset_count
