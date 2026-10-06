@@ -219,4 +219,4 @@ async def test_vlbi_vdif(
     with check:
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
-        assert receiver.total_frames - frames_before == (frameset_count) * receiver.n_threads
+        assert receiver.total_frames - frames_before == frameset_count * receiver.n_threads

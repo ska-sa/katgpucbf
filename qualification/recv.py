@@ -1004,6 +1004,9 @@ class TiedArrayResampledVoltageReceiver:
                                     n_frames = 0
                                     if self.last_seq_nr is not None:
                                         n_frames = frame0.seq_id - self.last_seq_nr
+                                        if n_frames < 0:
+                                            logger.warning("Negative number of frames!: %d", n_frames)
+                                            n_frames = 0
 
                                     self.missed_frames += n_frames
                                     self.total_frames += n_frames + self.n_threads
