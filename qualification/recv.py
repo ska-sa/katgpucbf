@@ -1001,11 +1001,14 @@ class TiedArrayResampledVoltageReceiver:
                                 frame0_linear = frame0.timestamp.linear
                                 if frame0_linear >= min_frame:
                                     logger.debug("Yielding frameset %d", frame0_linear)
+                                    n_frames = 0
                                     if self.last_seq_nr is not None:
-                                        n_frames = frame0.seq_id - self.last_seq_nr - 1
-                                        self.missed_frames += n_frames
-                                        self.total_frames += n_frames + self.n_threads
-                                    self.last_seq_nr = frame0.seq_id + self.n_threads - 1
+                                        n_frames = frame0.seq_id - self.last_seq_nr
+
+                                    self.missed_frames += n_frames
+                                    self.total_frames += n_frames + self.n_threads
+                                    self.last_seq_nr = frame0.seq_id + self.n_threads
+
                                     yield VDIFFrameset(prefix)
                                 else:
                                     logger.debug(

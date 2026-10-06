@@ -451,7 +451,7 @@ class TestTiedArrayResampledVoltageReceiver:
                 make_vtp_packet(FRAME_RATE * 2 + 1, frame_nr=0, seconds=102, thread_id=1),
                 make_vtp_packet(FRAME_RATE * 2 + 2, frame_nr=0, seconds=102, thread_id=2),
                 make_vtp_packet(FRAME_RATE * 2 + 3, frame_nr=0, seconds=102, thread_id=3),
-                # frames too old were already counted
+                # frames too old were already counted in total and missed, but we count them as dropped now.
                 make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=1),
                 make_vtp_packet(2, frame_nr=0, seconds=100, thread_id=2),
                 make_vtp_packet(3, frame_nr=0, seconds=100, thread_id=3),
@@ -474,7 +474,7 @@ class TestTiedArrayResampledVoltageReceiver:
 
         assert receiver.dropped_frames == 4
         assert receiver.missed_frames == FRAME_RATE - 8 + FRAME_RATE - 4
-        assert receiver.total_frames == FRAME_RATE * 2
+        assert receiver.total_frames == FRAME_RATE * 2 + 4  # two framesets and the 4 frames in second 103
 
     async def test_recieve_complete_framesets_total_frames(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
@@ -483,7 +483,6 @@ class TestTiedArrayResampledVoltageReceiver:
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
             [
-                # Frame with sequence ID 0 is dropped.
                 make_vtp_packet(0, frame_nr=0, seconds=101, thread_id=0),
                 make_vtp_packet(1, frame_nr=0, seconds=101, thread_id=1),
                 make_vtp_packet(2, frame_nr=0, seconds=101, thread_id=2),
@@ -499,7 +498,7 @@ class TestTiedArrayResampledVoltageReceiver:
             async for _ in receiver.complete_framesets():
                 pass
 
-        assert receiver.total_frames == 4
+        assert receiver.total_frames == 8
 
     async def test_close_clears_state(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
         """clear() resets all buffered state."""
