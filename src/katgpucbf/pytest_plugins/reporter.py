@@ -63,7 +63,7 @@ class POTLocator(matplotlib.ticker.Locator):
         return self.tick_values(vmin, vmax)
 
     def tick_values(self, vmin: float, vmax: float) -> Sequence[float]:  # noqa: D102
-        vmin, vmax = matplotlib.transforms.nonsingular(vmin, vmax, expander=1e-13, tiny=1e-14)
+        vmin, vmax = self.nonsingular(vmin, vmax)
         step = 2 ** np.ceil(np.log2((vmax - vmin) / self._nbins))
         # Note: MultipleLocator uses a private helper class to ensure that
         # floating-point rounding issues don't get in the way. For the
