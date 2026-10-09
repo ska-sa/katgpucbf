@@ -1009,7 +1009,7 @@ class TiedArrayResampledVoltageReceiver:
                                                 "Negative number of framesets between last and new frameset!:"
                                                 + " last frameset: %d new frameset: %d, diff: %d",
                                                 self.last_frameset_timestamp,
-                                                frame0.timestamp.timestamp.linear,
+                                                frame0_linear,
                                                 n_missed_framesets,
                                             )
                                             n_missed_framesets = 0
