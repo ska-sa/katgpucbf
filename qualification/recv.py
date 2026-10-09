@@ -1003,6 +1003,13 @@ class TiedArrayResampledVoltageReceiver:
                                     logger.debug("Yielding frameset %d", frame0_linear)
                                     n_missed_framesets = 0
                                     if self.last_frameset_timestamp is not None:
+                                        if self.last_frameset_timestamp == frame0_linear:
+                                            logger.warning(
+                                                "Duplicate frameset timestamp: %d, sequence ID: %d",
+                                                frame0_linear,
+                                                frame0.seq_id,
+                                            )
+                                            n_missed_framesets = 0
                                         n_missed_framesets = frame0_linear - self.last_frameset_timestamp - 1
 
                                     self.missed_framesets += n_missed_framesets
