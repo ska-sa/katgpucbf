@@ -210,6 +210,18 @@ class Reporter:
         """
         self._data.append({"$msg_type": "spead2_statistics", "name": name, "stats": stats})
 
+    def vdif_statistics(self, name: str, stats: dict[str, int]) -> None:
+        """Add record of statistics from the VDIF receiver.
+
+        Parameters
+        ----------
+        name
+            The receiver for which statistics are being reported.
+        stats
+            Statistics returned by :func:`qualification.recv.diff_stats`.
+        """
+        self._data.append({"$msg_type": "vdif_statistics", "name": name, "stats": stats})
+
     def net_device_statistics(self, name: str, stats: dict[str, int]) -> None:
         """Add record of statistics from the network device.
 

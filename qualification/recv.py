@@ -886,6 +886,10 @@ class TiedArrayResampledVoltageReceiver:
         self.buffer: list[VDIFFrame] = []  # Kept sorted by sequence ID
         self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
         self.reorder_window = reorder_window
+        self.dropped_frames = 0
+        self.missed_framesets = 0
+        self.total_framesets = 0
+        self.last_frameset_timestamp: int | None = None
 
         self.cbf = cbf
 
@@ -929,6 +933,7 @@ class TiedArrayResampledVoltageReceiver:
                 logger.warning("Duplicate sequence ID: %d", seq_id)
         else:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
+            self.dropped_frames += 1
 
     def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
         """Compute the minimum linearised frame number that is at least `min_time`."""
@@ -993,12 +998,33 @@ class TiedArrayResampledVoltageReceiver:
                                 # Make sure we don't re-accept these packets
                                 self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
                                 prefix.sort(key=lambda frame: frame.thread_id)
-                                frame0_nr = frame0.timestamp.linear
-                                if frame0_nr >= min_frame:
-                                    logger.debug("Yielding frame %d", frame0_nr)
+                                frame0_linear = frame0.timestamp.linear
+                                if frame0_linear >= min_frame:
+                                    logger.debug("Yielding frameset %d", frame0_linear)
+                                    n_missed_framesets = 0
+                                    if self.last_frameset_timestamp is not None:
+                                        n_missed_framesets = frame0_linear - self.last_frameset_timestamp - 1
+                                        if n_missed_framesets < 0:
+                                            logger.warning(
+                                                "Negative number of framesets between last and new frameset!:"
+                                                + " last frameset: %d new frameset: %d, diff: %d",
+                                                self.last_frameset_timestamp,
+                                                frame0_linear,
+                                                n_missed_framesets,
+                                            )
+                                            n_missed_framesets = 0
+
+                                    self.missed_framesets += n_missed_framesets
+                                    logger.debug("Missed %d frame sets", n_missed_framesets)
+                                    self.total_framesets += n_missed_framesets + 1
+                                    self.last_frameset_timestamp = frame0_linear
+
                                     yield VDIFFrameset(prefix)
                                 else:
-                                    logger.debug("Skipping frame %d < %d", frame0_nr, min_frame)
+                                    logger.debug(
+                                        "Skipping frameset because of min_timestamp: %d < %d", frame0_linear, min_frame
+                                    )
+                                    self.total_framesets += 1
                                 del self.buffer[: self.n_threads]
                                 continue
 
@@ -1006,6 +1032,7 @@ class TiedArrayResampledVoltageReceiver:
                             # If this frameset isn't complete now, it never will be. Drop the frame.
                             logger.debug("Dropping frame due to incomplete frameset: %d", frame0.timestamp.linear)
                             del self.buffer[0]
+                            self.dropped_frames += 1
                             continue
 
                     # If we didn't hit a continue above, we need more data from the network
@@ -1031,4 +1058,25 @@ class TiedArrayResampledVoltageReceiver:
         """Close the socket."""
         self.sock.close()
         self.buffer.clear()
-        self.min_seq_id = 0
+
+
+@contextlib.contextmanager
+def diff_framesets(receiver: TiedArrayResampledVoltageReceiver) -> Generator[dict[str, int], None, None]:
+    """Collect frameset statistics on entry and exit and return differences.
+
+    The context manager value is a dictionary of statistics. Only "counter"
+    mode statistics are returned, as maximum-value statistics cannot be
+    meaningfully differenced. Note that the dictionary is only populated on
+    exit from the context manager.
+    """
+    delta_stats: dict[str, int] = {}
+    init_missed_framesets = receiver.missed_framesets
+    init_dropped_frames = receiver.dropped_frames
+    init_total_framesets = receiver.total_framesets
+    yield delta_stats
+    final_missed_framesets = receiver.missed_framesets
+    final_dropped_frames = receiver.dropped_frames
+    final_total_framesets = receiver.total_framesets
+    delta_stats["missed_framesets"] = final_missed_framesets - init_missed_framesets
+    delta_stats["dropped_frames"] = final_dropped_frames - init_dropped_frames
+    delta_stats["total_framesets"] = final_total_framesets - init_total_framesets
