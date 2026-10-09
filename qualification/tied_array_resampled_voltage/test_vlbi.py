@@ -204,12 +204,12 @@ async def test_vlbi_vdif(
     assert receive_tied_array_resampled_voltage is not None
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frameset.")
-    # capture a few valid framests
+    # capture a few valid framesets
     framesets = np.empty(FRAMESETS_TO_CAPTURE, dtype=object)
     frameset_count = 0
     async for frameset in receiver.complete_framesets():
+        framesets[frameset_count] = frameset
         frameset_count += 1
-        framesets[frameset_count - 1] = frameset
         if frameset_count == FRAMESETS_TO_CAPTURE:
             break
 

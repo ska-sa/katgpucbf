@@ -889,7 +889,7 @@ class TiedArrayResampledVoltageReceiver:
         self.dropped_frames = 0
         self.missed_framesets = 0
         self.total_framesets = 0
-        self.last_frameset: int | None = None
+        self.last_frameset_timestamp: int | None = None
 
         self.cbf = cbf
 
@@ -1001,23 +1001,14 @@ class TiedArrayResampledVoltageReceiver:
                                 frame0_linear = frame0.timestamp.linear
                                 if frame0_linear >= min_frame:
                                     logger.debug("Yielding frameset %d", frame0_linear)
-                                    n_missed_framessets = 0
-                                    if self.last_frameset is not None:
-                                        n_missed_framessets = frame0_linear - self.last_frameset - 1
-                                        if n_missed_framessets <= 0:
-                                            logger.warning(
-                                                "Negative number of missed framesets!:  last frameset: "
-                                                + "%d new frameset: %d, diff: %d",
-                                                self.last_frameset,
-                                                frame0_linear,
-                                                n_missed_framessets,
-                                            )
-                                            n_missed_framessets = 0
+                                    n_missed_framesets = 0
+                                    if self.last_frameset_timestamp is not None:
+                                        n_missed_framesets = frame0_linear - self.last_frameset_timestamp - 1
 
-                                    self.missed_framesets += n_missed_framessets
-                                    logger.debug("Adding %d frames to missed frames", n_missed_framessets)
-                                    self.total_framesets += n_missed_framessets + 1
-                                    self.last_frameset = frame0_linear
+                                    self.missed_framesets += n_missed_framesets
+                                    logger.debug("Missed %d frame sets", n_missed_framesets)
+                                    self.total_framesets += n_missed_framesets + 1
+                                    self.last_frameset_timestamp = frame0_linear
 
                                     yield VDIFFrameset(prefix)
                                 else:
