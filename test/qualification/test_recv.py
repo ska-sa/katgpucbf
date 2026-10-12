@@ -54,7 +54,7 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     )  # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
     # From Identity matrix cut the array we need.
     identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
-    # -1 happen to map to -1, 1 happen to map to 1 when converting to signed 2bit data and back.
+    # -1 happen to map to -1, 1 happen to map to 1 when re-quantizing to signed 2bit data and back.
     return (np.ones_like(identity_data) * -1).astype(NP_DTYPE) + identity_data * 2
 
 
