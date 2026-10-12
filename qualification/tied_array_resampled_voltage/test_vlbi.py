@@ -198,7 +198,7 @@ async def test_vlbi_vdif(
     Verification method
     -------------------
     Verified by means of test.
-    Collect FRAMESETS_TO_CAPTURE valid VDIF framesets.
+    Collect ``FRAMESETS_TO_CAPTURE`` valid VDIF framesets.
     Verify the number of threads in the framesets is correct.
     """
     assert receive_tied_array_resampled_voltage is not None
