@@ -430,8 +430,10 @@ class TestTiedArrayResampledVoltageReceiver:
         assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0, frame_rate=FRAME_RATE)
         assert len(framesets[1].frames) == 4
 
-    async def test_receive_framesets_decodes_data(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
-        """Data is decoded correctly."""
+    async def test_receive_framesets_raw_data_correct(
+        self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
+    ) -> None:
+        """Verify Raw data can be correctly reconstructed from the VDIF frame."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
             [
