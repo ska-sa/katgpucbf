@@ -886,6 +886,7 @@ class TiedArrayResampledVoltageReceiver:
         self.buffer: list[VDIFFrame] = []  # Kept sorted by sequence ID
         self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
         self.reorder_window = reorder_window
+        # Frames dropped due to incomplete frameset or too old for reorder window and already missed frameset
         self.dropped_frames = 0
         self.missed_framesets = 0
         self.total_framesets = 0
