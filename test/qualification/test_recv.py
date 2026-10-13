@@ -17,7 +17,6 @@
 """Unit tests for module :mod:`qualification.recv`."""
 
 import io
-import logging
 import socket
 import struct
 from collections.abc import Buffer, Callable, Iterable
@@ -33,7 +32,6 @@ from baseband.vdif import VDIFFrame as BasebandVDIFFrame
 from qualification.cbf import CBFRemoteControl
 from qualification.recv import TiedArrayResampledVoltageReceiver, VDIFTimestamp
 
-logger = logging.getLogger(__name__)
 SAMPLES_PER_FRAME = 8000
 BANDWIDTH = 64e6
 FRAME_RATE = round(BANDWIDTH / SAMPLES_PER_FRAME)
@@ -72,8 +70,6 @@ def make_vtp_packet(
     data = create_identity_data(SAMPLES_PER_FRAME)
     assert data.shape == (SAMPLES_PER_FRAME, 1)
     assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
-
-    logger.debug(f"data: {data.shape} {data.dtype} {data.nbytes} bytes")
 
     #
     frame = BasebandVDIFFrame.fromdata(
