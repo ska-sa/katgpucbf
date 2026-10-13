@@ -128,7 +128,8 @@ async def test_mean_power(
     # for now just retry with .2 second intervals (sample rate of 5) since steady state is
     # not known beforehand.
     sample_rate = 5
-    samples = int(1e2 * sample_rate)
+    seconds = 5
+    samples = int(seconds * sample_rate)
     mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples), float)
     mean_power_sensor_values = np.zeros_like(mean_power_sensor_timestamps)
 
