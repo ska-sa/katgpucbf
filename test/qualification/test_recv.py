@@ -34,6 +34,8 @@ from qualification.recv import TiedArrayResampledVoltageReceiver, VDIFTimestamp
 SAMPLES_PER_FRAME = 8000
 BANDWIDTH = 64e6
 FRAME_RATE = round(BANDWIDTH / SAMPLES_PER_FRAME)
+THREADS = 4
+FRAME_RATE_THREADS = FRAME_RATE * THREADS
 
 
 def make_vtp_packet(
@@ -312,7 +314,7 @@ class TestTiedArrayResampledVoltageReceiver:
                 make_vtp_packet(6, frame_nr=2, seconds=100, thread_id=0),
                 make_vtp_packet(6, frame_nr=2, seconds=100, thread_id=2),
                 make_vtp_packet(6, frame_nr=2, seconds=100, thread_id=3),
-                make_vtp_packet(100, frame_nr=0, seconds=101, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS, frame_nr=0, seconds=101, thread_id=0),
             ]
         )
 
@@ -334,7 +336,7 @@ class TestTiedArrayResampledVoltageReceiver:
                 make_vtp_packet(5, frame_nr=0, seconds=98, thread_id=1),
                 make_vtp_packet(7, frame_nr=0, seconds=98, thread_id=3),
                 # ensure that buffered frames are flushed
-                make_vtp_packet(1000, frame_nr=0, seconds=101, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS, frame_nr=0, seconds=99, thread_id=0),
             ]
         )
         framesets = []
@@ -360,7 +362,7 @@ class TestTiedArrayResampledVoltageReceiver:
                 make_vtp_packet(9, frame_nr=10, seconds=98, thread_id=1),
                 make_vtp_packet(10, frame_nr=10, seconds=98, thread_id=2),
                 make_vtp_packet(11, frame_nr=10, seconds=98, thread_id=3),
-                make_vtp_packet(1000, frame_nr=0, seconds=101, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS, frame_nr=0, seconds=99, thread_id=0),
             ]
         )
         framesets = []
@@ -387,7 +389,7 @@ class TestTiedArrayResampledVoltageReceiver:
                 make_vtp_packet(13, frame_nr=10, seconds=98, thread_id=1),
                 make_vtp_packet(14, frame_nr=10, seconds=98, thread_id=2),
                 make_vtp_packet(15, frame_nr=10, seconds=98, thread_id=3),
-                make_vtp_packet(1000, frame_nr=0, seconds=101, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS, frame_nr=0, seconds=99, thread_id=0),
             ]
         )
         framesets = []
@@ -427,6 +429,78 @@ class TestTiedArrayResampledVoltageReceiver:
         assert (ts[2] - ts[0]).sec == pytest.approx(101, rel=1e-9), (
             "should have a difference of 101 seconds between 2016-12-31 23:59:60 and 2017-01-01 00:01:40"
         )
+
+    async def test_recieve_complete_framesets_stats(
+        self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
+    ) -> None:
+        """Missed and dropped frames are counted respectively."""
+        receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
+        mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
+            [
+                make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0),
+                # all frames in the first second are missed, but we don't start counting until we see the first frameset
+                # Frame with sequence ID 0 is dropped.
+                make_vtp_packet(FRAME_RATE_THREADS, frame_nr=0, seconds=101, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS + 1, frame_nr=0, seconds=101, thread_id=1),
+                make_vtp_packet(FRAME_RATE_THREADS + 2, frame_nr=0, seconds=101, thread_id=2),
+                make_vtp_packet(FRAME_RATE_THREADS + 3, frame_nr=0, seconds=101, thread_id=3),
+                make_vtp_packet(FRAME_RATE_THREADS + 4, frame_nr=1, seconds=101, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS + 5, frame_nr=1, seconds=101, thread_id=1),
+                make_vtp_packet(FRAME_RATE_THREADS + 6, frame_nr=1, seconds=101, thread_id=2),
+                make_vtp_packet(FRAME_RATE_THREADS + 7, frame_nr=1, seconds=101, thread_id=3),
+                # all frames in the second second are missed, except for the two framesets, we mark them as missed.
+                make_vtp_packet(FRAME_RATE_THREADS * 2, frame_nr=0, seconds=102, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS * 2 + 1, frame_nr=0, seconds=102, thread_id=1),
+                make_vtp_packet(FRAME_RATE_THREADS * 2 + 2, frame_nr=0, seconds=102, thread_id=2),
+                make_vtp_packet(FRAME_RATE_THREADS * 2 + 3, frame_nr=0, seconds=102, thread_id=3),
+                # frames too old were already counted in total and missed, but we count them as dropped now.
+                make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=1),
+                make_vtp_packet(2, frame_nr=0, seconds=100, thread_id=2),
+                make_vtp_packet(3, frame_nr=0, seconds=100, thread_id=3),
+                # all frames in the third second are missed, except for the first frameset, we mark them as missed.
+                make_vtp_packet(FRAME_RATE_THREADS * 3, frame_nr=0, seconds=103, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS * 3 + 1, frame_nr=0, seconds=103, thread_id=1),
+                make_vtp_packet(FRAME_RATE_THREADS * 3 + 2, frame_nr=0, seconds=103, thread_id=2),
+                make_vtp_packet(FRAME_RATE_THREADS * 3 + 3, frame_nr=0, seconds=103, thread_id=3),
+                # flush the last frameset so we can count the missed frames.
+                make_vtp_packet(FRAME_RATE_THREADS * 4, frame_nr=0, seconds=104, thread_id=0),
+            ]
+        )
+        framesets = []
+        with pytest.raises(ConnectionResetError):
+            async for frameset in receiver.complete_framesets():
+                framesets.append(frameset)
+        assert len(framesets) == 4
+        assert framesets[0].timestamp == VDIFTimestamp(seconds=101, frame_nr=0, ref_epoch=0, frame_rate=FRAME_RATE)
+        assert framesets[1].timestamp == VDIFTimestamp(seconds=101, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE)
+
+        assert receiver.dropped_frames == 4
+        assert receiver.missed_framesets == FRAME_RATE - 2 + FRAME_RATE - 1
+        assert receiver.total_framesets == FRAME_RATE * 2 + 1  # two framesets and the 4 frames in second 103
+
+    async def test_recieve_complete_framesets_total_frames(
+        self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
+    ) -> None:
+        """Missed and dropped frames are counted respectively."""
+        receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
+        mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
+            [
+                make_vtp_packet(0, frame_nr=0, seconds=101, thread_id=0),
+                make_vtp_packet(1, frame_nr=0, seconds=101, thread_id=1),
+                make_vtp_packet(2, frame_nr=0, seconds=101, thread_id=2),
+                make_vtp_packet(3, frame_nr=0, seconds=101, thread_id=3),
+                make_vtp_packet(4, frame_nr=1, seconds=101, thread_id=0),
+                make_vtp_packet(5, frame_nr=1, seconds=101, thread_id=1),
+                make_vtp_packet(6, frame_nr=1, seconds=101, thread_id=2),
+                make_vtp_packet(7, frame_nr=1, seconds=101, thread_id=3),
+                make_vtp_packet(FRAME_RATE_THREADS, frame_nr=0, seconds=102, thread_id=0),
+            ]
+        )
+        with pytest.raises(ConnectionResetError):
+            async for _ in receiver.complete_framesets():
+                pass
+
+        assert receiver.total_framesets == 2
 
     async def test_close_clears_state(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
         """clear() resets all buffered state."""
