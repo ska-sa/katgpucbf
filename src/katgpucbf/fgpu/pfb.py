@@ -166,7 +166,7 @@ class PFBFIRTemplate:
         """Determine tuning parameters."""
         queue = context.create_tuning_command_queue()
         step = channels if complex_input else 2 * channels
-        spectra = max(1, 16 * 1024 * 1024 // step)
+        spectra = max(1, 4 * 1024 * 1024 // step)
         samples = (spectra + taps - 1) * step
         n_pols = 2
         total_power_spectra = 1048576 // channels
