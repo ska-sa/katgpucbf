@@ -129,7 +129,7 @@ async def test_mean_power(
     # not known beforehand.
     sample_rate = 5
     seconds = 5
-    samples = int(seconds * sample_rate)
+    samples = seconds * sample_rate
     mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples), float)
     mean_power_sensor_values = np.zeros_like(mean_power_sensor_timestamps)
 
