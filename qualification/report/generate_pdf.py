@@ -1191,13 +1191,13 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
 
     if result.vdif_statistics:
         vdif_stat_framesets = {
-            "Total framesets": "total_framesets",
-            "Missed framesets": "missed_framesets",
+            "Total": "total_framesets",
+            "Missed": "missed_framesets",
         }
         vdif_stat_frames = {
-            "Old frames": "frame_older_than_window",
-            "Incomplete frameset frames": "incomplete_frameset_frames",
-            "Duplicate frames": "duplicate_frames",
+            "Old": "frame_older_than_window",
+            "Incomplete frameset": "incomplete_frameset_frames",
+            "Duplicate": "duplicate_frames",
         }
 
         n_stats = len({**vdif_stat_framesets, **vdif_stat_frames})
@@ -1211,20 +1211,17 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             stats_table.add_row(
                 [
                     MultiRow(2, data=bold("Stream")),
-                    MultiColumn(len(vdif_stat_framesets), align="|c|", data=bold("Framesets")),
-                    MultiColumn(len(vdif_stat_frames), align="|c|", data=bold("Frames")),
+                    MultiColumn(len(vdif_stat_framesets), align="c|", data=bold("Framesets")),
+                    MultiColumn(len(vdif_stat_frames), align="c|", data=bold("Frames")),
                 ]
                 + []
             )
-            stats_table.add_hline(2, len(vdif_stat_framesets) + 1)
-            stats_table.add_hline(
-                len(vdif_stat_framesets) + 1, len(vdif_stat_framesets) + 1 + len(vdif_stat_frames) + 1
-            )
+            stats_table.add_hline(2, len(vdif_stat_framesets) + len(vdif_stat_frames) + 1)
 
             stats_table.add_row(
                 [""]
-                + [bold(name) for name in vdif_stat_framesets.values()]
-                + [bold(name) for name in vdif_stat_frames.values()]
+                + [bold(name) for name in vdif_stat_framesets.keys()]
+                + [bold(name) for name in vdif_stat_frames.keys()]
             )
             stats_table.add_hline()
             for name, stats in result.vdif_statistics.items():
