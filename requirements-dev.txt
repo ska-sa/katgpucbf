@@ -123,7 +123,7 @@ frozenlist==1.8.0
     #   -c requirements.txt
     #   aiohttp
     #   aiosignal
-fsspec==2026.1.0
+fsspec==2026.6.0
     # via
     #   -c requirements.txt
     #   dask
