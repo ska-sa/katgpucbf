@@ -1168,7 +1168,7 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             stats_table.add_hline()
             n_streams = len(result.spead2_statistics)
             for i, (name, stats) in enumerate(result.spead2_statistics.items()):
-                row = list([name] + [stats.get(value, "-") for value in spead2_stat_names.values()])
+                row: list = [name] + [stats.get(value, "-") for value in spead2_stat_names.values()]
                 if i == 0:
                     for value in net_device_stat_names.values():
                         if not result.net_device_statistics:
@@ -1225,11 +1225,12 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             )
             stats_table.add_hline()
             for name, stats in result.vdif_statistics.items():
-                row = list(
+                row = (
                     [name]
                     + [stats.get(value, "-") for value in vdif_stat_framesets.values()]
                     + [stats.get(value, "-") for value in vdif_stat_frames.values()]
                 )
+
                 stats_table.add_row(row)
                 stats_table.add_hline()
 
