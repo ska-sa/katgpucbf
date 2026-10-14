@@ -888,6 +888,7 @@ class TiedArrayResampledVoltageReceiver:
         self.reorder_window = reorder_window
         # Frames dropped due to incomplete frameset or too old for reorder window and already missed frameset
         self.frame_older_than_window = 0
+        self.duplicate_frames = 0
         self.incomplete_frameset_frames = 0
         self.missed_framesets = 0
         self.total_framesets = 0
@@ -933,6 +934,7 @@ class TiedArrayResampledVoltageReceiver:
                 self.buffer.insert(pos, frame)
             else:
                 logger.warning("Duplicate sequence ID: %d", seq_id)
+                self.duplicate_frames += 1
         else:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
             self.frame_older_than_window += 1
@@ -1072,13 +1074,16 @@ def diff_vdif_stats(receiver: TiedArrayResampledVoltageReceiver) -> Generator[di
     init_missed_framesets = receiver.missed_framesets
     init_frame_older_than_window = receiver.frame_older_than_window
     init_incomplete_frameset_frames = receiver.incomplete_frameset_frames
+    init_duplicate_frames = receiver.duplicate_frames
     init_total_framesets = receiver.total_framesets
     yield delta_stats
     final_missed_framesets = receiver.missed_framesets
     final_frame_older_than_window = receiver.frame_older_than_window
     final_incomplete_frameset_frames = receiver.incomplete_frameset_frames
     final_total_framesets = receiver.total_framesets
+    final_duplicate_frames = receiver.duplicate_frames
     delta_stats["missed_framesets"] = final_missed_framesets - init_missed_framesets
     delta_stats["frame_older_than_window"] = final_frame_older_than_window - init_frame_older_than_window
     delta_stats["incomplete_frameset_frames"] = final_incomplete_frameset_frames - init_incomplete_frameset_frames
     delta_stats["total_framesets"] = final_total_framesets - init_total_framesets
+    delta_stats["duplicate_frames"] = final_duplicate_frames - init_duplicate_frames

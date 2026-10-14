@@ -459,6 +459,7 @@ class TestTiedArrayResampledVoltageReceiver:
                 make_vtp_packet(3, frame_nr=0, seconds=100, thread_id=3),
                 # all frames in the third second are missed, except for the first frameset, we mark them as missed.
                 make_vtp_packet(FRAME_RATE_THREADS * 3, frame_nr=0, seconds=103, thread_id=0),
+                make_vtp_packet(FRAME_RATE_THREADS * 3, frame_nr=0, seconds=103, thread_id=0),
                 make_vtp_packet(FRAME_RATE_THREADS * 3 + 1, frame_nr=0, seconds=103, thread_id=1),
                 make_vtp_packet(FRAME_RATE_THREADS * 3 + 2, frame_nr=0, seconds=103, thread_id=2),
                 make_vtp_packet(FRAME_RATE_THREADS * 3 + 3, frame_nr=0, seconds=103, thread_id=3),
@@ -474,7 +475,9 @@ class TestTiedArrayResampledVoltageReceiver:
         assert framesets[0].timestamp == VDIFTimestamp(seconds=101, frame_nr=0, ref_epoch=0, frame_rate=FRAME_RATE)
         assert framesets[1].timestamp == VDIFTimestamp(seconds=101, frame_nr=1, ref_epoch=0, frame_rate=FRAME_RATE)
 
-        assert receiver.frame_older_than_window == 4
+        assert receiver.frame_older_than_window == 3
+        assert receiver.duplicate_frames == 1
+        assert receiver.incomplete_frameset_frames == 1
         assert receiver.missed_framesets == FRAME_RATE - 2 + FRAME_RATE - 1
         assert receiver.total_framesets == FRAME_RATE * 2 + 1  # two seconds of frames and the 4 frames in second 103
 
