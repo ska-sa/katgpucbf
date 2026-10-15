@@ -16,7 +16,7 @@
 
 """Unit tests for :mod:`.shared_array`."""
 
-import multiprocessing
+import multiprocessing.connection
 from collections.abc import Generator
 
 import numpy as np

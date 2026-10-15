@@ -21,7 +21,7 @@ from typing import Self
 
 import katsdpsigproc.cuda
 import numpy as np
-import vkgdr
+import vkgdr.pycuda
 from katsdpsigproc import accel
 from katsdpsigproc.abc import AbstractContext, AbstractDevice
 

@@ -32,6 +32,7 @@ import katsdpsigproc.accel as accel
 import numpy as np
 import scipy.signal
 import spead2.recv
+import spead2.send.asyncio
 import vkgdr.pycuda
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractEvent
 from katsdpsigproc.resource import async_wait_for_events
