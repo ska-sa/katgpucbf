@@ -209,7 +209,7 @@ msgpack==1.2.1
     # via
     #   -c requirements.txt
     #   katsdptelstate
-multidict==6.7.0
+multidict==6.9.1
     # via
     #   -c requirements.txt
     #   aiohttp

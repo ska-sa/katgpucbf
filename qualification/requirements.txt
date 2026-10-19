@@ -204,7 +204,7 @@ msgpack==1.2.1
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
     #   katsdptelstate
-multidict==6.7.0
+multidict==6.9.1
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
