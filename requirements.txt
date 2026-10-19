@@ -84,7 +84,7 @@ markupsafe==3.0.3
     #   mako
 msgpack==1.2.1
     # via katsdptelstate
-multidict==6.7.0
+multidict==6.9.1
     # via
     #   aiohttp
     #   yarl
