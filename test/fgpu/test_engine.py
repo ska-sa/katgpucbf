@@ -29,7 +29,8 @@ import aiokatcp
 import numpy as np
 import pytest
 import scipy.signal
-import spead2.send
+import spead2.recv.asyncio
+import spead2.send.asyncio
 from katsdpsigproc.accel import roundup
 from numpy.typing import ArrayLike
 

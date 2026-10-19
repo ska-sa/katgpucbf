@@ -54,7 +54,8 @@ import async_solipsism
 import katsdpsigproc.cuda
 import pycuda.driver
 import pytest
-import spead2
+import spead2.recv
+import spead2.send.asyncio
 import vkgdr
 from katsdpsigproc.abc import AbstractDevice
 

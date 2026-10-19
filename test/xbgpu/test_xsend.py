@@ -20,8 +20,8 @@ from typing import Final
 
 import numpy as np
 import pytest
-import spead2
 import spead2.recv.asyncio
+import spead2.send.asyncio
 from katsdpsigproc.abc import AbstractContext
 
 from katgpucbf import COMPLEX

@@ -22,6 +22,7 @@ from collections.abc import AsyncGenerator, Generator
 
 import pytest
 import spead2.recv.asyncio
+import spead2.send.asyncio
 
 from katgpucbf.fsim.main import DTYPE, Sender, parse_args
 
