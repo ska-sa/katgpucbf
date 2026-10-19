@@ -1080,10 +1080,10 @@ def diff_vdif_stats(receiver: TiedArrayResampledVoltageReceiver) -> Generator[di
     final_missed_framesets = receiver.missed_framesets
     final_frame_older_than_window = receiver.frame_older_than_window
     final_incomplete_frameset_frames = receiver.incomplete_frameset_frames
-    final_total_framesets = receiver.total_framesets
     final_duplicate_frames = receiver.duplicate_frames
+    final_total_framesets = receiver.total_framesets
     delta_stats["missed_framesets"] = final_missed_framesets - init_missed_framesets
     delta_stats["frame_older_than_window"] = final_frame_older_than_window - init_frame_older_than_window
     delta_stats["incomplete_frameset_frames"] = final_incomplete_frameset_frames - init_incomplete_frameset_frames
-    delta_stats["total_framesets"] = final_total_framesets - init_total_framesets
     delta_stats["duplicate_frames"] = final_duplicate_frames - init_duplicate_frames
+    delta_stats["total_framesets"] = final_total_framesets - init_total_framesets
