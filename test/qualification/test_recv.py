@@ -49,13 +49,12 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     another for the difference to be visible.
     """
     identity_size = ceil(sqrt(samples_per_frame))
-    identity_data = np.identity(
-        identity_size, dtype=NP_DTYPE
-    )  # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
-    # From Identity matrix cut the array we need.
+    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
+    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
+    # the identity matrix size is rounded up to the nearest square number, correct it.
     identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
-    # -1 happen to map to -1, 1 happen to map to 1 when re-quantizing to signed 2bit data and back.
-    return (np.ones_like(identity_data) * -1).astype(NP_DTYPE) + identity_data * 2
+    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
+    return (np.ones_like(identity_data) * -1) + identity_data * 2
 
 
 def make_vtp_packet(
@@ -431,7 +430,7 @@ class TestTiedArrayResampledVoltageReceiver:
     async def test_receive_framesets_raw_data_correct(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
     ) -> None:
-        """Verify Raw data can be correctly reconstructed from the VDIF frame."""
+        """Verify raw data can be correctly reconstructed from the VDIF frame."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
             [
