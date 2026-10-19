@@ -70,7 +70,6 @@ def make_vtp_packet(
     assert data.shape == (SAMPLES_PER_FRAME, 1)
     assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
 
-    #
     frame = BasebandVDIFFrame.fromdata(
         data,
         frame_nr=frame_nr,
@@ -83,7 +82,6 @@ def make_vtp_packet(
         complex_data=False,
         thread_id=thread_id,
         legacy_mode=False,
-        sample_shape=(1,),
     )
     buf = io.BytesIO()
     frame.tofile(buf)
