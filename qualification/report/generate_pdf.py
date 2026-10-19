@@ -1195,7 +1195,7 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             "Missed": "missed_framesets",
         }
         vdif_stat_frames = {
-            "Old": "frame_older_than_window",
+            "Too old": "frame_older_than_window",
             "Incomplete frameset": "incomplete_frameset_frames",
             "Duplicate": "duplicate_frames",
         }
@@ -1214,7 +1214,6 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
                     MultiColumn(len(vdif_stat_framesets), align="c|", data=bold("Framesets")),
                     MultiColumn(len(vdif_stat_frames), align="c|", data=bold("Frames")),
                 ]
-                + []
             )
             stats_table.add_hline(2, len(vdif_stat_framesets) + len(vdif_stat_frames) + 1)
 
