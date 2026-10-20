@@ -153,7 +153,7 @@ class TiedArrayResampledVoltageReceiver:
         self.multicast_groups = multicast_groups
         self.n_chans: int = 2
         self.n_threads = self.n_chans * 2
-        self.veng_out_bits_per_sample: int = (2,)
+        self.veng_out_bits_per_sample: int = 2
 
         # all multicast groups must use the same port
         port = self.multicast_groups[0].port
@@ -165,12 +165,12 @@ class TiedArrayResampledVoltageReceiver:
 
         self.scale_factor_timestamp: float = 1
         self.power_int_time: float = 0.5
-        self.bandwidth: float = 64e6
+        self.bandwidth: int = int(64e6)
         self.n_samples_per_frame: int = 8000
         self.frame_rate = round(self.bandwidth / self.n_samples_per_frame)
         self.sync_time: float = 0.0
         self.sample_bytes_per_frame = self.n_samples_per_frame * self.veng_out_bits_per_sample // 8
-        packet_size = self.sample_bytes_per_frame + self.VDIF_HEADER_SIZE + self.VTP_HEADER_SIZE
+        packet_size = self.sample_bytes_per_frame + VDIF_HEADER_SIZE + self.VTP_HEADER_SIZE
         self._packet = bytearray(packet_size)
         # Number of times we've received a packet without sleeping
         self._sync_packets = 0
@@ -194,6 +194,7 @@ class TiedArrayResampledVoltageReceiver:
         self.missed_framesets = 0
         self.total_framesets = 0
         self.last_frameset_timestamp: int | None = None
+        self.filter_shift = 0.0
 
     async def _next_packet(self) -> None:
         # sock_recv_into will work synchronously if it can, but that can
@@ -217,7 +218,7 @@ class TiedArrayResampledVoltageReceiver:
         ref_epoch = (ref_epoch_frame_nr >> 24) & 0x3F
         frame_nr = ref_epoch_frame_nr & 0xFF_FFFF
         thread_id = sample_bits_thread_id & 0x3F
-        length = (length & 0xFF_FFFF) * 8 - self.VDIF_HEADER_SIZE  # Raw value includes the header
+        length = (length & 0xFF_FFFF) * 8 - VDIF_HEADER_SIZE  # Raw value includes the header
         if frame_nr == 0:
             is_complex = sample_bits_thread_id >> 15
             assert not is_complex
@@ -275,16 +276,20 @@ class TiedArrayResampledVoltageReceiver:
             min_timestamp / self.scale_factor_timestamp, format="sec", scale="tai"
         )
 
-        vlbi_delay = await self.cbf.product_controller_client.sensor_value(f"{self.stream_name}.delay", float)
-        min_time += TimeDelta(vlbi_delay, format="sec", scale="tai") + self.filter_shift
+        min_time += TimeDelta(0.0, format="sec", scale="tai") + self.filter_shift
 
         # Computing timestamps is expensive. So once we know the frame rate and
         # ref epoch, we can convert it into a minimum linearised frame number.
         min_frame: int | None = None
-
+        c = 0
         try:
             async with asyncio.timeout(time_limit) as timer:
                 while True:
+                    c += 1
+                    if c % 8000 == 0:
+                        logger.debug("Missed framesets: %d", self.missed_framesets)
+                        logger.debug("Total framesets: %d", self.total_framesets)
+                        logger.debug("Dropped frames: %d", self.dropped_frames)
                     # Check if we have a complete frameset at the start of the buffer.
                     if self.buffer:
                         frame0 = self.buffer[0]
@@ -301,7 +306,6 @@ class TiedArrayResampledVoltageReceiver:
                                 prefix.sort(key=lambda frame: frame.thread_id)
                                 frame0_linear = frame0.timestamp.linear
                                 if frame0_linear >= min_frame:
-                                    logger.debug("Yielding frameset %d", frame0_linear)
                                     n_missed_framesets = 0
                                     if self.last_frameset_timestamp is not None:
                                         n_missed_framesets = frame0_linear - self.last_frameset_timestamp - 1
@@ -316,7 +320,6 @@ class TiedArrayResampledVoltageReceiver:
                                             n_missed_framesets = 0
 
                                     self.missed_framesets += n_missed_framesets
-                                    logger.debug("Missed %d frame sets", n_missed_framesets)
                                     self.total_framesets += n_missed_framesets + 1
                                     self.last_frameset_timestamp = frame0_linear
 
@@ -362,8 +365,6 @@ class TiedArrayResampledVoltageReceiver:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--interface",
@@ -394,8 +395,21 @@ def main() -> None:
         default=4,
         help="Number of columns to plot",
     )
+    parser.add_argument(
+        "--fake-data",
+        action="store_true",
+        help="Use fake data instead of real data",
+        default=False,
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        help="Logging level",
+    )
     #    parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
+    logging.basicConfig(level=args.log_level)
     if args.interactive:
         matplotlib.use("WebAgg")
         # plt.show will run a Tornado event loop, which in turn runs an asyncio
@@ -439,24 +453,23 @@ class FakeSocket:
     def __init__(self):
         self.seq_id = 0
         self.frame_nr = 0
-        self.seconds = 0
+        self.seconds = 1
         self.thread_id = 0
 
     def recv_into(self, buf: Buffer) -> int:
         mv = memoryview(buf).cast("B")
-        try:
-            if self.frame_nr == SAMPLES_PER_FRAME:
-                self.frame_nr = 0
-                self.seconds += 1
-                self.thread_id += 1
-            if self.thread_id == 4:
-                self.thread_id = 0
-            packet = make_vtp_packet(self.seq_id, self.frame_nr, self.seconds, self.thread_id)
-            self.seq_id += 1
+        if self.thread_id > 3:
+            self.thread_id = 0
             self.frame_nr += 1
+        if self.frame_nr >= 8000:
+            self.frame_nr = 0
             self.seconds += 1
-            self.thread_id += 1
-        except StopIteration:
+            logger.debug("Generating second %d", self.seconds)
+
+        packet = make_vtp_packet(self.seq_id, self.frame_nr, self.seconds, self.thread_id)
+        self.seq_id += 1
+        self.thread_id += 1
+        if self.seconds >= 11:
             raise ConnectionResetError("ran out of pre-defined packets") from None
         assert len(mv) >= len(packet)
         mv[: len(packet)] = packet
@@ -464,31 +477,37 @@ class FakeSocket:
 
 
 async def async_main(args: argparse.Namespace) -> None:
-    if args.corr2:
-        host, port = await get_subordinate_endpoint(args.mc_address, args.product_name)
-    else:
+    if not args.fake_data:
         host, port = await get_product_controller_endpoint(args.mc_address, args.product_name)
-    client = await aiokatcp.Client.connect(host, port)
+        client = await aiokatcp.Client.connect(host, port)
 
-    async with client:
+        async with client:
 
-        async def sensor_val(name, sensor_type=None):
-            if args.corr2:
-                name = CORR2_SENSOR_REMAP.get(name, name.replace(".", "-"))
-            return await client.sensor_value(name, sensor_type)
+            async def sensor_val(name, sensor_type=None):
+                if args.corr2:
+                    name = CORR2_SENSOR_REMAP.get(name, name.replace(".", "-"))
+                return await client.sensor_value(name, sensor_type)
 
-        # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
-        # But we can cast Endpoints to tuples, which it does know.
-        multicast_endpoints = [
-            tuple(endpoint)
-            for endpoint in endpoint_list_parser(DEFAULT_VTP_PORT)(
-                await sensor_val("baseline-resampled-voltage.destination", str)
+            # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
+            # But we can cast Endpoints to tuples, which it does know.
+            multicast_endpoints = [
+                tuple(endpoint)
+                for endpoint in endpoint_list_parser(DEFAULT_VTP_PORT)(
+                    await sensor_val("baseline-resampled-voltage.destination", str)
+                )
+            ]
+            receiver = TiedArrayResampledVoltageReceiver(
+                stream_name=args.product_name,
+                interface_address=args.interface,
+                multicast_groups=multicast_endpoints,
+                sock=FakeSocket(),
             )
-        ]
+
+    else:
         receiver = TiedArrayResampledVoltageReceiver(
-            stream_name=args.product_name,
+            stream_name="tied-array-resampled-voltage",
             interface_address=args.interface,
-            multicast_groups=multicast_endpoints,
+            multicast_groups=[Endpoint("127.0.0.1", 5001)],
             sock=FakeSocket(),
         )
 
@@ -503,27 +522,31 @@ async def async_main(args: argparse.Namespace) -> None:
     axs = axs.ravel()  # Now that the plot is several columns wide, this comes as a 2-d array. Which is a pain.
     axs = axs[:4]  # If there are gaps at the end, ignore them
     lines = []
-    seconddata = np.zeros((4, receiver.bandwidth))
-    for i in range(receiver.n_chans):
-        lines.append(axs[i].plot(receiver.n_samples_per_frame, [0.0] * len(receiver.n_samples_per_frame))[0])
+    seconddata = np.zeros((4, 8000))
+    for i in range(4):
+        lines.append(axs[i].plot([0.0] * 8000, [0.0] * 8000)[0])
         axs[i].set_ylabel(i)
         axs[i].set_xlabel("Sample number")
     if args.interactive:
         fig.canvas.mpl_connect("close_event", lambda event: receiver.close())
         plt.ion()
         plt.show()
+    logger.info("Starting to receive framesets")
+    counter = 0
     async for chunk in receiver.complete_framesets():
-        started = False
-        if chunk.timestamp.frame_nr == 0:
-            started = True
-        if started:
-            for frame in chunk.frames:
-                vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
-                seconddata[frame.thread_id, frame.timestamp.frame_nr] = np.average(vdif_frame.data, axis=0)
-            if chunk.timestamp.frame_nr == receiver.n_samples_per_frame - 1:
-                # update line
-                for i in range(4):
-                    lines[i].set_ydata(seconddata[i, :])
+        counter += 1
+        for frame in chunk.frames:
+            vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
+            seconddata[frame.thread_id, counter - 1] = np.average(vdif_frame.data)
+        if counter == 8000:
+            # update line
+            for i in range(4):
+                lines[i].set_ydata(seconddata[i, :])
+            plt.title(f"Second {chunk.timestamp.seconds}")
+            if not args.interactive:
+                plt.savefig(f"{chunk.timestamp.seconds}.png")
+            logger.info("Wrote second %d", chunk.timestamp.seconds)
+            return
 
 
 if __name__ == "__main__":
