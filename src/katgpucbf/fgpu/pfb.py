@@ -209,13 +209,32 @@ class PFBFIRTemplate:
                     tuning={"wgs_x": wgs_x, "wgs_y": wgs_y, "max_rows_out": max_rows_out},
                 ).instantiate(queue, samples, spectra)
                 fn.bind(**data)
-                return tune.make_measure(queue, fn)
+
+            # We want to tune in a way that is good for both large and small
+            # numbers of spectra. We set up a few values to test and take the
+            # geometric mean of them. Going in powers of 3 also ensures we
+            # don't over-tune for power-of-2 sizes.
+            test_spectra = [spectra]
+            while test_spectra[-1] > 1 and len(test_spectra) < 4:
+                test_spectra.append(max(test_spectra[-1] // 3, 1))
+
+            def measure(iters):
+                product = 1.0
+                for s in test_spectra:
+                    fn.spectra = s
+                    queue.start_tuning()
+                    for _ in range(iters):
+                        fn()
+                    product *= queue.stop_tuning() / iters
+                return product ** (1 / len(test_spectra))
+
+            return measure
 
         tuning = tune.autotune(
             generate,
             wgs_x=[32, 64, 128],
-            wgs_y=[1, 2, 3, 4, 6, 8, 12, 16, 24, 32],
-            max_rows_out=[8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+            wgs_y=[1, 2, 4, 8, 16, 32],
+            max_rows_out=[8, 16, 32, 64, 128],
         )
         return cast(_TuningDict, tuning)
 
