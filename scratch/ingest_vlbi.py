@@ -523,8 +523,9 @@ async def async_main(args: argparse.Namespace) -> None:
     axs = axs[:4]  # If there are gaps at the end, ignore them
     lines = []
     seconddata = np.zeros((4, 8000))
+    sample_numbers = np.arange(seconddata.shape[1])
     for i in range(4):
-        lines.append(axs[i].plot([0.0] * 8000, [0.0] * 8000)[0])
+        lines.append(axs[i].plot(sample_numbers, seconddata[i])[0])
         axs[i].set_ylabel(i)
         axs[i].set_xlabel("Sample number")
     if args.interactive:
@@ -541,7 +542,9 @@ async def async_main(args: argparse.Namespace) -> None:
         if counter == 8000:
             # update line
             for i in range(4):
-                lines[i].set_ydata(seconddata[i, :])
+                lines[i].set_data(sample_numbers, seconddata[i, :])
+                axs[i].relim()
+                axs[i].autoscale_view()
             plt.title(f"Second {chunk.timestamp.seconds}")
             if not args.interactive:
                 plt.savefig(f"{chunk.timestamp.seconds}.png")
