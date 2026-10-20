@@ -23,7 +23,15 @@ extern "C++"
 
 namespace cg = cooperative_groups;
 
-<% do_total_power = not complex_input %>
+<%
+    do_total_power = not complex_input
+    max_amp_y = (max_rows_out + wgs_y - 1) / wgs_y
+    max_abs_sample = (1 << (input_sample_bits - 1)) - 1
+    max_sample_power = max_abs_sample * max_abs_sample;
+    max_col_power = max_sample_power * max_amp_y
+    max_reduced_power = max_col_power * wgs_x
+%>
+
 #define WGS_X ${wgs_x}
 #define WGS_Y ${wgs_y}
 #define MAX_ROWS_OUT ${max_rows_out}
@@ -44,6 +52,39 @@ namespace cg = cooperative_groups;
 
 <%include file="unpack.mako"/>
 
+% if max_reduced_power < 2**32:
+
+typedef unsigned int power_t;
+
+template<typename G>
+DEVICE_FN static power_t reduce_power(G &group, power_t value)
+{
+    return cg::reduce(group, value, cg::plus<unsigned int>());
+}
+
+% else:
+
+<% assert max_col_power < 2**48 %>
+typedef unsigned long long power_t;
+
+/* Sum a 48-bit value across the group.
+ *
+ * The implementation splits it into two 24-bit values, which can be
+ * added with __reduce_add_sync without overflow. The results are then
+ * combined.
+ */
+template<typename G>
+DEVICE_FN static power_t reduce_power(G &group, power_t value)
+{
+    unsigned int low = value & ((1 << 24) - 1);
+    unsigned int high = value >> 24;
+    low = cg::reduce(group, low, cg::plus<unsigned int>());
+    high = cg::reduce(group, high, cg::plus<unsigned int>());
+    return ((unsigned long long) high << 24) + low;
+}
+
+% endif
+
 % endif
 
 /* Apply unzipping to an output index.
@@ -58,24 +99,6 @@ DEVICE_FN static unsigned int shuffle_index(unsigned int idx)
     unsigned int orig = idx & mask;
     unsigned int swapped = ((orig >> low_bits) | (orig << high_bits)) & mask;
     return (idx & ~mask) | swapped;
-}
-
-/* Sum a 48-bit value across the warp.
- *
- * The implementation splits it into two 24-bit values, which can be
- * added with __reduce_add_sync without overflow. The results are then
- * combined.
- *
- * TODO: use a 32-bit reduction where possible.
- */
-template<typename G>
-DEVICE_FN static unsigned long long reduce_long(G &group, unsigned long long value)
-{
-    unsigned int low = value & ((1 << 24) - 1);
-    unsigned int high = value >> 24;
-    low = cg::reduce(group, low, cg::plus<unsigned int>());
-    high = cg::reduce(group, high, cg::plus<unsigned int>());
-    return ((unsigned long long) high << 24) + low;
 }
 
 } // extern "C++"
@@ -220,10 +243,10 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
     {
         {  // Block just to balance things with the not complex_input case.
 % else:
-    unsigned long long total_power = 0;
+    power_t total_power = 0;
     int out_y = out_start_y;
     // Note: this while loop may be executed different numbers of times
-    // for different lid_y values, and hence must not contain and BARRIER
+    // for different lid_y values, and hence must not contain any BARRIER
     // instructions.
     while (out_y < out_stop_y)
     {
@@ -257,7 +280,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS_X, WGS_Y, 1) void pfb_fir(
             out[i * step] = sum;
         }
 % if do_total_power:
-        total_power = reduce_long(row_group, total_power);
+        total_power = reduce_power(row_group, total_power);
         if (lid_x == 0)
             atomicAdd(&out_total_power[out_y / TOTAL_POWER_SPECTRA], total_power);
         total_power = 0;
