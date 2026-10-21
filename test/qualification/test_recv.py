@@ -17,10 +17,10 @@
 """Unit tests for module :mod:`qualification.recv`."""
 
 import io
-from math import ceil, sqrt
 import socket
 import struct
 from collections.abc import Buffer, Callable, Iterable
+from math import ceil, sqrt
 from unittest import mock
 
 import aiokatcp
@@ -41,11 +41,12 @@ NP_DTYPE = np.int8
 NP_DTYPE_SIZE_BITS = np.dtype(NP_DTYPE).itemsize * 8
 BYTES_PER_NP_ARRAY_FOR_FRAME = SAMPLES_PER_FRAME * (NP_DTYPE_SIZE_BITS // 8)  # The size of the numpy array for a frame.
 
+
 def create_identity_data(samples_per_frame: int) -> np.ndarray:
     """Create an identity data array use as payload for a VDIF frame.
 
     Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
-    another for the difference to be visible.  
+    another for the difference to be visible.
     """
     identity_size = ceil(sqrt(samples_per_frame))
     # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
