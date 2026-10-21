@@ -145,6 +145,8 @@ class TiedArrayResampledVoltageReceiver:
         self,
         stream_name: str,
         interface_address: str,
+        bandwidth: float,
+        samples_per_frame: int,
         multicast_groups: list[Endpoint],
         sock: socket.socket | None = None,
         reorder_window: int = 32,
@@ -164,9 +166,8 @@ class TiedArrayResampledVoltageReceiver:
         self.steady_state_timestamp: float = 0.0
 
         self.scale_factor_timestamp: float = 1
-        self.power_int_time: float = 0.5
-        self.bandwidth: int = int(64e6)
-        self.n_samples_per_frame: int = 8000
+        self.bandwidth: float = bandwidth
+        self.n_samples_per_frame: int = samples_per_frame
         self.frame_rate = round(self.bandwidth / self.n_samples_per_frame)
         self.sync_time: float = 0.0
         self.sample_bytes_per_frame = self.n_samples_per_frame * self.veng_out_bits_per_sample // 8
@@ -176,6 +177,9 @@ class TiedArrayResampledVoltageReceiver:
         self._sync_packets = 0
 
         if sock is None:
+            logger.info("Binding to port %d", port)
+            logger.info("Multicast groups: %s", self.multicast_groups)
+            logger.info("Interface address: %s", interface_address)
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.setsockopt(socket.SOL_SOCKET, IP_MULTICAST_ALL, 0)
@@ -407,7 +411,7 @@ def main() -> None:
         default="INFO",
         help="Logging level",
     )
-    #    parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
+    parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level)
     if args.interactive:
@@ -421,6 +425,26 @@ def main() -> None:
         asyncio.run(async_main(args))
 
 
+NP_DTYPE = np.int8
+NP_DTYPE_SIZE_BITS = np.dtype(NP_DTYPE).itemsize * 8
+BYTES_PER_NP_ARRAY_FOR_FRAME = SAMPLES_PER_FRAME * (NP_DTYPE_SIZE_BITS // 8)  # The size of the numpy array for a frame.
+
+
+def create_identity_data(samples_per_frame: int) -> np.ndarray:
+    """Create an identity data array use as payload for a VDIF frame.
+
+    Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
+    another for the difference to be visible.
+    """
+    identity_size = math.ceil(math.sqrt(samples_per_frame))
+    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
+    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
+    # the identity matrix size is rounded up to the nearest square number, correct it.
+    identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
+    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
+    return (np.ones_like(identity_data) * -1) + identity_data * 2
+
+
 def make_vtp_packet(
     seq_id: int,
     frame_nr: int,
@@ -430,7 +454,9 @@ def make_vtp_packet(
     ref_epoch: int = 0,
 ) -> bytes:
     """Build a VTP packet (8-byte seq header + VDIF frame)."""
-    data = np.zeros((SAMPLES_PER_FRAME, 1), dtype=np.float32)
+    data = create_identity_data(SAMPLES_PER_FRAME)
+    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
     frame = BasebandVDIFFrame.fromdata(
         data,
         frame_nr=frame_nr,
@@ -484,29 +510,34 @@ async def async_main(args: argparse.Namespace) -> None:
         async with client:
 
             async def sensor_val(name, sensor_type=None):
-                if args.corr2:
-                    name = CORR2_SENSOR_REMAP.get(name, name.replace(".", "-"))
                 return await client.sensor_value(name, sensor_type)
 
             # Spead2 doesn't know katsdptelstate so it can't recognise Endpoints.
             # But we can cast Endpoints to tuples, which it does know.
-            multicast_endpoints = [
-                tuple(endpoint)
+            multicast_groups = [
+                endpoint
                 for endpoint in endpoint_list_parser(DEFAULT_VTP_PORT)(
-                    await sensor_val("baseline-resampled-voltage.destination", str)
+                    await sensor_val("tied-array-resampled-voltage.destination", str)
                 )
             ]
+
+            bandwidth = float(await sensor_val("tied-array-resampled-voltage.bandwidth", float))
+            samples_per_frame = int(await sensor_val("tied-array-resampled-voltage.n-samples-per-frame", int))
+
             receiver = TiedArrayResampledVoltageReceiver(
-                stream_name=args.product_name,
+                stream_name="tied-array-resampled-voltage",
                 interface_address=args.interface,
-                multicast_groups=multicast_endpoints,
-                sock=FakeSocket(),
+                bandwidth=bandwidth,
+                samples_per_frame=samples_per_frame,
+                multicast_groups=multicast_groups,
             )
 
     else:
         receiver = TiedArrayResampledVoltageReceiver(
             stream_name="tied-array-resampled-voltage",
             interface_address=args.interface,
+            bandwidth=int(64e6),
+            samples_per_frame=8000,
             multicast_groups=[Endpoint("127.0.0.1", 5001)],
             sock=FakeSocket(),
         )
@@ -522,7 +553,7 @@ async def async_main(args: argparse.Namespace) -> None:
     axs = axs.ravel()  # Now that the plot is several columns wide, this comes as a 2-d array. Which is a pain.
     axs = axs[:4]  # If there are gaps at the end, ignore them
     lines = []
-    seconddata = np.zeros((4, 8000))
+    seconddata = np.zeros((4, receiver.n_samples_per_frame * receiver.frame_rate))
     sample_numbers = np.arange(seconddata.shape[1])
     for i in range(4):
         lines.append(axs[i].plot(sample_numbers, seconddata[i])[0])
@@ -538,8 +569,11 @@ async def async_main(args: argparse.Namespace) -> None:
         counter += 1
         for frame in chunk.frames:
             vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
-            seconddata[frame.thread_id, counter - 1] = np.average(vdif_frame.data)
-        if counter == 8000:
+            seconddata[
+                frame.thread_id, (counter - 1) * receiver.n_samples_per_frame : (counter) * receiver.n_samples_per_frame
+            ] = vdif_frame.data.reshape(-1)
+            # seconddata[frame.thread_id, (counter-1)*receiver.n_samples_per_frame:(counter)*receiver.n_samples_per_frame] = np.zeros((receiver.n_samples_per_frame,))
+        if counter == receiver.frame_rate:
             # update line
             for i in range(4):
                 lines[i].set_data(sample_numbers, seconddata[i, :])

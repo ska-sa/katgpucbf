@@ -17,6 +17,7 @@
 """Unit tests for module :mod:`qualification.recv`."""
 
 import io
+from math import ceil, sqrt
 import socket
 import struct
 from collections.abc import Buffer, Callable, Iterable
@@ -36,6 +37,23 @@ BANDWIDTH = 64e6
 FRAME_RATE = round(BANDWIDTH / SAMPLES_PER_FRAME)
 THREADS = 4
 FRAME_RATE_THREADS = FRAME_RATE * THREADS
+NP_DTYPE = np.int8
+NP_DTYPE_SIZE_BITS = np.dtype(NP_DTYPE).itemsize * 8
+BYTES_PER_NP_ARRAY_FOR_FRAME = SAMPLES_PER_FRAME * (NP_DTYPE_SIZE_BITS // 8)  # The size of the numpy array for a frame.
+
+def create_identity_data(samples_per_frame: int) -> np.ndarray:
+    """Create an identity data array use as payload for a VDIF frame.
+
+    Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
+    another for the difference to be visible.  
+    """
+    identity_size = ceil(sqrt(samples_per_frame))
+    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
+    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
+    # the identity matrix size is rounded up to the nearest square number, correct it.
+    identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
+    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
+    return (np.ones_like(identity_data) * -1) + identity_data * 2
 
 
 def make_vtp_packet(
@@ -47,7 +65,9 @@ def make_vtp_packet(
     ref_epoch: int = 0,
 ) -> bytes:
     """Build a VTP packet (8-byte seq header + VDIF frame)."""
-    data = np.zeros((SAMPLES_PER_FRAME, 1), dtype=np.float32)
+    data = create_identity_data(SAMPLES_PER_FRAME)
+    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
     frame = BasebandVDIFFrame.fromdata(
         data,
         frame_nr=frame_nr,
