@@ -85,6 +85,32 @@ def get_bls_subset(baselines: Sequence[str], bls_ordering: Sequence[tuple[str, s
     return bls_subset
 
 
+@dataclass
+class Band:
+    """Holds presets for a known band."""
+
+    long_name: str
+    adc_sample_rate: float
+    centre_frequency: float
+
+
+def get_pass_channels(narrowband_decimation: int, n_channels: int) -> slice:
+    band = Band("L", adc_sample_rate=1712e6, centre_frequency=1284e6)
+    bandwidth = band.adc_sample_rate * 0.5 / narrowband_decimation
+
+    max_pass_bandwidth = 0.7 * bandwidth
+    # Use a power-of-two MHz bandwidth, since that's what VLBI
+    # observations generally use.
+    pass_bandwidth = 1e6
+    while pass_bandwidth * 2 <= max_pass_bandwidth:
+        pass_bandwidth *= 2
+    pass_fraction = pass_bandwidth / bandwidth
+    lo = math.ceil(n_channels * 0.5 * (1.0 - pass_fraction))
+    # + 1 because this is an exclusive range
+    hi = math.floor(n_channels * 0.5 * (1.0 + pass_fraction)) + 1
+    return slice(lo, hi)
+
+
 @dataclass(frozen=True, order=True, slots=True)
 class VDIFTimestamp:
     """Identifier of an VDIF frameset."""
@@ -199,8 +225,13 @@ class TiedArrayResampledVoltageReceiver:
         self.total_framesets = 0
         self.last_frameset_timestamp: int | None = None
         self.filter_shift = 0.0
+        self.listening = True
 
     async def _next_packet(self) -> None:
+        if not self.listening:
+            packet_size = await asyncio.get_event_loop().sock_recv_into(self.sock, self._packet)
+
+            return
         # sock_recv_into will work synchronously if it can, but that can
         # prevent the event loop from ever getting a chance to run.
         # sleep(0) allows this. Performance is better if we don't sleep(0)
@@ -361,6 +392,16 @@ class TiedArrayResampledVoltageReceiver:
         """Wait until a complete VDIF frameset is available and return the timestamp."""
         async with asyncio.timeout(timeout):
             return (await self.next_complete_frameset(min_timestamp=min_timestamp)).timestamp
+
+    def pause(self) -> None:
+        """Pause the receiver."""
+        self.listening = False
+
+    def resume(self) -> None:
+        """Resume the receiver."""
+        self.last_frameset_timestamp = None
+        self.buffer.clear()
+        self.listening = True
 
     def close(self) -> None:
         """Close the socket."""
@@ -544,26 +585,58 @@ async def async_main(args: argparse.Namespace) -> None:
 
     fig, axs = plt.subplots(
         receiver.n_chans,
-        2,  # X and Y polarisations
-        sharex=True,
+        2 * 2,  # X and Y polarisations, freq & phase
+        sharex="col",
         squeeze=False,
         figsize=(12, 8) if args.interactive else (24, 16),
         constrained_layout=True,
     )
     axs = axs.ravel()  # Now that the plot is several columns wide, this comes as a 2-d array. Which is a pain.
-    axs = axs[:4]  # If there are gaps at the end, ignore them
+    axs = axs[:8]  # If there are gaps at the end, ignore them
     lines = []
-    seconddata = np.zeros((4, receiver.n_samples_per_frame * receiver.frame_rate))
-    sample_numbers = np.arange(seconddata.shape[1])
+    n_channels = 32768
+    frequency_sample_size_frames = round(receiver.frame_rate * 10e-3)
+    n_fft = receiver.n_samples_per_frame * frequency_sample_size_frames
+    seconddata = np.zeros((4, n_fft))
+    narrowband_decimation = 8
+    band = Band("L", adc_sample_rate=1712e6, centre_frequency=1284e6)
+    nb_bandwidth = band.adc_sample_rate * 0.5 / narrowband_decimation
+    pass_channels = get_pass_channels(narrowband_decimation, n_channels)
+    centre = band.centre_frequency
+    baseband = np.fft.rfftfreq(n_fft, d=1.0 / receiver.bandwidth)
+    f_pass_lo = (pass_channels.start - n_channels / 2) * nb_bandwidth / n_channels + centre
+    f_pass_hi = (pass_channels.stop - n_channels / 2) * nb_bandwidth / n_channels + centre
+    x_lower_all = centre - receiver.bandwidth / 2 + baseband
+    x_upper_all = centre + baseband
+    lower_bins = np.flatnonzero((x_lower_all >= f_pass_lo) & (x_lower_all < centre))
+    upper_bins = np.flatnonzero((x_upper_all >= centre) & (x_upper_all < f_pass_hi))
+    x_by_thread = (
+        x_lower_all[lower_bins],
+        x_lower_all[lower_bins],
+        x_upper_all[upper_bins],
+        x_upper_all[upper_bins],
+    )
+    bins_by_thread = (lower_bins, lower_bins, upper_bins, upper_bins)
+    fig_order = {
+        0: "X Lower",
+        1: "Y Lower",
+        2: "X Upper",
+        3: "Y Upper",
+    }
     for i in range(4):
-        lines.append(axs[i].plot(sample_numbers, seconddata[i])[0])
-        axs[i].set_ylabel(i)
-        axs[i].set_xlabel("Sample number")
+        lines.append(axs[i].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
+        axs[i].set_ylabel(f"{i}'s magnitude (dB)")
+        axs[i].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
+    for i in range(4):
+        lines.append(axs[i + 4].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
+        axs[i + 4].set_ylabel(f"{i}'s phase (rad)")
+        axs[i + 4].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
     if args.interactive:
         fig.canvas.mpl_connect("close_event", lambda event: receiver.close())
         plt.ion()
         plt.show()
     logger.info("Starting to receive framesets")
+    plt.title(f"VDIF FFTs")
     counter = 0
     async for chunk in receiver.complete_framesets():
         counter += 1
@@ -572,18 +645,33 @@ async def async_main(args: argparse.Namespace) -> None:
             seconddata[
                 frame.thread_id, (counter - 1) * receiver.n_samples_per_frame : (counter) * receiver.n_samples_per_frame
             ] = vdif_frame.data.reshape(-1)
-            # seconddata[frame.thread_id, (counter-1)*receiver.n_samples_per_frame:(counter)*receiver.n_samples_per_frame] = np.zeros((receiver.n_samples_per_frame,))
-        if counter == receiver.frame_rate:
+        if counter == frequency_sample_size_frames:
             # update line
+            # this takes a while so let's pause the receiver
+            receiver.pause()
+            logger.info("Generating Image")
+            await asyncio.sleep(1)
+            # do a fourier transform of the time domain data here and plot the magnitude and phase
             for i in range(4):
-                lines[i].set_data(sample_numbers, seconddata[i, :])
+                fft_data = np.fft.rfft(seconddata[i])[bins_by_thread[i]]
+                threshold = np.max(np.abs(fft_data)) / 10000
+                fft_data[np.abs(fft_data) < threshold] = 0
+                # as dBm
+                magnitude = 10 * np.log10(np.abs(fft_data))
+                phase = np.angle(fft_data)
+                lines[i].set_data(x_by_thread[i], magnitude)
+                lines[i + 4].set_data(x_by_thread[i], phase)
                 axs[i].relim()
                 axs[i].autoscale_view()
-            plt.title(f"Second {chunk.timestamp.seconds}")
+                axs[i + 4].relim()
+                axs[i + 4].autoscale_view()
+
             if not args.interactive:
-                plt.savefig(f"{chunk.timestamp.seconds}.png")
+                plt.savefig(f"rep.png")
             logger.info("Wrote second %d", chunk.timestamp.seconds)
-            return
+            counter = 0
+            await asyncio.sleep(1)
+            receiver.resume()
 
 
 if __name__ == "__main__":
