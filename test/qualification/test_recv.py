@@ -49,7 +49,7 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     another for the difference to be visible.
     """
     identity_size = ceil(sqrt(samples_per_frame))
-    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
+    # even though we only have 2 bits per sample, np.array can do minimum 8 bits per sample
     identity_data = np.identity(identity_size, dtype=NP_DTYPE)
     # the identity matrix size is rounded up to the nearest square number, correct it.
     identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
