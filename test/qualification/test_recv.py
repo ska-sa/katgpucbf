@@ -20,6 +20,7 @@ import io
 import socket
 import struct
 from collections.abc import Buffer, Callable, Iterable
+from math import ceil, sqrt
 from unittest import mock
 
 import aiokatcp
@@ -34,8 +35,26 @@ from qualification.recv import TiedArrayResampledVoltageReceiver, VDIFTimestamp
 SAMPLES_PER_FRAME = 8000
 BANDWIDTH = 64e6
 FRAME_RATE = round(BANDWIDTH / SAMPLES_PER_FRAME)
+NP_DTYPE = np.int8
+NP_DTYPE_SIZE_BITS = np.dtype(NP_DTYPE).itemsize * 8
+BYTES_PER_NP_ARRAY_FOR_FRAME = SAMPLES_PER_FRAME * (NP_DTYPE_SIZE_BITS // 8)  # The size of the numpy array for a frame.
 THREADS = 4
 FRAME_RATE_THREADS = FRAME_RATE * THREADS
+
+
+def create_identity_data(samples_per_frame: int) -> np.ndarray:
+    """Create an identity data array use as payload for a VDIF frame.
+
+    Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
+    another for the difference to be visible.
+    """
+    identity_size = ceil(sqrt(samples_per_frame))
+    # even though we only have 2 bits per sample, np.array can do minimum 8 bits per sample
+    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
+    # the identity matrix size is rounded up to the nearest square number, correct it.
+    identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
+    # Quantization of -1 and 1 maps to itself in a 2-bit representation.
+    return (np.ones_like(identity_data) * -1) + identity_data * 2
 
 
 def make_vtp_packet(
@@ -47,7 +66,10 @@ def make_vtp_packet(
     ref_epoch: int = 0,
 ) -> bytes:
     """Build a VTP packet (8-byte seq header + VDIF frame)."""
-    data = np.zeros((SAMPLES_PER_FRAME, 1), dtype=np.float32)
+    data = create_identity_data(SAMPLES_PER_FRAME)
+    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
+
     frame = BasebandVDIFFrame.fromdata(
         data,
         frame_nr=frame_nr,
@@ -402,6 +424,26 @@ class TestTiedArrayResampledVoltageReceiver:
         assert len(framesets[0].frames) == 4
         assert framesets[1].timestamp == VDIFTimestamp(seconds=98, frame_nr=10, ref_epoch=0, frame_rate=FRAME_RATE)
         assert len(framesets[1].frames) == 4
+
+    async def test_receive_framesets_raw_data_correct(
+        self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
+    ) -> None:
+        """Verify raw data can be correctly reconstructed from the VDIF frame."""
+        receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
+        mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
+            [
+                make_vtp_packet(0, frame_nr=0, seconds=100, thread_id=0),
+                make_vtp_packet(1, frame_nr=0, seconds=100, thread_id=1),
+                make_vtp_packet(2, frame_nr=0, seconds=100, thread_id=2),
+                make_vtp_packet(3, frame_nr=0, seconds=100, thread_id=3),
+                make_vtp_packet(1000, frame_nr=0, seconds=101, thread_id=0),
+            ]
+        )
+        frameset = await anext(receiver.complete_framesets())
+        for frame in frameset.frames:
+            vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
+            assert vdif_frame.shape == (SAMPLES_PER_FRAME, 1)
+            assert np.allclose(vdif_frame.data, create_identity_data(SAMPLES_PER_FRAME))
 
     async def test_timestamp_leap_seconds(self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket) -> None:
         """Timestamp is calculated correctly from the epoch."""
