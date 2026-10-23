@@ -25,6 +25,7 @@ import math
 import socket
 import struct
 import sys
+import time
 from collections.abc import AsyncGenerator, Buffer, Sequence
 from dataclasses import dataclass
 
@@ -48,6 +49,10 @@ TIMESTAMP = 0x1600
 FREQUENCY = 0x4103
 logger = logging.getLogger(__name__)
 SAMPLES_PER_FRAME = 8000
+CUTOFF = False
+ZOOM = True
+PHASE_FREQ = 1260e6
+SYNC = True
 
 
 async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
@@ -176,6 +181,10 @@ class TiedArrayResampledVoltageReceiver:
         multicast_groups: list[Endpoint],
         sock: socket.socket | None = None,
         reorder_window: int = 32,
+        scale_factor_timestamp: float = 1.0,
+        vlbi_delay: float = 0.0,
+        steady_state_timestamp: int = 0,
+        sync_time: float = 0.0,
     ) -> None:
         self.stream_name = stream_name
         self.multicast_groups = multicast_groups
@@ -189,13 +198,11 @@ class TiedArrayResampledVoltageReceiver:
             if multicast_group.port != port:
                 raise ValueError("All multicast groups must use the same port")
 
-        self.steady_state_timestamp: float = 0.0
-
-        self.scale_factor_timestamp: float = 1
+        self.scale_factor_timestamp: float = scale_factor_timestamp
         self.bandwidth: float = bandwidth
         self.n_samples_per_frame: int = samples_per_frame
         self.frame_rate = round(self.bandwidth / self.n_samples_per_frame)
-        self.sync_time: float = 0.0
+        self.sync_time: float = sync_time
         self.sample_bytes_per_frame = self.n_samples_per_frame * self.veng_out_bits_per_sample // 8
         packet_size = self.sample_bytes_per_frame + VDIF_HEADER_SIZE + self.VTP_HEADER_SIZE
         self._packet = bytearray(packet_size)
@@ -226,6 +233,8 @@ class TiedArrayResampledVoltageReceiver:
         self.last_frameset_timestamp: int | None = None
         self.filter_shift = 0.0
         self.listening = True
+        self.vlbi_delay = vlbi_delay
+        self.steady_state_timestamp = steady_state_timestamp
 
     async def _next_packet(self) -> None:
         if not self.listening:
@@ -276,7 +285,10 @@ class TiedArrayResampledVoltageReceiver:
     def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
         """Compute the minimum linearised frame number that is at least `min_time`."""
         ref_time = VDIFTimestamp(0, 0, ref_epoch, frame_rate=self.frame_rate).timestamp
+        logger.debug("ref_time: %s", ref_time)
+        logger.debug("min_time: %s", min_time)
         to_wait_sec = (min_time - ref_time).sec
+        logger.debug("to_wait_sec: %s", to_wait_sec)
         return math.ceil(to_wait_sec * self.frame_rate)
 
     async def complete_framesets(
@@ -311,7 +323,7 @@ class TiedArrayResampledVoltageReceiver:
             min_timestamp / self.scale_factor_timestamp, format="sec", scale="tai"
         )
 
-        min_time += TimeDelta(0.0, format="sec", scale="tai") + self.filter_shift
+        min_time += TimeDelta(self.vlbi_delay, format="sec", scale="tai") + self.filter_shift
 
         # Computing timestamps is expensive. So once we know the frame rate and
         # ref epoch, we can convert it into a minimum linearised frame number.
@@ -341,6 +353,7 @@ class TiedArrayResampledVoltageReceiver:
                                 prefix.sort(key=lambda frame: frame.thread_id)
                                 frame0_linear = frame0.timestamp.linear
                                 if frame0_linear >= min_frame:
+                                    logger.debug("min frame: %d, frame0_linear: %d", min_frame, frame0_linear)
                                     n_missed_framesets = 0
                                     if self.last_frameset_timestamp is not None:
                                         n_missed_framesets = frame0_linear - self.last_frameset_timestamp - 1
@@ -392,6 +405,14 @@ class TiedArrayResampledVoltageReceiver:
         """Wait until a complete VDIF frameset is available and return the timestamp."""
         async with asyncio.timeout(timeout):
             return (await self.next_complete_frameset(min_timestamp=min_timestamp)).timestamp
+
+    async def discard_pending(self) -> None:
+        """Read and drop socket data until this task is cancelled."""
+        while True:
+            await asyncio.get_event_loop().sock_recv_into(self.sock, self._packet)
+            self.buffer.clear()
+            self.min_seq_id = 0
+            self.last_frameset_timestamp = None
 
     def pause(self) -> None:
         """Pause the receiver."""
@@ -486,6 +507,13 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     return (np.ones_like(identity_data) * -1) + identity_data * 2
 
 
+def create_dirac_data(samples_per_frame: int, index: int) -> np.ndarray:
+    """Create a dirac data array use as payload for a VDIF frame."""
+    data = np.zeros((samples_per_frame, 1), dtype=NP_DTYPE) - 1
+    data[index] = 1
+    return data
+
+
 def make_vtp_packet(
     seq_id: int,
     frame_nr: int,
@@ -495,7 +523,8 @@ def make_vtp_packet(
     ref_epoch: int = 0,
 ) -> bytes:
     """Build a VTP packet (8-byte seq header + VDIF frame)."""
-    data = create_identity_data(SAMPLES_PER_FRAME)
+    # data = create_identity_data(SAMPLES_PER_FRAME)
+    data = create_dirac_data(SAMPLES_PER_FRAME, 1)
     assert data.shape == (SAMPLES_PER_FRAME, 1)
     assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
     frame = BasebandVDIFFrame.fromdata(
@@ -571,6 +600,12 @@ async def async_main(args: argparse.Namespace) -> None:
                 bandwidth=bandwidth,
                 samples_per_frame=samples_per_frame,
                 multicast_groups=multicast_groups,
+                scale_factor_timestamp=float(
+                    await sensor_val("tied-array-resampled-voltage.scale-factor-timestamp", float)
+                ),
+                vlbi_delay=float(await sensor_val("tied-array-resampled-voltage.delay", float)),
+                steady_state_timestamp=int(await sensor_val("sim.m800.1712000000.0.steady-state-timestamp", int)),
+                sync_time=float(await sensor_val("tied-array-resampled-voltage.sync-time", float)),
             )
 
     else:
@@ -594,34 +629,45 @@ async def async_main(args: argparse.Namespace) -> None:
     axs = axs.ravel()  # Now that the plot is several columns wide, this comes as a 2-d array. Which is a pain.
     axs = axs[:8]  # If there are gaps at the end, ignore them
     lines = []
-    n_channels = 32768
-    frequency_sample_size_frames = round(receiver.frame_rate * 10e-3)
+    bandpass_n_channels = 32768
+    target_fft_n_channels = 200
+    frequency_sample_size_frames = math.ceil(target_fft_n_channels * 2 / receiver.n_samples_per_frame)
     n_fft = receiver.n_samples_per_frame * frequency_sample_size_frames
-    seconddata = np.zeros((4, n_fft))
+    timedata = np.zeros((4, n_fft))
     narrowband_decimation = 8
     band = Band("L", adc_sample_rate=1712e6, centre_frequency=1284e6)
     nb_bandwidth = band.adc_sample_rate * 0.5 / narrowband_decimation
-    pass_channels = get_pass_channels(narrowband_decimation, n_channels)
+    pass_channels = get_pass_channels(narrowband_decimation, bandpass_n_channels)
     centre = band.centre_frequency
     baseband = np.fft.rfftfreq(n_fft, d=1.0 / receiver.bandwidth)
-    f_pass_lo = (pass_channels.start - n_channels / 2) * nb_bandwidth / n_channels + centre
-    f_pass_hi = (pass_channels.stop - n_channels / 2) * nb_bandwidth / n_channels + centre
+    # Bin 0 is the outer edge of a half, Nyquist is the centre.
     x_lower_all = centre - receiver.bandwidth / 2 + baseband
     x_upper_all = centre + baseband
-    lower_bins = np.flatnonzero((x_lower_all >= f_pass_lo) & (x_lower_all < centre))
-    upper_bins = np.flatnonzero((x_upper_all >= centre) & (x_upper_all < f_pass_hi))
-    x_by_thread = (
-        x_lower_all[lower_bins],
-        x_lower_all[lower_bins],
-        x_upper_all[upper_bins],
-        x_upper_all[upper_bins],
-    )
-    bins_by_thread = (lower_bins, lower_bins, upper_bins, upper_bins)
+    if ZOOM:
+        f_pass_lo = (pass_channels.start - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
+        f_pass_hi = (pass_channels.stop - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
+        lower_bins = np.flatnonzero((x_lower_all >= f_pass_lo) & (x_lower_all < centre))
+        upper_bins = np.flatnonzero((x_upper_all >= centre) & (x_upper_all < f_pass_hi))
+        x_by_thread = (
+            x_upper_all[upper_bins],
+            x_upper_all[upper_bins],
+            x_lower_all[lower_bins],
+            x_lower_all[lower_bins],
+        )
+        bins_by_thread = (upper_bins, upper_bins, lower_bins, lower_bins)
+    else:
+        x_by_thread = (baseband, baseband, baseband, baseband)
+        bins_by_thread = (
+            np.arange(baseband.size),
+            np.arange(baseband.size),
+            np.arange(baseband.size),
+            np.arange(baseband.size),
+        )
     fig_order = {
-        0: "X Lower",
-        1: "Y Lower",
-        2: "X Upper",
-        3: "Y Upper",
+        0: "X Upper",
+        1: "Y Upper",
+        2: "X Lower",
+        3: "Y Lower",
     }
     for i in range(4):
         lines.append(axs[i].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
@@ -635,43 +681,82 @@ async def async_main(args: argparse.Namespace) -> None:
         fig.canvas.mpl_connect("close_event", lambda event: receiver.close())
         plt.ion()
         plt.show()
+
+    logger.info("Bins and frequencies:")
+    logger.info("N FFT: %s", n_fft)
+    logger.info("Frequency sample size frames: %s", frequency_sample_size_frames)
+    logger.info("Target FFT n channels: %s", target_fft_n_channels)
+    logger.info("Bandpass n channels: %s", bandpass_n_channels)
+    logger.info("Narrowband decimation: %s", narrowband_decimation)
+    logger.info("Band: %s", band)
+    logger.info("NB bandwidth: %s", nb_bandwidth)
+    logger.info("Pass channels: %s", pass_channels)
+    logger.info("Centre: %s", centre)
+    await asyncio.sleep(4)
     logger.info("Starting to receive framesets")
     plt.title(f"VDIF FFTs")
     counter = 0
-    async for chunk in receiver.complete_framesets():
+    min_timestamp = None
+    while True:
+        chunk = await anext(receiver.complete_framesets(min_timestamp=min_timestamp))
+        if receiver.steady_state_timestamp == 0:
+            logger.info("Steady state timestamp is zero")
         counter += 1
         for frame in chunk.frames:
             vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
-            seconddata[
+            timedata[
                 frame.thread_id, (counter - 1) * receiver.n_samples_per_frame : (counter) * receiver.n_samples_per_frame
             ] = vdif_frame.data.reshape(-1)
         if counter == frequency_sample_size_frames:
+            # timedata = np.zeros((4, n_fft))
+            # for i in range(4):
+            #     timedata[i][1] = 1
             # update line
             # this takes a while so let's pause the receiver
-            receiver.pause()
             logger.info("Generating Image")
-            await asyncio.sleep(1)
+            logger.debug("Timedata: %s", timedata[0][0])
+            logger.debug("Timedata: %s", timedata[0][1])
+            logger.debug("Timedata: %s", timedata[0][7999])
+            logger.debug("Min Timestamp: %s", min_timestamp)
+
             # do a fourier transform of the time domain data here and plot the magnitude and phase
+            s_phase = np.zeros((4))
             for i in range(4):
-                fft_data = np.fft.rfft(seconddata[i])[bins_by_thread[i]]
-                threshold = np.max(np.abs(fft_data)) / 10000
-                fft_data[np.abs(fft_data) < threshold] = 0
+                fft_data = np.fft.rfft(timedata[i])[bins_by_thread[i]]
+                if CUTOFF:
+                    threshold = np.max(np.abs(fft_data)) / 10000
+                    fft_data[np.abs(fft_data) < threshold] = 0
                 # as dBm
                 magnitude = 10 * np.log10(np.abs(fft_data))
                 phase = np.angle(fft_data)
+                p_tmp = phase[np.abs(x_by_thread[i] - PHASE_FREQ) < 10000]
+                if p_tmp.size > 0:
+                    s_phase[i] = p_tmp[len(p_tmp) // 2]
+                else:
+                    s_phase[i] = np.nan
                 lines[i].set_data(x_by_thread[i], magnitude)
                 lines[i + 4].set_data(x_by_thread[i], phase)
                 axs[i].relim()
                 axs[i].autoscale_view()
                 axs[i + 4].relim()
                 axs[i + 4].autoscale_view()
+            plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is {', '.join(f'{s_p:.2f} rad' for s_p in s_phase)})")
 
             if not args.interactive:
                 plt.savefig(f"rep.png")
             logger.info("Wrote second %d", chunk.timestamp.seconds)
             counter = 0
-            await asyncio.sleep(1)
-            receiver.resume()
+            time.sleep(2)
+            while True:
+                client = await aiokatcp.Client.connect(host, port)
+                async with client:
+                    new_min_timestamp = await client.sensor_value("sim.m800.1712000000.0.steady-state-timestamp", int)
+                    if new_min_timestamp != min_timestamp:
+                        min_timestamp = new_min_timestamp
+                        logger.info("New min timestamp: %s", min_timestamp)
+                        break
+                logger.info("Waiting for sync signal")
+                await asyncio.sleep(1)
 
 
 if __name__ == "__main__":
