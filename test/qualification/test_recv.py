@@ -53,7 +53,7 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     identity_data = np.identity(identity_size, dtype=NP_DTYPE)
     # the identity matrix size is rounded up to the nearest square number, correct it.
     identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
-    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
+    # Quantization of -1 and 1 maps to itself in a 2-bit representation.
     return (np.ones_like(identity_data) * -1) + identity_data * 2
 
 
