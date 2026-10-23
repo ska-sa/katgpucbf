@@ -423,7 +423,7 @@ async def _cbf_config_and_description(
             "src_streams": [f"tied-array-channelised-voltage-0{pol_name}" for pol_name in "xy"],
             "n_chans": 2,
             "pols": ["x", "y"],
-            "station_id": "me",
+            "station_id": "Me",
         }
         vlbi_beams = 1
 
