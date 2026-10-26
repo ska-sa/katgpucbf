@@ -44,8 +44,8 @@ from .recv import (
     BaselineCorrelationProductsReceiver,
     TiedArrayChannelisedVoltageReceiver,
     TiedArrayResampledVoltageReceiver,
-    diff_framesets,
-    diff_stats,
+    diff_spead2_stats,
+    diff_vdif_stats,
 )
 from .types import AsyncRunner
 
@@ -766,7 +766,7 @@ async def receive_baseline_correlation_products(
     # data flowing at the start.
     if "baseline-correlation_products" in capture_start_streams:
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
-    with diff_stats(receiver) as delta_stats:
+    with diff_spead2_stats(receiver) as delta_stats:
         yield receiver
     pdf_report.spead2_statistics("baseline_correlation_products", delta_stats)
 
@@ -790,7 +790,7 @@ async def receive_tied_array_channelised_voltage(
         if config["type"] == "gpucbf.tied_array_channelised_voltage"
     ):
         await receiver.wait_complete_chunk(max_delay=0, timeout=3 * DEFAULT_TIMEOUT)
-    with diff_stats(receiver) as delta_stats:
+    with diff_spead2_stats(receiver) as delta_stats:
         yield receiver
     pdf_report.spead2_statistics("tied_array_channelised_voltage", delta_stats)
 
@@ -807,7 +807,7 @@ async def receive_tied_array_resampled_voltage(
     if "tied-array-resampled-voltage" in capture_start_streams:
         assert receiver is not None
         await receiver.wait_complete_frameset(timeout=3 * DEFAULT_TIMEOUT)
-        with diff_framesets(receiver) as delta_stats:
+        with diff_vdif_stats(receiver) as delta_stats:
             yield receiver
         pdf_report.vdif_statistics("tied_array_resampled_voltage", delta_stats)
     else:
