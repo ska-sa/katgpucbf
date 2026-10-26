@@ -66,8 +66,8 @@ def make_vtp_packet(
     ref_epoch: int = 0,
 ) -> bytes:
     """Build a VTP packet (8-byte seq header + VDIF frame)."""
-    data = create_identity_data(SAMPLES_PER_FRAME)
-    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    data = create_identity_data(samples_per_frame)
+    assert data.shape == (samples_per_frame, 1)
     assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
 
     frame = BasebandVDIFFrame.fromdata(
