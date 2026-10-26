@@ -34,6 +34,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from astropy.time import Time, TimeDelta
+from baseband.base.encoding import encode_2bit_base
 from baseband.vdif import VDIFFrame as BasebandVDIFFrame
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
@@ -49,10 +50,15 @@ TIMESTAMP = 0x1600
 FREQUENCY = 0x4103
 logger = logging.getLogger(__name__)
 SAMPLES_PER_FRAME = 8000
-CUTOFF = False
+CUTOFF = True
 ZOOM = True
 PHASE_FREQ = 1260e6
 SYNC = True
+SAMPLE_DELTA = 1 / (8000 * 8000)  # TODO actually calculate this
+
+window_sample_time = range(0, 8000) * SAMPLE_DELTA
+phase_signal = np.sin(2 * math.pi * PHASE_FREQ * window_sample_time)
+phase_signal_quantised = encode_2bit_base(phase_signal)
 
 
 async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
@@ -618,16 +624,18 @@ async def async_main(args: argparse.Namespace) -> None:
             sock=FakeSocket(),
         )
 
+    # X and Y polarisations, freq & phase for frequency domain,
+    # voltage and analysis signals for time domain, ~16 plots in total.
     fig, axs = plt.subplots(
         receiver.n_chans,
-        2 * 2,  # X and Y polarisations, freq & phase
+        2 * 4,
         sharex="col",
         squeeze=False,
         figsize=(12, 8) if args.interactive else (24, 16),
         constrained_layout=True,
     )
     axs = axs.ravel()  # Now that the plot is several columns wide, this comes as a 2-d array. Which is a pain.
-    axs = axs[:8]  # If there are gaps at the end, ignore them
+    axs = axs[:16]  # If there are gaps at the end, ignore them
     lines = []
     bandpass_n_channels = 32768
     target_fft_n_channels = 200
@@ -677,6 +685,17 @@ async def async_main(args: argparse.Namespace) -> None:
         lines.append(axs[i + 4].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
         axs[i + 4].set_ylabel(f"{i}'s phase (rad)")
         axs[i + 4].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
+    x_by_time = np.arange(0, 8000 * SAMPLE_DELTA, SAMPLE_DELTA)
+    for i in range(4):
+        lines.append(axs[i + 8].plot(x_by_time, np.zeros(x_by_time.shape))[0])
+        axs[i + 8].set_ylabel(f"{i}'s time domain voltage")
+        axs[i + 8].set_xlabel("time (s)")
+    axs[12].set_title("Time domain voltage of sythetic signal")
+    lines.append(axs[12].plot(x_by_time, np.zeros(x_by_time.shape))[0])
+    axs[13].set_title("Time domain voltage of multplication")
+    lines.append(axs[13].plot(x_by_time, np.zeros(x_by_time.shape))[0])
+    axs[14].set_title("arccos of time domain voltage of multiplication")
+    lines.append(axs[14].plot(x_by_time, np.zeros(x_by_time.shape))[0])
     if args.interactive:
         fig.canvas.mpl_connect("close_event", lambda event: receiver.close())
         plt.ion()
@@ -694,7 +713,7 @@ async def async_main(args: argparse.Namespace) -> None:
     logger.info("Centre: %s", centre)
     await asyncio.sleep(4)
     logger.info("Starting to receive framesets")
-    plt.title(f"VDIF FFTs")
+    plt.title("VDIF FFTs")
     counter = 0
     min_timestamp = None
     while True:
@@ -720,33 +739,46 @@ async def async_main(args: argparse.Namespace) -> None:
             logger.debug("Min Timestamp: %s", min_timestamp)
 
             # do a fourier transform of the time domain data here and plot the magnitude and phase
-            s_phase = np.zeros((4))
+            s_phase = np.zeros(4)
             for i in range(4):
                 fft_data = np.fft.rfft(timedata[i])[bins_by_thread[i]]
                 if CUTOFF:
-                    threshold = np.max(np.abs(fft_data)) / 10000
+                    threshold = np.max(np.abs(fft_data)) / 10
                     fft_data[np.abs(fft_data) < threshold] = 0
                 # as dBm
                 magnitude = 10 * np.log10(np.abs(fft_data))
                 phase = np.angle(fft_data)
-                p_tmp = phase[np.abs(x_by_thread[i] - PHASE_FREQ) < 10000]
-                if p_tmp.size > 0:
-                    s_phase[i] = p_tmp[len(p_tmp) // 2]
-                else:
-                    s_phase[i] = np.nan
+                # imag = np.imag(fft_data)
+                # get the phase via time domain data instead? https://dsp.stackexchange.com/questions/75907/signal-processing-techniques-for-accurate-phase-measurement
+                # p_tmp = phase[np.abs(x_by_thread[i] - PHASE_FREQ) < 10000]
+
+                theta = np.acos(2 * fft_data * phase_signal / (1 * 8000 * SAMPLE_DELTA))
+                s_phase[i] = theta
+                # if p_tmp.size > 0:
+                #     s_phase[i] = p_tmp[len(p_tmp) // 2]
+                # else:
+                #     s_phase[i] = np.nan
                 lines[i].set_data(x_by_thread[i], magnitude)
                 lines[i + 4].set_data(x_by_thread[i], phase)
+                lines[i + 8].set_data(x_by_time, timedata[i])
+                if i == 0:
+                    lines[12].set_data(x_by_time, phase_signal)
+                    lines[13].set_data(x_by_time, timedata[i] * phase_signal)
+                    lines[14].set_data(x_by_time, s_phase)
                 axs[i].relim()
                 axs[i].autoscale_view()
                 axs[i + 4].relim()
                 axs[i + 4].autoscale_view()
-            plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is {', '.join(f'{s_p:.2f} rad' for s_p in s_phase)})")
+            # plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is {', '.join(f'{s_p:.2f} rad' for s_p in s_phase)})")
+            plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is in phase with the synthetic signal)")
 
             if not args.interactive:
-                plt.savefig(f"rep.png")
+                plt.savefig("rep.png")
             logger.info("Wrote second %d", chunk.timestamp.seconds)
             counter = 0
             time.sleep(2)
+            if args.fake_data:
+                continue
             while True:
                 client = await aiokatcp.Client.connect(host, port)
                 async with client:
@@ -756,7 +788,7 @@ async def async_main(args: argparse.Namespace) -> None:
                         logger.info("New min timestamp: %s", min_timestamp)
                         break
                 logger.info("Waiting for sync signal")
-                await asyncio.sleep(1)
+                await asyncio.sleep(0)
 
 
 if __name__ == "__main__":
