@@ -34,7 +34,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from astropy.time import Time, TimeDelta
-from baseband.base.encoding import encode_2bit_base
+from baseband.base.encoding import decoder_levels, encode_2bit_base
 from baseband.vdif import VDIFFrame as BasebandVDIFFrame
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
@@ -56,9 +56,10 @@ PHASE_FREQ = 1260e6
 SYNC = True
 SAMPLE_DELTA = 1 / (8000 * 8000)  # TODO actually calculate this
 
-window_sample_time = range(0, 8000) * SAMPLE_DELTA
+window_sample_time = np.arange(8000) * SAMPLE_DELTA
 phase_signal = np.sin(2 * math.pi * PHASE_FREQ * window_sample_time)
-phase_signal_quantised = encode_2bit_base(phase_signal)
+phase_signal_quantised_sin = decoder_levels[2][encode_2bit_base(phase_signal)]
+phase_signal_quantised_cos = decoder_levels[2][encode_2bit_base(np.cos(2 * math.pi * PHASE_FREQ * window_sample_time))]
 
 
 async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
@@ -510,14 +511,63 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     # the identity matrix size is rounded up to the nearest square number, correct it.
     identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
     # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
-    return (np.ones_like(identity_data) * -1) + identity_data * 2
+    data = (np.ones_like(identity_data) * -1) + identity_data * 2
+    data = data.reshape(-1, 1)[:samples_per_frame]
+    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    return data
+
+
+def create_noisy_sine_data(samples_per_frame: int) -> np.ndarray:
+    """Create an identity data array use as payload for a VDIF frame.
+
+    Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
+    another for the difference to be visible.
+    """
+    identity_size = math.ceil(math.sqrt(samples_per_frame))
+    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
+    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
+    # the identity matrix size is rounded up to the nearest square number, correct it.
+    identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
+    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
+    # data = ((np.ones_like(identity_data) * -1) + identity_data * 2) + window_sample_time
+    data = phase_signal_quantised_sin
+    data = data.reshape(-1, 1)[:samples_per_frame]
+
+    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    return data
+
+
+def create_noisy_sine_data_offset_phase(samples_per_frame: int, offset_phase: float) -> np.ndarray:
+    """Create an identity data array use as payload for a VDIF frame.
+
+    Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
+    another for the difference to be visible.
+    """
+    identity_size = math.ceil(math.sqrt(samples_per_frame))
+    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
+    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
+    # the identity matrix size is rounded up to the nearest square number, correct it.
+    identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
+    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
+    # data = ((np.ones_like(identity_data) * -1) + identity_data * 2) + window_sample_time
+    # TODO: use the offset phase as a factor of the frequency to determine
+    # the correct number of samples to shift. theta = 2 * np.pi * frequency * time
+    data = np.roll(phase_signal_quantised_sin, 5)
+    data = data.reshape(-1, 1)[:samples_per_frame]
+
+    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    return data
 
 
 def create_dirac_data(samples_per_frame: int, index: int) -> np.ndarray:
     """Create a dirac data array use as payload for a VDIF frame."""
     data = np.zeros((samples_per_frame, 1), dtype=NP_DTYPE) - 1
     data[index] = 1
+    assert data.shape == (SAMPLES_PER_FRAME, 1)
     return data
+
+
+default_data = np.zeros((SAMPLES_PER_FRAME, 1), dtype=NP_DTYPE)
 
 
 def make_vtp_packet(
@@ -527,12 +577,10 @@ def make_vtp_packet(
     thread_id: int,
     samples_per_frame: int = SAMPLES_PER_FRAME,
     ref_epoch: int = 0,
+    data=default_data,
 ) -> bytes:
     """Build a VTP packet (8-byte seq header + VDIF frame)."""
-    # data = create_identity_data(SAMPLES_PER_FRAME)
-    data = create_dirac_data(SAMPLES_PER_FRAME, 1)
-    assert data.shape == (SAMPLES_PER_FRAME, 1)
-    assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
+    # assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
     frame = BasebandVDIFFrame.fromdata(
         data,
         frame_nr=frame_nr,
@@ -552,11 +600,12 @@ def make_vtp_packet(
 
 
 class FakeSocket:
-    def __init__(self):
+    def __init__(self, data_fnc=create_noisy_sine_data):
         self.seq_id = 0
         self.frame_nr = 0
         self.seconds = 1
         self.thread_id = 0
+        self.data_fnc = data_fnc
 
     def recv_into(self, buf: Buffer) -> int:
         mv = memoryview(buf).cast("B")
@@ -568,7 +617,9 @@ class FakeSocket:
             self.seconds += 1
             logger.debug("Generating second %d", self.seconds)
 
-        packet = make_vtp_packet(self.seq_id, self.frame_nr, self.seconds, self.thread_id)
+        packet = make_vtp_packet(
+            self.seq_id, self.frame_nr, self.seconds, self.thread_id, data=self.data_fnc(SAMPLES_PER_FRAME)
+        )
         self.seq_id += 1
         self.thread_id += 1
         if self.seconds >= 11:
@@ -621,7 +672,9 @@ async def async_main(args: argparse.Namespace) -> None:
             bandwidth=int(64e6),
             samples_per_frame=8000,
             multicast_groups=[Endpoint("127.0.0.1", 5001)],
-            sock=FakeSocket(),
+            # sock=FakeSocket(data_fnc=lambda x: create_dirac_data(x, 1)),
+            # sock=FakeSocket(data_fnc=create_noisy_sine_data),
+            sock=FakeSocket(data_fnc=lambda x: create_noisy_sine_data_offset_phase(x, 180)),
         )
 
     # X and Y polarisations, freq & phase for frequency domain,
@@ -641,6 +694,7 @@ async def async_main(args: argparse.Namespace) -> None:
     target_fft_n_channels = 200
     frequency_sample_size_frames = math.ceil(target_fft_n_channels * 2 / receiver.n_samples_per_frame)
     n_fft = receiver.n_samples_per_frame * frequency_sample_size_frames
+    assert n_fft == 8000
     timedata = np.zeros((4, n_fft))
     narrowband_decimation = 8
     band = Band("L", adc_sample_rate=1712e6, centre_frequency=1284e6)
@@ -648,6 +702,8 @@ async def async_main(args: argparse.Namespace) -> None:
     pass_channels = get_pass_channels(narrowband_decimation, bandpass_n_channels)
     centre = band.centre_frequency
     baseband = np.fft.rfftfreq(n_fft, d=1.0 / receiver.bandwidth)
+    x_by_time = np.arange(n_fft) * SAMPLE_DELTA
+
     # Bin 0 is the outer edge of a half, Nyquist is the centre.
     x_lower_all = centre - receiver.bandwidth / 2 + baseband
     x_upper_all = centre + baseband
@@ -682,19 +738,18 @@ async def async_main(args: argparse.Namespace) -> None:
         axs[i].set_ylabel(f"{i}'s magnitude (dB)")
         axs[i].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
     for i in range(4):
-        lines.append(axs[i + 4].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
-        axs[i + 4].set_ylabel(f"{i}'s phase (rad)")
-        axs[i + 4].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
-    x_by_time = np.arange(0, 8000 * SAMPLE_DELTA, SAMPLE_DELTA)
+        lines.append(axs[i + 8].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
+        axs[i + 8].set_ylabel(f"{i}'s phase (rad)")
+        axs[i + 8].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
     for i in range(4):
-        lines.append(axs[i + 8].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-        axs[i + 8].set_ylabel(f"{i}'s time domain voltage")
-        axs[i + 8].set_xlabel("time (s)")
-    axs[12].set_title("Time domain voltage of sythetic signal")
+        lines.append(axs[i + 4].plot(x_by_time, np.zeros(x_by_time.shape))[0])
+        axs[i + 4].set_ylabel(f"{i}'s time domain voltage")
+        axs[i + 4].set_xlabel("time (s)")
+    axs[12].set_title("sin multplication")
     lines.append(axs[12].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-    axs[13].set_title("Time domain voltage of multplication")
+    axs[13].set_title("cos multplication")
     lines.append(axs[13].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-    axs[14].set_title("arccos of time domain voltage of multiplication")
+    axs[14].set_title("zz")
     lines.append(axs[14].plot(x_by_time, np.zeros(x_by_time.shape))[0])
     if args.interactive:
         fig.canvas.mpl_connect("close_event", lambda event: receiver.close())
@@ -715,17 +770,19 @@ async def async_main(args: argparse.Namespace) -> None:
     logger.info("Starting to receive framesets")
     plt.title("VDIF FFTs")
     counter = 0
+    integration_factor = 1 * SAMPLE_DELTA
+
     min_timestamp = None
     while True:
         chunk = await anext(receiver.complete_framesets(min_timestamp=min_timestamp))
         if receiver.steady_state_timestamp == 0:
             logger.info("Steady state timestamp is zero")
-        counter += 1
         for frame in chunk.frames:
             vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
-            timedata[
-                frame.thread_id, (counter - 1) * receiver.n_samples_per_frame : (counter) * receiver.n_samples_per_frame
+            timedata[frame.thread_id][
+                counter * receiver.n_samples_per_frame : (counter + 1) * receiver.n_samples_per_frame
             ] = vdif_frame.data.reshape(-1)
+        counter += 1
         if counter == frequency_sample_size_frames:
             # timedata = np.zeros((4, n_fft))
             # for i in range(4):
@@ -752,7 +809,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 # get the phase via time domain data instead? https://dsp.stackexchange.com/questions/75907/signal-processing-techniques-for-accurate-phase-measurement
                 # p_tmp = phase[np.abs(x_by_thread[i] - PHASE_FREQ) < 10000]
 
-                theta = np.acos(2 * fft_data * phase_signal / (1 * 8000 * SAMPLE_DELTA))
+                theta = np.acos(np.sum(timedata[i] * phase_signal) * integration_factor)
                 s_phase[i] = theta
                 # if p_tmp.size > 0:
                 #     s_phase[i] = p_tmp[len(p_tmp) // 2]
@@ -760,13 +817,27 @@ async def async_main(args: argparse.Namespace) -> None:
                 #     s_phase[i] = np.nan
                 lines[i].set_data(x_by_thread[i], magnitude)
                 lines[i + 4].set_data(x_by_thread[i], phase)
+
                 lines[i + 8].set_data(x_by_time, timedata[i])
                 if i == 0:
-                    lines[12].set_data(x_by_time, phase_signal)
-                    lines[13].set_data(x_by_time, timedata[i] * phase_signal)
-                    lines[14].set_data(x_by_time, s_phase)
+                    _q = timedata[i] * phase_signal_quantised_sin
+                    lines[12].set_data(x_by_time, _q)
+                    axs[12].relim()
+                    axs[12].autoscale_view()
+                    _i = timedata[i] * phase_signal_quantised_cos
+                    lines[13].set_data(x_by_time, _i)
+                    axs[13].relim()
+                    axs[13].autoscale_view()
+                    # Summing I and Q is a boxcar lowpass of bandwidth fs/N
+                    # (8 kHz for 64 Msps and 8000 samples). That rejects the
+                    # double-frequency image and leaves one phase.
+                    theta = np.atan2(np.sum(_q), np.sum(_i))
+                    logger.info("Theta for thread %s: %.2f deg", i, np.degrees(theta))
+                    logger.info("----------------------------------")
                 axs[i].relim()
                 axs[i].autoscale_view()
+                axs[i + 8].relim()
+                axs[i + 8].autoscale_view()
                 axs[i + 4].relim()
                 axs[i + 4].autoscale_view()
             # plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is {', '.join(f'{s_p:.2f} rad' for s_p in s_phase)})")
