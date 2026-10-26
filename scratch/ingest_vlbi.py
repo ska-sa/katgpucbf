@@ -33,6 +33,7 @@ import aiokatcp
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.signal
 from astropy.time import Time, TimeDelta
 from baseband.base.encoding import decoder_levels, encode_2bit_base
 from baseband.vdif import VDIFFrame as BasebandVDIFFrame
@@ -46,20 +47,34 @@ CORR2_SENSOR_REMAP = {
     "antenna-channelised-voltage.adc-sample-rate": "adc-sample-rate",
 }
 # According to the ICD.
-TIMESTAMP = 0x1600
-FREQUENCY = 0x4103
 logger = logging.getLogger(__name__)
-SAMPLES_PER_FRAME = 8000
-CUTOFF = True
+SAMPLES_PER_FRAME = 20000
+CUTOFF = False
 ZOOM = True
-PHASE_FREQ = 1260e6
+PHASE_FREQ = 1290e6
 SYNC = True
-SAMPLE_DELTA = 1 / (8000 * 8000)  # TODO actually calculate this
+SAMPLE_DELTA = 1 / (3200 * 20000 * 2)  # TODO: actually calculate this
 
-window_sample_time = np.arange(8000) * SAMPLE_DELTA
-phase_signal = np.sin(2 * math.pi * PHASE_FREQ * window_sample_time)
-phase_signal_quantised_sin = decoder_levels[2][encode_2bit_base(phase_signal)]
+window_sample_time = np.arange(20000 * 2) * SAMPLE_DELTA
+phase_signal_quantised_sin = decoder_levels[2][encode_2bit_base(np.sin(2 * math.pi * PHASE_FREQ * window_sample_time))]
 phase_signal_quantised_cos = decoder_levels[2][encode_2bit_base(np.cos(2 * math.pi * PHASE_FREQ * window_sample_time))]
+SAMPLE_RATE = 1.0 / SAMPLE_DELTA
+SCAN_OFFSET = 0
+phase_signal_quantised_sin = np.roll(phase_signal_quantised_sin, SCAN_OFFSET, SCAN_OFFSET)
+phase_signal_quantised_cos = np.roll(phase_signal_quantised_cos, SCAN_OFFSET, SCAN_OFFSET)
+
+# PHASE_FREQ is above Nyquist, so the tone in the sampled voltage is this alias.
+PHASE_BASEBAND = abs(PHASE_FREQ) % SAMPLE_RATE
+if PHASE_BASEBAND > SAMPLE_RATE / 2:
+    PHASE_BASEBAND = SAMPLE_RATE - PHASE_BASEBAND
+BANDPASS_HALF_WIDTH = 10e3
+phase_bandpass_sos = scipy.signal.butter(
+    4,
+    [PHASE_BASEBAND - BANDPASS_HALF_WIDTH, PHASE_BASEBAND + BANDPASS_HALF_WIDTH],
+    btype="bandpass",
+    fs=SAMPLE_RATE,
+    output="sos",
+)
 
 
 async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
@@ -550,9 +565,12 @@ def create_noisy_sine_data_offset_phase(samples_per_frame: int, offset_phase: fl
     identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
     # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
     # data = ((np.ones_like(identity_data) * -1) + identity_data * 2) + window_sample_time
-    # TODO: use the offset phase as a factor of the frequency to determine
-    # the correct number of samples to shift. theta = 2 * np.pi * frequency * time
-    data = np.roll(phase_signal_quantised_sin, 5)
+    # theta = 2 * pi * PHASE_FREQ * t. Adjacent samples of that tone differ by the
+    # fractional part of PHASE_FREQ / SAMPLE_RATE cycles (the tone aliases).
+    phase_cycles = offset_phase / 360.0
+    cycles_per_sample = math.fmod(PHASE_FREQ / SAMPLE_RATE, 1.0)
+    sample_shift = int(round(phase_cycles / cycles_per_sample)) if cycles_per_sample else 0
+    data = np.roll(phase_signal_quantised_sin, sample_shift)
     data = data.reshape(-1, 1)[:samples_per_frame]
 
     assert data.shape == (SAMPLES_PER_FRAME, 1)
@@ -612,7 +630,7 @@ class FakeSocket:
         if self.thread_id > 3:
             self.thread_id = 0
             self.frame_nr += 1
-        if self.frame_nr >= 8000:
+        if self.frame_nr >= 8000:  # TODO: parametrize samples per frame
             self.frame_nr = 0
             self.seconds += 1
             logger.debug("Generating second %d", self.seconds)
@@ -670,7 +688,7 @@ async def async_main(args: argparse.Namespace) -> None:
             stream_name="tied-array-resampled-voltage",
             interface_address=args.interface,
             bandwidth=int(64e6),
-            samples_per_frame=8000,
+            samples_per_frame=20000,
             multicast_groups=[Endpoint("127.0.0.1", 5001)],
             # sock=FakeSocket(data_fnc=lambda x: create_dirac_data(x, 1)),
             # sock=FakeSocket(data_fnc=create_noisy_sine_data),
@@ -691,10 +709,14 @@ async def async_main(args: argparse.Namespace) -> None:
     axs = axs[:16]  # If there are gaps at the end, ignore them
     lines = []
     bandpass_n_channels = 32768
-    target_fft_n_channels = 200
+    target_fft_n_channels = 20000
     frequency_sample_size_frames = math.ceil(target_fft_n_channels * 2 / receiver.n_samples_per_frame)
     n_fft = receiver.n_samples_per_frame * frequency_sample_size_frames
-    assert n_fft == 8000
+    logger.info("N FFT: %s", n_fft)
+    logger.info("Samples per frame: %s", receiver.n_samples_per_frame)
+    logger.info("Frame rate: %s", receiver.frame_rate)
+    assert n_fft == 40000
+    assert receiver.frame_rate == 3200
     timedata = np.zeros((4, n_fft))
     narrowband_decimation = 8
     band = Band("L", adc_sample_rate=1712e6, centre_frequency=1284e6)
@@ -737,20 +759,28 @@ async def async_main(args: argparse.Namespace) -> None:
         lines.append(axs[i].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
         axs[i].set_ylabel(f"{i}'s magnitude (dB)")
         axs[i].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
-    for i in range(4):
+
+        lines.append(axs[i + 4].plot(x_by_time, np.zeros(x_by_time.shape))[0])
+        axs[i + 4].set_ylabel(f"{i}'s time domain voltage after bandpass filter")
+        axs[i + 4].set_xlabel("time (s)")
+
         lines.append(axs[i + 8].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
         axs[i + 8].set_ylabel(f"{i}'s phase (rad)")
         axs[i + 8].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
-    for i in range(4):
-        lines.append(axs[i + 4].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-        axs[i + 4].set_ylabel(f"{i}'s time domain voltage")
-        axs[i + 4].set_xlabel("time (s)")
-    axs[12].set_title("sin multplication")
+
+    axs[12].set_title("sin reference")
+    axs[12].set_xlabel("time (s)")
     lines.append(axs[12].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-    axs[13].set_title("cos multplication")
+    axs[13].set_title("cos reference")
+    axs[13].set_xlabel("time (s)")
     lines.append(axs[13].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-    axs[14].set_title("zz")
+    axs[14].set_title("sin multplication")
+    axs[14].set_xlabel("time (s)")
     lines.append(axs[14].plot(x_by_time, np.zeros(x_by_time.shape))[0])
+    axs[15].set_title("cos multplication")
+    axs[15].set_xlabel("time (s)")
+    lines.append(axs[15].plot(x_by_time, np.zeros(x_by_time.shape))[0])
+
     if args.interactive:
         fig.canvas.mpl_connect("close_event", lambda event: receiver.close())
         plt.ion()
@@ -768,9 +798,7 @@ async def async_main(args: argparse.Namespace) -> None:
     logger.info("Centre: %s", centre)
     await asyncio.sleep(4)
     logger.info("Starting to receive framesets")
-    plt.title("VDIF FFTs")
     counter = 0
-    integration_factor = 1 * SAMPLE_DELTA
 
     min_timestamp = None
     while True:
@@ -796,7 +824,6 @@ async def async_main(args: argparse.Namespace) -> None:
             logger.debug("Min Timestamp: %s", min_timestamp)
 
             # do a fourier transform of the time domain data here and plot the magnitude and phase
-            s_phase = np.zeros(4)
             for i in range(4):
                 fft_data = np.fft.rfft(timedata[i])[bins_by_thread[i]]
                 if CUTOFF:
@@ -809,28 +836,33 @@ async def async_main(args: argparse.Namespace) -> None:
                 # get the phase via time domain data instead? https://dsp.stackexchange.com/questions/75907/signal-processing-techniques-for-accurate-phase-measurement
                 # p_tmp = phase[np.abs(x_by_thread[i] - PHASE_FREQ) < 10000]
 
-                theta = np.acos(np.sum(timedata[i] * phase_signal) * integration_factor)
-                s_phase[i] = theta
                 # if p_tmp.size > 0:
                 #     s_phase[i] = p_tmp[len(p_tmp) // 2]
                 # else:
                 #     s_phase[i] = np.nan
                 lines[i].set_data(x_by_thread[i], magnitude)
                 lines[i + 4].set_data(x_by_thread[i], phase)
-
-                lines[i + 8].set_data(x_by_time, timedata[i])
+                filtered = scipy.signal.sosfiltfilt(phase_bandpass_sos, timedata[i])
+                lines[i + 8].set_data(x_by_time, filtered)
                 if i == 0:
-                    _q = timedata[i] * phase_signal_quantised_sin
-                    lines[12].set_data(x_by_time, _q)
+                    lines[12].set_data(x_by_time, phase_signal_quantised_sin)
                     axs[12].relim()
                     axs[12].autoscale_view()
-                    _i = timedata[i] * phase_signal_quantised_cos
-                    lines[13].set_data(x_by_time, _i)
+
+                    lines[13].set_data(x_by_time, phase_signal_quantised_cos)
                     axs[13].relim()
                     axs[13].autoscale_view()
-                    # Summing I and Q is a boxcar lowpass of bandwidth fs/N
-                    # (8 kHz for 64 Msps and 8000 samples). That rejects the
-                    # double-frequency image and leaves one phase.
+
+                    _q = filtered * phase_signal_quantised_sin
+                    lines[14].set_data(x_by_time, _q)
+                    axs[14].relim()
+                    axs[14].autoscale_view()
+
+                    _i = filtered * phase_signal_quantised_cos
+                    lines[15].set_data(x_by_time, _i)
+                    axs[15].relim()
+                    axs[15].autoscale_view()
+
                     theta = np.atan2(np.sum(_q), np.sum(_i))
                     logger.info("Theta for thread %s: %.2f deg", i, np.degrees(theta))
                     logger.info("----------------------------------")
@@ -859,7 +891,7 @@ async def async_main(args: argparse.Namespace) -> None:
                         logger.info("New min timestamp: %s", min_timestamp)
                         break
                 logger.info("Waiting for sync signal")
-                await asyncio.sleep(0)
+                await asyncio.sleep(1)
 
 
 if __name__ == "__main__":
