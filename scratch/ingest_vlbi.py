@@ -48,33 +48,13 @@ CORR2_SENSOR_REMAP = {
 }
 # According to the ICD.
 logger = logging.getLogger(__name__)
-SAMPLES_PER_FRAME = 20000
 CUTOFF = False
 ZOOM = True
 PHASE_FREQ = 1290e6
 SYNC = True
-SAMPLE_DELTA = 1 / (3200 * 20000 * 2)  # TODO: actually calculate this
-
-window_sample_time = np.arange(20000 * 2) * SAMPLE_DELTA
-phase_signal_quantised_sin = decoder_levels[2][encode_2bit_base(np.sin(2 * math.pi * PHASE_FREQ * window_sample_time))]
-phase_signal_quantised_cos = decoder_levels[2][encode_2bit_base(np.cos(2 * math.pi * PHASE_FREQ * window_sample_time))]
-SAMPLE_RATE = 1.0 / SAMPLE_DELTA
-SCAN_OFFSET = 0
-phase_signal_quantised_sin = np.roll(phase_signal_quantised_sin, SCAN_OFFSET, SCAN_OFFSET)
-phase_signal_quantised_cos = np.roll(phase_signal_quantised_cos, SCAN_OFFSET, SCAN_OFFSET)
-
-# PHASE_FREQ is above Nyquist, so the tone in the sampled voltage is this alias.
-PHASE_BASEBAND = abs(PHASE_FREQ) % SAMPLE_RATE
-if PHASE_BASEBAND > SAMPLE_RATE / 2:
-    PHASE_BASEBAND = SAMPLE_RATE - PHASE_BASEBAND
+SCAN_OFFSET = 3
 BANDPASS_HALF_WIDTH = 10e3
-phase_bandpass_sos = scipy.signal.butter(
-    4,
-    [PHASE_BASEBAND - BANDPASS_HALF_WIDTH, PHASE_BASEBAND + BANDPASS_HALF_WIDTH],
-    btype="bandpass",
-    fs=SAMPLE_RATE,
-    output="sos",
-)
+FAKE_DATA_REF_EPOCH = 35
 
 
 async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
@@ -304,14 +284,31 @@ class TiedArrayResampledVoltageReceiver:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
             self.dropped_frames += 1
 
+    def sync_time_for(self, min_timestamp: int | None) -> Time:
+        """Absolute time of the first sample that should be kept for `min_timestamp`."""
+        if min_timestamp is None:
+            min_timestamp = self.steady_state_timestamp
+        scale = int(self.scale_factor_timestamp)
+        whole_seconds, ticks = divmod(int(min_timestamp), scale)
+        # Whole seconds stay on the UNIX count. The leftover ticks are a fraction of one second,
+        # so a few samples are not lost in the gap of a large float.
+        min_time = Time(self.sync_time + whole_seconds, format="unix", scale="utc")
+        if ticks:
+            min_time += TimeDelta(ticks / scale, format="sec", scale="tai")
+        return min_time + TimeDelta(self.vlbi_delay, format="sec", scale="tai") + self.filter_shift
+
     def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
-        """Compute the minimum linearised frame number that is at least `min_time`."""
+        """First frame that still contains samples at or after `min_time`.
+
+        The frame that contains the sync starts before it. Floor keeps that frame so the
+        caller can drop only the leading samples, instead of ceil discarding the whole frame.
+        """
         ref_time = VDIFTimestamp(0, 0, ref_epoch, frame_rate=self.frame_rate).timestamp
         logger.debug("ref_time: %s", ref_time)
         logger.debug("min_time: %s", min_time)
         to_wait_sec = (min_time - ref_time).sec
         logger.debug("to_wait_sec: %s", to_wait_sec)
-        return math.ceil(to_wait_sec * self.frame_rate)
+        return math.floor(to_wait_sec * self.frame_rate)
 
     async def complete_framesets(
         self,
@@ -339,13 +336,7 @@ class TiedArrayResampledVoltageReceiver:
             this many seconds. Note that no :exc:`asyncio.TimeoutError` will be
             raised.
         """
-        if min_timestamp is None:
-            min_timestamp = self.steady_state_timestamp
-        min_time = Time(self.sync_time, format="unix", scale="utc") + TimeDelta(
-            min_timestamp / self.scale_factor_timestamp, format="sec", scale="tai"
-        )
-
-        min_time += TimeDelta(self.vlbi_delay, format="sec", scale="tai") + self.filter_shift
+        sync_time = self.sync_time_for(min_timestamp)
 
         # Computing timestamps is expensive. So once we know the frame rate and
         # ref epoch, we can convert it into a minimum linearised frame number.
@@ -363,7 +354,7 @@ class TiedArrayResampledVoltageReceiver:
                     if self.buffer:
                         frame0 = self.buffer[0]
                         if min_frame is None:
-                            min_frame = self._calc_min_frame(min_time, frame0.timestamp.ref_epoch)
+                            min_frame = self._calc_min_frame(sync_time, frame0.timestamp.ref_epoch)
                         if frame0.seq_id <= self.min_seq_id and len(self.buffer) >= self.n_threads:
                             prefix = self.buffer[: self.n_threads]
                             if all(
@@ -510,8 +501,21 @@ def main() -> None:
 
 
 NP_DTYPE = np.int8
-NP_DTYPE_SIZE_BITS = np.dtype(NP_DTYPE).itemsize * 8
-BYTES_PER_NP_ARRAY_FOR_FRAME = SAMPLES_PER_FRAME * (NP_DTYPE_SIZE_BITS // 8)  # The size of the numpy array for a frame.
+
+
+def samples_before_sync(frame_start: Time, sync_time: Time, sample_rate: float, n_samples: int) -> int:
+    """How many leading samples in a frame fall before `sync_time`.
+
+    A sample that lands on the sync is kept. The result is clamped to the frame.
+    """
+    delta_sec = (sync_time - frame_start).sec
+    if delta_sec <= 0:
+        return 0
+    # A fraction of a sample of slack stops float rounding from dropping the sync sample.
+    skip = math.ceil(delta_sec * sample_rate - 1e-4)
+    if skip <= 0:
+        return 0
+    return min(skip, n_samples)
 
 
 def create_identity_data(samples_per_frame: int) -> np.ndarray:
@@ -528,11 +532,43 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
     data = (np.ones_like(identity_data) * -1) + identity_data * 2
     data = data.reshape(-1, 1)[:samples_per_frame]
-    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    assert data.shape == (samples_per_frame, 1)
     return data
 
 
-def create_noisy_sine_data(samples_per_frame: int) -> np.ndarray:
+def generate_time_data(
+    samples_per_frame: int,
+    n_frames: int,
+    sample_rate: float,
+    phase_freq: float,
+    *,
+    scan_offset: int = 0,
+    bandpass_half_width: float = BANDPASS_HALF_WIDTH,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    window_sample_time = np.arange(samples_per_frame * n_frames) / sample_rate
+    phase_signal_quantised_sin = decoder_levels[2][
+        encode_2bit_base(np.sin(2 * math.pi * phase_freq * window_sample_time))
+    ]
+    phase_signal_quantised_cos = decoder_levels[2][
+        encode_2bit_base(np.cos(2 * math.pi * phase_freq * window_sample_time))
+    ]
+    phase_signal_quantised_sin = np.roll(phase_signal_quantised_sin, scan_offset)
+    phase_signal_quantised_cos = np.roll(phase_signal_quantised_cos, scan_offset)
+
+    phase_baseband = abs(phase_freq) % sample_rate
+    if phase_baseband > sample_rate / 2:
+        phase_baseband = sample_rate - phase_baseband
+    phase_bandpass_sos = scipy.signal.butter(
+        4,
+        [phase_baseband - bandpass_half_width, phase_baseband + bandpass_half_width],
+        btype="bandpass",
+        fs=sample_rate,
+        output="sos",
+    )
+    return window_sample_time, phase_signal_quantised_sin, phase_signal_quantised_cos, phase_bandpass_sos
+
+
+def create_noisy_sine_data(samples_per_frame: int, phase_signal_quantised_sin: np.ndarray) -> np.ndarray:
     """Create an identity data array use as payload for a VDIF frame.
 
     Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
@@ -545,14 +581,18 @@ def create_noisy_sine_data(samples_per_frame: int) -> np.ndarray:
     identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
     # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
     # data = ((np.ones_like(identity_data) * -1) + identity_data * 2) + window_sample_time
-    data = phase_signal_quantised_sin
-    data = data.reshape(-1, 1)[:samples_per_frame]
+    data = np.reshape(phase_signal_quantised_sin, (-1, 1))[:samples_per_frame]
 
-    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    assert data.shape == (samples_per_frame, 1)
     return data
 
 
-def create_noisy_sine_data_offset_phase(samples_per_frame: int, offset_phase: float) -> np.ndarray:
+def create_noisy_sine_data_offset_phase(
+    samples_per_frame: int,
+    offset_phase: float,
+    phase_signal_quantised_sin: np.ndarray,
+    sample_rate: float,
+) -> np.ndarray:
     """Create an identity data array use as payload for a VDIF frame.
 
     Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
@@ -566,14 +606,14 @@ def create_noisy_sine_data_offset_phase(samples_per_frame: int, offset_phase: fl
     # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
     # data = ((np.ones_like(identity_data) * -1) + identity_data * 2) + window_sample_time
     # theta = 2 * pi * PHASE_FREQ * t. Adjacent samples of that tone differ by the
-    # fractional part of PHASE_FREQ / SAMPLE_RATE cycles (the tone aliases).
+    # fractional part of PHASE_FREQ / sample_rate cycles (the tone aliases).
     phase_cycles = offset_phase / 360.0
-    cycles_per_sample = math.fmod(PHASE_FREQ / SAMPLE_RATE, 1.0)
+    cycles_per_sample = math.fmod(PHASE_FREQ / sample_rate, 1.0)
     sample_shift = int(round(phase_cycles / cycles_per_sample)) if cycles_per_sample else 0
     data = np.roll(phase_signal_quantised_sin, sample_shift)
     data = data.reshape(-1, 1)[:samples_per_frame]
 
-    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    assert data.shape == (samples_per_frame, 1)
     return data
 
 
@@ -581,11 +621,8 @@ def create_dirac_data(samples_per_frame: int, index: int) -> np.ndarray:
     """Create a dirac data array use as payload for a VDIF frame."""
     data = np.zeros((samples_per_frame, 1), dtype=NP_DTYPE) - 1
     data[index] = 1
-    assert data.shape == (SAMPLES_PER_FRAME, 1)
+    assert data.shape == (samples_per_frame, 1)
     return data
-
-
-default_data = np.zeros((SAMPLES_PER_FRAME, 1), dtype=NP_DTYPE)
 
 
 def make_vtp_packet(
@@ -593,12 +630,13 @@ def make_vtp_packet(
     frame_nr: int,
     seconds: int,
     thread_id: int,
-    samples_per_frame: int = SAMPLES_PER_FRAME,
-    ref_epoch: int = 0,
-    data=default_data,
+    samples_per_frame: int,
+    ref_epoch: int = FAKE_DATA_REF_EPOCH,
+    data: np.ndarray | None = None,
 ) -> bytes:
     """Build a VTP packet (8-byte seq header + VDIF frame)."""
-    # assert data.nbytes == BYTES_PER_NP_ARRAY_FOR_FRAME
+    if data is None:
+        data = np.zeros((samples_per_frame, 1), dtype=NP_DTYPE)
     frame = BasebandVDIFFrame.fromdata(
         data,
         frame_nr=frame_nr,
@@ -618,11 +656,12 @@ def make_vtp_packet(
 
 
 class FakeSocket:
-    def __init__(self, data_fnc=create_noisy_sine_data):
+    def __init__(self, samples_per_frame: int, data_fnc=None):
         self.seq_id = 0
         self.frame_nr = 0
-        self.seconds = 1
+        self.seconds = 0
         self.thread_id = 0
+        self.samples_per_frame = samples_per_frame
         self.data_fnc = data_fnc
 
     def recv_into(self, buf: Buffer) -> int:
@@ -630,13 +669,18 @@ class FakeSocket:
         if self.thread_id > 3:
             self.thread_id = 0
             self.frame_nr += 1
-        if self.frame_nr >= 8000:  # TODO: parametrize samples per frame
+        if self.frame_nr >= 3200:  # TODO: parametrize frames per second
             self.frame_nr = 0
             self.seconds += 1
             logger.debug("Generating second %d", self.seconds)
 
         packet = make_vtp_packet(
-            self.seq_id, self.frame_nr, self.seconds, self.thread_id, data=self.data_fnc(SAMPLES_PER_FRAME)
+            self.seq_id,
+            self.frame_nr,
+            self.seconds,
+            self.thread_id,
+            self.samples_per_frame,
+            data=self.data_fnc(self.samples_per_frame),
         )
         self.seq_id += 1
         self.thread_id += 1
@@ -684,15 +728,15 @@ async def async_main(args: argparse.Namespace) -> None:
             )
 
     else:
+        samples_per_frame = 20000
         receiver = TiedArrayResampledVoltageReceiver(
             stream_name="tied-array-resampled-voltage",
             interface_address=args.interface,
             bandwidth=int(64e6),
-            samples_per_frame=20000,
+            samples_per_frame=samples_per_frame,
             multicast_groups=[Endpoint("127.0.0.1", 5001)],
-            # sock=FakeSocket(data_fnc=lambda x: create_dirac_data(x, 1)),
-            # sock=FakeSocket(data_fnc=create_noisy_sine_data),
-            sock=FakeSocket(data_fnc=lambda x: create_noisy_sine_data_offset_phase(x, 180)),
+            scale_factor_timestamp=64e6,
+            sock=FakeSocket(samples_per_frame),
         )
 
     # X and Y polarisations, freq & phase for frequency domain,
@@ -710,21 +754,38 @@ async def async_main(args: argparse.Namespace) -> None:
     lines = []
     bandpass_n_channels = 32768
     target_fft_n_channels = 20000
-    frequency_sample_size_frames = math.ceil(target_fft_n_channels * 2 / receiver.n_samples_per_frame)
-    n_fft = receiver.n_samples_per_frame * frequency_sample_size_frames
-    logger.info("N FFT: %s", n_fft)
-    logger.info("Samples per frame: %s", receiver.n_samples_per_frame)
+    samples_per_frame = receiver.n_samples_per_frame
+    frequency_sample_size_frames = math.ceil(target_fft_n_channels * 2 / samples_per_frame)
+    logger.info("Samples per frame: %s", samples_per_frame)
     logger.info("Frame rate: %s", receiver.frame_rate)
-    assert n_fft == 40000
-    assert receiver.frame_rate == 3200
+    # One real sample per output sample: rate is frames/s times samples/frame,
+    # which is the tied-array-resampled-voltage bandwidth from the client.
+    sample_rate = receiver.frame_rate * samples_per_frame
+    logger.info("Sample rate: %s", sample_rate)
+    (
+        window_sample_time,
+        phase_signal_quantised_sin,
+        phase_signal_quantised_cos,
+        phase_bandpass_sos,
+    ) = generate_time_data(
+        samples_per_frame, frequency_sample_size_frames, sample_rate, PHASE_FREQ, scan_offset=SCAN_OFFSET
+    )
+    n_fft = window_sample_time.size
+    logger.info("N FFT: %s", n_fft)
+    if args.fake_data:
+        # sock=FakeSocket(data_fnc=lambda x: create_dirac_data(x, 1)),
+        # sock=FakeSocket(data_fnc=create_noisy_sine_data),
+        receiver.sock.data_fnc = lambda n_samples: create_noisy_sine_data_offset_phase(
+            n_samples, 0, phase_signal_quantised_sin, sample_rate
+        )
     timedata = np.zeros((4, n_fft))
     narrowband_decimation = 8
     band = Band("L", adc_sample_rate=1712e6, centre_frequency=1284e6)
     nb_bandwidth = band.adc_sample_rate * 0.5 / narrowband_decimation
     pass_channels = get_pass_channels(narrowband_decimation, bandpass_n_channels)
     centre = band.centre_frequency
-    baseband = np.fft.rfftfreq(n_fft, d=1.0 / receiver.bandwidth)
-    x_by_time = np.arange(n_fft) * SAMPLE_DELTA
+    baseband = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
+    x_by_time = window_sample_time
 
     # Bin 0 is the outer edge of a half, Nyquist is the centre.
     x_lower_all = centre - receiver.bandwidth / 2 + baseband
@@ -799,18 +860,34 @@ async def async_main(args: argparse.Namespace) -> None:
     await asyncio.sleep(4)
     logger.info("Starting to receive framesets")
     counter = 0
+    filled = 0
+    frame_samples = receiver.n_samples_per_frame
 
     min_timestamp = None
+    if args.fake_data:
+        scale = int(receiver.scale_factor_timestamp)
+        vdif = VDIFTimestamp(seconds=0, ref_epoch=FAKE_DATA_REF_EPOCH, frame_nr=0, frame_rate=receiver.frame_rate)
+        elapsed_seconds = int(vdif.timestamp.unix - receiver.sync_time)
+        min_timestamp = elapsed_seconds * scale + 5 * scale // int(sample_rate)
+
     while True:
         chunk = await anext(receiver.complete_framesets(min_timestamp=min_timestamp))
         if receiver.steady_state_timestamp == 0:
             logger.info("Steady state timestamp is zero")
-        for frame in chunk.frames:
-            vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
-            timedata[frame.thread_id][
-                counter * receiver.n_samples_per_frame : (counter + 1) * receiver.n_samples_per_frame
-            ] = vdif_frame.data.reshape(-1)
-        counter += 1
+        skip = samples_before_sync(
+            chunk.timestamp.timestamp, receiver.sync_time_for(min_timestamp), sample_rate, frame_samples
+        )
+        take = min(frame_samples - skip, n_fft - filled)
+        if skip and take:
+            logger.info("Skipping %d samples before sync in frame %d", skip, chunk.timestamp.linear)
+        if take > 0:
+            for frame in chunk.frames:
+                vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
+                samples = np.reshape(vdif_frame.data, -1)[skip : skip + take]
+                timedata[frame.thread_id, filled : filled + take] = samples
+            filled += take
+            # A short leading fragment does not count as a frame on its own.
+            counter = filled // frame_samples
         if counter == frequency_sample_size_frames:
             # timedata = np.zeros((4, n_fft))
             # for i in range(4):
@@ -818,9 +895,6 @@ async def async_main(args: argparse.Namespace) -> None:
             # update line
             # this takes a while so let's pause the receiver
             logger.info("Generating Image")
-            logger.debug("Timedata: %s", timedata[0][0])
-            logger.debug("Timedata: %s", timedata[0][1])
-            logger.debug("Timedata: %s", timedata[0][7999])
             logger.debug("Min Timestamp: %s", min_timestamp)
 
             # do a fourier transform of the time domain data here and plot the magnitude and phase
@@ -863,7 +937,7 @@ async def async_main(args: argparse.Namespace) -> None:
                     axs[15].relim()
                     axs[15].autoscale_view()
 
-                    theta = np.atan2(np.sum(_q), np.sum(_i))
+                    theta = np.atan2(np.sum(_i), np.sum(_q))
                     logger.info("Theta for thread %s: %.2f deg", i, np.degrees(theta))
                     logger.info("----------------------------------")
                 axs[i].relim()
@@ -879,6 +953,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 plt.savefig("rep.png")
             logger.info("Wrote second %d", chunk.timestamp.seconds)
             counter = 0
+            filled = 0
             time.sleep(2)
             if args.fake_data:
                 continue
