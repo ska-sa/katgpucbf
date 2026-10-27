@@ -35,7 +35,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal
 from astropy.time import Time, TimeDelta
-from baseband.base.encoding import decoder_levels, encode_2bit_base
 from baseband.vdif import VDIFFrame as BasebandVDIFFrame
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
@@ -53,7 +52,7 @@ CUTOFF = False
 ZOOM = True
 PHASE_FREQ = 1290e6
 SYNC = True
-SCAN_OFFSET = 3
+SCAN_OFFSET = 8
 BANDPASS_HALF_WIDTH = 10e3
 FAKE_DATA_REF_EPOCH = 35
 
@@ -483,6 +482,12 @@ def main() -> None:
         default="INFO",
         help="Logging level",
     )
+    parser.add_argument(
+        "--n-channels",
+        type=int,
+        default=None,
+        help="Number of channels to use for the FFT. If not provided, the default is 20000.",
+    )
     parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level)
@@ -533,6 +538,11 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     return data
 
 
+def quantise_2bit(values: np.ndarray) -> np.ndarray:
+    inverse_threshold = 1.0 / 0.969
+    return np.clip(values * inverse_threshold + 2, 0, 3)
+
+
 def generate_time_data(
     samples_per_frame: int,
     n_frames: int,
@@ -543,12 +553,9 @@ def generate_time_data(
     bandpass_half_width: float = BANDPASS_HALF_WIDTH,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     window_sample_time = np.arange(samples_per_frame * n_frames) / sample_rate
-    phase_signal_quantised_sin = decoder_levels[2][
-        encode_2bit_base(np.sin(2 * math.pi * phase_freq * window_sample_time))
-    ]
-    phase_signal_quantised_cos = decoder_levels[2][
-        encode_2bit_base(np.cos(2 * math.pi * phase_freq * window_sample_time))
-    ]
+    phase_signal_quantised_sin = quantise_2bit(np.sin(2 * math.pi * phase_freq * window_sample_time))
+    phase_signal_quantised_cos = quantise_2bit(np.cos(2 * math.pi * phase_freq * window_sample_time))
+
     phase_signal_quantised_sin = np.roll(phase_signal_quantised_sin, scan_offset)
     phase_signal_quantised_cos = np.roll(phase_signal_quantised_cos, scan_offset)
 
@@ -565,50 +572,20 @@ def generate_time_data(
     return window_sample_time, phase_signal_quantised_sin, phase_signal_quantised_cos, phase_bandpass_sos
 
 
-def create_noisy_sine_data(samples_per_frame: int, phase_signal_quantised_sin: np.ndarray) -> np.ndarray:
-    """Create an identity data array use as payload for a VDIF frame.
-
-    Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
-    another for the difference to be visible.
-    """
-    identity_size = math.ceil(math.sqrt(samples_per_frame))
-    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
-    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
-    # the identity matrix size is rounded up to the nearest square number, correct it.
-    identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
-    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
-    # data = ((np.ones_like(identity_data) * -1) + identity_data * 2) + window_sample_time
-    data = np.reshape(phase_signal_quantised_sin, (-1, 1))[:samples_per_frame]
-
-    assert data.shape == (samples_per_frame, 1)
-    return data
-
-
 def create_noisy_sine_data_offset_phase(
     samples_per_frame: int,
     offset_phase: float,
-    phase_signal_quantised_sin: np.ndarray,
+    n_window_samples: int,
     sample_rate: float,
+    *,
+    scan_offset: int = 0,
 ) -> np.ndarray:
-    """Create an identity data array use as payload for a VDIF frame.
-
-    Because the VDIF frames are low bit quantization, we need to have an identity matrix with data sufficiently far from
-    another for the difference to be visible.
-    """
-    identity_size = math.ceil(math.sqrt(samples_per_frame))
-    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
-    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
-    # the identity matrix size is rounded up to the nearest square number, correct it.
-    identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
-    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
-    # data = ((np.ones_like(identity_data) * -1) + identity_data * 2) + window_sample_time
-    # theta = 2 * pi * PHASE_FREQ * t. Adjacent samples of that tone differ by the
-    # fractional part of PHASE_FREQ / sample_rate cycles (the tone aliases).
-    phase_cycles = offset_phase / 360.0
-    cycles_per_sample = math.fmod(PHASE_FREQ / sample_rate, 1.0)
-    sample_shift = int(round(phase_cycles / cycles_per_sample)) if cycles_per_sample else 0
-    data = np.roll(phase_signal_quantised_sin, sample_shift)
-    data = data.reshape(-1, 1)[:samples_per_frame]
+    window_sample_time = np.arange(n_window_samples) / sample_rate
+    data = np.sin(2 * math.pi * PHASE_FREQ * window_sample_time + math.radians(offset_phase))
+    data + (np.random.normal(0, 3, data.size) - 1.5)
+    if scan_offset:
+        data = np.roll(data, scan_offset)
+    data = quantise_2bit(data).reshape(-1, 1)[:samples_per_frame]
 
     assert data.shape == (samples_per_frame, 1)
     return data
@@ -748,7 +725,7 @@ async def async_main(args: argparse.Namespace) -> None:
     )
     lines = [[None] * 8, [None] * 8]
     bandpass_n_channels = 32768
-    target_fft_n_channels = 20000
+    target_fft_n_channels = args.n_channels or 20000
     samples_per_frame = receiver.n_samples_per_frame
     frequency_sample_size_frames = math.ceil(target_fft_n_channels * 2 / samples_per_frame)
     logger.info("Samples per frame: %s", samples_per_frame)
@@ -771,7 +748,11 @@ async def async_main(args: argparse.Namespace) -> None:
         # sock=FakeSocket(data_fnc=lambda x: create_dirac_data(x, 1)),
         # sock=FakeSocket(data_fnc=create_noisy_sine_data),
         receiver.sock.data_fnc = lambda n_samples: create_noisy_sine_data_offset_phase(
-            n_samples, 0, phase_signal_quantised_sin, sample_rate
+            n_samples,
+            -90,
+            phase_signal_quantised_sin.size,
+            sample_rate,
+            scan_offset=SCAN_OFFSET,
         )
     timedata = np.zeros((4, n_fft))
     narrowband_decimation = 8
@@ -826,10 +807,11 @@ async def async_main(args: argparse.Namespace) -> None:
 
     axs[1][4].set_title("sin reference")
     axs[1][4].set_xlabel("time (s)")
-    lines[1][4] = axs[1][4].plot(x_by_time, np.zeros(x_by_time.shape))[0]
+    lines[1][4] = axs[1][4].plot(x_by_time, phase_signal_quantised_sin)[0]
     axs[1][5].set_title("cos reference")
     axs[1][5].set_xlabel("time (s)")
-    lines[1][5] = axs[1][5].plot(x_by_time, np.zeros(x_by_time.shape))[0]
+    lines[1][5] = axs[1][5].plot(x_by_time, phase_signal_quantised_cos)[0]
+
     axs[1][6].set_title("sin multplication")
     axs[1][6].set_xlabel("time (s)")
     lines[1][6] = axs[1][6].plot(x_by_time, np.zeros(x_by_time.shape))[0]
@@ -857,6 +839,8 @@ async def async_main(args: argparse.Namespace) -> None:
     counter = 0
     filled = 0
     frame_samples = receiver.n_samples_per_frame
+    if args.fake_data and frequency_sample_size_frames > 1:
+        raise ValueError("Frequency sample size frames must be 1 for fake data")
 
     min_timestamp = None
     if args.fake_data:
@@ -889,11 +873,6 @@ async def async_main(args: argparse.Namespace) -> None:
             # A short leading fragment does not count as a frame on its own.
             counter = filled // frame_samples
         if counter == frequency_sample_size_frames:
-            # timedata = np.zeros((4, n_fft))
-            # for i in range(4):
-            #     timedata[i][1] = 1
-            # update line
-            # this takes a while so let's pause the receiver
             logger.info("Generating Image")
             logger.debug("Min Timestamp: %s", min_timestamp)
 
@@ -906,27 +885,12 @@ async def async_main(args: argparse.Namespace) -> None:
                 # as dBm
                 magnitude = 10 * np.log10(np.abs(fft_data))
                 phase = np.angle(fft_data)
-                # imag = np.imag(fft_data)
                 # get the phase via time domain data instead? https://dsp.stackexchange.com/questions/75907/signal-processing-techniques-for-accurate-phase-measurement
-                # p_tmp = phase[np.abs(x_by_thread[i] - PHASE_FREQ) < 10000]
-
-                # if p_tmp.size > 0:
-                #     s_phase[i] = p_tmp[len(p_tmp) // 2]
-                # else:
-                #     s_phase[i] = np.nan
                 lines[0][i].set_data(x_by_thread[i], magnitude)
                 lines[1][i].set_data(x_by_thread[i], phase)
                 filtered = scipy.signal.sosfiltfilt(phase_bandpass_sos, timedata[i])
                 lines[0][i + 4].set_data(x_by_time, filtered)
                 if i == 0:
-                    lines[1][4].set_data(x_by_time, phase_signal_quantised_sin)
-                    axs[1][4].relim()
-                    axs[1][4].autoscale_view()
-
-                    lines[1][5].set_data(x_by_time, phase_signal_quantised_cos)
-                    axs[1][5].relim()
-                    axs[1][5].autoscale_view()
-
                     _q = filtered * phase_signal_quantised_sin
                     lines[1][6].set_data(x_by_time, _q)
                     axs[1][6].relim()
