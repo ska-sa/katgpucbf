@@ -41,6 +41,7 @@ from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
 
 from katgpucbf import DEFAULT_VTP_PORT
+from katgpucbf.utils import TimeConverter
 
 CPLX = 2
 CORR2_SENSOR_REMAP = {
@@ -288,13 +289,9 @@ class TiedArrayResampledVoltageReceiver:
         """Absolute time of the first sample that should be kept for `min_timestamp`."""
         if min_timestamp is None:
             min_timestamp = self.steady_state_timestamp
-        scale = int(self.scale_factor_timestamp)
-        whole_seconds, ticks = divmod(int(min_timestamp), scale)
-        # Whole seconds stay on the UNIX count. The leftover ticks are a fraction of one second,
-        # so a few samples are not lost in the gap of a large float.
-        min_time = Time(self.sync_time + whole_seconds, format="unix", scale="utc")
-        if ticks:
-            min_time += TimeDelta(ticks / scale, format="sec", scale="tai")
+        min_time = Time(self.sync_time, format="unix", scale="utc") + TimeDelta(
+            min_timestamp / self.scale_factor_timestamp, format="sec", scale="tai"
+        )
         return min_time + TimeDelta(self.vlbi_delay, format="sec", scale="tai") + self.filter_shift
 
     def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
@@ -749,9 +746,7 @@ async def async_main(args: argparse.Namespace) -> None:
         figsize=(12, 8) if args.interactive else (24, 16),
         constrained_layout=True,
     )
-    axs = axs.ravel()  # Now that the plot is several columns wide, this comes as a 2-d array. Which is a pain.
-    axs = axs[:16]  # If there are gaps at the end, ignore them
-    lines = []
+    lines = [[None] * 8, [None] * 8]
     bandpass_n_channels = 32768
     target_fft_n_channels = 20000
     samples_per_frame = receiver.n_samples_per_frame
@@ -789,7 +784,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
     # Bin 0 is the outer edge of a half, Nyquist is the centre.
     x_lower_all = centre - receiver.bandwidth / 2 + baseband
-    x_upper_all = centre + baseband
+    x_upper_all = centre + receiver.bandwidth / 2 - baseband
     if ZOOM:
         f_pass_lo = (pass_channels.start - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
         f_pass_hi = (pass_channels.stop - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
@@ -817,30 +812,30 @@ async def async_main(args: argparse.Namespace) -> None:
         3: "Y Lower",
     }
     for i in range(4):
-        lines.append(axs[i].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
-        axs[i].set_ylabel(f"{i}'s magnitude (dB)")
-        axs[i].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
+        lines[0][i] = axs[0][i].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0]
+        axs[0][i].set_ylabel(f"{i}'s magnitude (dB)")
+        axs[0][i].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
 
-        lines.append(axs[i + 4].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-        axs[i + 4].set_ylabel(f"{i}'s time domain voltage after bandpass filter")
-        axs[i + 4].set_xlabel("time (s)")
+        lines[0][i + 4] = axs[0][i + 4].plot(x_by_time, np.zeros(x_by_time.shape))[0]
+        axs[0][i + 4].set_ylabel(f"{i}'s time domain voltage after bandpass filter")
+        axs[0][i + 4].set_xlabel("time (s)")
 
-        lines.append(axs[i + 8].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0])
-        axs[i + 8].set_ylabel(f"{i}'s phase (rad)")
-        axs[i + 8].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
+        lines[1][i] = axs[1][i].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0]
+        axs[1][i].set_ylabel(f"{i}'s phase (rad)")
+        axs[1][i].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
 
-    axs[12].set_title("sin reference")
-    axs[12].set_xlabel("time (s)")
-    lines.append(axs[12].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-    axs[13].set_title("cos reference")
-    axs[13].set_xlabel("time (s)")
-    lines.append(axs[13].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-    axs[14].set_title("sin multplication")
-    axs[14].set_xlabel("time (s)")
-    lines.append(axs[14].plot(x_by_time, np.zeros(x_by_time.shape))[0])
-    axs[15].set_title("cos multplication")
-    axs[15].set_xlabel("time (s)")
-    lines.append(axs[15].plot(x_by_time, np.zeros(x_by_time.shape))[0])
+    axs[1][4].set_title("sin reference")
+    axs[1][4].set_xlabel("time (s)")
+    lines[1][4] = axs[1][4].plot(x_by_time, np.zeros(x_by_time.shape))[0]
+    axs[1][5].set_title("cos reference")
+    axs[1][5].set_xlabel("time (s)")
+    lines[1][5] = axs[1][5].plot(x_by_time, np.zeros(x_by_time.shape))[0]
+    axs[1][6].set_title("sin multplication")
+    axs[1][6].set_xlabel("time (s)")
+    lines[1][6] = axs[1][6].plot(x_by_time, np.zeros(x_by_time.shape))[0]
+    axs[1][7].set_title("cos multplication")
+    axs[1][7].set_xlabel("time (s)")
+    lines[1][7] = axs[1][7].plot(x_by_time, np.zeros(x_by_time.shape))[0]
 
     if args.interactive:
         fig.canvas.mpl_connect("close_event", lambda event: receiver.close())
@@ -865,10 +860,15 @@ async def async_main(args: argparse.Namespace) -> None:
 
     min_timestamp = None
     if args.fake_data:
-        scale = int(receiver.scale_factor_timestamp)
-        vdif = VDIFTimestamp(seconds=0, ref_epoch=FAKE_DATA_REF_EPOCH, frame_nr=0, frame_rate=receiver.frame_rate)
-        elapsed_seconds = int(vdif.timestamp.unix - receiver.sync_time)
-        min_timestamp = elapsed_seconds * scale + 5 * scale // int(sample_rate)
+        vdif_time = (
+            VDIFTimestamp(
+                seconds=0, ref_epoch=FAKE_DATA_REF_EPOCH, frame_nr=0, frame_rate=receiver.frame_rate
+            ).timestamp
+            + TimeDelta(1 / sample_rate, format="sec", scale="tai") * 5
+        )
+        min_timestamp = round(
+            TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp).unix_to_adc(vdif_time.unix)
+        )
 
     while True:
         chunk = await anext(receiver.complete_framesets(min_timestamp=min_timestamp))
@@ -914,38 +914,38 @@ async def async_main(args: argparse.Namespace) -> None:
                 #     s_phase[i] = p_tmp[len(p_tmp) // 2]
                 # else:
                 #     s_phase[i] = np.nan
-                lines[i].set_data(x_by_thread[i], magnitude)
-                lines[i + 4].set_data(x_by_thread[i], phase)
+                lines[0][i].set_data(x_by_thread[i], magnitude)
+                lines[1][i].set_data(x_by_thread[i], phase)
                 filtered = scipy.signal.sosfiltfilt(phase_bandpass_sos, timedata[i])
-                lines[i + 8].set_data(x_by_time, filtered)
+                lines[0][i + 4].set_data(x_by_time, filtered)
                 if i == 0:
-                    lines[12].set_data(x_by_time, phase_signal_quantised_sin)
-                    axs[12].relim()
-                    axs[12].autoscale_view()
+                    lines[1][4].set_data(x_by_time, phase_signal_quantised_sin)
+                    axs[1][4].relim()
+                    axs[1][4].autoscale_view()
 
-                    lines[13].set_data(x_by_time, phase_signal_quantised_cos)
-                    axs[13].relim()
-                    axs[13].autoscale_view()
+                    lines[1][5].set_data(x_by_time, phase_signal_quantised_cos)
+                    axs[1][5].relim()
+                    axs[1][5].autoscale_view()
 
                     _q = filtered * phase_signal_quantised_sin
-                    lines[14].set_data(x_by_time, _q)
-                    axs[14].relim()
-                    axs[14].autoscale_view()
+                    lines[1][6].set_data(x_by_time, _q)
+                    axs[1][6].relim()
+                    axs[1][6].autoscale_view()
 
                     _i = filtered * phase_signal_quantised_cos
-                    lines[15].set_data(x_by_time, _i)
-                    axs[15].relim()
-                    axs[15].autoscale_view()
+                    lines[1][7].set_data(x_by_time, _i)
+                    axs[1][7].relim()
+                    axs[1][7].autoscale_view()
 
                     theta = np.atan2(np.sum(_i), np.sum(_q))
                     logger.info("Theta for thread %s: %.2f deg", i, np.degrees(theta))
                     logger.info("----------------------------------")
-                axs[i].relim()
-                axs[i].autoscale_view()
-                axs[i + 8].relim()
-                axs[i + 8].autoscale_view()
-                axs[i + 4].relim()
-                axs[i + 4].autoscale_view()
+                axs[0][i].relim()
+                axs[0][i].autoscale_view()
+                axs[1][i].relim()
+                axs[1][i].autoscale_view()
+                axs[0][i + 4].relim()
+                axs[0][i + 4].autoscale_view()
             # plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is {', '.join(f'{s_p:.2f} rad' for s_p in s_phase)})")
             plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is in phase with the synthetic signal)")
 
