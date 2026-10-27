@@ -577,12 +577,13 @@ def create_noisy_sine_data_offset_phase(
     offset_phase: float,
     n_window_samples: int,
     sample_rate: float,
+    time_offset: float = 0,
     *,
     scan_offset: int = 0,
 ) -> np.ndarray:
-    window_sample_time = np.arange(n_window_samples) / sample_rate
+    window_sample_time = np.arange(n_window_samples) / sample_rate + time_offset
     data = np.sin(2 * math.pi * PHASE_FREQ * window_sample_time + math.radians(offset_phase))
-    data = data + ((np.random.normal(0, 2, data.size) - 1) * 3)
+    data = data + np.random.normal(0, 0.9, data.size)
     if scan_offset:
         data = np.roll(data, scan_offset)
     data = quantise_2bit(data).reshape(-1, 1)[:samples_per_frame]
@@ -630,13 +631,14 @@ def make_vtp_packet(
 
 
 class FakeSocket:
-    def __init__(self, samples_per_frame: int, data_fnc=None):
+    def __init__(self, samples_per_frame: int, frame_rate: int, data_fnc=None):
         self.seq_id = 0
         self.frame_nr = 0
         self.seconds = 0
         self.thread_id = 0
         self.samples_per_frame = samples_per_frame
         self.data_fnc = data_fnc
+        self.frame_rate = frame_rate
 
     def recv_into(self, buf: Buffer) -> int:
         mv = memoryview(buf).cast("B")
@@ -654,7 +656,7 @@ class FakeSocket:
             self.seconds,
             self.thread_id,
             self.samples_per_frame,
-            data=self.data_fnc(self.samples_per_frame),
+            data=self.data_fnc(self.samples_per_frame, self.frame_nr * (1 / self.frame_rate)),
         )
         self.seq_id += 1
         self.thread_id += 1
@@ -706,11 +708,11 @@ async def async_main(args: argparse.Namespace) -> None:
         receiver = TiedArrayResampledVoltageReceiver(
             stream_name="tied-array-resampled-voltage",
             interface_address=args.interface,
-            bandwidth=int(64e6),
+            bandwidth=int(64e9),
             samples_per_frame=samples_per_frame,
             multicast_groups=[Endpoint("127.0.0.1", 5001)],
-            scale_factor_timestamp=64e6,
-            sock=FakeSocket(samples_per_frame),
+            scale_factor_timestamp=64e9,
+            sock=FakeSocket(samples_per_frame, frame_rate=64e9),
         )
 
     # X and Y polarisations, freq & phase for frequency domain,
@@ -747,12 +749,17 @@ async def async_main(args: argparse.Namespace) -> None:
     if args.fake_data:
         # sock=FakeSocket(data_fnc=lambda x: create_dirac_data(x, 1)),
         # sock=FakeSocket(data_fnc=create_noisy_sine_data),
-        receiver.sock.data_fnc = lambda n_samples: create_noisy_sine_data_offset_phase(
-            n_samples,
-            -53,
-            phase_signal_quantised_sin.size,
-            sample_rate,
-            scan_offset=SCAN_OFFSET,
+        receiver.sock = FakeSocket(
+            samples_per_frame=samples_per_frame,
+            frame_rate=receiver.frame_rate,
+            data_fnc=lambda n_samples, time_offset: create_noisy_sine_data_offset_phase(
+                n_samples,
+                49,
+                phase_signal_quantised_sin.size,
+                sample_rate,
+                time_offset=time_offset,
+                scan_offset=SCAN_OFFSET,
+            ),
         )
     timedata = np.zeros((4, n_fft))
     narrowband_decimation = 8
@@ -762,10 +769,12 @@ async def async_main(args: argparse.Namespace) -> None:
     centre = band.centre_frequency
     baseband = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
     x_by_time = window_sample_time
-
-    # Bin 0 is the outer edge of a half, Nyquist is the centre.
-    x_lower_all = centre - receiver.bandwidth / 2 + baseband
-    x_upper_all = centre + receiver.bandwidth / 2 - baseband
+    assert PHASE_FREQ < sample_rate / 2
+    # rfft bins are 0 .. Nyquist only. A full FFT would append the negative
+    # frequencies after that, so bin 0 is the band centre, not the outer edge.
+    # PHASE_FREQ is below Nyquist and lands on this axis directly.
+    x_lower_all = centre - baseband
+    x_upper_all = centre + baseband
     if ZOOM:
         f_pass_lo = (pass_channels.start - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
         f_pass_hi = (pass_channels.stop - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
@@ -841,8 +850,6 @@ async def async_main(args: argparse.Namespace) -> None:
     counter = 0
     filled = 0
     frame_samples = receiver.n_samples_per_frame
-    if args.fake_data and frequency_sample_size_frames > 1:
-        raise ValueError("Frequency sample size frames must be 1 for fake data")
 
     min_timestamp = None
     if args.fake_data:
