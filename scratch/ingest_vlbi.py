@@ -540,7 +540,7 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
 
 def quantise_2bit(values: np.ndarray) -> np.ndarray:
     inverse_threshold = 1.0 / 0.969
-    return np.clip(values * inverse_threshold + 2, 0, 3)
+    return np.clip(values * inverse_threshold + 2, 0, 3) - 2
 
 
 def generate_time_data(
@@ -582,7 +582,7 @@ def create_noisy_sine_data_offset_phase(
 ) -> np.ndarray:
     window_sample_time = np.arange(n_window_samples) / sample_rate
     data = np.sin(2 * math.pi * PHASE_FREQ * window_sample_time + math.radians(offset_phase))
-    data + (np.random.normal(0, 3, data.size) - 1.5)
+    data = data + ((np.random.normal(0, 2, data.size) - 1) * 3)
     if scan_offset:
         data = np.roll(data, scan_offset)
     data = quantise_2bit(data).reshape(-1, 1)[:samples_per_frame]
@@ -749,7 +749,7 @@ async def async_main(args: argparse.Namespace) -> None:
         # sock=FakeSocket(data_fnc=create_noisy_sine_data),
         receiver.sock.data_fnc = lambda n_samples: create_noisy_sine_data_offset_phase(
             n_samples,
-            -90,
+            -53,
             phase_signal_quantised_sin.size,
             sample_rate,
             scan_offset=SCAN_OFFSET,
@@ -807,9 +807,11 @@ async def async_main(args: argparse.Namespace) -> None:
 
     axs[1][4].set_title("sin reference")
     axs[1][4].set_xlabel("time (s)")
+    axs[1][4].set_ylim(-3, 3)
     lines[1][4] = axs[1][4].plot(x_by_time, phase_signal_quantised_sin)[0]
     axs[1][5].set_title("cos reference")
     axs[1][5].set_xlabel("time (s)")
+    axs[1][5].set_ylim(-3, 3)
     lines[1][5] = axs[1][5].plot(x_by_time, phase_signal_quantised_cos)[0]
 
     axs[1][6].set_title("sin multplication")
