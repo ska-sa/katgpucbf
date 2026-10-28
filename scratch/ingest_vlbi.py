@@ -50,7 +50,7 @@ CORR2_SENSOR_REMAP = {
 logger = logging.getLogger(__name__)
 CUTOFF = False
 ZOOM = True
-SEARCH_SIGNALS = {"low": [1240e6, 1150e6], "high": [1292.0002e6, 1500e6]}
+SEARCH_SIGNALS = {"low": [1250e6, 1150.00001e6], "high": [1300.00001e6, 1400e6]}
 SYNC = True
 SCAN_OFFSET = 8
 BANDPASS_HALF_WIDTH = 10e3
@@ -545,7 +545,7 @@ def quantise_2bit(values: np.ndarray) -> np.ndarray:
     return np.clip(values * inverse_threshold + 2, 0, 3) - 2
 
 
-def degrees_approx(measured: float, expected: float = 0.0, abs: float = 3.5) -> bool:
+def degrees_approx(measured: float, expected: float = 0.0, abs: float = 2.5) -> bool:
     """Whether two angles in degrees agree, wrapping 360 onto 0."""
     delta = (measured - expected + 180.0) % 360.0 - 180.0
     return delta == approx(0.0, abs=abs)
