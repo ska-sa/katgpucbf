@@ -25,7 +25,6 @@ import math
 import socket
 import struct
 import sys
-import time
 from collections.abc import AsyncGenerator, Buffer, Sequence
 from dataclasses import dataclass
 
@@ -38,6 +37,7 @@ from astropy.time import Time, TimeDelta
 from baseband.vdif import VDIFFrame as BasebandVDIFFrame
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
+from pytest import approx
 
 from katgpucbf import DEFAULT_VTP_PORT
 from katgpucbf.utils import TimeConverter
@@ -50,7 +50,7 @@ CORR2_SENSOR_REMAP = {
 logger = logging.getLogger(__name__)
 CUTOFF = False
 ZOOM = True
-PHASE_FREQ = 1290e6
+SEARCH_SIGNALS = {"low": [1240e6, 1150e6], "high": [1290e6, 1500e6]}
 SYNC = True
 SCAN_OFFSET = 8
 BANDPASS_HALF_WIDTH = 10e3
@@ -361,6 +361,9 @@ class TiedArrayResampledVoltageReceiver:
                                 self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
                                 prefix.sort(key=lambda frame: frame.thread_id)
                                 frame0_linear = frame0.timestamp.linear
+                                # Drop the frameset before yielding. anext() never resumes
+                                # this generator, so a delete after yield would leave it to be emitted again.
+                                del self.buffer[: self.n_threads]
                                 if frame0_linear >= min_frame:
                                     logger.debug("min frame: %d, frame0_linear: %d", min_frame, frame0_linear)
                                     n_missed_framesets = 0
@@ -386,7 +389,6 @@ class TiedArrayResampledVoltageReceiver:
                                         "Skipping frameset because of min_timestamp: %d < %d", frame0_linear, min_frame
                                     )
                                     self.total_framesets += 1
-                                del self.buffer[: self.n_threads]
                                 continue
 
                         if frame0.seq_id <= self.min_seq_id - self.n_threads:
@@ -543,33 +545,71 @@ def quantise_2bit(values: np.ndarray) -> np.ndarray:
     return np.clip(values * inverse_threshold + 2, 0, 3) - 2
 
 
+def degrees_approx(measured: float, expected: float = 0.0) -> bool:
+    """Whether two angles in degrees agree, wrapping 360 onto 0."""
+    delta = (measured - expected + 180.0) % 360.0 - 180.0
+    return delta == approx(0.0, abs=1.0)
+
+
+def sideband_tone_frequency(sky_freq: float, adc_sample_rate: float, output_sample_rate: float) -> float:
+    """Frequency of a sky tone in the real V-engine output.
+
+    The ADC rate and the V-engine rate set the shift. A tone in the upper half
+    of the ADC band aliases to ``adc_sample_rate - sky_freq``. The narrowband
+    mixer removes ``adc_sample_rate / 4``. The remainder is folded into
+    0 .. Nyquist of the V-engine output rate.
+    """
+    aliased = abs(sky_freq) % adc_sample_rate
+    if aliased > adc_sample_rate / 2:
+        aliased = adc_sample_rate - aliased
+    shifted = abs(aliased - adc_sample_rate / 4) % output_sample_rate
+    if shifted > output_sample_rate / 2:
+        shifted = output_sample_rate - shifted
+    return shifted
+
+
 def generate_time_data(
     samples_per_frame: int,
     n_frames: int,
     sample_rate: float,
-    phase_freq: float,
+    phase_freqs: dict[str, list[float]],
     *,
     scan_offset: int = 0,
     bandpass_half_width: float = BANDPASS_HALF_WIDTH,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     window_sample_time = np.arange(samples_per_frame * n_frames) / sample_rate
-    phase_signal_quantised_sin = quantise_2bit(np.sin(2 * math.pi * phase_freq * window_sample_time))
-    phase_signal_quantised_cos = quantise_2bit(np.cos(2 * math.pi * phase_freq * window_sample_time))
+    phase_signals_quantised = {
+        "high": {
+            "sin": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["high"]),
+            "cos": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["high"]),
+        },
+        "low": {
+            "sin": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["low"]),
+            "cos": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["low"]),
+        },
+    }
+    butterworth_passbands = {"high": [None] * len(phase_freqs["high"]), "low": [None] * len(phase_freqs["low"])}
+    for ch, freqs in phase_freqs.items():
+        for i, freq in enumerate(freqs):
+            phase_signals_quantised[ch]["sin"][i] = np.roll(
+                quantise_2bit(np.sin(2 * math.pi * freq * window_sample_time)), scan_offset
+            )
+            phase_signals_quantised[ch]["cos"][i] = np.roll(
+                quantise_2bit(np.cos(2 * math.pi * freq * window_sample_time)), scan_offset
+            )
 
-    phase_signal_quantised_sin = np.roll(phase_signal_quantised_sin, scan_offset)
-    phase_signal_quantised_cos = np.roll(phase_signal_quantised_cos, scan_offset)
-
-    phase_baseband = abs(phase_freq) % sample_rate
-    if phase_baseband > sample_rate / 2:
-        phase_baseband = sample_rate - phase_baseband
-    phase_bandpass_sos = scipy.signal.butter(
-        4,
-        [phase_baseband - bandpass_half_width, phase_baseband + bandpass_half_width],
-        btype="bandpass",
-        fs=sample_rate,
-        output="sos",
-    )
-    return window_sample_time, phase_signal_quantised_sin, phase_signal_quantised_cos, phase_bandpass_sos
+            phase_baseband = abs(freq) % sample_rate
+            if phase_baseband > sample_rate / 2:
+                phase_baseband = sample_rate - phase_baseband
+            phase_bandpass_sos = scipy.signal.butter(
+                4,
+                [phase_baseband - bandpass_half_width, phase_baseband + bandpass_half_width],
+                btype="bandpass",
+                fs=sample_rate,
+                output="sos",
+            )
+            butterworth_passbands[ch][i] = phase_bandpass_sos
+    return window_sample_time, phase_signals_quantised, butterworth_passbands
 
 
 def create_noisy_sine_data_offset_phase(
@@ -577,13 +617,16 @@ def create_noisy_sine_data_offset_phase(
     offset_phase: float,
     n_window_samples: int,
     sample_rate: float,
+    tone_freqs: list[float],
     time_offset: float = 0,
     *,
     scan_offset: int = 0,
 ) -> np.ndarray:
     window_sample_time = np.arange(n_window_samples) / sample_rate + time_offset
-    data = np.sin(2 * math.pi * PHASE_FREQ * window_sample_time + math.radians(offset_phase))
+    data = np.sin(2 * math.pi * tone_freqs[0] * window_sample_time + math.radians(offset_phase))
     data = data + np.random.normal(0, 0.9, data.size)
+    for tone_freq in tone_freqs[1:]:
+        data += np.sin(2 * math.pi * tone_freq * window_sample_time + math.radians(offset_phase))
     if scan_offset:
         data = np.roll(data, scan_offset)
     data = quantise_2bit(data).reshape(-1, 1)[:samples_per_frame]
@@ -708,11 +751,11 @@ async def async_main(args: argparse.Namespace) -> None:
         receiver = TiedArrayResampledVoltageReceiver(
             stream_name="tied-array-resampled-voltage",
             interface_address=args.interface,
-            bandwidth=int(64e9),
+            bandwidth=int(64e6),
             samples_per_frame=samples_per_frame,
             multicast_groups=[Endpoint("127.0.0.1", 5001)],
-            scale_factor_timestamp=64e9,
-            sock=FakeSocket(samples_per_frame, frame_rate=64e9),
+            scale_factor_timestamp=64e6,
+            sock=FakeSocket(samples_per_frame, frame_rate=64e6),
         )
 
     # X and Y polarisations, freq & phase for frequency domain,
@@ -736,13 +779,30 @@ async def async_main(args: argparse.Namespace) -> None:
     # which is the tied-array-resampled-voltage bandwidth from the client.
     sample_rate = receiver.frame_rate * samples_per_frame
     logger.info("Sample rate: %s", sample_rate)
+    narrowband_decimation = 8
+    band = Band("L", adc_sample_rate=1712e6, centre_frequency=1284e6)
+    nb_bandwidth = band.adc_sample_rate * 0.5 / narrowband_decimation
+    pass_channels = get_pass_channels(narrowband_decimation, bandpass_n_channels)
+    centre = band.centre_frequency
+    # 1290 MHz aliases against the 1712 MHz ADC clock to 422 MHz, then the
+    # mixer at adc/4 (428 MHz) shifts it to 6 MHz in the 64 MHz V-engine output.
+    tone_freqs = {
+        ch: [sideband_tone_frequency(freq, band.adc_sample_rate, sample_rate) for freq in freqs]
+        for ch, freqs in SEARCH_SIGNALS.items()
+    }
+    logger.info(
+        "V-engine tone %s Hz from sky %s Hz (ADC %s Hz, output %s Hz)",
+        tone_freqs,
+        SEARCH_SIGNALS,
+        band.adc_sample_rate,
+        sample_rate,
+    )
     (
         window_sample_time,
-        phase_signal_quantised_sin,
-        phase_signal_quantised_cos,
-        phase_bandpass_sos,
+        phase_signals_quantised,
+        butterworth_passbands,
     ) = generate_time_data(
-        samples_per_frame, frequency_sample_size_frames, sample_rate, PHASE_FREQ, scan_offset=SCAN_OFFSET
+        samples_per_frame, frequency_sample_size_frames, sample_rate, tone_freqs, scan_offset=SCAN_OFFSET
     )
     n_fft = window_sample_time.size
     logger.info("N FFT: %s", n_fft)
@@ -755,26 +815,21 @@ async def async_main(args: argparse.Namespace) -> None:
             data_fnc=lambda n_samples, time_offset: create_noisy_sine_data_offset_phase(
                 n_samples,
                 49,
-                phase_signal_quantised_sin.size,
+                n_fft,
                 sample_rate,
+                tone_freqs["high"],
                 time_offset=time_offset,
                 scan_offset=SCAN_OFFSET,
             ),
         )
     timedata = np.zeros((4, n_fft))
-    narrowband_decimation = 8
-    band = Band("L", adc_sample_rate=1712e6, centre_frequency=1284e6)
-    nb_bandwidth = band.adc_sample_rate * 0.5 / narrowband_decimation
-    pass_channels = get_pass_channels(narrowband_decimation, bandpass_n_channels)
-    centre = band.centre_frequency
     baseband = np.fft.rfftfreq(n_fft, d=1.0 / sample_rate)
     x_by_time = window_sample_time
-    assert PHASE_FREQ < sample_rate / 2
     # rfft bins are 0 .. Nyquist only. A full FFT would append the negative
     # frequencies after that, so bin 0 is the band centre, not the outer edge.
-    # PHASE_FREQ is below Nyquist and lands on this axis directly.
     x_lower_all = centre - baseband
     x_upper_all = centre + baseband
+    ch_order = ["high", "high", "low", "low"]
     if ZOOM:
         f_pass_lo = (pass_channels.start - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
         f_pass_hi = (pass_channels.stop - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
@@ -817,11 +872,11 @@ async def async_main(args: argparse.Namespace) -> None:
     axs[1][4].set_title("sin reference")
     axs[1][4].set_xlabel("time (s)")
     axs[1][4].set_ylim(-3, 3)
-    lines[1][4] = axs[1][4].plot(x_by_time, phase_signal_quantised_sin)[0]
-    axs[1][5].set_title("cos reference")
+    lines[1][4] = axs[1][4].plot(x_by_time, np.zeros(x_by_time.shape))[0]
+    axs[1][5].set_title("phase")
     axs[1][5].set_xlabel("time (s)")
     axs[1][5].set_ylim(-3, 3)
-    lines[1][5] = axs[1][5].plot(x_by_time, phase_signal_quantised_cos)[0]
+    lines[1][5] = axs[1][5].plot(x_by_time, np.zeros(x_by_time.shape))[0]
 
     axs[1][6].set_title("sin multplication")
     axs[1][6].set_xlabel("time (s)")
@@ -863,6 +918,7 @@ async def async_main(args: argparse.Namespace) -> None:
             TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp).unix_to_adc(vdif_time.unix)
         )
 
+    t_zero = None
     while True:
         chunk = await anext(receiver.complete_framesets(min_timestamp=min_timestamp))
         if receiver.steady_state_timestamp == 0:
@@ -886,6 +942,11 @@ async def async_main(args: argparse.Namespace) -> None:
             logger.debug("Min Timestamp: %s", min_timestamp)
 
             # do a fourier transform of the time domain data here and plot the magnitude and phase
+
+            thetas = {
+                "high": [0] * len(phase_signals_quantised[ch_order[i]]["sin"]),
+                "low": [0] * len(phase_signals_quantised[ch_order[i]]["sin"]),
+            }
             for i in range(4):
                 fft_data = np.fft.rfft(timedata[i])[bins_by_thread[i]]
                 if CUTOFF:
@@ -897,22 +958,27 @@ async def async_main(args: argparse.Namespace) -> None:
                 # get the phase via time domain data instead? https://dsp.stackexchange.com/questions/75907/signal-processing-techniques-for-accurate-phase-measurement
                 lines[0][i].set_data(x_by_thread[i], magnitude)
                 lines[1][i].set_data(x_by_thread[i], phase)
-                filtered = scipy.signal.sosfiltfilt(phase_bandpass_sos, timedata[i])
-                lines[0][i + 4].set_data(x_by_time, filtered)
-                if i == 0:
-                    _q = filtered * phase_signal_quantised_sin
-                    lines[1][6].set_data(x_by_time, _q)
-                    axs[1][6].relim()
-                    axs[1][6].autoscale_view()
-
-                    _i = filtered * phase_signal_quantised_cos
-                    lines[1][7].set_data(x_by_time, _i)
-                    axs[1][7].relim()
-                    axs[1][7].autoscale_view()
-
+                for j in range(2):
+                    filtered = scipy.signal.sosfiltfilt(butterworth_passbands[ch_order[i]][j], timedata[i])
+                    _q = filtered * phase_signals_quantised[ch_order[i]]["sin"][j]
+                    _i = filtered * phase_signals_quantised[ch_order[i]]["cos"][j]
                     theta = np.atan2(np.sum(_i), np.sum(_q))
-                    logger.info("Theta for thread %s: %.2f deg", i, np.degrees(theta))
-                    logger.info("----------------------------------")
+                    if i == 0:
+                        lines[1][6].set_data(x_by_time, _q)
+                        lines[1][7].set_data(x_by_time, _i)
+                        axs[1][6].relim()
+                        axs[1][6].autoscale_view()
+                        axs[1][7].relim()
+                        axs[1][7].autoscale_view()
+                        lines[1][5].set_data(x_by_time, np.atan2(_i, _q))
+                        axs[1][5].relim()
+                        axs[1][5].autoscale_view()
+                    logger.info(
+                        "Phase for thread %s, freq %s: %.2f deg", i, SEARCH_SIGNALS[ch_order[i]][j], np.degrees(theta)
+                    )
+                    thetas[ch_order[i]][j] = np.degrees(theta)
+
+                    lines[0][i + 4].set_data(x_by_time, filtered)
                 axs[0][i].relim()
                 axs[0][i].autoscale_view()
                 axs[1][i].relim()
@@ -920,26 +986,33 @@ async def async_main(args: argparse.Namespace) -> None:
                 axs[0][i + 4].relim()
                 axs[0][i + 4].autoscale_view()
             # plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is {', '.join(f'{s_p:.2f} rad' for s_p in s_phase)})")
-            plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is in phase with the synthetic signal)")
+            plt.suptitle(
+                f"VDIF FFTs search signals {SEARCH_SIGNALS['high'][0]} MHz and {SEARCH_SIGNALS['high'][1]} MHz"
+            )
+
+            if t_zero is not None:
+                diff = thetas["high"][0] - thetas["high"][1]
+                # the diff should be 2pi*(f1-f2)*t
+                t = chunk.timestamp.timestamp - t_zero
+                logger.info("Time_zero: %s", t_zero.unix)
+                logger.info("Time: %s", chunk.timestamp.timestamp.unix)
+                expected = np.degrees(2 * math.pi * (SEARCH_SIGNALS["high"][0] - SEARCH_SIGNALS["high"][1]) * t.sec)
+                assert degrees_approx(diff, expected), f"Expected {expected:.2f}, got {diff:.2f}"
+                logger.info("Relative phase: %s", diff)
+                t_zero = chunk.timestamp.timestamp
+
+            if degrees_approx(thetas["high"][0]) and degrees_approx(thetas["high"][1]):
+                t_zero = chunk.timestamp.timestamp
+            else:
+                logger.info(f"Not all high frequencies are in sync {thetas['high']}")
 
             if not args.interactive:
                 plt.savefig("rep.png")
             logger.info("Wrote second %d", chunk.timestamp.seconds)
             counter = 0
             filled = 0
-            time.sleep(2)
             if args.fake_data:
                 continue
-            while True:
-                client = await aiokatcp.Client.connect(host, port)
-                async with client:
-                    new_min_timestamp = await client.sensor_value("sim.m800.1712000000.0.steady-state-timestamp", int)
-                    if new_min_timestamp != min_timestamp:
-                        min_timestamp = new_min_timestamp
-                        logger.info("New min timestamp: %s", min_timestamp)
-                        break
-                logger.info("Waiting for sync signal")
-                await asyncio.sleep(1)
 
 
 if __name__ == "__main__":
