@@ -8,7 +8,7 @@ aiohappyeyeballs==2.6.1
     # via
     #   -c requirements.txt
     #   aiohttp
-aiohttp==3.14.3
+aiohttp==3.14.5
     # via
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
@@ -110,7 +110,7 @@ execnet==2.1.2
     # via pytest-xdist
 executing==2.3.0
     # via stack-data
-filelock==4.1.1
+filelock==4.2.4
     # via
     #   python-discovery
     #   virtualenv
@@ -278,7 +278,7 @@ patsy==1.0.3
     # via statsmodels
 pexpect==4.9.0
     # via ipython
-pillow==12.3.0
+pillow==13.0.0
     # via matplotlib
 platformdirs==4.5.1
     # via
@@ -515,7 +515,7 @@ tzlocal==5.4.4
     # via dateparser
 urllib3==2.8.0
     # via requests
-uv==0.13.0
+uv==0.13.6
     # via -r requirements-dev.in
 virtualenv==21.14.5
     # via pre-commit
@@ -533,7 +533,7 @@ xarray==2025.12.0
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
     #   katcbf-vlbi-resample
-yarl==1.22.0
+yarl==1.25.1
     # via
     #   -c requirements.txt
     #   aiohttp
