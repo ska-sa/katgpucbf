@@ -869,10 +869,21 @@ async def async_main(args: argparse.Namespace) -> None:
         axs[1][i].set_ylabel(f"{i}'s phase (rad)")
         axs[1][i].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
 
-    axs[1][4].set_title("sin reference")
     axs[1][4].set_xlabel("time (s)")
     axs[1][4].set_ylim(-3, 3)
     lines[1][4] = axs[1][4].plot(x_by_time, np.zeros(x_by_time.shape))[0]
+    phase_fig, phase_ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
+    phase_ax.set_title("high relative phase")
+    phase_ax.set_xlabel("time since start (s)")
+    phase_ax.set_ylabel("deg")
+    phase_ax.set_ylim(-180, 180)
+    phase_diff_line = phase_ax.plot([], [], label="measured")[0]
+    phase_diff_expected_line = phase_ax.plot([], [], label="expected")[0]
+    phase_ax.legend()
+    phase_diff_times: list[float] = []
+    phase_diff_values: list[float] = []
+    phase_diff_expected: list[float] = []
+    phase_diff_origin = None
     axs[1][5].set_title("phase")
     axs[1][5].set_xlabel("time (s)")
     axs[1][5].set_ylim(-3, 3)
@@ -990,13 +1001,28 @@ async def async_main(args: argparse.Namespace) -> None:
                 f"VDIF FFTs search signals {SEARCH_SIGNALS['high'][0]} MHz and {SEARCH_SIGNALS['high'][1]} MHz"
             )
 
+            diff = (thetas["high"][0] - thetas["high"][1] + 180.0) % 360.0 - 180.0
+            if phase_diff_origin is None:
+                phase_diff_origin = chunk.timestamp.timestamp
+            elapsed = (chunk.timestamp.timestamp - phase_diff_origin).sec
             if t_zero is not None:
-                diff = thetas["high"][0] - thetas["high"][1]
-                # the diff should be 2pi*(f1-f2)*t
+                t = chunk.timestamp.timestamp - t_zero
+                expected = np.degrees(2 * math.pi * (SEARCH_SIGNALS["high"][0] - SEARCH_SIGNALS["high"][1]) * t.sec)
+                expected = (expected + 180.0) % 360.0 - 180.0
+            else:
+                expected = np.nan
+            phase_diff_times.append(elapsed)
+            phase_diff_values.append(diff)
+            phase_diff_expected.append(expected)
+            phase_diff_line.set_data(phase_diff_times, phase_diff_values)
+            phase_diff_expected_line.set_data(phase_diff_times, phase_diff_expected)
+            phase_ax.relim()
+            phase_ax.autoscale_view(scaley=False)
+
+            if t_zero is not None:
                 t = chunk.timestamp.timestamp - t_zero
                 logger.info("Time_zero: %s", t_zero.unix)
                 logger.info("Time: %s", chunk.timestamp.timestamp.unix)
-                expected = np.degrees(2 * math.pi * (SEARCH_SIGNALS["high"][0] - SEARCH_SIGNALS["high"][1]) * t.sec)
                 if not degrees_approx(diff, expected):
                     logger.info(f"Expected {expected % 360:.2f}, got {diff:.2f}")
                 else:
@@ -1008,7 +1034,11 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info(f"Not all high frequencies are in sync {thetas['high']}")
 
             if not args.interactive:
-                plt.savefig("rep.png")
+                fig.savefig("rep.png")
+                phase_fig.savefig("phase.png")
+            else:
+                fig.canvas.draw_idle()
+                phase_fig.canvas.draw_idle()
             logger.info("Wrote second %d", chunk.timestamp.seconds)
             counter = 0
             filled = 0
