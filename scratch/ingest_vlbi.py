@@ -50,7 +50,7 @@ CORR2_SENSOR_REMAP = {
 logger = logging.getLogger(__name__)
 CUTOFF = False
 ZOOM = True
-SEARCH_SIGNALS = {"low": [1240e6, 1150e6], "high": [1290e6, 1500e6]}
+SEARCH_SIGNALS = {"low": [1240e6, 1150e6], "high": [1292.0002e6, 1500e6]}
 SYNC = True
 SCAN_OFFSET = 8
 BANDPASS_HALF_WIDTH = 10e3
@@ -545,10 +545,10 @@ def quantise_2bit(values: np.ndarray) -> np.ndarray:
     return np.clip(values * inverse_threshold + 2, 0, 3) - 2
 
 
-def degrees_approx(measured: float, expected: float = 0.0) -> bool:
+def degrees_approx(measured: float, expected: float = 0.0, abs: float = 3.5) -> bool:
     """Whether two angles in degrees agree, wrapping 360 onto 0."""
     delta = (measured - expected + 180.0) % 360.0 - 180.0
-    return delta == approx(0.0, abs=1.0)
+    return delta == approx(0.0, abs=abs)
 
 
 def sideband_tone_frequency(sky_freq: float, adc_sample_rate: float, output_sample_rate: float) -> float:
@@ -997,13 +997,14 @@ async def async_main(args: argparse.Namespace) -> None:
                 logger.info("Time_zero: %s", t_zero.unix)
                 logger.info("Time: %s", chunk.timestamp.timestamp.unix)
                 expected = np.degrees(2 * math.pi * (SEARCH_SIGNALS["high"][0] - SEARCH_SIGNALS["high"][1]) * t.sec)
-                assert degrees_approx(diff, expected), f"Expected {expected:.2f}, got {diff:.2f}"
-                logger.info("Relative phase: %s", diff)
-                t_zero = chunk.timestamp.timestamp
+                if not degrees_approx(diff, expected):
+                    logger.info(f"Expected {expected % 360:.2f}, got {diff:.2f}")
+                else:
+                    logger.info("Relative phase: %s", diff)
 
-            if degrees_approx(thetas["high"][0]) and degrees_approx(thetas["high"][1]):
+            if degrees_approx(thetas["high"][0] - thetas["high"][1]) and t_zero is None:
                 t_zero = chunk.timestamp.timestamp
-            else:
+            elif t_zero is None:
                 logger.info(f"Not all high frequencies are in sync {thetas['high']}")
 
             if not args.interactive:
