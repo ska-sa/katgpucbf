@@ -32,7 +32,6 @@ import aiokatcp
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.signal
 from astropy.time import Time, TimeDelta
 from baseband.vdif import VDIFFrame as BasebandVDIFFrame
 from katsdpservices import get_interface_address
@@ -40,7 +39,6 @@ from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_par
 from pytest import approx
 
 from katgpucbf import DEFAULT_VTP_PORT
-from katgpucbf.utils import TimeConverter
 
 CPLX = 2
 CORR2_SENSOR_REMAP = {
@@ -50,11 +48,9 @@ CORR2_SENSOR_REMAP = {
 logger = logging.getLogger(__name__)
 CUTOFF = False
 ZOOM = True
-SEARCH_SIGNALS = {"low": [1250e6, 1150e6], "high": [1350e6, 1365e6]}
-TONE_RELATIVE_PHASE = 30.0
+SEARCH_SIGNALS = {"low": [1250e6, 1150e6], "high": [1350e6, 1355e6, 1360e6, 1365e6, 1370e6, 1375e6]}
+VLBI_DELAY = 30.0
 SYNC = True
-SCAN_OFFSET = 8
-BANDPASS_HALF_WIDTH = 10e3
 FAKE_DATA_REF_EPOCH = 35
 
 
@@ -185,7 +181,7 @@ class TiedArrayResampledVoltageReceiver:
         sock: socket.socket | None = None,
         reorder_window: int = 32,
         scale_factor_timestamp: float = 1.0,
-        vlbi_delay: float = 0.0,
+        vlbi_delay: float = 1.0,
         steady_state_timestamp: int = 0,
         sync_time: float = 0.0,
     ) -> None:
@@ -508,21 +504,6 @@ def main() -> None:
 NP_DTYPE = np.int8
 
 
-def samples_before_sync(frame_start: Time, sync_time: Time, sample_rate: float, n_samples: int) -> int:
-    """How many leading samples in a frame fall before `sync_time`.
-
-    A sample that lands on the sync is kept. The result is clamped to the frame.
-    """
-    delta_sec = (sync_time - frame_start).sec
-    if delta_sec <= 0:
-        return 0
-    # A fraction of a sample of slack stops float rounding from dropping the sync sample.
-    skip = math.ceil(delta_sec * sample_rate - 1e-4)
-    if skip <= 0:
-        return 0
-    return min(skip, n_samples)
-
-
 def create_identity_data(samples_per_frame: int) -> np.ndarray:
     """Create an identity data array use as payload for a VDIF frame.
 
@@ -557,47 +538,6 @@ def wrap_degrees(angle: float) -> float:
     return (angle + 180.0) % 360.0 - 180.0
 
 
-def tone_phase_degrees(filtered: np.ndarray, sin_ref: np.ndarray, cos_ref: np.ndarray) -> float:
-    """Phase of `filtered` relative to the sin/cos reference pair, in degrees."""
-    in_phase = np.sum(filtered * cos_ref)
-    quadrature = np.sum(filtered * sin_ref)
-    return np.degrees(np.atan2(in_phase, quadrature))
-
-
-def zero_relative_phase_offset(
-    samples: np.ndarray,
-    sin_refs: Sequence[np.ndarray],
-    cos_refs: Sequence[np.ndarray],
-    passbands: Sequence,
-    n_offsets: int,
-) -> float | None:
-    """Sample offset at which the two tones have the same phase.
-
-    The frame as a whole need not have zero relative phase. Each tone completes
-    a whole number of cycles in `samples`, so rolling the window is a time
-    shift. The returned offset is a shift whose measured difference is near
-    zero. ``None`` if no scanned shift is.
-    """
-    phases = np.empty(n_offsets)
-    for offset in range(n_offsets):
-        window = samples if offset == 0 else np.roll(samples, -offset)
-        phase_a = tone_phase_degrees(scipy.signal.sosfiltfilt(passbands[0], window), sin_refs[0], cos_refs[0])
-        phase_b = tone_phase_degrees(scipy.signal.sosfiltfilt(passbands[1], window), sin_refs[1], cos_refs[1])
-        phases[offset] = wrap_degrees(phase_a - phase_b)
-
-    if degrees_approx(float(phases[0])):
-        return 0.0
-    for i in range(n_offsets - 1):
-        start = float(phases[i])
-        stop = float(phases[i + 1])
-        # A step through ±180 wraps the sign without passing through 0.
-        if abs(stop - start) >= 180.0 or start == stop:
-            continue
-        if start < 0.0 < stop or stop < 0.0 < start:
-            return i + (0.0 - start) / (stop - start)
-    return None
-
-
 def sideband_tone_frequency(sky_freq: float, adc_sample_rate: float, output_sample_rate: float) -> float:
     """Frequency of a sky tone in the real V-engine output.
 
@@ -620,10 +560,7 @@ def generate_time_data(
     n_frames: int,
     sample_rate: float,
     phase_freqs: dict[str, list[float]],
-    *,
-    scan_offset: int = 0,
-    bandpass_half_width: float = BANDPASS_HALF_WIDTH,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, dict]:
     window_sample_time = np.arange(samples_per_frame * n_frames) / sample_rate
     phase_signals_quantised = {
         "high": {
@@ -635,28 +572,11 @@ def generate_time_data(
             "cos": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["low"]),
         },
     }
-    butterworth_passbands = {"high": [None] * len(phase_freqs["high"]), "low": [None] * len(phase_freqs["low"])}
     for ch, freqs in phase_freqs.items():
         for i, freq in enumerate(freqs):
-            phase_signals_quantised[ch]["sin"][i] = np.roll(
-                quantise_2bit(np.sin(2 * math.pi * freq * window_sample_time)), scan_offset
-            )
-            phase_signals_quantised[ch]["cos"][i] = np.roll(
-                quantise_2bit(np.cos(2 * math.pi * freq * window_sample_time)), scan_offset
-            )
-
-            phase_baseband = abs(freq) % sample_rate
-            if phase_baseband > sample_rate / 2:
-                phase_baseband = sample_rate - phase_baseband
-            phase_bandpass_sos = scipy.signal.butter(
-                4,
-                [phase_baseband - bandpass_half_width, phase_baseband + bandpass_half_width],
-                btype="bandpass",
-                fs=sample_rate,
-                output="sos",
-            )
-            butterworth_passbands[ch][i] = phase_bandpass_sos
-    return window_sample_time, phase_signals_quantised, butterworth_passbands
+            phase_signals_quantised[ch]["sin"][i] = quantise_2bit(np.sin(2 * math.pi * freq * window_sample_time))
+            phase_signals_quantised[ch]["cos"][i] = quantise_2bit(np.cos(2 * math.pi * freq * window_sample_time))
+    return window_sample_time, phase_signals_quantised
 
 
 def create_noisy_sine_data_offset_phase(
@@ -666,9 +586,7 @@ def create_noisy_sine_data_offset_phase(
     sample_rate: float,
     tone_freqs: list[float],
     time_offset: float = 0,
-    relative_phase: float = TONE_RELATIVE_PHASE,
-    *,
-    scan_offset: int = 0,
+    relative_phase: float = VLBI_DELAY,
 ) -> np.ndarray:
     window_sample_time = np.arange(n_window_samples) / sample_rate + time_offset
     data = np.sin(2 * math.pi * tone_freqs[0] * window_sample_time + math.radians(offset_phase))
@@ -679,8 +597,6 @@ def create_noisy_sine_data_offset_phase(
             + math.radians(offset_phase)
             + (c + 1) * math.radians(relative_phase)
         )
-    if scan_offset:
-        data = np.roll(data, scan_offset)
     data = quantise_2bit(data).reshape(-1, 1)[:samples_per_frame]
 
     assert data.shape == (samples_per_frame, 1)
@@ -849,19 +765,11 @@ async def async_main(args: argparse.Namespace) -> None:
         band.adc_sample_rate,
         sample_rate,
     )
-    high_beat_hz = tone_freqs["high"][0] - tone_freqs["high"][1]
-    (
-        window_sample_time,
-        phase_signals_quantised,
-        butterworth_passbands,
-    ) = generate_time_data(
-        samples_per_frame, frequency_sample_size_frames, sample_rate, tone_freqs, scan_offset=SCAN_OFFSET
+    window_sample_time, phase_signals_quantised = generate_time_data(
+        samples_per_frame, frequency_sample_size_frames, sample_rate, tone_freqs
     )
     n_fft = window_sample_time.size
-    beat_period_samples = sample_rate / abs(high_beat_hz)
-    scan_offsets = min(n_fft // 2, math.ceil(beat_period_samples) + 1, 1333)
     logger.info("N FFT: %s", n_fft)
-    logger.info("Subframe scan: %d samples (beat %.3f samples)", scan_offsets, beat_period_samples)
     if args.fake_data:
         # sock=FakeSocket(data_fnc=lambda x: create_dirac_data(x, 1)),
         # sock=FakeSocket(data_fnc=create_noisy_sine_data),
@@ -875,7 +783,6 @@ async def async_main(args: argparse.Namespace) -> None:
                 sample_rate,
                 tone_freqs["high"],
                 time_offset=time_offset,
-                scan_offset=SCAN_OFFSET,
             ),
         )
     timedata = np.zeros((4, n_fft))
@@ -918,7 +825,7 @@ async def async_main(args: argparse.Namespace) -> None:
         axs[0][i].set_xlabel(f"{fig_order[i]} half frequency (Hz)")
 
         lines[0][i + 4] = axs[0][i + 4].plot(x_by_time, np.zeros(x_by_time.shape))[0]
-        axs[0][i + 4].set_ylabel(f"{i}'s time domain voltage after bandpass filter")
+        axs[0][i + 4].set_ylabel(f"{i}'s time domain voltage")
         axs[0][i + 4].set_xlabel("time (s)")
 
         lines[1][i] = axs[1][i].plot(x_by_thread[i], np.zeros(x_by_thread[i].shape))[0]
@@ -929,17 +836,13 @@ async def async_main(args: argparse.Namespace) -> None:
     axs[1][4].set_ylim(-3, 3)
     lines[1][4] = axs[1][4].plot(x_by_time, np.zeros(x_by_time.shape))[0]
     phase_fig, phase_ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
-    phase_ax.set_title("high relative phase")
-    phase_ax.set_xlabel("time since start (s)")
+    phase_ax.set_title("high phase difference")
+    phase_ax.set_xlabel("sky frequency (Hz)")
     phase_ax.set_ylabel("deg")
     phase_ax.set_ylim(-180, 180)
-    phase_diff_line = phase_ax.plot([], [], label="measured")[0]
-    phase_diff_expected_line = phase_ax.plot([], [], label="expected")[0]
+    phase_diff_line = phase_ax.plot([], [], "o", label="measured")[0]
+    phase_diff_expected_line = phase_ax.plot([], [], "x", label="expected")[0]
     phase_ax.legend()
-    phase_diff_times: list[float] = []
-    phase_diff_values: list[float] = []
-    phase_diff_expected: list[float] = []
-    phase_diff_origin = None
     axs[1][5].set_title("phase")
     axs[1][5].set_xlabel("time (s)")
     axs[1][5].set_ylim(-3, 3)
@@ -969,53 +872,26 @@ async def async_main(args: argparse.Namespace) -> None:
     logger.info("Centre: %s", centre)
     await asyncio.sleep(4)
     logger.info("Starting to receive framesets")
-    counter = 0
-    filled = 0
     frame_samples = receiver.n_samples_per_frame
+    pending = 0
 
-    min_timestamp = None
-    if args.fake_data:
-        vdif_time = (
-            VDIFTimestamp(
-                seconds=0, ref_epoch=FAKE_DATA_REF_EPOCH, frame_nr=0, frame_rate=receiver.frame_rate
-            ).timestamp
-            + TimeDelta(1 / sample_rate, format="sec", scale="tai") * 5
-        )
-        min_timestamp = round(
-            TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp).unix_to_adc(vdif_time.unix)
-        )
     fig.savefig("rep.png")
     phase_fig.savefig("phase.png")
 
-    t_zero = None
-    while True:
-        chunk = await anext(receiver.complete_framesets(min_timestamp=min_timestamp))
-        if receiver.steady_state_timestamp == 0:
-            logger.info("Steady state timestamp is zero")
-        skip = samples_before_sync(
-            chunk.timestamp.timestamp, receiver.sync_time_for(min_timestamp), sample_rate, frame_samples
-        )
-        take = min(frame_samples - skip, n_fft - filled)
-        if skip and take:
-            logger.info("Skipping %d samples before sync in frame %d", skip, chunk.timestamp.linear)
-        if take > 0:
-            for frame in chunk.frames:
-                vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
-                samples = np.reshape(vdif_frame.data, -1)[skip : skip + take]
-                timedata[frame.thread_id, filled : filled + take] = samples
-            filled += take
-            # A short leading fragment does not count as a frame on its own.
-            counter = filled // frame_samples
-        if counter == frequency_sample_size_frames:
+    async for chunk in receiver.complete_framesets():
+        for frame in chunk.frames:
+            vdif_frame = BasebandVDIFFrame.fromfile(io.BytesIO(frame.raw_frame))
+            samples = np.reshape(vdif_frame.data, -1)
+            start = pending * frame_samples
+            timedata[frame.thread_id, start : start + frame_samples] = samples
+        pending += 1
+        if pending == frequency_sample_size_frames:
+            pending = 0
             logger.info("Generating Image")
-            logger.debug("Min Timestamp: %s", min_timestamp)
 
             # do a fourier transform of the time domain data here and plot the magnitude and phase
 
-            thetas = {
-                "high": [0] * len(phase_signals_quantised[ch_order[i]]["sin"]),
-                "low": [0] * len(phase_signals_quantised[ch_order[i]]["sin"]),
-            }
+            thetas = {ch: [0.0] * len(phase_signals_quantised[ch]["sin"]) for ch in ("high", "low")}
             for i in range(4):
                 fft_data = np.fft.rfft(timedata[i])[bins_by_thread[i]]
                 if CUTOFF:
@@ -1027,10 +903,10 @@ async def async_main(args: argparse.Namespace) -> None:
                 # get the phase via time domain data instead? https://dsp.stackexchange.com/questions/75907/signal-processing-techniques-for-accurate-phase-measurement
                 lines[0][i].set_data(x_by_thread[i], magnitude)
                 lines[1][i].set_data(x_by_thread[i], phase)
-                for j in range(2):
-                    filtered = scipy.signal.sosfiltfilt(butterworth_passbands[ch_order[i]][j], timedata[i])
-                    _q = filtered * phase_signals_quantised[ch_order[i]]["sin"][j]
-                    _i = filtered * phase_signals_quantised[ch_order[i]]["cos"][j]
+                lines[0][i + 4].set_data(x_by_time, timedata[i])
+                for j in range(len(thetas[ch_order[i]])):
+                    _q = timedata[i] * phase_signals_quantised[ch_order[i]]["sin"][j]
+                    _i = timedata[i] * phase_signals_quantised[ch_order[i]]["cos"][j]
                     theta = np.atan2(np.sum(_i), np.sum(_q))
                     if i == 0:
                         lines[1][6].set_data(x_by_time, _q)
@@ -1046,62 +922,49 @@ async def async_main(args: argparse.Namespace) -> None:
                         "Phase for thread %s, freq %s: %.2f deg", i, SEARCH_SIGNALS[ch_order[i]][j], np.degrees(theta)
                     )
                     thetas[ch_order[i]][j] = np.degrees(theta)
-
-                    lines[0][i + 4].set_data(x_by_time, filtered)
                 axs[0][i].relim()
                 axs[0][i].autoscale_view()
                 axs[1][i].relim()
                 axs[1][i].autoscale_view()
                 axs[0][i + 4].relim()
                 axs[0][i + 4].autoscale_view()
-            # plt.suptitle(f"VDIF FFTs ({PHASE_FREQ} phase is {', '.join(f'{s_p:.2f} rad' for s_p in s_phase)})")
-            plt.suptitle(
-                f"VDIF FFTs search signals {SEARCH_SIGNALS['high'][0]} MHz and {SEARCH_SIGNALS['high'][1]} MHz"
-            )
+            high_mhz = ", ".join(f"{freq / 1e6:.0f}" for freq in SEARCH_SIGNALS["high"])
+            plt.suptitle(f"VDIF FFTs search signals {high_mhz} MHz")
 
-            diff = wrap_degrees(thetas["high"][0] - thetas["high"][1])
-            if t_zero is None:
-                offset = zero_relative_phase_offset(
-                    timedata[1],
-                    phase_signals_quantised["high"]["sin"],
-                    phase_signals_quantised["high"]["cos"],
-                    butterworth_passbands["high"],
-                    scan_offsets,
+            high_freqs = tone_freqs["high"]
+            high_phase = thetas["high"]
+            sky_freqs = SEARCH_SIGNALS["high"]
+            measured_diff = []
+            expected_diff = []
+            for index in range(len(high_freqs) - 1):
+                beat = high_freqs[index] - high_freqs[index + 1]
+                diff = wrap_degrees(high_phase[index] - high_phase[index + 1])
+                # Each later tone is another TONE_RELATIVE_PHASE ahead.
+                delay = -wrap_degrees(diff + VLBI_DELAY) / (360.0 * beat)
+                logger.info(
+                    "Delay between %.0f MHz and %.0f MHz: %.3f ns",
+                    sky_freqs[index] / 1e6,
+                    sky_freqs[index + 1] / 1e6,
+                    1e9 * delay,
                 )
-                if offset is None:
-                    logger.info("No scanned sample has relative phase near zero %s", thetas["high"])
-                else:
-                    t_zero = chunk.timestamp.timestamp + TimeDelta(offset / sample_rate, format="sec", scale="tai")
+            for index, freq in enumerate(high_freqs):
+                measured_diff.append(wrap_degrees(high_phase[index] - high_phase[0]))
+                expected_diff.append(
+                    wrap_degrees(-360.0 * (freq - high_freqs[0]) * receiver.vlbi_delay + index * VLBI_DELAY)
+                )
+                if not degrees_approx(measured_diff[-1], expected_diff[-1]):
                     logger.info(
-                        "Zero relative phase at %.3f samples (%.3f ns) after %s",
-                        offset,
-                        1e9 * offset / sample_rate,
-                        chunk.timestamp.timestamp.isot,
+                        "Expected phase %.2f deg at %.0f MHz, got %.2f",
+                        expected_diff[-1],
+                        sky_freqs[index] / 1e6,
+                        measured_diff[-1],
                     )
-
-            if phase_diff_origin is None:
-                phase_diff_origin = chunk.timestamp.timestamp
-            elapsed = (chunk.timestamp.timestamp - phase_diff_origin).sec
-            if t_zero is not None:
-                t = chunk.timestamp.timestamp - t_zero
-                expected = wrap_degrees(float(np.degrees(2 * math.pi * high_beat_hz * t.sec)))
-            else:
-                expected = np.nan
-            phase_diff_times.append(elapsed)
-            phase_diff_values.append(diff)
-            phase_diff_expected.append(expected)
-            phase_diff_line.set_data(phase_diff_times, phase_diff_values)
-            phase_diff_expected_line.set_data(phase_diff_times, phase_diff_expected)
+            phase_diff_line.set_data(sky_freqs, measured_diff)
+            phase_diff_expected_line.set_data(sky_freqs, expected_diff)
             phase_ax.relim()
             phase_ax.autoscale_view(scaley=False)
 
-            if t_zero is not None:
-                logger.info("Time_zero: %s", t_zero.unix)
-                logger.info("Time: %s", chunk.timestamp.timestamp.unix)
-                if not degrees_approx(diff, expected):
-                    logger.info(f"Expected {expected:.2f}, got {diff:.2f}")
-                else:
-                    logger.info("Relative phase: %s", diff)
+            logger.info("Time: %s", chunk.timestamp.timestamp.unix)
 
             if not args.interactive:
                 fig.savefig("rep.png")
@@ -1110,12 +973,6 @@ async def async_main(args: argparse.Namespace) -> None:
                 fig.canvas.draw_idle()
                 phase_fig.canvas.draw_idle()
             logger.info("Wrote second %d", chunk.timestamp.seconds)
-            counter = 0
-            filled = 0
-            if args.fake_data:
-                # if t_zero is not None:
-                #     break
-                continue
 
 
 if __name__ == "__main__":
