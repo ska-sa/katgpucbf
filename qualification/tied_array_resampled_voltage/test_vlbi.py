@@ -16,13 +16,14 @@
 
 """Test for tied-array-resampled-voltage stream."""
 
-import io
 import asyncio
+import io
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import numpy as np
 import pytest
+from baseband.vdif.header import VDIFHeader
 from matplotlib.figure import Figure
 from pytest_check import check
 
@@ -35,6 +36,7 @@ from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltag
 
 FRAMESETS_TO_CAPTURE = 10
 VGPU_SAMPLES_PER_FRAME = 20000
+
 
 async def max_retry_test(
     test_procedure: Callable[[int], Awaitable[bool]], max_attempts: int, retry_interval: float
@@ -218,15 +220,15 @@ async def test_vlbi_vdif(
     with check:
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
-    
+
     pdf_report.detail("""Verify edv equals 0, and samples per frame equals 20000, and
         timestamps set according to the most recent reference epoch.""")
     with check:
-            for frame in frameset.frames:
-                buffer = io.BytesIO(frame.raw_frame)
-                header = VDIFHeader.fromfile(buffer)
-                assert header.edv == 0
-                assert header.samples_per_frame == VGPU_SAMPLES_PER_FRAME
-                half_years = frame.timestamp.seconds // (182 * 24 * 3600)
-                overflow = frame.timestamp.seconds % (182 * 24 * 3600)
-                assert half_years == 0 or (half_years == 1 and overflow <= 7 * 24 * 3600)
+        for frame in frameset.frames:
+            buffer = io.BytesIO(frame.raw_frame)
+            header = VDIFHeader.fromfile(buffer)
+            assert header.edv == 0
+            assert header.samples_per_frame == VGPU_SAMPLES_PER_FRAME
+            half_years = frame.timestamp.seconds // (182 * 24 * 3600)
+            overflow = frame.timestamp.seconds % (182 * 24 * 3600)
+            assert half_years == 0 or (half_years == 1 and overflow <= 7 * 24 * 3600)
