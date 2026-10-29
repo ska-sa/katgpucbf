@@ -50,7 +50,8 @@ CORR2_SENSOR_REMAP = {
 logger = logging.getLogger(__name__)
 CUTOFF = False
 ZOOM = True
-SEARCH_SIGNALS = {"low": [1250e6, 1150.00001e6], "high": [1300.00001e6, 1400e6]}
+SEARCH_SIGNALS = {"low": [1250e6, 1150e6], "high": [1350e6, 1365e6]}
+TONE_RELATIVE_PHASE = 30.0
 SYNC = True
 SCAN_OFFSET = 8
 BANDPASS_HALF_WIDTH = 10e3
@@ -547,8 +548,54 @@ def quantise_2bit(values: np.ndarray) -> np.ndarray:
 
 def degrees_approx(measured: float, expected: float = 0.0, abs: float = 2.5) -> bool:
     """Whether two angles in degrees agree, wrapping 360 onto 0."""
-    delta = (measured - expected + 180.0) % 360.0 - 180.0
+    delta = wrap_degrees(measured - expected)
     return delta == approx(0.0, abs=abs)
+
+
+def wrap_degrees(angle: float) -> float:
+    """Wrap degrees into (-180, 180]."""
+    return (angle + 180.0) % 360.0 - 180.0
+
+
+def tone_phase_degrees(filtered: np.ndarray, sin_ref: np.ndarray, cos_ref: np.ndarray) -> float:
+    """Phase of `filtered` relative to the sin/cos reference pair, in degrees."""
+    in_phase = np.sum(filtered * cos_ref)
+    quadrature = np.sum(filtered * sin_ref)
+    return np.degrees(np.atan2(in_phase, quadrature))
+
+
+def zero_relative_phase_offset(
+    samples: np.ndarray,
+    sin_refs: Sequence[np.ndarray],
+    cos_refs: Sequence[np.ndarray],
+    passbands: Sequence,
+    n_offsets: int,
+) -> float | None:
+    """Sample offset at which the two tones have the same phase.
+
+    The frame as a whole need not have zero relative phase. Each tone completes
+    a whole number of cycles in `samples`, so rolling the window is a time
+    shift. The returned offset is a shift whose measured difference is near
+    zero. ``None`` if no scanned shift is.
+    """
+    phases = np.empty(n_offsets)
+    for offset in range(n_offsets):
+        window = samples if offset == 0 else np.roll(samples, -offset)
+        phase_a = tone_phase_degrees(scipy.signal.sosfiltfilt(passbands[0], window), sin_refs[0], cos_refs[0])
+        phase_b = tone_phase_degrees(scipy.signal.sosfiltfilt(passbands[1], window), sin_refs[1], cos_refs[1])
+        phases[offset] = wrap_degrees(phase_a - phase_b)
+
+    if degrees_approx(float(phases[0])):
+        return 0.0
+    for i in range(n_offsets - 1):
+        start = float(phases[i])
+        stop = float(phases[i + 1])
+        # A step through ±180 wraps the sign without passing through 0.
+        if abs(stop - start) >= 180.0 or start == stop:
+            continue
+        if start < 0.0 < stop or stop < 0.0 < start:
+            return i + (0.0 - start) / (stop - start)
+    return None
 
 
 def sideband_tone_frequency(sky_freq: float, adc_sample_rate: float, output_sample_rate: float) -> float:
@@ -619,14 +666,19 @@ def create_noisy_sine_data_offset_phase(
     sample_rate: float,
     tone_freqs: list[float],
     time_offset: float = 0,
+    relative_phase: float = TONE_RELATIVE_PHASE,
     *,
     scan_offset: int = 0,
 ) -> np.ndarray:
     window_sample_time = np.arange(n_window_samples) / sample_rate + time_offset
     data = np.sin(2 * math.pi * tone_freqs[0] * window_sample_time + math.radians(offset_phase))
     data = data + np.random.normal(0, 0.9, data.size)
-    for tone_freq in tone_freqs[1:]:
-        data += np.sin(2 * math.pi * tone_freq * window_sample_time + math.radians(offset_phase))
+    for c, tone_freq in enumerate(tone_freqs[1:]):
+        data += np.sin(
+            2 * math.pi * tone_freq * window_sample_time
+            + math.radians(offset_phase)
+            + (c + 1) * math.radians(relative_phase)
+        )
     if scan_offset:
         data = np.roll(data, scan_offset)
     data = quantise_2bit(data).reshape(-1, 1)[:samples_per_frame]
@@ -797,6 +849,7 @@ async def async_main(args: argparse.Namespace) -> None:
         band.adc_sample_rate,
         sample_rate,
     )
+    high_beat_hz = tone_freqs["high"][0] - tone_freqs["high"][1]
     (
         window_sample_time,
         phase_signals_quantised,
@@ -805,7 +858,10 @@ async def async_main(args: argparse.Namespace) -> None:
         samples_per_frame, frequency_sample_size_frames, sample_rate, tone_freqs, scan_offset=SCAN_OFFSET
     )
     n_fft = window_sample_time.size
+    beat_period_samples = sample_rate / abs(high_beat_hz)
+    scan_offsets = min(n_fft // 2, math.ceil(beat_period_samples) + 1, 1333)
     logger.info("N FFT: %s", n_fft)
+    logger.info("Subframe scan: %d samples (beat %.3f samples)", scan_offsets, beat_period_samples)
     if args.fake_data:
         # sock=FakeSocket(data_fnc=lambda x: create_dirac_data(x, 1)),
         # sock=FakeSocket(data_fnc=create_noisy_sine_data),
@@ -928,6 +984,8 @@ async def async_main(args: argparse.Namespace) -> None:
         min_timestamp = round(
             TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp).unix_to_adc(vdif_time.unix)
         )
+    fig.savefig("rep.png")
+    phase_fig.savefig("phase.png")
 
     t_zero = None
     while True:
@@ -1001,14 +1059,32 @@ async def async_main(args: argparse.Namespace) -> None:
                 f"VDIF FFTs search signals {SEARCH_SIGNALS['high'][0]} MHz and {SEARCH_SIGNALS['high'][1]} MHz"
             )
 
-            diff = (thetas["high"][0] - thetas["high"][1] + 180.0) % 360.0 - 180.0
+            diff = wrap_degrees(thetas["high"][0] - thetas["high"][1])
+            if t_zero is None:
+                offset = zero_relative_phase_offset(
+                    timedata[1],
+                    phase_signals_quantised["high"]["sin"],
+                    phase_signals_quantised["high"]["cos"],
+                    butterworth_passbands["high"],
+                    scan_offsets,
+                )
+                if offset is None:
+                    logger.info("No scanned sample has relative phase near zero %s", thetas["high"])
+                else:
+                    t_zero = chunk.timestamp.timestamp + TimeDelta(offset / sample_rate, format="sec", scale="tai")
+                    logger.info(
+                        "Zero relative phase at %.3f samples (%.3f ns) after %s",
+                        offset,
+                        1e9 * offset / sample_rate,
+                        chunk.timestamp.timestamp.isot,
+                    )
+
             if phase_diff_origin is None:
                 phase_diff_origin = chunk.timestamp.timestamp
             elapsed = (chunk.timestamp.timestamp - phase_diff_origin).sec
             if t_zero is not None:
                 t = chunk.timestamp.timestamp - t_zero
-                expected = np.degrees(2 * math.pi * (SEARCH_SIGNALS["high"][0] - SEARCH_SIGNALS["high"][1]) * t.sec)
-                expected = (expected + 180.0) % 360.0 - 180.0
+                expected = wrap_degrees(float(np.degrees(2 * math.pi * high_beat_hz * t.sec)))
             else:
                 expected = np.nan
             phase_diff_times.append(elapsed)
@@ -1020,18 +1096,12 @@ async def async_main(args: argparse.Namespace) -> None:
             phase_ax.autoscale_view(scaley=False)
 
             if t_zero is not None:
-                t = chunk.timestamp.timestamp - t_zero
                 logger.info("Time_zero: %s", t_zero.unix)
                 logger.info("Time: %s", chunk.timestamp.timestamp.unix)
                 if not degrees_approx(diff, expected):
-                    logger.info(f"Expected {expected % 360:.2f}, got {diff:.2f}")
+                    logger.info(f"Expected {expected:.2f}, got {diff:.2f}")
                 else:
                     logger.info("Relative phase: %s", diff)
-
-            if degrees_approx(thetas["high"][0] - thetas["high"][1]) and t_zero is None:
-                t_zero = chunk.timestamp.timestamp
-            elif t_zero is None:
-                logger.info(f"Not all high frequencies are in sync {thetas['high']}")
 
             if not args.interactive:
                 fig.savefig("rep.png")
@@ -1043,6 +1113,8 @@ async def async_main(args: argparse.Namespace) -> None:
             counter = 0
             filled = 0
             if args.fake_data:
+                # if t_zero is not None:
+                #     break
                 continue
 
 
