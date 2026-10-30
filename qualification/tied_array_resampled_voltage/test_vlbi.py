@@ -252,6 +252,7 @@ async def test_vlbi_vdif_header(
             buffer = io.BytesIO(frame.raw_frame)
             header = VDIFHeader.fromfile(buffer)
             assert header.edv == 0
+            assert header.bps == 1
             assert header.samples_per_frame == VGPU_SAMPLES_PER_FRAME
             half_years = frame.timestamp.seconds // (182 * 24 * 3600)
             overflow = frame.timestamp.seconds % (182 * 24 * 3600)
