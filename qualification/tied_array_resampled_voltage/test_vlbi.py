@@ -138,6 +138,7 @@ async def test_mean_power(
     # for now just retry with .2 second intervals (sample rate of 5) since steady state is
     # not known beforehand.
     sample_rate = ceil(2 / power_int_time)
+    assert sample_rate > 1
     seconds = 5
     samples = seconds * sample_rate
     mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples), float)
