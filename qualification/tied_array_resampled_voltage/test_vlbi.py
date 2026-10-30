@@ -221,6 +221,7 @@ async def test_vlbi_vdif(
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
 
+
 @pytest.mark.name("VLBI VDIF header")
 async def test_vlbi_vdif_header(
     pdf_report: Reporter,
