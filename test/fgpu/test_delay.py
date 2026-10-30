@@ -152,7 +152,7 @@ def test_multi_add_older(multi) -> None:
     """New delay model must overwrite older ones from the start time."""
     old_models = list(multi._models)
     assert len(old_models) == 4  # Just to check that the fixture wasn't changed
-    new_linear = LinearDelayModel(20000, 0.0, 0.0, 0.0, 0.0)
+    new_linear = LinearDelayModel(25000, 0.0, 0.0, 0.0, 0.0)
     multi.add(new_linear)
     assert list(multi._models) == [old_models[0], old_models[1], new_linear]
 
