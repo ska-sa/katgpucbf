@@ -221,8 +221,31 @@ async def test_vlbi_vdif(
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
 
-    pdf_report.detail("""Verify edv equals 0, and samples per frame equals 20000, and
-        timestamps set according to the most recent reference epoch.""")
+@pytest.mark.name("VLBI VDIF header")
+async def test_vlbi_vdif_header(
+    pdf_report: Reporter,
+    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
+) -> None:
+    """Test VDIF frame header.
+
+    Verification method
+    -------------------
+    Verify edv equals 0, and samples per frame equals 20000, and
+    timestamps set according to the most recent reference epoch.
+    """
+    assert receive_tied_array_resampled_voltage is not None
+    receiver = receive_tied_array_resampled_voltage
+    pdf_report.step("Collect a valid VDIF frameset.")
+    # capture a few valid framesets
+    framesets = np.empty(FRAMESETS_TO_CAPTURE, dtype=object)
+    frameset_count = 0
+    async for frameset in receiver.complete_framesets():
+        framesets[frameset_count] = frameset
+        frameset_count += 1
+        if frameset_count == FRAMESETS_TO_CAPTURE:
+            break
+
+    pdf_report.detail("Verify VDIF frame header")
     with check:
         for frame in frameset.frames:
             buffer = io.BytesIO(frame.raw_frame)
