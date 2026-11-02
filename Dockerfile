@@ -20,7 +20,7 @@
 # nvidia and cuda runtime and development tools. pycuda needs nvcc, so
 # the development tools are necessary.
 
-FROM nvidia/cuda:13.2.1-base-ubuntu24.04 AS base
+FROM nvidia/cuda:13.4.3-base-ubuntu26.04 AS base
 
 # This "base" layer is modified to better support running with Vulkan. That's
 # needed by both build-base (used by Jenkins to run unit tests) and the final
@@ -35,14 +35,14 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 RUN sed -i 's!http://!https://!' /etc/apt/sources.list.d/ubuntu.sources
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cuda-nvcc-13-2 \
-    cuda-nvrtc-13-2 \
-    cuda-profiler-api-13-2 \
-    libcurand-dev-13-2 \
-    libcublas-13-2 \
-    libcufft-13-2 \
-    libcusparse-13-2 \
-    libnvjitlink-13-2 \
+    cuda-nvcc-13-4 \
+    cuda-nvrtc-13-4 \
+    cuda-profiler-api-13-4 \
+    libcurand-dev-13-4 \
+    libcublas-13-4 \
+    libcufft-13-4 \
+    libcusparse-13-4 \
+    libnvjitlink-13-4 \
     libvulkan1 \
     libegl1 \
     libxext6
