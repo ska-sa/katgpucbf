@@ -199,7 +199,7 @@ matplotlib==3.11.2
     # via
     #   -c qualification/../requirements-dev.txt
     #   katgpucbf (pyproject.toml)
-msgpack==1.2.1
+msgpack==1.2.4
     # via
     #   -c qualification/../requirements-dev.txt
     #   -c qualification/../requirements.txt
