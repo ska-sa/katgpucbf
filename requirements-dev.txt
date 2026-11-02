@@ -205,7 +205,7 @@ matplotlib==3.11.2
     # via katgpucbf (pyproject.toml)
 matplotlib-inline==0.2.2
     # via ipython
-msgpack==1.2.1
+msgpack==1.2.4
     # via
     #   -c requirements.txt
     #   katsdptelstate
