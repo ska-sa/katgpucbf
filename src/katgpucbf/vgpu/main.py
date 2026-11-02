@@ -107,7 +107,7 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         "--send-samples-per-frame",
         type=int,
         metavar="SAMPLES",
-        default=20000,
+        default=25000,
         help="Samples per VDIF frame [%(default)s]",
     )
     parser.add_argument("--send-station", type=str, metavar="ID", required=True, help="VDIF Station ID")
