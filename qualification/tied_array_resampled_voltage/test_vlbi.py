@@ -271,6 +271,7 @@ async def test_group_delay_compensation(
             f"0;multicw({len(search_frequencies)}, 0.16, 0, {start_frequency}, {TONE_SPACING});",
         )
 
+    await asyncio.sleep(5)
     pdf_report.step("Collect a valid VDIF frameset.")
     frameset = await receiver.next_complete_frameset()
 
@@ -292,6 +293,7 @@ async def test_group_delay_compensation(
         len(channels_keys),
         len(receiver.pol_ordering),
         sharex="col",
+        squeeze=False,
     )
     x_frameset_data = [BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame)) for index in x_indices]
     y_frameset_data = [BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame)) for index in y_indices]
@@ -319,19 +321,20 @@ async def test_group_delay_compensation(
                 assert x_phase_differences[j] == pytest.approx(0, rel=5e-3)
                 assert y_phase_differences[j] == pytest.approx(0, rel=5e-3)
 
-        xplt = axs[i, 0]
+        xplt = axs[i][0]
         xplt = xplt.plot(
             (search_frequencies + (TONE_SPACING / 2))[: len(search_frequencies) - 1],
             x_phase_differences,
         )
-
         xplt.legend()
         xplt.set_title(f"X polarity {channels_keys[i]} channel delay")
-        yplt = axs[i, 1]
+
+        yplt = axs[i][1]
         yplt = yplt.plot(
             (search_frequencies + (TONE_SPACING / 2))[: len(search_frequencies) - 1],
             y_phase_differences,
         )
         yplt.legend()
         yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
-        await run_async(pdf_report.figure, fig)
+
+    await run_async(pdf_report.figure, fig)
