@@ -17,6 +17,7 @@
 """Test for tied-array-resampled-voltage stream."""
 
 import asyncio
+import io
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -25,14 +26,17 @@ import pytest
 from matplotlib.figure import Figure
 from pytest_check import check
 
+from katgpucbf.meerkat import BANDS
 from katgpucbf.pytest_plugins.reporter import Reporter, plot_focus
 from katgpucbf.utils import TimeConverter
 from qualification.cbf import CBFRemoteControl
 from qualification.types import AsyncRunner
+from test.qualification.test_recv import BasebandVDIFFrame
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
 
 FRAMESETS_TO_CAPTURE = 10
+TONE_SPACING = 100e6
 
 
 async def max_retry_test(
@@ -201,7 +205,6 @@ async def test_vlbi_vdif(
     Verified by means of test. Collect ``FRAMESETS_TO_CAPTURE`` valid VDIF framesets.
     Verify the number of threads in the framesets are correct.
     """
-    assert receive_tied_array_resampled_voltage is not None
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frameset.")
     # capture a few valid framesets
@@ -217,3 +220,94 @@ async def test_vlbi_vdif(
     with check:
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
+
+
+@pytest.mark.name("VLBI group delay compensation")
+async def test_group_delay_compensation(
+    pdf_report: Reporter,
+    cbf: CBFRemoteControl,
+    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
+    band: str,
+    run_async: AsyncRunner,
+) -> None:
+    """Test group delay compensation.
+
+    Verification method
+    -------------------
+    Verified by means of test. Set input frequency tones seperated by 100 MHz, Collect a
+    valid VDIF frameset, and determine the phase difference between the tones.
+    The phase difference should be linear and within 5 degrees of zero after compensation.
+    """
+    receiver = receive_tied_array_resampled_voltage
+    b = BANDS[band]
+
+    low_frequencies = slice(b.centre_frequency - b.adc_sample_rate / 2, b.centre_frequency, TONE_SPACING)
+    high_frequencies = slice(b.centre_frequency, b.centre_frequency + b.adc_sample_rate / 2, TONE_SPACING)
+    tones = np.append(np.arange(low_frequencies), np.arange(high_frequencies))
+
+    pcc = cbf.product_controller_client
+    dsim_names = cbf.dsim_names
+    for dsim_name in dsim_names:
+        await pcc.request(
+            "dsim-signals", dsim_name, f"0;multicw(0.16, 0, {low_frequencies.start}, {TONE_SPACING}, {len(tones)});"
+        )
+
+    pdf_report.step("Collect a valid VDIF frameset.")
+    frameset = await receiver.next_complete_frameset()
+
+    x_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "x"]
+    y_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "y"]
+
+    channels = [high_frequencies, low_frequencies]
+    channels_keys = ["high", "low"]
+    assert receiver.n_chans == len(channels)
+    time = np.arange(receiver.n_samples_per_frame) / (receiver.frame_rate * receiver.n_samples_per_frame)
+    x_phases = np.zeros((len(channels_keys), len(tones)))
+    y_phases = np.zeros((len(channels_keys), len(tones)))
+    fig, axs = Figure(tight_layout=True).subplots(
+        len(channels_keys),
+        len(receiver.pol_ordering),
+        sharex="col",
+    )
+    x_frameset_data = [BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame)) for index in x_indices]
+    y_frameset_data = [BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame)) for index in y_indices]
+
+    for i in range(len(channels_keys)):
+        pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
+        for tone in tones[channels[i]]:
+            ref_sin = np.sin(2 * np.pi * tone * time)
+            ref_cos = np.cos(2 * np.pi * tone * time)
+
+            def calculate_phase(data: np.ndarray) -> float:
+                nonlocal ref_sin, ref_cos
+                q = data * ref_sin  # noqa: B023
+                i = data * ref_cos  # noqa: B023
+                return np.atan2(np.sum(i), np.sum(q))
+
+            x_phases[i, tone] = calculate_phase(x_frameset_data[i])
+
+            y_phases[i, tone] = calculate_phase(y_frameset_data[i])
+
+        x_phase_differences = np.diff(x_phases[i, :])
+        y_phase_differences = np.diff(y_phases[i, :])
+        for j in range(len(x_phase_differences)):
+            with check:
+                assert x_phase_differences[j] == pytest.approx(0, rel=5e-3)
+                assert y_phase_differences[j] == pytest.approx(0, rel=5e-3)
+
+        xplt = axs[i, 0]
+        xplt = xplt.plot(
+            (tones + (TONE_SPACING / 2))[: len(tones) - 1],
+            x_phase_differences,
+        )
+
+        xplt.legend()
+        xplt.set_title(f"X polarity {channels_keys[i]} channel delay")
+        yplt = axs[i, 1]
+        yplt = yplt.plot(
+            (tones + (TONE_SPACING / 2))[: len(tones) - 1],
+            y_phase_differences,
+        )
+        yplt.legend()
+        yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
+        await run_async(pdf_report.figure, fig)
