@@ -222,6 +222,17 @@ async def test_vlbi_vdif(
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
 
 
+def sideband_tone_frequency(sky_freq: float, output_sample_rate: float) -> float:
+    """Frequency of a sky tone in the real V-engine output.
+
+    Convert to the vlbi sideband tone frequency.
+    """
+    shifted = abs(sky_freq - output_sample_rate / 2) % output_sample_rate
+    if shifted > output_sample_rate / 2:
+        shifted = output_sample_rate - shifted
+    return shifted
+
+
 @pytest.mark.name("VLBI group delay compensation")
 async def test_group_delay_compensation(
     pdf_report: Reporter,
@@ -240,16 +251,24 @@ async def test_group_delay_compensation(
     """
     receiver = receive_tied_array_resampled_voltage
     b = BANDS[band]
+    start_frequency = b.centre_frequency - b.adc_sample_rate / 2
 
-    low_frequencies = slice(b.centre_frequency - b.adc_sample_rate / 2, b.centre_frequency, TONE_SPACING)
-    high_frequencies = slice(b.centre_frequency, b.centre_frequency + b.adc_sample_rate / 2, TONE_SPACING)
-    tones = np.append(np.arange(low_frequencies), np.arange(high_frequencies))
+    low_frequencies = np.arange(start_frequency, b.centre_frequency, TONE_SPACING, dtype=np.float64)
+    high_frequencies = np.arange(
+        b.centre_frequency, b.centre_frequency + b.adc_sample_rate / 2, TONE_SPACING, dtype=np.float64
+    )
+    search_frequencies = np.append(
+        low_frequencies,
+        high_frequencies,
+    )
 
     pcc = cbf.product_controller_client
     dsim_names = cbf.dsim_names
     for dsim_name in dsim_names:
         await pcc.request(
-            "dsim-signals", dsim_name, f"0;multicw(0.16, 0, {low_frequencies.start}, {TONE_SPACING}, {len(tones)});"
+            "dsim-signals",
+            dsim_name,
+            f"0;multicw(0.16, 0, {start_frequency}, {TONE_SPACING}, {len(search_frequencies)});",
         )
 
     pdf_report.step("Collect a valid VDIF frameset.")
@@ -257,13 +276,18 @@ async def test_group_delay_compensation(
 
     x_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "x"]
     y_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "y"]
+    reciever_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
-    channels = [high_frequencies, low_frequencies]
+    # channel zero is high frequency, channel one is low frequency
+    channels = [
+        [sideband_tone_frequency(freq, reciever_sample_rate) for freq in high_frequencies],
+        [sideband_tone_frequency(freq, reciever_sample_rate) for freq in low_frequencies],
+    ]
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(channels)
     time = np.arange(receiver.n_samples_per_frame) / (receiver.frame_rate * receiver.n_samples_per_frame)
-    x_phases = np.zeros((len(channels_keys), len(tones)))
-    y_phases = np.zeros((len(channels_keys), len(tones)))
+    x_phases = np.zeros((len(channels_keys), len(search_frequencies)))
+    y_phases = np.zeros((len(channels_keys), len(search_frequencies)))
     fig, axs = Figure(tight_layout=True).subplots(
         len(channels_keys),
         len(receiver.pol_ordering),
@@ -274,7 +298,7 @@ async def test_group_delay_compensation(
 
     for i in range(len(channels_keys)):
         pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
-        for tone in tones[channels[i]]:
+        for j, tone in enumerate(channels[i]):
             ref_sin = np.sin(2 * np.pi * tone * time)
             ref_cos = np.cos(2 * np.pi * tone * time)
 
@@ -284,9 +308,9 @@ async def test_group_delay_compensation(
                 i = data * ref_cos  # noqa: B023
                 return np.atan2(np.sum(i), np.sum(q))
 
-            x_phases[i, tone] = calculate_phase(x_frameset_data[i])
+            x_phases[i, j] = calculate_phase(x_frameset_data[i])
 
-            y_phases[i, tone] = calculate_phase(y_frameset_data[i])
+            y_phases[i, j] = calculate_phase(y_frameset_data[i])
 
         x_phase_differences = np.diff(x_phases[i, :])
         y_phase_differences = np.diff(y_phases[i, :])
@@ -297,7 +321,7 @@ async def test_group_delay_compensation(
 
         xplt = axs[i, 0]
         xplt = xplt.plot(
-            (tones + (TONE_SPACING / 2))[: len(tones) - 1],
+            (search_frequencies + (TONE_SPACING / 2))[: len(search_frequencies) - 1],
             x_phase_differences,
         )
 
@@ -305,7 +329,7 @@ async def test_group_delay_compensation(
         xplt.set_title(f"X polarity {channels_keys[i]} channel delay")
         yplt = axs[i, 1]
         yplt = yplt.plot(
-            (tones + (TONE_SPACING / 2))[: len(tones) - 1],
+            (search_frequencies + (TONE_SPACING / 2))[: len(search_frequencies) - 1],
             y_phase_differences,
         )
         yplt.legend()
