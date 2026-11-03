@@ -268,7 +268,7 @@ async def test_group_delay_compensation(
         await pcc.request(
             "dsim-signals",
             dsim_name,
-            f"0;multicw(0.16, 0, {start_frequency}, {TONE_SPACING}, {len(search_frequencies)});",
+            f"0;multicw({len(search_frequencies)}, 0.16, 0, {start_frequency}, {TONE_SPACING});",
         )
 
     pdf_report.step("Collect a valid VDIF frameset.")
