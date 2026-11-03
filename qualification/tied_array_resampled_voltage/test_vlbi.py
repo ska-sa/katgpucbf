@@ -242,6 +242,7 @@ async def test_group_delay_compensation(
     cbf: CBFRemoteControl,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
     band: str,
+    pass_channels: slice,
     run_async: AsyncRunner,
 ) -> None:
     """Test group delay compensation.
@@ -256,14 +257,17 @@ async def test_group_delay_compensation(
     b = BANDS[band]
     start_frequency = b.centre_frequency - b.adc_sample_rate / 2
 
-    low_frequencies = np.arange(start_frequency, b.centre_frequency, TONE_SPACING, dtype=np.float64)
+    low_frequencies = np.arange(start_frequency, b.centre_frequency, TONE_SPACING, dtype=np.float64)[pass_channels]
     high_frequencies = np.arange(
         b.centre_frequency, b.centre_frequency + b.adc_sample_rate / 2, TONE_SPACING, dtype=np.float64
-    )
+    )[pass_channels]
     search_frequencies = np.append(
         low_frequencies,
         high_frequencies,
     )
+
+    pdf_report.step("Set dsim signals to search for phase in frequencies.")
+    pdf_report.detail(f"Searching for phase in frequencies: {search_frequencies}")
 
     pcc = cbf.product_controller_client
     dsim_names = cbf.dsim_names
@@ -288,6 +292,7 @@ async def test_group_delay_compensation(
     reciever_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     # channel zero is high frequency, channel one is low frequency
+    search_frequencies_split = [high_frequencies, low_frequencies]
     channels = [
         [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in high_frequencies],
         [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in low_frequencies],
@@ -299,8 +304,8 @@ async def test_group_delay_compensation(
     y_phases = np.zeros((len(channels_keys), len(search_frequencies)))
     fig = Figure(tight_layout=True)
     axs = fig.subplots(
-        len(channels_keys),
         len(receiver.pol_ordering),
+        len(channels_keys),
         sharex="col",
         squeeze=False,
     )
@@ -329,17 +334,19 @@ async def test_group_delay_compensation(
                 assert np.degrees(x_phase_differences[j]) == pytest.approx(0, abs=5)
                 assert np.degrees(y_phase_differences[j]) == pytest.approx(0, abs=5)
 
-        xplt = axs[i][0]
+        channel_frequencies = search_frequencies_split[i]
+        channel_frequencies_diff = (channel_frequencies + (TONE_SPACING / 2))[: len(channel_frequencies) - 1]
+        xplt = axs[0][i]
         xplt.plot(
-            (search_frequencies + (TONE_SPACING / 2))[: len(search_frequencies) - 1],
+            channel_frequencies_diff,
             x_phase_differences,
         )
         xplt.set_title(f"X polarity {channels_keys[i]} channel delay")
         xplt.legend()
 
-        yplt = axs[i][1]
+        yplt = axs[1][i]
         yplt.plot(
-            (search_frequencies + (TONE_SPACING / 2))[: len(search_frequencies) - 1],
+            channel_frequencies_diff,
             y_phase_differences,
         )
         yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
