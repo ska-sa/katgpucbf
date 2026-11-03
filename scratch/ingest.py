@@ -295,8 +295,6 @@ async def async_main(args: argparse.Namespace) -> None:
         if received_heaps == HEAPS_PER_CHUNK:
             # We have a full chunk.
             for i, idx in enumerate(bls_subset):
-                # We're just plotting the magnitude for now. Phase is easy enough,
-                # and is left as an exercise to the reader.
                 data = chunk.data[:, idx, 0] + 1j * chunk.data[:, idx, 1]
                 if args.phase:
                     data = np.angle(data)
