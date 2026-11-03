@@ -225,8 +225,7 @@ class TestStreamGroup:
             # and xbgpu tests.
             del heaps[4 * layout.batch_heaps : 10 * layout.batch_heaps + 1]
         if reorder:
-            # Ignore is needed due to https://github.com/numpy/numpy/issues/29974
-            rng.shuffle(heaps)  # type: ignore
+            rng.shuffle(heaps)
 
         with PromDiff(namespace=METRIC_NAMESPACE) as prom_diff:
             # Heap with no payload - representing any sort of metadata heap such as descriptors

@@ -120,7 +120,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help='Output polarisations ("x,y" or "R,L")',
     )
     parser.add_argument(
-        "--vlbi-station-id", type=str, default="me", help="VDIF Station ID for VLBI output [%(default)s]"
+        "--vlbi-station-id", type=str, default="Me", help="VDIF Station ID for VLBI output [%(default)s]"
     )
 
     katgpucbf.configure_tools.add_arguments(parser)

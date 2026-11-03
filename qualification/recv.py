@@ -740,7 +740,7 @@ def create_tied_array_channelised_voltage_receive_stream_group(
 
 
 @contextlib.contextmanager
-def diff_stats(receiver: XBReceiver) -> Generator[dict[str, int], None, None]:
+def diff_spead2_stats(receiver: XBReceiver) -> Generator[dict[str, int], None, None]:
     """Collect stream group statistics on entry and exit and return differences.
 
     The context manager value is a dictionary of statistics. Only "counter"
@@ -887,7 +887,9 @@ class TiedArrayResampledVoltageReceiver:
         self.min_seq_id = 0  # Minimum sequence ID we're still willing to accept for reordering
         self.reorder_window = reorder_window
         # Frames dropped due to incomplete frameset or too old for reorder window and already missed frameset
-        self.dropped_frames = 0
+        self.frame_older_than_window = 0
+        self.duplicate_frames = 0
+        self.incomplete_frameset_frames = 0
         self.missed_framesets = 0
         self.total_framesets = 0
         self.last_frameset_timestamp: int | None = None
@@ -932,9 +934,10 @@ class TiedArrayResampledVoltageReceiver:
                 self.buffer.insert(pos, frame)
             else:
                 logger.warning("Duplicate sequence ID: %d", seq_id)
+                self.duplicate_frames += 1
         else:
             logger.debug("Frame too old: %d < %d", seq_id, self.min_seq_id)
-            self.dropped_frames += 1
+            self.frame_older_than_window += 1
 
     def _calc_min_frame(self, min_time: Time, ref_epoch: int) -> int:
         """Compute the minimum linearised frame number that is at least `min_time`."""
@@ -1007,16 +1010,15 @@ class TiedArrayResampledVoltageReceiver:
                                         n_missed_framesets = frame0_linear - self.last_frameset_timestamp - 1
                                         if n_missed_framesets < 0:
                                             logger.warning(
-                                                "Negative number of framesets between last and new frameset!:"
-                                                + " last frameset: %d new frameset: %d, diff: %d",
-                                                self.last_frameset_timestamp,
-                                                frame0_linear,
-                                                n_missed_framesets,
+                                                "Couldn't calculate number of missed framesets,"
+                                                + " timestamp difference between last and new frameset: %d",
+                                                frame0_linear - self.last_frameset_timestamp,
                                             )
                                             n_missed_framesets = 0
 
                                     self.missed_framesets += n_missed_framesets
-                                    logger.debug("Missed %d frame sets", n_missed_framesets)
+                                    if n_missed_framesets > 0:
+                                        logger.debug("Missed %d frame sets", n_missed_framesets)
                                     self.total_framesets += n_missed_framesets + 1
                                     self.last_frameset_timestamp = frame0_linear
 
@@ -1033,7 +1035,7 @@ class TiedArrayResampledVoltageReceiver:
                             # If this frameset isn't complete now, it never will be. Drop the frame.
                             logger.debug("Dropping frame due to incomplete frameset: %d", frame0.timestamp.linear)
                             del self.buffer[0]
-                            self.dropped_frames += 1
+                            self.incomplete_frameset_frames += 1
                             continue
 
                     # If we didn't hit a continue above, we need more data from the network
@@ -1062,22 +1064,26 @@ class TiedArrayResampledVoltageReceiver:
 
 
 @contextlib.contextmanager
-def diff_framesets(receiver: TiedArrayResampledVoltageReceiver) -> Generator[dict[str, int], None, None]:
+def diff_vdif_stats(receiver: TiedArrayResampledVoltageReceiver) -> Generator[dict[str, int], None, None]:
     """Collect frameset statistics on entry and exit and return differences.
 
-    The context manager value is a dictionary of statistics. Only "counter"
-    mode statistics are returned, as maximum-value statistics cannot be
-    meaningfully differenced. Note that the dictionary is only populated on
-    exit from the context manager.
+    The context manager value is a dictionary of statistics.
+    Note that the dictionary is only populated on exit from the context manager.
     """
     delta_stats: dict[str, int] = {}
     init_missed_framesets = receiver.missed_framesets
-    init_dropped_frames = receiver.dropped_frames
+    init_frame_older_than_window = receiver.frame_older_than_window
+    init_incomplete_frameset_frames = receiver.incomplete_frameset_frames
+    init_duplicate_frames = receiver.duplicate_frames
     init_total_framesets = receiver.total_framesets
     yield delta_stats
     final_missed_framesets = receiver.missed_framesets
-    final_dropped_frames = receiver.dropped_frames
+    final_frame_older_than_window = receiver.frame_older_than_window
+    final_incomplete_frameset_frames = receiver.incomplete_frameset_frames
+    final_duplicate_frames = receiver.duplicate_frames
     final_total_framesets = receiver.total_framesets
     delta_stats["missed_framesets"] = final_missed_framesets - init_missed_framesets
-    delta_stats["dropped_frames"] = final_dropped_frames - init_dropped_frames
+    delta_stats["frame_older_than_window"] = final_frame_older_than_window - init_frame_older_than_window
+    delta_stats["incomplete_frameset_frames"] = final_incomplete_frameset_frames - init_incomplete_frameset_frames
+    delta_stats["duplicate_frames"] = final_duplicate_frames - init_duplicate_frames
     delta_stats["total_framesets"] = final_total_framesets - init_total_framesets
