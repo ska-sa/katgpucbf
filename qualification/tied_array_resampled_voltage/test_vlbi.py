@@ -222,12 +222,15 @@ async def test_vlbi_vdif(
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
 
 
-def sideband_tone_frequency(sky_freq: float, output_sample_rate: float) -> float:
+def sideband_tone_frequency(sky_freq: float, adc_sample_rate: float, output_sample_rate: float) -> float:
     """Frequency of a sky tone in the real V-engine output.
 
     Convert to the vlbi sideband tone frequency.
     """
-    shifted = abs(sky_freq - output_sample_rate / 2) % output_sample_rate
+    aliased = abs(sky_freq) % adc_sample_rate
+    if aliased > adc_sample_rate / 2:
+        aliased = adc_sample_rate - aliased
+    shifted = abs(aliased - adc_sample_rate / 4) % output_sample_rate
     if shifted > output_sample_rate / 2:
         shifted = output_sample_rate - shifted
     return shifted
@@ -268,28 +271,34 @@ async def test_group_delay_compensation(
         await pcc.request(
             "dsim-signals",
             dsim_name,
-            f"0;multicw({len(search_frequencies)}, 0.16, 0, {start_frequency}, {TONE_SPACING});",
+            f"multicw({len(search_frequencies)}, 0.16, 0, {start_frequency}, {TONE_SPACING});"
+            + f"multicw({len(search_frequencies)}, 0.16, 0, {start_frequency}, {TONE_SPACING});",
         )
 
-    await asyncio.sleep(5)
+    steady_state_timestamp = await cbf.steady_state_timestamp()
     pdf_report.step("Collect a valid VDIF frameset.")
-    frameset = await receiver.next_complete_frameset()
+    frameset = await receiver.next_complete_frameset(min_timestamp=steady_state_timestamp)
 
     x_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "x"]
+    assert len(x_indices) == 1
+    x_indices = [x_indices[0], x_indices[0] + receiver.n_chans]
     y_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "y"]
+    assert len(y_indices) == 1
+    y_indices = [y_indices[0], y_indices[0] + receiver.n_chans]
     reciever_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     # channel zero is high frequency, channel one is low frequency
     channels = [
-        [sideband_tone_frequency(freq, reciever_sample_rate) for freq in high_frequencies],
-        [sideband_tone_frequency(freq, reciever_sample_rate) for freq in low_frequencies],
+        [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in high_frequencies],
+        [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in low_frequencies],
     ]
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(channels)
     time = np.arange(receiver.n_samples_per_frame) / (receiver.frame_rate * receiver.n_samples_per_frame)
     x_phases = np.zeros((len(channels_keys), len(search_frequencies)))
     y_phases = np.zeros((len(channels_keys), len(search_frequencies)))
-    fig, axs = Figure(tight_layout=True).subplots(
+    fig = Figure(tight_layout=True)
+    axs = fig.subplots(
         len(channels_keys),
         len(receiver.pol_ordering),
         sharex="col",
@@ -310,31 +319,30 @@ async def test_group_delay_compensation(
                 i = data * ref_cos  # noqa: B023
                 return np.atan2(np.sum(i), np.sum(q))
 
-            x_phases[i, j] = calculate_phase(x_frameset_data[i])
-
-            y_phases[i, j] = calculate_phase(y_frameset_data[i])
+            x_phases[i, j] = calculate_phase(x_frameset_data[i].data)
+            y_phases[i, j] = calculate_phase(y_frameset_data[i].data)
 
         x_phase_differences = np.diff(x_phases[i, :])
         y_phase_differences = np.diff(y_phases[i, :])
         for j in range(len(x_phase_differences)):
             with check:
-                assert x_phase_differences[j] == pytest.approx(0, rel=5e-3)
-                assert y_phase_differences[j] == pytest.approx(0, rel=5e-3)
+                assert np.degrees(x_phase_differences[j]) == pytest.approx(0, abs=5)
+                assert np.degrees(y_phase_differences[j]) == pytest.approx(0, abs=5)
 
         xplt = axs[i][0]
-        xplt = xplt.plot(
+        xplt.plot(
             (search_frequencies + (TONE_SPACING / 2))[: len(search_frequencies) - 1],
             x_phase_differences,
         )
-        xplt.legend()
         xplt.set_title(f"X polarity {channels_keys[i]} channel delay")
+        xplt.legend()
 
         yplt = axs[i][1]
-        yplt = yplt.plot(
+        yplt.plot(
             (search_frequencies + (TONE_SPACING / 2))[: len(search_frequencies) - 1],
             y_phase_differences,
         )
-        yplt.legend()
         yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
+        yplt.legend()
 
     await run_async(pdf_report.figure, fig)

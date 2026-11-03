@@ -827,7 +827,9 @@ class TiedArrayResampledVoltageReceiver:
             cbf.init_sensors[f"{stream_name}.destination"].value.decode()
         )
         self.n_chans: int = cbf.init_sensors[f"{stream_name}.n-chans"].value
-        self.pol_ordering: list[str] = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value)
+        self.pol_ordering: list[str] = json.loads(
+            cbf.init_sensors[f"{stream_name}.pol-ordering"].value
+        )  # format: ["x", "y"]
         self.n_threads = self.n_chans * len(self.pol_ordering)
         self.veng_out_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.veng-out-bits-per-sample"].value
 
