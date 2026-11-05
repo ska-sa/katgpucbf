@@ -262,10 +262,9 @@ async def test_group_delay_compensation(
     center_freq = b.centre_frequency
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + center_freq
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + center_freq
-    start_frequency = center_freq - bandwidth / 2
 
     low_frequencies = []
-    for freq in np.arange(start_frequency, center_freq, TONE_SPACING, dtype=np.float64):
+    for freq in np.arange(center_freq - bandwidth / 2, center_freq, TONE_SPACING, dtype=np.float64):
         if pass_lo <= freq < pass_hi:
             low_frequencies.append(freq)
     high_frequencies = []
@@ -288,8 +287,8 @@ async def test_group_delay_compensation(
         await pcc.request(
             "dsim-signals",
             dsim_name,
-            f"multicw({n_search_frequencies}, 0.16, 0, {start_frequency}, {TONE_SPACING});"
-            + f"multicw({n_search_frequencies}, 0.16, 0, {start_frequency}, {TONE_SPACING});",
+            f"multicw({n_search_frequencies}, 0.16, 0, {low_frequencies[0]}, {TONE_SPACING});"
+            + f"multicw({n_search_frequencies}, 0.16, 0, {high_frequencies[0]}, {TONE_SPACING});",
         )
 
     steady_state_timestamp = await cbf.steady_state_timestamp()
@@ -310,12 +309,12 @@ async def test_group_delay_compensation(
 
     # channel zero is high frequency, channel one is low frequency
     search_frequencies_split = [high_frequencies, low_frequencies]
-    channels = [
+    tone_channels = [
         [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in high_frequencies],
         [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in low_frequencies],
     ]
     channels_keys = ["high", "low"]
-    assert receiver.n_chans == len(channels)
+    assert receiver.n_chans == len(tone_channels)
     time = np.arange(receiver.n_samples_per_frame * n_frames) / (receiver.frame_rate * receiver.n_samples_per_frame)
     x_phases = np.zeros((len(channels_keys), n_tones))
     y_phases = np.zeros((len(channels_keys), n_tones))
@@ -331,8 +330,8 @@ async def test_group_delay_compensation(
 
     for i in range(len(channels_keys)):
         pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
-        pdf_report.detail(f"Reference frequency: {channels[i][0]} Hz.")
-        for j, tone in enumerate(channels[i]):
+        pdf_report.detail(f"Reference frequency: {search_frequencies_split[i][0]} Hz.")
+        for j, tone in enumerate(tone_channels[i]):
             ref_sin = np.sin(2 * np.pi * tone * time)
             ref_cos = np.cos(2 * np.pi * tone * time)
 
@@ -348,13 +347,13 @@ async def test_group_delay_compensation(
 
         x_phase_differences = [x_phase - x_phases[i, 0] for x_phase in x_phases[i, 1:]]
         y_phase_differences = [y_phase - y_phases[i, 0] for y_phase in y_phases[i, 1:]]
-        for j in range(len(x_phase_differences)):
+        for j in range(1, len(x_phase_differences) + 1):
             with check:
                 assert np.degrees(x_phase_differences[j]) == pytest.approx(
-                    -360.0 * (channels[i][j] - channels[i][0]) * vlbi_delay, abs=5
+                    -360.0 * (tone_channels[i][j] - tone_channels[i][0]) * vlbi_delay, abs=5
                 )
                 assert np.degrees(y_phase_differences[j]) == pytest.approx(
-                    -360.0 * (channels[i][j] - channels[i][0]) * vlbi_delay, abs=5
+                    -360.0 * (tone_channels[i][j] - tone_channels[i][0]) * vlbi_delay, abs=5
                 )
 
         channel_frequencies = search_frequencies_split[i]
