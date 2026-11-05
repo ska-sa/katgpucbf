@@ -223,19 +223,15 @@ async def test_vlbi_vdif(
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
 
 
-def sideband_tone_frequency(
-    digitiser_freq: float, adc_sample_rate: float, centre_frequency: float, output_sample_rate: float
-) -> float:
-    """Frequency of a digitiser tone in the real V-engine output.
+def sideband_tone_frequency(sky_freq: float, adc_sample_rate: float, output_sample_rate: float) -> float:
+    """Frequency of a sky tone in the real V-engine output.
 
-    Fold the tone into the first Nyquist zone, mix it down by the narrowband
-    centre frequency, then fold the remainder into 0 .. Nyquist of the
-    V-engine output rate.
+    Convert to the vlbi sideband tone frequency.
     """
-    aliased = abs(digitiser_freq) % adc_sample_rate
+    aliased = abs(sky_freq) % adc_sample_rate
     if aliased > adc_sample_rate / 2:
         aliased = adc_sample_rate - aliased
-    shifted = abs(aliased - centre_frequency) % output_sample_rate
+    shifted = abs(aliased - adc_sample_rate / 4) % output_sample_rate
     if shifted > output_sample_rate / 2:
         shifted = output_sample_rate - shifted
     return shifted
@@ -263,8 +259,7 @@ async def test_group_delay_compensation(
     receiver = receive_tied_array_resampled_voltage
     b = BANDS[band]
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
-    # Digitiser-domain centre of the narrowband channel, as set in conftest.
-    center_freq = cbf.config["outputs"]["antenna-channelised-voltage"]["narrowband"]["centre_frequency"]
+    center_freq = b.centre_frequency
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + center_freq
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + center_freq
 
@@ -315,20 +310,21 @@ async def test_group_delay_compensation(
     # channel zero is high frequency, channel one is low frequency
     search_frequencies_split = [high_frequencies, low_frequencies]
     tone_channels = [
-        [
-            sideband_tone_frequency(freq, b.adc_sample_rate, center_freq, reciever_sample_rate)
-            for freq in high_frequencies
-        ],
-        [
-            sideband_tone_frequency(freq, b.adc_sample_rate, center_freq, reciever_sample_rate)
-            for freq in low_frequencies
-        ],
+        [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in high_frequencies],
+        [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in low_frequencies],
     ]
+    baseband = np.fft.rfftfreq(
+        receiver.n_samples_per_frame * n_frames, d=1.0 / receiver.n_samples_per_frame * receiver.frame_rate
+    )
+
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(tone_channels)
     time = np.arange(receiver.n_samples_per_frame * n_frames) / (receiver.frame_rate * receiver.n_samples_per_frame)
     x_phases = np.zeros((len(channels_keys), n_tones))
     y_phases = np.zeros((len(channels_keys), n_tones))
+    x_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)))
+    y_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)))
+
     fig = Figure(tight_layout=True)
     axs = fig.subplots(
         len(receiver.pol_ordering),
@@ -339,6 +335,8 @@ async def test_group_delay_compensation(
     x_frameset_data = [BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame)) for index in x_indices]
     y_frameset_data = [BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame)) for index in y_indices]
 
+    # For debugging purposes, do a FFT of the data and plot the spectrum.
+
     for i in range(len(channels_keys)):
         pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
         pdf_report.detail(f"Reference frequency: {search_frequencies_split[i][0]} Hz.")
@@ -346,15 +344,18 @@ async def test_group_delay_compensation(
             ref_sin = np.sin(2 * np.pi * tone * time)
             ref_cos = np.cos(2 * np.pi * tone * time)
 
-            def calculate_phase(data: np.ndarray) -> float:
+            def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
+                samples = np.reshape(data, -1)
+                fft_data = np.fft.rfft(samples)
+
                 nonlocal ref_sin, ref_cos
-                q = data * ref_sin  # noqa: B023
-                i = data * ref_cos  # noqa: B023
-                return np.atan2(np.sum(i), np.sum(q))
+                q = samples * ref_sin  # noqa: B023
+                i = samples * ref_cos  # noqa: B023
+                return np.atan2(np.sum(i), np.sum(q)), fft_data
 
             assert len(x_frameset_data[i].data) == len(time)
-            x_phases[i, j] = calculate_phase(x_frameset_data[i].data)
-            y_phases[i, j] = calculate_phase(y_frameset_data[i].data)
+            x_phases[i, j], x_frequency_data[i, j] = analyze_signal(x_frameset_data[i].data)
+            y_phases[i, j], y_frequency_data[i, j] = analyze_signal(y_frameset_data[i].data)
 
         x_phase_differences = [x_phase - x_phases[i, 0] for x_phase in x_phases[i, 1:]]
         y_phase_differences = [y_phase - y_phases[i, 0] for y_phase in y_phases[i, 1:]]
@@ -384,4 +385,19 @@ async def test_group_delay_compensation(
         yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
         yplt.legend()
 
+    mag_fig = Figure(tight_layout=True)
+    mag_axs = mag_fig.subplots(len(channels_keys), n_tones, sharex=True, sharey=True, squeeze=False)
+    for i, key in enumerate(channels_keys):
+        for j in range(n_tones):
+            ax = mag_axs[i][j]
+            ax.plot(baseband, 10 * np.log10(np.abs(x_frequency_data[i, j])), label="x")
+            ax.plot(baseband, 10 * np.log10(np.abs(y_frequency_data[i, j])), label="y")
+            ax.axvline(tone_channels[i][j], color="k", linestyle="--", linewidth=0.8)
+            ax.set_title(f"{key} {search_frequencies_split[i][j] / 1e6:.1f} MHz")
+        mag_axs[i][0].set_ylabel("Magnitude")
+    for ax in mag_axs[-1]:
+        ax.set_xlabel("Frequency (Hz)")
+    mag_axs[0][0].legend()
+
     await run_async(pdf_report.figure, fig)
+    await run_async(pdf_report.figure, mag_fig)
