@@ -36,7 +36,7 @@ from test.qualification.test_recv import BasebandVDIFFrame
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
 
 FRAMESETS_TO_CAPTURE = 10
-TONE_SPACING = 10e6
+TONE_SPACING = 10e6  # todo: make this a % of the bandwidth instead.
 
 
 async def max_retry_test(
@@ -316,8 +316,8 @@ async def test_group_delay_compensation(
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(channels)
     time = np.arange(receiver.n_samples_per_frame * n_frames) / (receiver.frame_rate * receiver.n_samples_per_frame)
-    x_phases = np.zeros((len(channels_keys), n_search_frequencies))
-    y_phases = np.zeros((len(channels_keys), n_search_frequencies))
+    x_phases = np.zeros((len(channels_keys), n_tones))
+    y_phases = np.zeros((len(channels_keys), n_tones))
     fig = Figure(tight_layout=True)
     axs = fig.subplots(
         len(receiver.pol_ordering),
