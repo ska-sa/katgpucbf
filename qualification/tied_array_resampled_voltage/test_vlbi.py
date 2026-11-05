@@ -18,6 +18,7 @@
 
 import asyncio
 import io
+import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -274,7 +275,7 @@ async def test_group_delay_compensation(
     n_tones = min(len(low_frequencies), len(high_frequencies))
     low_frequencies = low_frequencies[:n_tones]
     high_frequencies = high_frequencies[:n_tones]
-    n_search_frequencies = np.ceil((high_frequencies[-1] - low_frequencies[0]) // TONE_SPACING + 1)
+    n_search_frequencies = math.ceil((high_frequencies[-1] - low_frequencies[0]) // TONE_SPACING + 1)
 
     n_frames = 1
 
