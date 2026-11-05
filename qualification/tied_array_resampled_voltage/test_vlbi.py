@@ -313,17 +313,15 @@ async def test_group_delay_compensation(
         [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in high_frequencies],
         [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in low_frequencies],
     ]
-    baseband = np.fft.rfftfreq(
-        receiver.n_samples_per_frame * n_frames, d=1.0 / receiver.n_samples_per_frame * receiver.frame_rate
-    )
+    baseband = np.fft.rfftfreq(receiver.n_samples_per_frame * n_frames, d=1.0 / reciever_sample_rate)
 
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(tone_channels)
     time = np.arange(receiver.n_samples_per_frame * n_frames) / (receiver.frame_rate * receiver.n_samples_per_frame)
     x_phases = np.zeros((len(channels_keys), n_tones))
     y_phases = np.zeros((len(channels_keys), n_tones))
-    x_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)))
-    y_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)))
+    x_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)), dtype=np.complex128)
+    y_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)), dtype=np.complex128)
 
     fig = Figure(tight_layout=True)
     axs = fig.subplots(
@@ -345,12 +343,12 @@ async def test_group_delay_compensation(
             ref_cos = np.cos(2 * np.pi * tone * time)
 
             def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
-                samples = np.reshape(data, -1)
-                fft_data = np.fft.rfft(samples)
+                # samples = np.reshape(data, -1)
+                fft_data = np.fft.rfft(data)
 
                 nonlocal ref_sin, ref_cos
-                q = samples * ref_sin  # noqa: B023
-                i = samples * ref_cos  # noqa: B023
+                q = data * ref_sin  # noqa: B023
+                i = data * ref_cos  # noqa: B023
                 return np.atan2(np.sum(i), np.sum(q)), fft_data
 
             assert len(x_frameset_data[i].data) == len(time)
