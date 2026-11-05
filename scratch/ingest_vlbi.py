@@ -562,21 +562,21 @@ def generate_time_data(
     phase_freqs: dict[str, list[float]],
 ) -> tuple[np.ndarray, dict]:
     window_sample_time = np.arange(samples_per_frame * n_frames) / sample_rate
-    phase_signals_quantised = {
+    phase_signals = {
         "high": {
-            "sin": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["high"]),
-            "cos": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["high"]),
+            "sin": [np.zeros((samples_per_frame * n_frames, 1))] * len(phase_freqs["high"]),
+            "cos": [np.zeros((samples_per_frame * n_frames, 1))] * len(phase_freqs["high"]),
         },
         "low": {
-            "sin": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["low"]),
-            "cos": [np.zeros((samples_per_frame, 1))] * len(phase_freqs["low"]),
+            "sin": [np.zeros((samples_per_frame * n_frames, 1))] * len(phase_freqs["low"]),
+            "cos": [np.zeros((samples_per_frame * n_frames, 1))] * len(phase_freqs["low"]),
         },
     }
     for ch, freqs in phase_freqs.items():
         for i, freq in enumerate(freqs):
-            phase_signals_quantised[ch]["sin"][i] = quantise_2bit(np.sin(2 * math.pi * freq * window_sample_time))
-            phase_signals_quantised[ch]["cos"][i] = quantise_2bit(np.cos(2 * math.pi * freq * window_sample_time))
-    return window_sample_time, phase_signals_quantised
+            phase_signals[ch]["sin"][i] = np.sin(2 * math.pi * freq * window_sample_time)
+            phase_signals[ch]["cos"][i] = np.cos(2 * math.pi * freq * window_sample_time)
+    return window_sample_time, phase_signals
 
 
 def create_noisy_sine_data_offset_phase(
@@ -765,7 +765,7 @@ async def async_main(args: argparse.Namespace) -> None:
         band.adc_sample_rate,
         sample_rate,
     )
-    window_sample_time, phase_signals_quantised = generate_time_data(
+    window_sample_time, phase_signals = generate_time_data(
         samples_per_frame, frequency_sample_size_frames, sample_rate, tone_freqs
     )
     n_fft = window_sample_time.size
@@ -891,7 +891,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
             # do a fourier transform of the time domain data here and plot the magnitude and phase
 
-            thetas = {ch: [0.0] * len(phase_signals_quantised[ch]["sin"]) for ch in ("high", "low")}
+            thetas = {ch: [0.0] * len(phase_signals[ch]["sin"]) for ch in ("high", "low")}
             for i in range(4):
                 fft_data = np.fft.rfft(timedata[i])[bins_by_thread[i]]
                 if CUTOFF:
@@ -905,8 +905,8 @@ async def async_main(args: argparse.Namespace) -> None:
                 lines[1][i].set_data(x_by_thread[i], phase)
                 lines[0][i + 4].set_data(x_by_time, timedata[i])
                 for j in range(len(thetas[ch_order[i]])):
-                    _q = timedata[i] * phase_signals_quantised[ch_order[i]]["sin"][j]
-                    _i = timedata[i] * phase_signals_quantised[ch_order[i]]["cos"][j]
+                    _q = timedata[i] * phase_signals[ch_order[i]]["sin"][j]
+                    _i = timedata[i] * phase_signals[ch_order[i]]["cos"][j]
                     theta = np.atan2(np.sum(_i), np.sum(_q))
                     if i == 0:
                         lines[1][6].set_data(x_by_time, _q)
