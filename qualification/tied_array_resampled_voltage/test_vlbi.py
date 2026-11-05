@@ -242,33 +242,44 @@ async def test_group_delay_compensation(
     cbf: CBFRemoteControl,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
     band: str,
+    n_channels: int,
     pass_channels: slice,
+    narrowband_decimation: int,
     run_async: AsyncRunner,
 ) -> None:
     """Test group delay compensation.
 
     Verification method
     -------------------
-    Verified by means of test. Set input frequency tones seperated by 100 MHz, Collect a
+    Verified by means of test. Set input frequency tones seperated by 10 MHz, Collect a
     valid VDIF frameset, and determine the phase difference between the tones.
     The phase difference should be linear and within 5 degrees of zero after compensation.
     """
     receiver = receive_tied_array_resampled_voltage
     b = BANDS[band]
-    start_frequency = b.centre_frequency - b.adc_sample_rate / 2
+    bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
+    center_freq = b.centre_frequency
+    pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + center_freq
+    pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + center_freq
+    start_frequency = center_freq - bandwidth / 2
 
-    low_frequencies = np.arange(start_frequency, b.centre_frequency, TONE_SPACING, dtype=np.float64)[pass_channels]
-    high_frequencies = np.arange(
-        b.centre_frequency, b.centre_frequency + b.adc_sample_rate / 2, TONE_SPACING, dtype=np.float64
-    )[pass_channels]
-    search_frequencies = np.append(
-        low_frequencies,
-        high_frequencies,
-    )
+    low_frequencies = []
+    for freq in np.arange(start_frequency, center_freq, TONE_SPACING, dtype=np.float64):
+        if pass_lo <= freq < pass_hi:
+            low_frequencies.append(freq)
+    high_frequencies = []
+    for freq in np.arange(center_freq, center_freq + bandwidth / 2, TONE_SPACING, dtype=np.float64):
+        if pass_lo <= freq < pass_hi:
+            high_frequencies.append(freq)
+    n_tones = min(len(low_frequencies), len(high_frequencies))
+    low_frequencies = low_frequencies[:n_tones]
+    high_frequencies = high_frequencies[:n_tones]
+    n_search_frequencies = np.ceil((high_frequencies[-1] - low_frequencies[0]) // TONE_SPACING + 1)
+
     n_frames = 1
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
-    pdf_report.detail(f"Searching for phase in frequencies: {search_frequencies}")
+    pdf_report.detail(f"Searching for phase in {n_search_frequencies} frequencies.")
 
     pcc = cbf.product_controller_client
     dsim_names = cbf.dsim_names
@@ -276,8 +287,8 @@ async def test_group_delay_compensation(
         await pcc.request(
             "dsim-signals",
             dsim_name,
-            f"multicw({len(search_frequencies)}, 0.16, 0, {start_frequency}, {TONE_SPACING});"
-            + f"multicw({len(search_frequencies)}, 0.16, 0, {start_frequency}, {TONE_SPACING});",
+            f"multicw({n_search_frequencies}, 0.16, 0, {start_frequency}, {TONE_SPACING});"
+            + f"multicw({n_search_frequencies}, 0.16, 0, {start_frequency}, {TONE_SPACING});",
         )
 
     steady_state_timestamp = await cbf.steady_state_timestamp()
@@ -305,8 +316,8 @@ async def test_group_delay_compensation(
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(channels)
     time = np.arange(receiver.n_samples_per_frame * n_frames) / (receiver.frame_rate * receiver.n_samples_per_frame)
-    x_phases = np.zeros((len(channels_keys), len(search_frequencies)))
-    y_phases = np.zeros((len(channels_keys), len(search_frequencies)))
+    x_phases = np.zeros((len(channels_keys), n_search_frequencies))
+    y_phases = np.zeros((len(channels_keys), n_search_frequencies))
     fig = Figure(tight_layout=True)
     axs = fig.subplots(
         len(receiver.pol_ordering),
@@ -329,6 +340,7 @@ async def test_group_delay_compensation(
                 i = data * ref_cos  # noqa: B023
                 return np.atan2(np.sum(i), np.sum(q))
 
+            assert len(x_frameset_data[i].data) == len(time)
             x_phases[i, j] = calculate_phase(x_frameset_data[i].data)
             y_phases[i, j] = calculate_phase(y_frameset_data[i].data)
 
