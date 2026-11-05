@@ -223,15 +223,19 @@ async def test_vlbi_vdif(
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
 
 
-def sideband_tone_frequency(sky_freq: float, adc_sample_rate: float, output_sample_rate: float) -> float:
-    """Frequency of a sky tone in the real V-engine output.
+def sideband_tone_frequency(
+    digitiser_freq: float, adc_sample_rate: float, centre_frequency: float, output_sample_rate: float
+) -> float:
+    """Frequency of a digitiser tone in the real V-engine output.
 
-    Convert to the vlbi sideband tone frequency.
+    Fold the tone into the first Nyquist zone, mix it down by the narrowband
+    centre frequency, then fold the remainder into 0 .. Nyquist of the
+    V-engine output rate.
     """
-    aliased = abs(sky_freq) % adc_sample_rate
+    aliased = abs(digitiser_freq) % adc_sample_rate
     if aliased > adc_sample_rate / 2:
         aliased = adc_sample_rate - aliased
-    shifted = abs(aliased - adc_sample_rate / 4) % output_sample_rate
+    shifted = abs(aliased - centre_frequency) % output_sample_rate
     if shifted > output_sample_rate / 2:
         shifted = output_sample_rate - shifted
     return shifted
@@ -259,7 +263,8 @@ async def test_group_delay_compensation(
     receiver = receive_tied_array_resampled_voltage
     b = BANDS[band]
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
-    center_freq = b.centre_frequency
+    # Digitiser-domain centre of the narrowband channel, as set in conftest.
+    center_freq = cbf.config["outputs"]["antenna-channelised-voltage"]["narrowband"]["centre_frequency"]
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + center_freq
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + center_freq
 
@@ -310,8 +315,14 @@ async def test_group_delay_compensation(
     # channel zero is high frequency, channel one is low frequency
     search_frequencies_split = [high_frequencies, low_frequencies]
     tone_channels = [
-        [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in high_frequencies],
-        [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in low_frequencies],
+        [
+            sideband_tone_frequency(freq, b.adc_sample_rate, center_freq, reciever_sample_rate)
+            for freq in high_frequencies
+        ],
+        [
+            sideband_tone_frequency(freq, b.adc_sample_rate, center_freq, reciever_sample_rate)
+            for freq in low_frequencies
+        ],
     ]
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(tone_channels)
