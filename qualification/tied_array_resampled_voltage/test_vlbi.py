@@ -347,13 +347,13 @@ async def test_group_delay_compensation(
 
         x_phase_differences = [x_phase - x_phases[i, 0] for x_phase in x_phases[i, 1:]]
         y_phase_differences = [y_phase - y_phases[i, 0] for y_phase in y_phases[i, 1:]]
-        for j in range(1, len(x_phase_differences) + 1):
+        for j in range(len(x_phase_differences)):
             with check:
                 assert np.degrees(x_phase_differences[j]) == pytest.approx(
-                    -360.0 * (tone_channels[i][j] - tone_channels[i][0]) * vlbi_delay, abs=5
+                    -360.0 * (tone_channels[i][j + 1] - tone_channels[i][0]) * vlbi_delay, abs=5
                 )
                 assert np.degrees(y_phase_differences[j]) == pytest.approx(
-                    -360.0 * (tone_channels[i][j] - tone_channels[i][0]) * vlbi_delay, abs=5
+                    -360.0 * (tone_channels[i][j + 1] - tone_channels[i][0]) * vlbi_delay, abs=5
                 )
 
         channel_frequencies = search_frequencies_split[i]
