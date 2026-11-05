@@ -259,7 +259,7 @@ async def test_group_delay_compensation(
     receiver = receive_tied_array_resampled_voltage
     b = BANDS[band]
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
-    center_freq = b.centre_frequency
+    center_freq = b.adc_sample_rate * (3456789 / 2**24)  # this is the narrowband centre frequency.
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + center_freq
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + center_freq
 
@@ -385,19 +385,16 @@ async def test_group_delay_compensation(
         yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
         yplt.legend()
 
-    mag_fig = Figure(tight_layout=True)
-    mag_axs = mag_fig.subplots(len(channels_keys), n_tones, sharex=True, sharey=True, squeeze=False)
+    await run_async(pdf_report.figure, fig)
     for i, key in enumerate(channels_keys):
         for j in range(n_tones):
-            ax = mag_axs[i][j]
+            mag_fig = Figure(tight_layout=True)
+            ax = mag_fig.add_subplot(1, 1, 1)
             ax.plot(baseband, 10 * np.log10(np.abs(x_frequency_data[i, j])), label="x")
             ax.plot(baseband, 10 * np.log10(np.abs(y_frequency_data[i, j])), label="y")
             ax.axvline(tone_channels[i][j], color="k", linestyle="--", linewidth=0.8)
             ax.set_title(f"{key} {search_frequencies_split[i][j] / 1e6:.1f} MHz")
-        mag_axs[i][0].set_ylabel("Magnitude")
-    for ax in mag_axs[-1]:
-        ax.set_xlabel("Frequency (Hz)")
-    mag_axs[0][0].legend()
-
-    await run_async(pdf_report.figure, fig)
-    await run_async(pdf_report.figure, mag_fig)
+            ax.set_xlabel("Frequency (Hz)")
+            ax.set_ylabel("Magnitude")
+            ax.legend()
+            await run_async(pdf_report.figure, mag_fig)
