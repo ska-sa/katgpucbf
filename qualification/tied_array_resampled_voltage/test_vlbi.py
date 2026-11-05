@@ -37,7 +37,7 @@ from test.qualification.test_recv import BasebandVDIFFrame
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
 
 FRAMESETS_TO_CAPTURE = 10
-TONE_SPACING = 10e6  # todo: make this a % of the bandwidth instead.
+TONE_SPACING = 5e6  # todo: make this a % of the bandwidth instead.
 
 
 async def max_retry_test(
