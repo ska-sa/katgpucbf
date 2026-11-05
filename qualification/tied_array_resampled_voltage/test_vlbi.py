@@ -253,7 +253,7 @@ async def test_group_delay_compensation(
     Verification method
     -------------------
     Verified by means of test. Set input frequency tones seperated by 10 MHz, Collect a
-    valid VDIF frameset, and determine the phase difference between the tones.
+    valid VDIF frameset, and determine the phase difference between each tone and the reference tone.
     The phase difference should be linear and within 5 degrees of zero after compensation.
     """
     receiver = receive_tied_array_resampled_voltage
@@ -331,6 +331,7 @@ async def test_group_delay_compensation(
 
     for i in range(len(channels_keys)):
         pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
+        pdf_report.detail(f"Reference frequency: {channels[i][0]} Hz.")
         for j, tone in enumerate(channels[i]):
             ref_sin = np.sin(2 * np.pi * tone * time)
             ref_cos = np.cos(2 * np.pi * tone * time)
@@ -359,7 +360,7 @@ async def test_group_delay_compensation(
         channel_frequencies = search_frequencies_split[i]
         xplt = axs[0][i]
         xplt.plot(
-            channel_frequencies,
+            channel_frequencies[1:],
             x_phase_differences,
         )
         xplt.set_title(f"X polarity {channels_keys[i]} channel delay")
@@ -367,7 +368,7 @@ async def test_group_delay_compensation(
 
         yplt = axs[1][i]
         yplt.plot(
-            channel_frequencies,
+            channel_frequencies[1:],
             y_phase_differences,
         )
         yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
