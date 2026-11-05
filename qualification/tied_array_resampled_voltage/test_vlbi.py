@@ -288,7 +288,7 @@ async def test_group_delay_compensation(
             "dsim-signals",
             dsim_name,
             f"multicw({n_search_frequencies}, 0.16, 0, {low_frequencies[0]}, {TONE_SPACING});"
-            + f"multicw({n_search_frequencies}, 0.16, 0, {high_frequencies[0]}, {TONE_SPACING});",
+            + f"multicw({n_search_frequencies}, 0.16, 0, {low_frequencies[0]}, {TONE_SPACING});",
         )
 
     steady_state_timestamp = await cbf.steady_state_timestamp()
