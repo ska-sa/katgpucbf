@@ -18,7 +18,6 @@
 
 import asyncio
 import io
-import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -272,33 +271,38 @@ async def test_group_delay_compensation(
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre
 
+    # Step both ways from the narrowband centre. bandwidth/2 is not a multiple of
+    # TONE_SPACING, so an arange started at the band edge never lands on the
+    # upper half.
     low_frequencies = []
-    for freq in np.arange(sky_centre - bandwidth / 2, sky_centre, TONE_SPACING, dtype=np.float64):
-        if pass_lo <= freq < pass_hi:
+    for freq in np.arange(sky_centre - TONE_SPACING, pass_lo - TONE_SPACING, -TONE_SPACING, dtype=np.float64):
+        if pass_lo <= freq < sky_centre:
             low_frequencies.append(freq)
+    low_frequencies.reverse()
     high_frequencies = []
-    for freq in np.arange(sky_centre, sky_centre + bandwidth / 2, TONE_SPACING, dtype=np.float64):
-        if pass_lo <= freq < pass_hi:
+    for freq in np.arange(sky_centre + TONE_SPACING, pass_hi, TONE_SPACING, dtype=np.float64):
+        if sky_centre < freq < pass_hi:
             high_frequencies.append(freq)
     n_tones = min(len(low_frequencies), len(high_frequencies))
     low_frequencies = low_frequencies[:n_tones]
     high_frequencies = high_frequencies[:n_tones]
-    n_search_frequencies = math.ceil((high_frequencies[-1] - low_frequencies[0]) // TONE_SPACING + 1)
+    n_injected = len(low_frequencies) + len(high_frequencies)
 
     n_frames = 1
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
-    pdf_report.detail(f"Searching for phase in {n_search_frequencies} frequencies.")
+    pdf_report.detail(f"Searching for phase in {n_injected} frequencies.")
 
     pcc = cbf.product_controller_client
     dsim_names = cbf.dsim_names
-    amplitude = 1 / n_search_frequencies
+    amplitude = 1 / n_injected
+    low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING})"
+    high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {TONE_SPACING})"
     for dsim_name in dsim_names:
         await pcc.request(
             "dsim-signals",
             dsim_name,
-            f"multicw({n_search_frequencies}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING});"
-            + f"multicw({n_search_frequencies}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING});",
+            f"{low_signal} + {high_signal}; {low_signal} + {high_signal};",
         )
 
     steady_state_timestamp = await cbf.steady_state_timestamp()
