@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 import pytest
+from astropy.time import Time, TimeDelta
 from matplotlib.figure import Figure
 from pytest_check import check
 
@@ -305,6 +306,15 @@ async def test_group_delay_compensation(
             f"{low_signal} + {high_signal}; {low_signal} + {high_signal};",
         )
 
+    # multicw rounds each tone onto an integer number of cycles of this period.
+    # The steady-state timestamp is the first ADC sample of that waveform.
+    dsim_period = await pcc.sensor_value(f"{dsim_names[0]}.period", int)
+    dsim_timestamp = await pcc.sensor_value(f"{dsim_names[0]}.steady-state-timestamp", int)
+
+    def played_frequency(freq: float) -> float:
+        waves = max(1, round(dsim_period * freq / b.adc_sample_rate))
+        return waves * b.adc_sample_rate / dsim_period
+
     steady_state_timestamp = await cbf.steady_state_timestamp()
     pdf_report.step("Collect a valid VDIF frameset.")
     frameset = await receiver.next_complete_frameset(min_timestamp=steady_state_timestamp)
@@ -325,11 +335,11 @@ async def test_group_delay_compensation(
     search_frequencies_split = [high_frequencies, low_frequencies]
     tone_channels = [
         [
-            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, reciever_sample_rate)
+            sideband_tone_frequency(played_frequency(freq), b.adc_sample_rate, centre_frequency, reciever_sample_rate)
             for freq in high_frequencies
         ],
         [
-            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, reciever_sample_rate)
+            sideband_tone_frequency(played_frequency(freq), b.adc_sample_rate, centre_frequency, reciever_sample_rate)
             for freq in low_frequencies
         ],
     ]
@@ -339,7 +349,17 @@ async def test_group_delay_compensation(
 
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(tone_channels)
-    time = np.arange(receiver.n_samples_per_frame * n_frames) / (receiver.frame_rate * receiver.n_samples_per_frame)
+    # Seconds from a phase-zero sample of this waveform to the frame.
+    # The receiver turns an ADC timestamp into a time as sync plus the sample
+    # count, so the frame is measured from the dsim steady-state timestamp.
+    # Phase 0 is on period boundaries, and that timestamp is only aligned to
+    # half a buffer, so step back to the boundary it falls in.
+    frame_time = frameset.timestamp.timestamp
+    signal_time = Time(receiver.sync_time, format="unix", scale="utc") + TimeDelta(
+        dsim_timestamp / receiver.scale_factor_timestamp, format="sec", scale="tai"
+    )
+    t0 = (frame_time - signal_time).sec + (dsim_timestamp % dsim_period) / receiver.scale_factor_timestamp
+    time = t0 + np.arange(receiver.n_samples_per_frame * n_frames) / reciever_sample_rate
     x_phases = np.zeros((len(channels_keys), n_tones))
     y_phases = np.zeros((len(channels_keys), n_tones))
     x_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)), dtype=np.complex128)
