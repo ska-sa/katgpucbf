@@ -343,12 +343,12 @@ async def test_group_delay_compensation(
             ref_cos = np.cos(2 * np.pi * tone * time)
 
             def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
-                # samples = np.reshape(data, -1)
-                fft_data = np.fft.rfft(data)
+                samples = np.reshape(data, -1)
+                fft_data = np.fft.rfft(samples)
 
                 nonlocal ref_sin, ref_cos
-                q = data * ref_sin  # noqa: B023
-                i = data * ref_cos  # noqa: B023
+                q = samples * ref_sin  # noqa: B023
+                i = samples * ref_cos  # noqa: B023
                 return np.atan2(np.sum(i), np.sum(q)), fft_data
 
             assert len(x_frameset_data[i].data) == len(time)
