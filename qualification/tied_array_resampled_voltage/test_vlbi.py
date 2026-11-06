@@ -290,8 +290,9 @@ async def test_group_delay_compensation(
     high_frequencies = high_frequencies[:n_tones]
     n_injected = len(low_frequencies) + len(high_frequencies)
 
-    # A real FFT of twice the channel count has one bin per channelised channel.
-    n_samples = 2 * n_channels
+    # rfft of an even length returns length/2 + 1 bins. 2*(n_channels - 1) samples
+    # returns exactly one bin per channelised channel.
+    n_samples = 2 * (n_channels - 1)
     output_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
