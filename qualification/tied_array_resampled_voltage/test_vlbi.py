@@ -223,15 +223,21 @@ async def test_vlbi_vdif(
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
 
 
-def sideband_tone_frequency(sky_freq: float, adc_sample_rate: float, output_sample_rate: float) -> float:
-    """Frequency of a sky tone in the real V-engine output.
+def sideband_tone_frequency(
+    sky_freq: float, adc_sample_rate: float, centre_frequency: float, output_sample_rate: float
+) -> float:
+    """Frequency of a sky tone in one VLBI sideband.
 
-    Convert to the vlbi sideband tone frequency.
+    A tone above Nyquist aliases to ``adc_sample_rate - sky_freq``. The
+    narrowband mixer removes ``centre_frequency``, and the absolute remainder
+    is that tone's offset from the narrowband centre, folded into the real
+    V-engine output. Both sidebands share this offset: the high stream is the
+    upper half of the narrowband and the low stream is the lower half.
     """
     aliased = abs(sky_freq) % adc_sample_rate
     if aliased > adc_sample_rate / 2:
         aliased = adc_sample_rate - aliased
-    shifted = abs(aliased - adc_sample_rate / 4) % output_sample_rate
+    shifted = abs(aliased - centre_frequency) % output_sample_rate
     if shifted > output_sample_rate / 2:
         shifted = output_sample_rate - shifted
     return shifted
@@ -259,16 +265,19 @@ async def test_group_delay_compensation(
     receiver = receive_tied_array_resampled_voltage
     b = BANDS[band]
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
-    center_freq = b.adc_sample_rate * (3456789 / 2**24)  # this is the narrowband centre frequency.
-    pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + center_freq
-    pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + center_freq
+    # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
+    # aliases to it is ``adc_sample_rate - centre``, as in ingest_vlbi.py.
+    centre_frequency = b.adc_sample_rate * (3456789 / 2**24)
+    sky_centre = b.adc_sample_rate - centre_frequency
+    pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre
+    pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre
 
     low_frequencies = []
-    for freq in np.arange(center_freq - bandwidth / 2, center_freq, TONE_SPACING, dtype=np.float64):
+    for freq in np.arange(sky_centre - bandwidth / 2, sky_centre, TONE_SPACING, dtype=np.float64):
         if pass_lo <= freq < pass_hi:
             low_frequencies.append(freq)
     high_frequencies = []
-    for freq in np.arange(center_freq, center_freq + bandwidth / 2, TONE_SPACING, dtype=np.float64):
+    for freq in np.arange(sky_centre, sky_centre + bandwidth / 2, TONE_SPACING, dtype=np.float64):
         if pass_lo <= freq < pass_hi:
             high_frequencies.append(freq)
     n_tones = min(len(low_frequencies), len(high_frequencies))
@@ -311,10 +320,18 @@ async def test_group_delay_compensation(
     # channel zero is high frequency, channel one is low frequency
     search_frequencies_split = [high_frequencies, low_frequencies]
     tone_channels = [
-        [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in high_frequencies],
-        [sideband_tone_frequency(freq, b.adc_sample_rate, reciever_sample_rate) for freq in low_frequencies],
+        [
+            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, reciever_sample_rate)
+            for freq in high_frequencies
+        ],
+        [
+            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, reciever_sample_rate)
+            for freq in low_frequencies
+        ],
     ]
     baseband = np.fft.rfftfreq((receiver.n_samples_per_frame * n_frames), d=1.0 / reciever_sample_rate)
+    # Bin 0 is the narrowband centre. The two VLBI streams are its upper and lower halves.
+    sky_frequency = [sky_centre + baseband, sky_centre - baseband]
 
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(tone_channels)
@@ -389,11 +406,11 @@ async def test_group_delay_compensation(
         for j in range(n_tones):
             mag_fig = Figure(tight_layout=True)
             ax = mag_fig.add_subplot(1, 1, 1)
-            ax.plot(baseband, 10 * np.log10(np.abs(x_frequency_data[i, j])), label="x")
-            ax.plot(baseband, 10 * np.log10(np.abs(y_frequency_data[i, j])), label="y")
-            ax.axvline(tone_channels[i][j], color="k", linestyle="--", linewidth=0.8)
+            ax.plot(sky_frequency[i], 10 * np.log10(np.abs(x_frequency_data[i, j])), label="x")
+            ax.plot(sky_frequency[i], 10 * np.log10(np.abs(y_frequency_data[i, j])), label="y")
+            ax.axvline(search_frequencies_split[i][j], color="k", linestyle="--", linewidth=0.8)
             ax.set_title(f"{key} {search_frequencies_split[i][j] / 1e6:.1f} MHz")
-            ax.set_xlabel("Frequency (Hz)")
+            ax.set_xlabel("Sky frequency (Hz)")
             ax.set_ylabel("Magnitude")
             ax.legend()
             await run_async(pdf_report.figure, mag_fig)
