@@ -364,6 +364,8 @@ async def test_group_delay_compensation(
     y_phases = np.zeros((len(channels_keys), n_tones))
     x_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)), dtype=np.complex128)
     y_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)), dtype=np.complex128)
+    x_spectrum = np.zeros((len(channels_keys), len(baseband)), dtype=np.complex128)
+    y_spectrum = np.zeros((len(channels_keys), len(baseband)), dtype=np.complex128)
 
     fig = Figure(tight_layout=True)
     axs = fig.subplots(
@@ -380,23 +382,23 @@ async def test_group_delay_compensation(
     for i in range(len(channels_keys)):
         pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
         pdf_report.detail(f"Reference frequency: {search_frequencies_split[i][0]} Hz.")
+        x_samples = np.reshape(x_frameset_data[i].data, -1)
+        y_samples = np.reshape(y_frameset_data[i].data, -1)
+        assert len(x_samples) == len(time)
+        x_spectrum[i] = np.fft.rfft(x_samples)
+        y_spectrum[i] = np.fft.rfft(y_samples)
         for j, tone in enumerate(tone_channels[i]):
             ref_sin = np.sin(2 * np.pi * tone * time)
             ref_cos = np.cos(2 * np.pi * tone * time)
 
-            def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
-                samples = np.reshape(data, -1)
-
+            def analyze_signal(samples: np.ndarray) -> tuple[float, np.ndarray]:
                 nonlocal ref_sin, ref_cos
                 q = samples * ref_sin  # noqa: B023
                 i = samples * ref_cos  # noqa: B023
+                return np.atan2(np.sum(i), np.sum(q)), np.fft.rfft(q)
 
-                fft_data = np.fft.rfft(q)
-                return np.atan2(np.sum(i), np.sum(q)), fft_data
-
-            assert len(x_frameset_data[i].data) == len(time)
-            x_phases[i, j], x_frequency_data[i, j] = analyze_signal(x_frameset_data[i].data)
-            y_phases[i, j], y_frequency_data[i, j] = analyze_signal(y_frameset_data[i].data)
+            x_phases[i, j], x_frequency_data[i, j] = analyze_signal(x_samples)
+            y_phases[i, j], y_frequency_data[i, j] = analyze_signal(y_samples)
 
         x_phase_differences = [x_phase - x_phases[i, 0] for x_phase in x_phases[i, 1:]]
         y_phase_differences = [y_phase - y_phases[i, 0] for y_phase in y_phases[i, 1:]]
@@ -439,3 +441,14 @@ async def test_group_delay_compensation(
             ax.set_ylabel("Magnitude")
             ax.legend()
             await run_async(pdf_report.figure, mag_fig)
+        mag_fig = Figure(tight_layout=True)
+        ax = mag_fig.add_subplot(1, 1, 1)
+        ax.plot(baseband, 10 * np.log10(np.abs(x_spectrum[i])), label="x")
+        ax.plot(baseband, 10 * np.log10(np.abs(y_spectrum[i])), label="y")
+        for tone in tone_channels[i]:
+            ax.axvline(tone, color="k", linestyle="--", linewidth=0.8)
+        ax.set_title(f"{key} channel samples")
+        ax.set_xlabel("Baseband frequency (Hz)")
+        ax.set_ylabel("Magnitude")
+        ax.legend()
+        await run_async(pdf_report.figure, mag_fig)
