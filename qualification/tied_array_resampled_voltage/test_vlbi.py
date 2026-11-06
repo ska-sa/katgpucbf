@@ -18,11 +18,13 @@
 
 import asyncio
 import io
+import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import numpy as np
 import pytest
+from astropy.time import Time
 from matplotlib.figure import Figure
 from pytest_check import check
 
@@ -33,7 +35,7 @@ from qualification.cbf import CBFRemoteControl
 from qualification.types import AsyncRunner
 from test.qualification.test_recv import BasebandVDIFFrame
 
-from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
+from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
 FRAMESETS_TO_CAPTURE = 10
 TONE_SPACING = 5e6  # todo: make this a % of the bandwidth instead.
@@ -266,7 +268,7 @@ async def test_group_delay_compensation(
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
     # aliases to it is ``adc_sample_rate - centre``, as in ingest_vlbi.py.
-    centre_frequency = b.adc_sample_rate * (3456789 / 2**24)
+    centre_frequency = b.adc_sample_rate * (3456789 / 2**24)  # copy of formula in conftest.
     sky_centre = b.adc_sample_rate - centre_frequency
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre
@@ -288,7 +290,9 @@ async def test_group_delay_compensation(
     high_frequencies = high_frequencies[:n_tones]
     n_injected = len(low_frequencies) + len(high_frequencies)
 
-    n_frames = 1
+    # A real FFT of twice the channel count has one bin per channelised channel.
+    n_samples = 2 * n_channels
+    output_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
     pdf_report.detail(f"Searching for phase in {n_injected} frequencies.")
@@ -306,8 +310,36 @@ async def test_group_delay_compensation(
         )
 
     steady_state_timestamp = await cbf.steady_state_timestamp()
-    pdf_report.step("Collect a valid VDIF frameset.")
-    frameset = await receiver.next_complete_frameset(min_timestamp=steady_state_timestamp)
+    # The dsim waveform repeats every `dsim_period` ADC samples, with phase 0 at
+    # each multiple. The signal request uses the default period, which is max-period.
+    dsim_period = int(cbf.init_sensors[f"{dsim_names[0]}.max-period"].value)
+    pdf_report.step("Collect VDIF framesets covering a dsim phase-zero epoch.")
+    framesets: list[VDIFFrameset] = []
+    start_sample = 0
+    n_frames = 0
+    async for frameset in receiver.complete_framesets(min_timestamp=steady_state_timestamp):
+        if framesets and frameset.timestamp.linear != framesets[-1].timestamp.linear + 1:
+            framesets.clear()
+        if not framesets:
+            sync = Time(receiver.sync_time, format="unix", scale="utc")
+            first_timestamp = round((frameset.timestamp.timestamp - sync).sec * receiver.scale_factor_timestamp)
+            # Same epoch as test_delay.compute_delay: the dsim period boundary at or
+            # before this frame. Step forward one period when that boundary is in the past.
+            phase_zero_timestamp = first_timestamp // dsim_period * dsim_period
+            if phase_zero_timestamp < first_timestamp:
+                phase_zero_timestamp += dsim_period
+            start_sample = round(
+                (phase_zero_timestamp - first_timestamp) * output_sample_rate / receiver.scale_factor_timestamp
+            )
+            n_frames = math.ceil((start_sample + n_samples) / receiver.n_samples_per_frame)
+            pdf_report.detail(
+                f"First frame ADC timestamp {first_timestamp}, reading from sample {start_sample} "
+                f"(ADC timestamp {phase_zero_timestamp})."
+            )
+        framesets.append(frameset)
+        if len(framesets) == n_frames:
+            break
+    assert len(framesets) == n_frames
 
     x_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "x"]
     assert len(x_indices) == 1
@@ -319,7 +351,7 @@ async def test_group_delay_compensation(
     y_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "y"]
     assert len(y_indices) == 1
     y_indices = [y_indices[0], y_indices[0] + receiver.n_chans]
-    reciever_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
+    reciever_sample_rate = output_sample_rate
 
     # channel zero is high frequency, channel one is low frequency
     search_frequencies_split = [high_frequencies, low_frequencies]
@@ -333,13 +365,13 @@ async def test_group_delay_compensation(
             for freq in low_frequencies
         ],
     ]
-    baseband = np.fft.rfftfreq((receiver.n_samples_per_frame * n_frames), d=1.0 / reciever_sample_rate)
+    baseband = np.fft.rfftfreq(n_samples, d=1.0 / reciever_sample_rate)
     # Bin 0 is the narrowband centre. The two VLBI streams are its upper and lower halves.
     sky_frequency = [sky_centre + baseband, sky_centre - baseband]
 
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(tone_channels)
-    time = np.arange(receiver.n_samples_per_frame * n_frames) / (receiver.frame_rate * receiver.n_samples_per_frame)
+    time = np.arange(n_samples) / reciever_sample_rate
     x_phases = np.zeros((len(channels_keys), n_tones))
     y_phases = np.zeros((len(channels_keys), n_tones))
     x_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)), dtype=np.complex128)
@@ -352,8 +384,17 @@ async def test_group_delay_compensation(
         sharex="col",
         squeeze=False,
     )
-    x_frameset_data = [BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame)) for index in x_indices]
-    y_frameset_data = [BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame)) for index in y_indices]
+
+    def samples_from_framesets(indices: list[int]) -> list[np.ndarray]:
+        per_index: list[list[np.ndarray]] = [[] for _ in indices]
+        for frameset in framesets:
+            for k, index in enumerate(indices):
+                frame = BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame))
+                per_index[k].append(np.reshape(frame.data, -1))
+        return [np.concatenate(parts)[start_sample : start_sample + n_samples] for parts in per_index]
+
+    x_samples = samples_from_framesets(x_indices)
+    y_samples = samples_from_framesets(y_indices)
 
     # For debugging purposes, do a FFT of the data and plot the spectrum.
 
@@ -372,11 +413,14 @@ async def test_group_delay_compensation(
                 i = samples * ref_cos  # noqa: B023
 
                 fft_data = np.fft.rfft(q)
+                assert len(fft_data) == n_channels
                 return np.atan2(np.sum(i), np.sum(q)), fft_data
 
-            assert len(x_frameset_data[i].data) == len(time)
-            x_phases[i, j], x_frequency_data[i, j] = analyze_signal(x_frameset_data[i].data)
-            y_phases[i, j], y_frequency_data[i, j] = analyze_signal(y_frameset_data[i].data)
+            assert len(x_samples[i]) == len(time)
+            x_phases[i, j], x_frequency_data[i, j] = analyze_signal(x_samples[i])
+            y_phases[i, j], y_frequency_data[i, j] = analyze_signal(y_samples[i])
+            with check:
+                assert np.angle(x_frequency_data[i, j]) == pytest.approx(x_phases[i, j], abs=10)
 
         x_phase_differences = [x_phase - x_phases[i, 0] for x_phase in x_phases[i, 1:]]
         y_phase_differences = [y_phase - y_phases[i, 0] for y_phase in y_phases[i, 1:]]
