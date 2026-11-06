@@ -283,12 +283,13 @@ async def test_group_delay_compensation(
 
     pcc = cbf.product_controller_client
     dsim_names = cbf.dsim_names
+    amplitude = 1 / n_search_frequencies
     for dsim_name in dsim_names:
         await pcc.request(
             "dsim-signals",
             dsim_name,
-            f"multicw({n_search_frequencies}, 0.16, 0, {low_frequencies[0]}, {TONE_SPACING});"
-            + f"multicw({n_search_frequencies}, 0.16, 0, {low_frequencies[0]}, {TONE_SPACING});",
+            f"multicw({n_search_frequencies}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING});"
+            + f"multicw({n_search_frequencies}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING});",
         )
 
     steady_state_timestamp = await cbf.steady_state_timestamp()
