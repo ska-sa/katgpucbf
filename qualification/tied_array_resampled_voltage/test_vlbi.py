@@ -91,7 +91,7 @@ async def test_mean_power(
     The values must agree to within 0.5%. During the test the mean power for the y polarity
     is verified to be zero.
 
-    Verify that the mean power sensor values are updated at the ``power-int-time`` intervals
+    Verify that the x polarity mean power sensor values are updated at the ``power-int-time`` intervals
     by measuring the mean power sensor values at a rate of ``2 / power-int-time`` Hz and verifying
     the time differences between the sensor values are equal to the power-int-time.
     """
