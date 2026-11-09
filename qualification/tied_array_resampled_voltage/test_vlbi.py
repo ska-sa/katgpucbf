@@ -201,7 +201,7 @@ async def test_mean_power(
     pdf_report.step("Verify mean power sensor values are updated at the power-int-time intervals.")
     for i in range(len(sensor_names)):
         pdf_report.detail(f"Verifying mean power sensor for stream {sensor_names[i]}")
-        timestamps = np.diff(np.unique(mean_power_sensor_timestamps[i, :]))
+        timestamps = np.diff(np.unique(mean_power_sensor_timestamps[i, : last_attempt + 1]))
         with check:
             assert np.all(timestamps == pytest.approx(power_int_time)), (
                 "Mean power sensor values are not updated at the power-int-time intervals: current interval"
