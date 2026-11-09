@@ -245,13 +245,13 @@ def sideband_tone_frequency(
 
 
 @pytest.mark.name("VLBI group delay compensation")
+@pytest.mark.no_capture_start("gpucbf.tied_array_resampled_voltage")
 async def test_group_delay_compensation(
     pdf_report: Reporter,
     cbf: CBFRemoteControl,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     band: str,
-    n_dsims: int,
     n_channels: int,
     pass_channels: slice,
     narrowband_decimation: int,
@@ -268,6 +268,8 @@ async def test_group_delay_compensation(
     receiver = receive_tied_array_resampled_voltage
     xb_receiver = receive_tied_array_channelised_voltage
     pcc = cbf.product_controller_client
+    delay = await pcc.sensor_value("tied_array_channelised_voltage.filter-group-delay")
+    await pcc.request("vlbi-delay", receiver.stream_name, delay)
     b = BANDS[band]
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
@@ -319,6 +321,7 @@ async def test_group_delay_compensation(
             dsim_name,
             f"{low_signal} + {high_signal}; {low_signal} + {high_signal};",
         )
+    await pcc.request("capture-start", receiver.stream_name)
 
     steady_state_timestamp = await cbf.steady_state_timestamp()
     # The dsim waveform repeats every `dsim_period` ADC samples, with phase 0 at
