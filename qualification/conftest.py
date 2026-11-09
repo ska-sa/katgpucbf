@@ -44,6 +44,7 @@ from .recv import (
     BaselineCorrelationProductsReceiver,
     TiedArrayChannelisedVoltageReceiver,
     TiedArrayResampledVoltageReceiver,
+    XBReceiver,
     diff_spead2_stats,
     diff_vdif_stats,
 )
@@ -670,6 +671,7 @@ async def cbf(
     assert isinstance(cbf, CBFRemoteControl)
 
     # If this is a new (rather than cached) CBF, set up the receivers.
+    to_start: list[XBReceiver] = []
     if cbf.baseline_correlation_products_receiver is None:
         logger.info("Subscribing to baseline-correlation-products")
         cbf.baseline_correlation_products_receiver = BaselineCorrelationProductsReceiver(
@@ -679,6 +681,7 @@ async def cbf(
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
+        to_start.append(cbf.baseline_correlation_products_receiver)
     if cbf.tied_array_channelised_voltage_receiver is None:
         logger.info("Subscribing to %d beam streams", len(tied_array_channelised_voltage_receive_streams))
         cbf.tied_array_channelised_voltage_receiver = TiedArrayChannelisedVoltageReceiver(
@@ -688,6 +691,7 @@ async def cbf(
             interface_address=interface_address,
             use_ibv=use_ibv,
         )
+        to_start.append(cbf.tied_array_channelised_voltage_receiver)
     if cbf.tied_array_resampled_voltage_receiver is None and vlbi:
         logger.info("Subscribing to tied-array-resampled-voltage")
         cbf.tied_array_resampled_voltage_receiver = TiedArrayResampledVoltageReceiver(
@@ -695,6 +699,11 @@ async def cbf(
             stream_name="tied-array-resampled-voltage",
             interface_address=interface_address,
         )
+    # Delay starting the receivers until we've set them all up,
+    # because creating a receiver can take significant CPU time
+    # to allocate buffer space.
+    for xbreceiver in to_start:
+        xbreceiver.start()
 
     # Reset the CBF to default state
     pcc = cbf.product_controller_client

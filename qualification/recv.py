@@ -63,7 +63,13 @@ logger = logging.getLogger(__name__)
 
 
 class XBReceiver:
-    """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`."""
+    """Base for :class:`BaselineCorrelationProductsReceiver` and :class:`TiedArrayChannelisedVoltageReceiver`.
+
+    The constructor does not start the streams. Use :meth:`start` for that.
+    This two-phase initialisation allows for other CPU-intensive operations
+    (including creating more receivers) to be performed before turning on the
+    taps.
+    """
 
     # Attributes instantiated by the derived classes
     stream_group: spead2.recv.ChunkStreamRingGroup
@@ -108,6 +114,14 @@ class XBReceiver:
         self.cbf = cbf
         self._acv_name = acv_name
         self.incomplete_chunks = 0
+
+    def start(self) -> None:
+        """Start the streams created by the constructor.
+
+        This must only be called once.
+        """
+        for stream in self.stream_group:
+            stream.start()
 
     def is_complete_chunk(self, chunk: katgpucbf.recv.Chunk) -> bool:
         """Check whether this chunk is complete (no missing data)."""
@@ -522,7 +536,7 @@ def _create_receive_stream_group(
     chunk_place: Callable,  # Actual type comes from ctypes.CFUNCTYPE, but it doesn't have a static name
     chunk_factory: Callable[[spead2.recv.ChunkRingPair], katgpucbf.recv.Chunk],
 ) -> spead2.recv.ChunkStreamRingGroup:
-    """Create and start a stream group to receive data from an engine.
+    """Create (but do not start) a stream group to receive data from an engine.
 
     Parameters
     ----------
@@ -604,8 +618,6 @@ def _create_receive_stream_group(
         else:
             for ep in endpoints:
                 stream.add_udp_reader(*ep, interface_address=interface_address)
-    for stream in group:
-        stream.start()
     return group
 
 
