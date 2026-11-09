@@ -38,7 +38,7 @@ from test.qualification.test_recv import BasebandVDIFFrame
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
 FRAMESETS_TO_CAPTURE = 10
-TONE_SPACING = 5e6  # todo: make this a % of the bandwidth instead.
+TONE_SPACING = 1e6  # todo: make this a % of the bandwidth instead.
 
 
 async def max_retry_test(
@@ -292,7 +292,7 @@ async def test_group_delay_compensation(
 
     # Same as the wideband F-engine: 2*channels real samples, and the bin at half
     # the sample rate is not kept, leaving one bin per channelised channel.
-    n_samples = 2 * n_channels * 10
+    n_samples = 2 * n_channels * FRAMESETS_TO_CAPTURE
     receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
@@ -300,7 +300,7 @@ async def test_group_delay_compensation(
 
     pcc = cbf.product_controller_client
     dsim_names = cbf.dsim_names
-    amplitude = 1 / n_injected
+    amplitude = 1 / n_injected * 0.75
     low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING})"
     high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {TONE_SPACING})"
     for dsim_name in dsim_names:
