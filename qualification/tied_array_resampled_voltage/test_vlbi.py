@@ -273,15 +273,17 @@ async def test_group_delay_compensation(
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre
 
-    # Reference tone of each side is the passband edge. The upper comb steps
-    # downward so its first tone is pass_hi.
+    # Step both ways from the narrowband centre. bandwidth/2 is not a multiple of
+    # TONE_SPACING, so an arange started at the band edge never lands on the
+    # upper half.
     low_frequencies = []
-    for freq in np.arange(pass_lo, sky_centre, TONE_SPACING, dtype=np.float64):
+    for freq in np.arange(sky_centre - TONE_SPACING, pass_lo - TONE_SPACING, -TONE_SPACING, dtype=np.float64):
         if pass_lo <= freq < sky_centre:
             low_frequencies.append(freq)
+    low_frequencies.reverse()
     high_frequencies = []
-    for freq in np.arange(pass_hi, sky_centre, -TONE_SPACING, dtype=np.float64):
-        if sky_centre < freq <= pass_hi:
+    for freq in np.arange(sky_centre + TONE_SPACING, pass_hi, TONE_SPACING, dtype=np.float64):
+        if sky_centre < freq < pass_hi:
             high_frequencies.append(freq)
     n_tones = min(len(low_frequencies), len(high_frequencies))
     low_frequencies = low_frequencies[:n_tones]
@@ -291,7 +293,7 @@ async def test_group_delay_compensation(
     # Same as the wideband F-engine: 2*channels real samples, and the bin at half
     # the sample rate is not kept, leaving one bin per channelised channel.
     n_samples = 2 * n_channels * 10
-    output_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
+    receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
     pdf_report.detail(f"Searching for phase in {n_injected} frequencies.")
@@ -300,7 +302,7 @@ async def test_group_delay_compensation(
     dsim_names = cbf.dsim_names
     amplitude = 1 / n_injected
     low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING})"
-    high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {-TONE_SPACING})"
+    high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {TONE_SPACING})"
     for dsim_name in dsim_names:
         await pcc.request(
             "dsim-signals",
@@ -328,7 +330,7 @@ async def test_group_delay_compensation(
             if phase_zero_timestamp < first_timestamp:
                 phase_zero_timestamp += dsim_period
             start_sample = round(
-                (phase_zero_timestamp - first_timestamp) * output_sample_rate / receiver.scale_factor_timestamp
+                (phase_zero_timestamp - first_timestamp) * receiver_sample_rate / receiver.scale_factor_timestamp
             )
             n_frames = math.ceil((start_sample + n_samples) / receiver.n_samples_per_frame)
             pdf_report.detail(
@@ -350,28 +352,27 @@ async def test_group_delay_compensation(
     y_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "y"]
     assert len(y_indices) == 1
     y_indices = [y_indices[0], y_indices[0] + receiver.n_chans]
-    reciever_sample_rate = output_sample_rate
 
     # channel zero is high frequency, channel one is low frequency
     search_frequencies_split = [high_frequencies, low_frequencies]
     tone_channels = [
         [
-            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, reciever_sample_rate)
+            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, receiver_sample_rate)
             for freq in high_frequencies
         ],
         [
-            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, reciever_sample_rate)
+            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, receiver_sample_rate)
             for freq in low_frequencies
         ],
     ]
     # Drop the half-sample-rate bin, as the F-engine does.
-    baseband = np.fft.rfftfreq(2 * n_channels, d=1.0 / reciever_sample_rate)[:-1]
+    baseband = np.fft.rfftfreq(2 * n_channels, d=1.0 / receiver_sample_rate)[:-1]
     # Bin 0 is the narrowband centre. The two VLBI streams are its upper and lower halves.
     sky_frequency = [sky_centre + baseband, sky_centre - baseband]
 
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(tone_channels)
-    time = np.arange(n_samples) / reciever_sample_rate
+    time = np.arange(n_samples) / receiver_sample_rate
     x_phases = np.zeros((len(channels_keys), n_tones))
     y_phases = np.zeros((len(channels_keys), n_tones))
     x_frequency_data = np.zeros((len(channels_keys), n_tones, len(baseband)), dtype=np.complex128)
@@ -458,7 +459,9 @@ async def test_group_delay_compensation(
             ax.plot(sky_frequency[i], 10 * np.log10(np.abs(x_frequency_data[i, j])), label="x")
             ax.plot(sky_frequency[i], 10 * np.log10(np.abs(y_frequency_data[i, j])), label="y")
             ax.axvline(search_frequencies_split[i][j], color="k", linestyle="--", linewidth=0.8)
-            ax.set_title(f"{key} {search_frequencies_split[i][j] / 1e6:.1f} MHz")
+            ax.set_title(
+                f"{key} {search_frequencies_split[i][j] / 1e6:.1f} MHz modulated to {tone_channels[i][j] / 1e3:.1f} KHz"
+            )
             ax.set_xlabel("Sky frequency (Hz)")
             ax.set_ylabel("Magnitude")
             ax.legend()
