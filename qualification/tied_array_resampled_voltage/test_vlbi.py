@@ -249,6 +249,7 @@ async def test_group_delay_compensation(
     pdf_report: Reporter,
     cbf: CBFRemoteControl,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
+    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     band: str,
     n_channels: int,
     pass_channels: slice,
@@ -264,6 +265,8 @@ async def test_group_delay_compensation(
     The phase difference should be linear and within 5 degrees of zero after compensation.
     """
     receiver = receive_tied_array_resampled_voltage
+    xb_receiver = receive_tied_array_channelised_voltage
+    pcc = cbf.product_controller_client
     b = BANDS[band]
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
@@ -295,12 +298,18 @@ async def test_group_delay_compensation(
     n_samples = 2 * n_channels * FRAMESETS_TO_CAPTURE
     receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
+    # TODO: use the compute_tone_gain to set f engine gains
+    pdf_report.step("Set F-engine gains.")
+    amplitude = 0.75 / n_injected
+    gain = xb_receiver.compute_tone_gain(amplitude, 100)
+    for j in range(2):
+        input_label = xb_receiver.input_labels[2 * j]
+        await pcc.request("gain", "antenna-channelised-voltage", input_label, gain)
+
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
     pdf_report.detail(f"Searching for phase in {n_injected} frequencies.")
 
-    pcc = cbf.product_controller_client
     dsim_names = cbf.dsim_names
-    amplitude = 1 / n_injected * 0.75
     low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING})"
     high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {TONE_SPACING})"
     for dsim_name in dsim_names:
