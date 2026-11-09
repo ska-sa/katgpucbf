@@ -251,6 +251,7 @@ async def test_group_delay_compensation(
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
     band: str,
+    n_dsims: int,
     n_channels: int,
     pass_channels: slice,
     narrowband_decimation: int,
@@ -298,11 +299,12 @@ async def test_group_delay_compensation(
     n_samples = 2 * n_channels * FRAMESETS_TO_CAPTURE
     receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
+    assert len(cbf.dsim_names) == 1
     # TODO: use the compute_tone_gain to set f engine gains
     pdf_report.step("Set F-engine gains.")
     amplitude = 0.75 / n_injected
     gain = xb_receiver.compute_tone_gain(amplitude, 100)
-    gains = [gain] * n_channels
+    gains = [gain * 0.8] * n_channels
     for j in range(2):
         input_label = xb_receiver.input_labels[2 * j]
         await pcc.request("gain", "antenna-channelised-voltage", input_label, *gains)
