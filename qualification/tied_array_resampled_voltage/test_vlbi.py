@@ -271,7 +271,7 @@ async def test_group_delay_compensation(
     # filter-group-delay is in ADC samples; vlbi-delay is in seconds.
     delay_samples = await pcc.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
     b = BANDS[band]
-    delay = -delay_samples / b.adc_sample_rate
+    delay = delay_samples / b.adc_sample_rate
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
