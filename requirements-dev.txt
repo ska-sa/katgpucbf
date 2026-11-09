@@ -246,7 +246,7 @@ numpy==2.3.5
     #   spead2
     #   statsmodels
     #   xarray
-packaging==25.0
+packaging==26.3
     # via
     #   -c requirements.txt
     #   astropy
@@ -517,7 +517,7 @@ urllib3==2.8.0
     # via requests
 uv==0.13.6
     # via -r requirements-dev.in
-virtualenv==21.14.5
+virtualenv==21.15.2
     # via pre-commit
 wcwidth==0.2.14
     # via
