@@ -135,12 +135,11 @@ async def test_mean_power(
     pdf_report.detail(f"Mean TACV power over passband channels: {tacv_power}.")
 
     # TODO: See NGC-2099 & 1689: Because the data is zero for the first several seconds,
-    # for now just retry with .2 second intervals (sample rate of 5) since steady state is
-    # not known beforehand.
-    sample_rate = ceil(2 / power_int_time)
+    # we can't determine the period of the test to run, so we run for 5 seconds.
+    sample_rate = 2 / power_int_time  # twice per int-time to guarantee we won't miss the update.
     assert sample_rate > 1
     seconds = 5
-    samples = seconds * sample_rate
+    samples = ceil(seconds * sample_rate)
     mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples), float)
     mean_power_sensor_values = np.zeros_like(mean_power_sensor_timestamps)
 
@@ -199,27 +198,16 @@ async def test_mean_power(
     ax.legend()
     await run_async(pdf_report.figure, fig)
 
-    pdf_report.step("Verify mean power sensor values are updated at the `power-int-time` intervals.")
-    value_change_index = 0
-    for i in range(1, last_attempt + 1):
-        if mean_power_sensor_values[0, i] != mean_power_sensor_values[0, i - 1]:
-            value_change_index = i
-            break
-    for i in range(value_change_index + 1, last_attempt + 1):
-        if mean_power_sensor_values[0, i] != mean_power_sensor_values[0, value_change_index]:
-            with check:
-                assert (
-                    pytest.approx(
-                        mean_power_sensor_timestamps[0, i] - mean_power_sensor_timestamps[0, value_change_index],
-                        rel=1e-3,
-                    )
-                    == power_int_time
-                ), (
-                    "Mean power sensor values are not updated at the `power-int-time` intervals: current interval"
-                    + f" {mean_power_sensor_timestamps[0, i] - mean_power_sensor_timestamps[0, value_change_index]},"
-                    + f" expected interval: {power_int_time}"
-                )
-            value_change_index = i
+    pdf_report.step("Verify mean power sensor values are updated at the power-int-time intervals.")
+    for i in range(len(sensor_names)):
+        pdf_report.detail(f"Verifying mean power sensor for stream {sensor_names[i]}")
+        timestamps = np.diff(np.unique(mean_power_sensor_timestamps[i, :]))
+        with check:
+            assert np.all(timestamps == pytest.approx(power_int_time)), (
+                "Mean power sensor values are not updated at the power-int-time intervals: current interval"
+                + f" {timestamps},"
+                + f" expected interval: {power_int_time}"
+            )
 
 
 @pytest.mark.name("VLBI VDIF output")
