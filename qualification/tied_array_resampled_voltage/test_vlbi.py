@@ -305,8 +305,7 @@ async def test_group_delay_compensation(
     amplitude = 0.75 / n_injected
     gain = xb_receiver.compute_tone_gain(amplitude, 100)
     gains = [gain / 16] * n_channels
-    for j in range(2):
-        input_label = xb_receiver.input_labels[2 * j]
+    for input_label in xb_receiver.input_labels:
         await pcc.request("gain", "antenna-channelised-voltage", input_label, *gains)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
