@@ -38,7 +38,7 @@ from test.qualification.test_recv import BasebandVDIFFrame
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
 FRAMESETS_TO_CAPTURE = 10
-TONE_SPACING = 1e6  # todo: make this a % of the bandwidth instead.
+TONE_SPACING = 2e6  # todo: make this a % of the bandwidth instead.
 
 
 async def max_retry_test(
@@ -274,8 +274,8 @@ async def test_group_delay_compensation(
     # aliases to it is ``adc_sample_rate - centre``, as in ingest_vlbi.py.
     centre_frequency = b.adc_sample_rate * (3456789 / 2**24)  # copy of formula in conftest.
     sky_centre = b.adc_sample_rate - centre_frequency
-    pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre
-    pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre
+    pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre + TONE_SPACING
+    pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre - TONE_SPACING
 
     # Step both ways from the narrowband centre. bandwidth/2 is not a multiple of
     # TONE_SPACING, so an arange started at the band edge never lands on the
