@@ -367,7 +367,7 @@ async def test_group_delay_compensation(
         ],
     ]
     # Drop the half-sample-rate bin, as the F-engine does.
-    baseband = np.fft.rfftfreq(n_samples, d=1.0 / reciever_sample_rate)[:-1]
+    baseband = np.fft.rfftfreq(2 * n_channels, d=1.0 / reciever_sample_rate)[:-1]
     # Bin 0 is the narrowband centre. The two VLBI streams are its upper and lower halves.
     sky_frequency = [sky_centre + baseband, sky_centre - baseband]
 
