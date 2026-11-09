@@ -273,17 +273,15 @@ async def test_group_delay_compensation(
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre
 
-    # Step both ways from the narrowband centre. bandwidth/2 is not a multiple of
-    # TONE_SPACING, so an arange started at the band edge never lands on the
-    # upper half.
+    # Reference tone of each side is the passband edge. The upper comb steps
+    # downward so its first tone is pass_hi.
     low_frequencies = []
-    for freq in np.arange(sky_centre - TONE_SPACING, pass_lo - TONE_SPACING, -TONE_SPACING, dtype=np.float64):
+    for freq in np.arange(pass_lo, sky_centre, TONE_SPACING, dtype=np.float64):
         if pass_lo <= freq < sky_centre:
             low_frequencies.append(freq)
-    low_frequencies.reverse()
     high_frequencies = []
-    for freq in np.arange(sky_centre + TONE_SPACING, pass_hi, TONE_SPACING, dtype=np.float64):
-        if sky_centre < freq < pass_hi:
+    for freq in np.arange(pass_hi, sky_centre, -TONE_SPACING, dtype=np.float64):
+        if sky_centre < freq <= pass_hi:
             high_frequencies.append(freq)
     n_tones = min(len(low_frequencies), len(high_frequencies))
     low_frequencies = low_frequencies[:n_tones]
@@ -302,7 +300,7 @@ async def test_group_delay_compensation(
     dsim_names = cbf.dsim_names
     amplitude = 1 / n_injected
     low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING})"
-    high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {TONE_SPACING})"
+    high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {-TONE_SPACING})"
     for dsim_name in dsim_names:
         await pcc.request(
             "dsim-signals",
