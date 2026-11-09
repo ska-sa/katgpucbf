@@ -304,7 +304,7 @@ async def test_group_delay_compensation(
     pdf_report.step("Set F-engine gains.")
     amplitude = 0.75 / n_injected
     gain = xb_receiver.compute_tone_gain(amplitude, 100)
-    gains = [gain * 0.8] * n_channels
+    gains = [gain / 16] * n_channels
     for j in range(2):
         input_label = xb_receiver.input_labels[2 * j]
         await pcc.request("gain", "antenna-channelised-voltage", input_label, *gains)
