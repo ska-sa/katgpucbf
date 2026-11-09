@@ -270,7 +270,7 @@ async def test_group_delay_compensation(
     pcc = cbf.product_controller_client
     # filter-group-delay is in ADC samples; vlbi-delay is in seconds.
     delay_samples = await pcc.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
-    delay = -delay_samples / xb_receiver.scale_factor_timestamp
+    delay = delay_samples / xb_receiver.scale_factor_timestamp
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
     b = BANDS[band]
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
