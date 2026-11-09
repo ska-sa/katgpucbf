@@ -290,9 +290,9 @@ async def test_group_delay_compensation(
     high_frequencies = high_frequencies[:n_tones]
     n_injected = len(low_frequencies) + len(high_frequencies)
 
-    # rfft of an even length returns length/2 + 1 bins. 2*(n_channels - 1) samples
-    # returns exactly one bin per channelised channel.
-    n_samples = 2 * (n_channels - 1)
+    # Same as the wideband F-engine: 2*channels real samples, and the bin at half
+    # the sample rate is not kept, leaving one bin per channelised channel.
+    n_samples = 2 * n_channels * 10
     output_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
@@ -366,7 +366,8 @@ async def test_group_delay_compensation(
             for freq in low_frequencies
         ],
     ]
-    baseband = np.fft.rfftfreq(n_samples, d=1.0 / reciever_sample_rate)
+    # Drop the half-sample-rate bin, as the F-engine does.
+    baseband = np.fft.rfftfreq(n_samples, d=1.0 / reciever_sample_rate)[:-1]
     # Bin 0 is the narrowband centre. The two VLBI streams are its upper and lower halves.
     sky_frequency = [sky_centre + baseband, sky_centre - baseband]
 
@@ -413,7 +414,7 @@ async def test_group_delay_compensation(
                 q = samples * ref_sin  # noqa: B023
                 i = samples * ref_cos  # noqa: B023
 
-                fft_data = np.fft.rfft(q)
+                fft_data = np.fft.rfft(q[: 2 * n_channels])[:-1]
                 assert len(fft_data) == n_channels
                 return np.atan2(np.sum(i), np.sum(q)), fft_data
 
