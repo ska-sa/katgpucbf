@@ -20,13 +20,15 @@ These classes handle the operation of the GPU in performing the PFB-FIR part
 through a mako-templated kernel.
 """
 
+import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import resources
 from typing import TypedDict, cast
 
 import numpy as np
 from katsdpsigproc import accel, tune
-from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext, AbstractKernel
 
 from .. import BYTE_BITS
 from . import DIG_SAMPLE_BITS_VALID, INPUT_CHUNK_PADDING
@@ -36,6 +38,15 @@ class _TuningDict(TypedDict):
     wgs_x: int
     wgs_y: int
     max_rows_out: int
+
+
+@dataclass
+class _PFBFIRKernel:
+    target_spectra: int
+    wgs_x: int
+    wgs_y: int
+    max_rows_out: int
+    kernel: AbstractKernel
 
 
 class PFBFIRTemplate:
@@ -105,15 +116,18 @@ class PFBFIRTemplate:
         complex_input: bool = False,
         n_pols: int,
         total_power_spectra: int = 1,
-        tuning: _TuningDict | None = None,
+        tuning: list[_TuningDict] | None = None,
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
+        autotune_spectra = self._autotune_spectra(channels, complex_input)
         if tuning is None:
             tuning = self.autotune(context, taps, channels, input_sample_bits, complex_input)
-        self.wgs_x = tuning["wgs_x"]
-        self.wgs_y = tuning["wgs_y"]
-        self.max_rows_out = tuning["max_rows_out"]
+        elif len(tuning) == 1:
+            # This is used during autotuning, to construct just a single kernel to test.
+            autotune_spectra = [1]
+        elif len(tuning) != len(autotune_spectra):
+            raise ValueError("tuning list has the wrong length")
         self.taps = taps
         self.channels = channels
         self.input_sample_bits = input_sample_bits
@@ -132,44 +146,72 @@ class PFBFIRTemplate:
         else:
             if input_sample_bits not in DIG_SAMPLE_BITS_VALID:
                 raise ValueError("input_sample_bits must be 2-10, 12 or 16 when complex_input is false")
-        if (2 * channels) % self.wgs_x != 0:
-            raise ValueError(f"2*channels must be a multiple of {self.wgs_x}")
-        if channels <= 1 or channels & (channels - 1):
-            raise ValueError("channels must be an even power of 2")
+        if channels < 64 or channels & (channels - 1):
+            raise ValueError("channels must be a power of 2 and at least 64")
         if channels % unzip_factor != 0:
             raise ValueError("channels must be a multiple of unzip_factor")
+        self.kernels = []
         with resources.as_file(resources.files(__package__)) as resource_dir:
-            program = accel.build(
-                context,
-                "kernels/pfb_fir.mako",
-                {
-                    "wgs_x": self.wgs_x,
-                    "wgs_y": self.wgs_y,
-                    "max_rows_out": self.max_rows_out,
-                    "taps": self.taps,
-                    "channels": channels,
-                    "input_sample_bits": input_sample_bits,
-                    "unzip_factor": unzip_factor,
-                    "complex_input": complex_input,
-                    "n_pols": n_pols,
-                    "total_power_spectra": total_power_spectra,
-                },
-                extra_dirs=[str(resource_dir)],
-            )
-        self.kernel = program.get_kernel("pfb_fir")
+            for spectra, sub_tuning in zip(autotune_spectra, tuning, strict=True):
+                program = accel.build(
+                    context,
+                    "kernels/pfb_fir.mako",
+                    {
+                        "wgs_x": sub_tuning["wgs_x"],
+                        "wgs_y": sub_tuning["wgs_y"],
+                        "max_rows_out": sub_tuning["max_rows_out"],
+                        "taps": self.taps,
+                        "channels": channels,
+                        "input_sample_bits": input_sample_bits,
+                        "unzip_factor": unzip_factor,
+                        "complex_input": complex_input,
+                        "n_pols": n_pols,
+                        "total_power_spectra": total_power_spectra,
+                    },
+                    extra_dirs=[str(resource_dir)],
+                )
+                kernel = program.get_kernel("pfb_fir")
+                self.kernels.append(
+                    _PFBFIRKernel(
+                        target_spectra=spectra,
+                        kernel=kernel,
+                        **sub_tuning,
+                    )
+                )
+
+    @staticmethod
+    def _autotune_spectra(channels: int, complex_input: int) -> list[int]:
+        """Get problem sizes (in spectra) for which to tune."""
+        # Going in powers of 3 also ensures we don't over-tune for power-of-2
+        # sizes.
+        # NOTE: if the implementation of this function changes, autotune_version
+        # needs to be increased, as the sizes are not encoded in the database.
+        step = channels if complex_input else 2 * channels
+        max_spectra = max(1, 16 * 1024 * 1024 // step)
+        test_spectra = [max_spectra]
+        while test_spectra[-1] > 1 and len(test_spectra) < 4:
+            test_spectra.append(max(test_spectra[-1] // 3, 1))
+        test_spectra.sort()
+        return test_spectra
 
     @classmethod
     @tune.autotuner(test={"wgs_x": 64, "wgs_y": 8, "max_rows_out": 64})
-    def autotune(
-        cls, context: AbstractContext, taps: int, channels: int, input_sample_bits: int, complex_input: bool
+    def _autotune1(
+        cls,
+        context: AbstractContext,
+        taps: int,
+        channels: int,
+        input_sample_bits: int,
+        complex_input: bool,
+        spectra: int,
     ) -> _TuningDict:
-        """Determine tuning parameters."""
+        """Determine tuning parameters for a single problem size."""
         queue = context.create_tuning_command_queue()
         step = channels if complex_input else 2 * channels
-        spectra = max(1, 16 * 1024 * 1024 // step)
         samples = (spectra + taps - 1) * step
         n_pols = 2
         total_power_spectra = 1048576 // channels
+        alloc_spectra = accel.roundup(spectra, total_power_spectra)
         # Create one just to get buffer sizes and padding
         dummy_fn = cls(
             context,
@@ -179,8 +221,8 @@ class PFBFIRTemplate:
             complex_input=complex_input,
             n_pols=n_pols,
             total_power_spectra=total_power_spectra,
-            tuning={"wgs_x": 32, "wgs_y": 1, "max_rows_out": 1},
-        ).instantiate(queue, samples, spectra)
+            tuning=[{"wgs_x": 32, "wgs_y": 1, "max_rows_out": 1}],
+        ).instantiate(queue, samples, alloc_spectra)
         dummy_fn.ensure_all_bound()
         data = {"in": dummy_fn.buffer("in"), "out": dummy_fn.buffer("out"), "weights": dummy_fn.buffer("weights")}
         if not complex_input:
@@ -205,30 +247,12 @@ class PFBFIRTemplate:
                     unzip_factor=4,
                     complex_input=complex_input,
                     n_pols=n_pols,
-                    total_power_spectra=1048576 // channels,
-                    tuning={"wgs_x": wgs_x, "wgs_y": wgs_y, "max_rows_out": max_rows_out},
-                ).instantiate(queue, samples, spectra)
+                    total_power_spectra=total_power_spectra,
+                    tuning=[{"wgs_x": wgs_x, "wgs_y": wgs_y, "max_rows_out": max_rows_out}],
+                ).instantiate(queue, samples, alloc_spectra)
                 fn.bind(**data)
-
-            # We want to tune in a way that is good for both large and small
-            # numbers of spectra. We set up a few values to test and take the
-            # geometric mean of them. Going in powers of 3 also ensures we
-            # don't over-tune for power-of-2 sizes.
-            test_spectra = [spectra]
-            while test_spectra[-1] > 1 and len(test_spectra) < 4:
-                test_spectra.append(max(test_spectra[-1] // 3, 1))
-
-            def measure(iters):
-                product = 1.0
-                for s in test_spectra:
-                    fn.spectra = s
-                    queue.start_tuning()
-                    for _ in range(iters):
-                        fn()
-                    product *= queue.stop_tuning() / iters
-                return product ** (1 / len(test_spectra))
-
-            return measure
+                fn.spectra = spectra
+                return tune.make_measure(queue, fn)
 
         tuning = tune.autotune(
             generate,
@@ -237,6 +261,16 @@ class PFBFIRTemplate:
             max_rows_out=[8, 16, 32, 64, 128],
         )
         return cast(_TuningDict, tuning)
+
+    @classmethod
+    def autotune(
+        cls, context: AbstractContext, taps: int, channels: int, input_sample_bits: int, complex_input: bool
+    ) -> list[_TuningDict]:
+        """Determine tuning parameters."""
+        return [
+            cls._autotune1(context, taps, channels, input_sample_bits, complex_input, spectra)
+            for spectra in cls._autotune_spectra(channels, complex_input)
+        ]
 
     def instantiate(
         self,
@@ -387,6 +421,15 @@ class PFBFIR(accel.Operation):
     def _run(self) -> None:
         if self.spectra == 0:
             return
+        # Find the tuned kernel whose problem size is the closest (in log scale).
+        best_kernel = self.template.kernels[0]
+        best_score = math.inf
+        for kernel in self.template.kernels:
+            score = abs(math.log(self.spectra) - math.log(kernel.target_spectra))
+            if score < best_score:
+                best_kernel = kernel
+                best_score = score
+
         rps = 2 if self.template.complex_input else 1  # real values per sample
         real_step = 2 * self.template.channels  # step size in real values
         sample_step = real_step // rps  # step size in samples
@@ -401,7 +444,7 @@ class PFBFIR(accel.Operation):
         if self.out_offset + self.spectra > out_buffer.shape[1]:
             raise IndexError("Output buffer does not contain sufficient spectra")
 
-        groups_y = accel.divup(self.spectra, self.template.max_rows_out)
+        groups_y = accel.divup(self.spectra, best_kernel.max_rows_out)
 
         raw_in_offset = (self.in_offset * rps).astype(np.int32)
         out_buffer = self.buffer("out")
@@ -429,8 +472,8 @@ class PFBFIR(accel.Operation):
             ]
 
         self.command_queue.enqueue_kernel(
-            self.template.kernel,
+            best_kernel.kernel,
             kernel_args,
-            global_size=(real_step, groups_y * self.template.wgs_y, self.template.n_pols),
-            local_size=(self.template.wgs_x, self.template.wgs_y, 1),
+            global_size=(real_step, groups_y * best_kernel.wgs_y, self.template.n_pols),
+            local_size=(best_kernel.wgs_x, best_kernel.wgs_y, 1),
         )
