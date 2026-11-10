@@ -458,3 +458,5 @@ async def test_group_delay_compensation(
         with check:
             assert np.all(np.abs(x_tau) < 5)
             assert np.all(np.abs(y_tau) < 5)
+
+    await run_async(pdf_report.figure, fig)
