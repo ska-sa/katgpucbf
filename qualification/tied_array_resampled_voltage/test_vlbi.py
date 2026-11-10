@@ -273,16 +273,16 @@ async def test_group_delay_compensation(
     delay_error = 0.01 * delay
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
-    bandwidth = cbf.init_sensors[
+    pass_bandwidth = cbf.init_sensors[
         f"{receiver.stream_name}.pass-bandwidth"
     ].value  # Use flat response bandwidth reported rather than in the band
     sky_centre = xb_receiver.adc_sample_rate - xb_receiver.centre_frequency
 
-    tone_spacing = bandwidth / SEARCH_TONES
+    tone_spacing = math.floor(xb_receiver.bandwidth / SEARCH_TONES)
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
     # aliases to it is ``adc_sample_rate - centre``
-    pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre + tone_spacing
-    pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre - tone_spacing
+    pass_lo = (pass_channels.start - n_channels / 2) * pass_bandwidth / n_channels + sky_centre + tone_spacing
+    pass_hi = (pass_channels.stop - n_channels / 2) * pass_bandwidth / n_channels + sky_centre - tone_spacing
 
     low_frequencies = []
     for freq in np.arange(sky_centre - tone_spacing, pass_lo - tone_spacing, -tone_spacing, dtype=np.float64):
@@ -294,6 +294,7 @@ async def test_group_delay_compensation(
         if sky_centre < freq < pass_hi:
             high_frequencies.append(freq)
     n_tones = min(len(low_frequencies), len(high_frequencies))
+    assert n_tones > 2, "at least 2 tones per channel are required"
     low_frequencies = low_frequencies[:n_tones]
     high_frequencies = high_frequencies[:n_tones]
     n_injected = len(low_frequencies) + len(high_frequencies)
