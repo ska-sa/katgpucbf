@@ -277,12 +277,10 @@ async def test_group_delay_compensation(
     sky_centre = xb_receiver.adc_sample_rate - xb_receiver.centre_frequency
 
     tone_spacing = pass_bandwidth // 2 // (SEARCH_TONES + 1)
-
-    low_frequencies = np.arange(sky_centre - pass_bandwidth / 2, sky_centre, tone_spacing, dtype=np.float64)
-    # pass_hi is the last tone. arange stops short of its endpoint, so step one past it.
-    high_frequencies = np.arange(
-        sky_centre + tone_spacing, sky_centre + pass_bandwidth / 2, tone_spacing, dtype=np.float64
-    )
+    # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
+    tone_offsets = np.arange(1, SEARCH_TONES + 1, dtype=np.float64) * tone_spacing
+    low_frequencies = sky_centre - tone_offsets[::-1]
+    high_frequencies = sky_centre + tone_offsets
     assert len(low_frequencies) == len(high_frequencies), "the number of low and high frequencies must be equal"
     n_injected = SEARCH_TONES * 2
 
