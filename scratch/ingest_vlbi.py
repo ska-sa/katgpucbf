@@ -46,11 +46,8 @@ CORR2_SENSOR_REMAP = {
 }
 # According to the ICD.
 logger = logging.getLogger(__name__)
-CUTOFF = False
-ZOOM = True
 SEARCH_SIGNALS = {"low": [1250e6, 1150e6], "high": [1350e6, 1355e6, 1360e6, 1365e6, 1370e6, 1375e6]}
 VLBI_DELAY = 30.0
-SYNC = True
 FAKE_DATA_REF_EPOCH = 35
 
 
@@ -487,6 +484,12 @@ def main() -> None:
         default=None,
         help="Number of channels to use for the FFT. If not provided, the default is 20000.",
     )
+    parser.add_argument(
+        "--zoom",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Plot only the passband around the band centre. [%(default)s]",
+    )
     parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level)
@@ -793,7 +796,7 @@ async def async_main(args: argparse.Namespace) -> None:
     x_lower_all = centre - baseband
     x_upper_all = centre + baseband
     ch_order = ["high", "high", "low", "low"]
-    if ZOOM:
+    if args.zoom:
         f_pass_lo = (pass_channels.start - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
         f_pass_hi = (pass_channels.stop - bandpass_n_channels / 2) * nb_bandwidth / bandpass_n_channels + centre
         lower_bins = np.flatnonzero((x_lower_all >= f_pass_lo) & (x_lower_all < centre))
@@ -894,9 +897,6 @@ async def async_main(args: argparse.Namespace) -> None:
             thetas = {ch: [0.0] * len(phase_signals[ch]["sin"]) for ch in ("high", "low")}
             for i in range(4):
                 fft_data = np.fft.rfft(timedata[i])[bins_by_thread[i]]
-                if CUTOFF:
-                    threshold = np.max(np.abs(fft_data)) / 10
-                    fft_data[np.abs(fft_data) < threshold] = 0
                 # as dBm
                 magnitude = 10 * np.log10(np.abs(fft_data))
                 phase = np.angle(fft_data)

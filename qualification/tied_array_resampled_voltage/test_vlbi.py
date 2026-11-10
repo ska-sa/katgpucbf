@@ -300,7 +300,7 @@ async def test_group_delay_compensation(
     high_frequencies = high_frequencies[:n_tones]
     n_injected = len(low_frequencies) + len(high_frequencies)
 
-    n_samples = 2 * n_channels * FRAMESETS_TO_CAPTURE
+    n_samples = FRAMESETS_TO_CAPTURE * receiver.n_samples_per_frame
     receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     assert len(cbf.dsim_names) == 1
@@ -353,6 +353,7 @@ async def test_group_delay_compensation(
         framesets.append(frameset)
         if len(framesets) == n_frames:
             break
+    pdf_report.detail(f"Skipping {start_sample} samples to start at a phase-zero epoch.")
     assert len(framesets) == n_frames
 
     x_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "x"]
