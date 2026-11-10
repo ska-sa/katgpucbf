@@ -276,10 +276,11 @@ async def test_group_delay_compensation(
     bandwidth = cbf.init_sensors[
         f"{receiver.stream_name}.pass-bandwidth"
     ].value  # Use flat response bandwidth reported rather than in the band
-    tone_spacing = math.floor(bandwidth / SEARCH_TONES)
+    sky_centre = xb_receiver.adc_sample_rate - xb_receiver.centre_frequency
+
+    tone_spacing = math.floor((2 * sky_centre) * (bandwidth / xb_receiver.bandwidth) / SEARCH_TONES)
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
     # aliases to it is ``adc_sample_rate - centre``
-    sky_centre = xb_receiver.adc_sample_rate - xb_receiver.centre_frequency
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre + tone_spacing
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre - tone_spacing
 
