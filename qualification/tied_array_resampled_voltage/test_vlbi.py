@@ -268,7 +268,7 @@ async def test_group_delay_compensation(
     pdf_report.step("compensate for filter-group-delay.")
     delay_samples = await pcc.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
     delay = delay_samples / xb_receiver.adc_sample_rate
-    delay_error = 0.01 * delay
+    delay_error = abs(0.01 * delay)
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
     pass_bandwidth = cbf.init_sensors[
