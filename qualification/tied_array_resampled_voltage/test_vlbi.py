@@ -258,9 +258,10 @@ async def test_group_delay_compensation(
 
     Verification method
     -------------------
-    Verified by means of test. Set input frequency tones seperated by 10 MHz, Collect a
-    valid VDIF frameset, and determine the phase difference between each tone and the reference tone.
-    The phase difference should be linear and within 0.5 microseconds of zero.
+    Verified by means of test. Generate 10 tones in the passband seperated evenly.
+    Compensate for the filter-group-delay and the VLBI delay by setting the VLBI delay to the filter-group-delay.
+    Collect valid VDIF framesets, and determine the phase difference between each tone and the reference tone.
+    The phase difference should be linear and within 1% of the filter-group-delay to zero.
     """
     receiver = receive_tied_array_resampled_voltage
     xb_receiver = receive_tied_array_channelised_voltage
@@ -269,6 +270,7 @@ async def test_group_delay_compensation(
     pdf_report.step("compensate for filter-group-delay.")
     delay_samples = await pcc.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
     delay = delay_samples / xb_receiver.adc_sample_rate
+    delay_error = 0.01 * delay
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
     bandwidth = cbf.init_sensors[
@@ -298,14 +300,11 @@ async def test_group_delay_compensation(
     high_frequencies = high_frequencies[:n_tones]
     n_injected = len(low_frequencies) + len(high_frequencies)
 
-    # Same as the wideband F-engine: 2*channels real samples, and the bin at half
-    # the sample rate is not kept, leaving one bin per channelised channel.
     n_samples = 2 * n_channels * FRAMESETS_TO_CAPTURE
     receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
 
     assert len(cbf.dsim_names) == 1
-    # TODO: use the compute_tone_gain to set f engine gains
-    pdf_report.step("Set F-engine gains.")
+    pdf_report.step("Set Antenna Channelised Voltage gains.")
     amplitude = 0.99 / n_injected
     gain = xb_receiver.compute_tone_gain(amplitude, 100)
     for input_label in xb_receiver.input_labels:
@@ -451,7 +450,7 @@ async def test_group_delay_compensation(
 
         pdf_report.step("Verify the delays are within 0.5 µs of zero.")
         with check:
-            assert np.all(x_tau == pytest.approx(0.0, abs=0.5 * 1e-6))
-            assert np.all(y_tau == pytest.approx(0.0, abs=0.5 * 1e-6))
+            assert np.all(x_tau == pytest.approx(0.0, abs=delay_error))
+            assert np.all(y_tau == pytest.approx(0.0, abs=delay_error))
 
     await run_async(pdf_report.figure, fig)
