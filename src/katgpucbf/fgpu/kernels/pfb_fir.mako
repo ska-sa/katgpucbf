@@ -24,6 +24,8 @@
 #define INPUT_SAMPLE_BITS ${input_sample_bits}
 #define WEIGHT_INDEX_SHIFT ${1 if complex_input else 0}
 #define N_POLS ${n_pols}
+#define SPECTRA_AXIS ${spectra_axis}
+#define CHANNEL_AXIS ${1 - spectra_axis}
 
 % if complex_input:
 
@@ -87,7 +89,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
 {
     const unsigned int step = 2 * CHANNELS;
     // Figure out where our thread block has to work.
-    int group_spectrum = get_group_id(0) * work_spectra;
+    int group_spectrum = get_group_id(SPECTRA_AXIS) * work_spectra;
     int pol = get_group_id(2);
     int in_offset;
     switch (pol)
@@ -102,7 +104,7 @@ KERNEL REQD_WORK_GROUP_SIZE(WGS, 1, 1) void pfb_fir(
     // Figure out where this thread has to work.
     int lid = get_local_id(0);
     // pos is the position within the spectrum that this thread will work on.
-    int pos = get_group_id(1) * WGS + lid;
+    int pos = get_group_id(CHANNEL_AXIS) * WGS + lid;
 
     // can't skip individual (input) samples with pointer arithmetic, so track in_offset
     in_offset += group_spectrum * step + pos;

@@ -20,14 +20,21 @@ These classes handle the operation of the GPU in performing the PFB-FIR part
 through a mako-templated kernel.
 """
 
+from collections.abc import Callable
 from importlib import resources
+from typing import TypedDict, cast
 
 import numpy as np
-from katsdpsigproc import accel
+from katsdpsigproc import accel, tune
 from katsdpsigproc.abc import AbstractCommandQueue, AbstractContext
 
 from .. import BYTE_BITS
 from . import DIG_SAMPLE_BITS_VALID, INPUT_CHUNK_PADDING
+
+
+class _TuningDict(TypedDict):
+    spectra_axis: int
+    init_work_scale: int
 
 
 class PFBFIRTemplate:
@@ -84,6 +91,8 @@ class PFBFIRTemplate:
         128).
     """
 
+    autotune_version = 1
+
     def __init__(
         self,
         context: AbstractContext,
@@ -95,9 +104,12 @@ class PFBFIRTemplate:
         complex_input: bool = False,
         n_pols: int,
         total_power_spectra: int = 1,
+        tuning: _TuningDict | None = None,
     ) -> None:
         if taps <= 0:
             raise ValueError("taps must be at least 1")
+        if tuning is None:
+            tuning = self.autotune(context, taps, channels, input_sample_bits, complex_input)
         self.wgs = 128
         self.taps = taps
         self.channels = channels
@@ -105,6 +117,8 @@ class PFBFIRTemplate:
         self.unzip_factor = unzip_factor
         self.complex_input = complex_input
         self.n_pols = n_pols
+        self.spectra_axis = tuning["spectra_axis"]
+        self.init_work_scale = tuning["init_work_scale"]
         if complex_input:
             # Ensures that the given value definitely has no effect. Choosing 1
             # ensures that tests that it divides into other values are
@@ -136,10 +150,59 @@ class PFBFIRTemplate:
                     "complex_input": complex_input,
                     "n_pols": n_pols,
                     "total_power_spectra": total_power_spectra,
+                    "spectra_axis": self.spectra_axis,
                 },
                 extra_dirs=[str(resource_dir)],
             )
         self.kernel = program.get_kernel("pfb_fir")
+
+    @classmethod
+    @tune.autotuner(test={"spectra_axis": 1, "init_work_scale": 4})
+    def autotune(
+        cls, context: AbstractContext, taps: int, channels: int, input_sample_bits: int, complex_input: bool
+    ) -> _TuningDict:
+        """Determine tuning parameters."""
+        queue = context.create_tuning_command_queue()
+        step = channels if complex_input else 2 * channels
+        spectra = max(1, 16 * 1024 * 1024 // step)
+        samples = (spectra + taps - 1) * step
+        n_pols = 2
+        total_power_spectra = 1048576 // channels
+        # Create one just to get buffer sizes and padding
+        dummy_fn = cls(
+            context,
+            taps,
+            channels,
+            input_sample_bits,
+            complex_input=complex_input,
+            n_pols=n_pols,
+            total_power_spectra=total_power_spectra,
+            tuning={"spectra_axis": 1, "init_work_scale": 1},
+        ).instantiate(queue, samples, spectra)
+        dummy_fn.ensure_all_bound()
+        data = {"in": dummy_fn.buffer("in"), "out": dummy_fn.buffer("out"), "weights": dummy_fn.buffer("weights")}
+        if not complex_input:
+            data["total_power"] = dummy_fn.buffer("total_power")
+        data["in"].zero(queue)
+
+        def generate(spectra_axis: int, init_work_scale: int) -> Callable[[int], float] | None:
+            with context:
+                fn = cls(
+                    context,
+                    taps,
+                    channels,
+                    input_sample_bits,
+                    unzip_factor=4,
+                    complex_input=complex_input,
+                    n_pols=n_pols,
+                    total_power_spectra=1048576 // channels,
+                    tuning={"spectra_axis": spectra_axis, "init_work_scale": init_work_scale},
+                ).instantiate(queue, samples, spectra)
+                fn.bind(**data)
+                return tune.make_measure(queue, fn)
+
+        tuning = tune.autotune(generate, spectra_axis=[0, 1], init_work_scale=list(range(1, 9)))
+        return cast(_TuningDict, tuning)
 
     def instantiate(
         self,
@@ -314,7 +377,7 @@ class PFBFIR(accel.Operation):
         # saturate the GPU, or tail effects might be significant. The code
         # below tries to ensure that neither is too small.
 
-        work_spectra = self.template.taps * 8  # Initial lower bound
+        work_spectra = self.template.taps * self.template.init_work_scale  # Initial lower bound
         spectra_groups = accel.divup(self.spectra, work_spectra)
         # Keep a minimum of 128K workitems (across all pols), to avoid starving
         # the GPU for work.
@@ -351,7 +414,9 @@ class PFBFIR(accel.Operation):
                 np.int32(total_power_buffer.padded_shape[1]),
             ]
 
-        groups = (spectra_groups, real_step // self.template.wgs, self.template.n_pols)
+        groups = (real_step // self.template.wgs, spectra_groups, self.template.n_pols)
+        if self.template.spectra_axis == 0:
+            groups = (groups[1], groups[0], groups[2])
         local_size = (self.template.wgs, 1, 1)
         self.command_queue.enqueue_kernel(
             self.template.kernel,
