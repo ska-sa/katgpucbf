@@ -283,9 +283,8 @@ async def test_group_delay_compensation(
     high_frequencies = np.arange(
         sky_centre + tone_spacing, sky_centre + pass_bandwidth / 2, tone_spacing, dtype=np.float64
     )
-    n_tones = min(len(low_frequencies), len(high_frequencies))
-    assert n_tones == SEARCH_TONES, "the number of tones must be equal to SEARCH_TONES"
-    n_injected = n_tones * 2
+    assert len(low_frequencies) == len(high_frequencies), "the number of low and high frequencies must be equal"
+    n_injected = SEARCH_TONES * 2
 
     n_samples = FRAMESETS_TO_CAPTURE * receiver.n_samples_per_frame
     receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
@@ -371,8 +370,8 @@ async def test_group_delay_compensation(
     channels_keys = ["high", "low"]
     assert receiver.n_chans == len(tone_channels)
     time = np.arange(n_samples) / receiver_sample_rate
-    x_phases = np.zeros((len(channels_keys), n_tones))
-    y_phases = np.zeros((len(channels_keys), n_tones))
+    x_phases = np.zeros((len(channels_keys), SEARCH_TONES))
+    y_phases = np.zeros((len(channels_keys), SEARCH_TONES))
 
     fig = Figure(tight_layout=True)
     axs = fig.subplots(
@@ -412,8 +411,8 @@ async def test_group_delay_compensation(
 
         # Phases from atan2 are wrapped to ±π. Unwrap along the tone comb
         # before subtracting the reference, so a slope past ±π stays continuous.
-        x_phase_differences = np.unwrap(x_phases[i])[1:] - x_phases[0]
-        y_phase_differences = np.unwrap(y_phases[i])[1:] - y_phases[0]
+        x_phase_differences = np.unwrap(x_phases[i])[1:] - x_phases[i, 0]
+        y_phase_differences = np.unwrap(y_phases[i])[1:] - y_phases[i, 0]
 
         channel_frequencies = search_frequencies_split[i]
         xplt = axs[0][i]
