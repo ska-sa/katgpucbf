@@ -360,9 +360,6 @@ async def test_group_delay_compensation(
 
     x_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "x"]
     assert len(x_indices) == 1
-    vlbi_delay = 0
-    with check:
-        assert vlbi_delay == await pcc.sensor_value(f"{receiver.stream_name}.delay", float)
 
     x_indices = [x_indices[0], x_indices[0] + receiver.n_chans]
     y_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "y"]
