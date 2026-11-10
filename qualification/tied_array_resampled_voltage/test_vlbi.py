@@ -254,7 +254,6 @@ async def test_group_delay_compensation(
     band: str,
     n_channels: int,
     pass_channels: slice,
-    narrowband_decimation: int,
     run_async: AsyncRunner,
 ) -> None:
     """Test group delay compensation.
@@ -275,12 +274,12 @@ async def test_group_delay_compensation(
     delay = delay_samples / b.adc_sample_rate
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
-    # bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
-    bandwidth = cbf.init_sensors[f"{receiver.stream_name}.pass-bandwidth"].value
+    bandwidth = cbf.init_sensors[
+        f"{receiver.stream_name}.pass-bandwidth"
+    ].value  # Use flat response bandwidth reported rather than in the band
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
-    # aliases to it is ``adc_sample_rate - centre``, as in ingest_vlbi.py.
-    centre_frequency = b.adc_sample_rate * (3456789 / 2**24)  # copy of formula in conftest.
-    sky_centre = b.adc_sample_rate - centre_frequency
+    # aliases to it is ``adc_sample_rate - centre``
+    sky_centre = xb_receiver.adc_sample_rate - xb_receiver.centre_frequency
     pass_lo = (pass_channels.start - n_channels / 2) * bandwidth / n_channels + sky_centre + TONE_SPACING
     pass_hi = (pass_channels.stop - n_channels / 2) * bandwidth / n_channels + sky_centre - TONE_SPACING
 
@@ -371,11 +370,11 @@ async def test_group_delay_compensation(
     search_frequencies_split = [high_frequencies, low_frequencies]
     tone_channels = [
         [
-            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, receiver_sample_rate)
+            sideband_tone_frequency(freq, b.adc_sample_rate, xb_receiver.centre_frequency, receiver_sample_rate)
             for freq in high_frequencies
         ],
         [
-            sideband_tone_frequency(freq, b.adc_sample_rate, centre_frequency, receiver_sample_rate)
+            sideband_tone_frequency(freq, b.adc_sample_rate, xb_receiver.centre_frequency, receiver_sample_rate)
             for freq in low_frequencies
         ],
     ]
@@ -402,11 +401,6 @@ async def test_group_delay_compensation(
                 per_index[k].append(np.reshape(frame.data, -1))
         return [np.concatenate(parts)[start_sample : start_sample + n_samples] for parts in per_index]
 
-    x_samples = samples_from_framesets(x_indices)
-    y_samples = samples_from_framesets(y_indices)
-
-    # For debugging purposes, do a FFT of the data and plot the spectrum.
-
     for i in range(len(channels_keys)):
         pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
         pdf_report.detail(f"Reference frequency: {search_frequencies_split[i][0] * 1e-6:.3f} MHz.")
@@ -416,6 +410,7 @@ async def test_group_delay_compensation(
 
             def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
                 samples = np.reshape(data, -1)
+                assert len(data) == len(time)
 
                 nonlocal ref_sin, ref_cos
                 q = samples * ref_sin  # noqa: B023
@@ -423,9 +418,8 @@ async def test_group_delay_compensation(
 
                 return np.atan2(np.sum(i), np.sum(q))
 
-            assert len(x_samples[i]) == len(time)
-            x_phases[i, j] = analyze_signal(x_samples[i])
-            y_phases[i, j] = analyze_signal(y_samples[i])
+            x_phases[i, j] = analyze_signal(samples_from_framesets(x_indices)[i])
+            y_phases[i, j] = analyze_signal(samples_from_framesets(y_indices)[i])
 
         # Phases from atan2 are wrapped to ±π. Unwrap along the tone comb
         # before subtracting the reference, so a slope past ±π stays continuous.

@@ -83,6 +83,7 @@ class XBReceiver:
         if "narrowband" in acv_config:
             self.decimation_factor = acv_config["narrowband"]["decimation_factor"]
         self.adc_sample_rate: float = cbf.config["outputs"][acv_config["src_streams"][0]]["adc_sample_rate"]
+        self.centre_frequency: float = acv_config["center-freq"]
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
