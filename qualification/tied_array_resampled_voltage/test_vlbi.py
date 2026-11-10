@@ -250,8 +250,6 @@ async def test_group_delay_compensation(
     cbf: CBFRemoteControl,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
     receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
-    n_channels: int,
-    pass_channels: slice,
     run_async: AsyncRunner,
 ) -> None:
     """Test group delay compensation.
@@ -278,26 +276,16 @@ async def test_group_delay_compensation(
     ].value  # Use flat response bandwidth reported rather than in the band
     sky_centre = xb_receiver.adc_sample_rate - xb_receiver.centre_frequency
 
-    tone_spacing = math.floor(xb_receiver.bandwidth / SEARCH_TONES)
-    # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
-    # aliases to it is ``adc_sample_rate - centre``
-    pass_lo = (pass_channels.start - n_channels / 2) * pass_bandwidth / n_channels + sky_centre + tone_spacing
-    pass_hi = (pass_channels.stop - n_channels / 2) * pass_bandwidth / n_channels + sky_centre - tone_spacing
+    tone_spacing = pass_bandwidth // 2 // SEARCH_TONES
 
-    low_frequencies = []
-    for freq in np.arange(sky_centre - tone_spacing, pass_lo - tone_spacing, -tone_spacing, dtype=np.float64):
-        if pass_lo <= freq < sky_centre:
-            low_frequencies.append(freq)
-    low_frequencies.reverse()
-    high_frequencies = []
-    for freq in np.arange(sky_centre + tone_spacing, pass_hi, tone_spacing, dtype=np.float64):
-        if sky_centre < freq < pass_hi:
-            high_frequencies.append(freq)
+    low_frequencies = np.arange(sky_centre - pass_bandwidth / 2, sky_centre, tone_spacing, dtype=np.float64)
+    # pass_hi is the last tone. arange stops short of its endpoint, so step one past it.
+    high_frequencies = np.arange(
+        sky_centre + tone_spacing, sky_centre + pass_bandwidth / 2 + tone_spacing, tone_spacing, dtype=np.float64
+    )
     n_tones = min(len(low_frequencies), len(high_frequencies))
-    assert n_tones > 2, "at least 2 tones per channel are required"
-    low_frequencies = low_frequencies[:n_tones]
-    high_frequencies = high_frequencies[:n_tones]
-    n_injected = len(low_frequencies) + len(high_frequencies)
+    assert n_tones == SEARCH_TONES, "the number of tones must be equal to SEARCH_TONES"
+    n_injected = n_tones * 2
 
     n_samples = FRAMESETS_TO_CAPTURE * receiver.n_samples_per_frame
     receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
