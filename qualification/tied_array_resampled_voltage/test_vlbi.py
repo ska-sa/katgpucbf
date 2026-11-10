@@ -263,7 +263,7 @@ async def test_group_delay_compensation(
     -------------------
     Verified by means of test. Set input frequency tones seperated by 10 MHz, Collect a
     valid VDIF frameset, and determine the phase difference between each tone and the reference tone.
-    The phase difference should be linear and within 5 degrees of zero after compensation.
+    The phase difference should be linear and within 0.5 microseconds of zero.
     """
     receiver = receive_tied_array_resampled_voltage
     xb_receiver = receive_tied_array_channelised_voltage
@@ -275,7 +275,8 @@ async def test_group_delay_compensation(
     delay = delay_samples / b.adc_sample_rate
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
-    bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
+    # bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
+    bandwidth = cbf.init_sensors[f"{receiver.stream_name}.pass-bandwidth"].value
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
     # aliases to it is ``adc_sample_rate - centre``, as in ingest_vlbi.py.
     centre_frequency = b.adc_sample_rate * (3456789 / 2**24)  # copy of formula in conftest.
@@ -408,7 +409,7 @@ async def test_group_delay_compensation(
 
     for i in range(len(channels_keys)):
         pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
-        pdf_report.detail(f"Reference frequency: {search_frequencies_split[i][0]} Hz.")
+        pdf_report.detail(f"Reference frequency: {search_frequencies_split[i][0] * 1e-6:.3f} MHz.")
         for j, tone in enumerate(tone_channels[i]):
             ref_sin = np.sin(2 * np.pi * tone * time)
             ref_cos = np.cos(2 * np.pi * tone * time)
@@ -454,9 +455,9 @@ async def test_group_delay_compensation(
         yplt.set_ylabel("Delay (µs)")
         yplt.legend()
 
-        pdf_report.step("Verify the delays are within 5 µs of zero.")
+        pdf_report.step("Verify the delays are within 0.5 µs of zero.")
         with check:
-            assert np.all(np.abs(x_tau) < 5)
-            assert np.all(np.abs(y_tau) < 5)
+            assert np.all(np.abs(x_tau) < 5 * 1e-7)
+            assert np.all(np.abs(y_tau) < 5 * 1e-7)
 
     await run_async(pdf_report.figure, fig)
