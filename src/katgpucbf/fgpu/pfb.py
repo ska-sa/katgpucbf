@@ -257,8 +257,8 @@ class PFBFIRTemplate:
         tuning = tune.autotune(
             generate,
             wgs_x=[32, 64, 128],
-            wgs_y=[1, 2, 4, 8, 16, 32],
-            max_rows_out=[8, 16, 32, 64, 128],
+            wgs_y=[1, 2, 3, 4, 6, 8, 12, 16, 24, 32],
+            max_rows_out=[8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
         )
         return cast(_TuningDict, tuning)
 
