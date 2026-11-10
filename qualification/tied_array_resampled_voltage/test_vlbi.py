@@ -269,9 +269,11 @@ async def test_group_delay_compensation(
     xb_receiver = receive_tied_array_channelised_voltage
     pcc = cbf.product_controller_client
     # filter-group-delay is in ADC samples; vlbi-delay is in seconds.
+    pdf_report.step("compensate for filter-group-delay.")
     delay_samples = await pcc.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
     b = BANDS[band]
     delay = delay_samples / b.adc_sample_rate
+    pdf_report.detail(f"group-delay: {delay} seconds.")
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
     bandwidth = b.adc_sample_rate * 0.5 / narrowband_decimation
     # Digitiser-domain mixer. In the second Nyquist zone the sky frequency that
@@ -313,7 +315,6 @@ async def test_group_delay_compensation(
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
     pdf_report.detail(f"Searching for phase in {n_injected} frequencies.")
-
     dsim_names = cbf.dsim_names
     low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {TONE_SPACING})"
     high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {TONE_SPACING})"
@@ -438,8 +439,12 @@ async def test_group_delay_compensation(
             with check:
                 assert np.angle(x_frequency_data[i, j]) == pytest.approx(x_phases[i, j], abs=10)
 
-        x_phase_differences = [x_phase - x_phases[i, 0] for x_phase in x_phases[i, 1:]]
-        y_phase_differences = [y_phase - y_phases[i, 0] for y_phase in y_phases[i, 1:]]
+        # Phases from atan2 are wrapped to ±π. Unwrap along the tone comb
+        # before subtracting the reference, so a slope past ±π stays continuous.
+        x_unwrapped = np.unwrap(x_phases[i])
+        y_unwrapped = np.unwrap(y_phases[i])
+        x_phase_differences = x_unwrapped[1:] - x_unwrapped[0]
+        y_phase_differences = y_unwrapped[1:] - y_unwrapped[0]
         for j in range(len(x_phase_differences)):
             with check:
                 assert np.degrees(x_phase_differences[j]) == pytest.approx(
@@ -451,17 +456,19 @@ async def test_group_delay_compensation(
 
         channel_frequencies = search_frequencies_split[i]
         xplt = axs[0][i]
+        x_tau = [-1 / 360 * (np.degrees(x) / (TONE_SPACING * (1 + c))) for c, x in enumerate(x_phase_differences)]
         xplt.plot(
             channel_frequencies[1:],
-            x_phase_differences,
+            x_tau,
         )
         xplt.set_title(f"X polarity {channels_keys[i]} channel delay")
         xplt.legend()
 
         yplt = axs[1][i]
+        y_tau = [-1 / 360 * (np.degrees(y) / (TONE_SPACING * (1 + c))) for c, y in enumerate(y_phase_differences)]
         yplt.plot(
             channel_frequencies[1:],
-            y_phase_differences,
+            y_tau,
         )
         yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
         yplt.legend()
