@@ -199,11 +199,13 @@ async def test_mean_power(
 
     pdf_report.step("Verify mean power sensor values are updated at the power-int-time intervals.")
     timestamp_diffs = np.diff(np.unique(mean_power_sensor_timestamps[:, : last_attempt + 1]))
-    expected_timestamp_diffs = np.zeros_like(timestamp_diffs) + power_int_time
+    expected_timestamp_diffs = np.ones_like(timestamp_diffs) * power_int_time
     assert np.all(len(mean_power_sensor_timestamps[:]) > 1)
     with check:
-        assert np.testing.assert_allclose(timestamp_diffs, expected_timestamp_diffs), (
-            "Mean power sensor values are not updated at the power-int-time intervals."
+        np.testing.assert_allclose(
+            timestamp_diffs,
+            expected_timestamp_diffs,
+            err_msg="Mean power sensor values are not updated at the power-int-time intervals.",
         )
 
 
