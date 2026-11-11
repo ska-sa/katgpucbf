@@ -244,6 +244,33 @@ def sideband_tone_frequency(
     return shifted
 
 
+def seek_thread_samples(framesets: list[VDIFFrameset], start_sample: int, n_samples: int) -> list[np.ndarray]:
+    """Seek to the start sample for a thread and return the samples from the frameset.
+
+    Parameters
+    ----------
+    framesets
+        The list of framesets to seek in.
+    start_sample
+        The start sample to skip to.
+    n_samples
+        The number of samples to return.
+    indices
+        The indices of the frameset to seek.
+
+    Returns
+    -------
+    list[np.ndarray]
+        The samples from the frameset after seeking split by thread.
+    """
+    per_thread_id: list = [[] for _ in range(len(framesets[0].frames))]
+    for frameset in framesets:
+        for k, vdif_frame in enumerate(frameset.frames):
+            frame = BasebandVDIFFrame.fromfile(io.BytesIO(vdif_frame.raw_frame))
+            per_thread_id[k].append(np.reshape(frame.data, -1))
+    return [np.concatenate(parts)[start_sample : start_sample + n_samples] for parts in per_thread_id]
+
+
 @pytest.mark.name("VLBI group delay compensation")
 @pytest.mark.no_capture_start("gpucbf.tied_array_resampled_voltage")
 async def test_group_delay_compensation(
@@ -377,21 +404,14 @@ async def test_group_delay_compensation(
     ax.set_ylabel("Delay (µs)")
     ax.set_title("Group delay")
 
-    def samples_from_framesets(indices: list[int]) -> list[np.ndarray]:
-        per_index: list[list[np.ndarray]] = [[] for _ in indices]
-        for frameset in framesets:
-            for k, index in enumerate(indices):
-                frame = BasebandVDIFFrame.fromfile(io.BytesIO(frameset.frames[index].raw_frame))
-                per_index[k].append(np.reshape(frame.data, -1))
-        return [np.concatenate(parts)[start_sample : start_sample + n_samples] for parts in per_index]
-
     pdf_report.step("Calculate the delays of the tones per polarisation-channel thread.")
     # Each channel's polarisations are adjacent, build the index for each polarisation to thread index.
     # example: [0, 2] for X, [1, 3] for Y.
     pol_channel_indices = [
         [base + channel_i * n_poles for channel_i in range(len(channels_keys))] for base in range(n_poles)
     ]
-    pol_samples = [samples_from_framesets(indices) for indices in pol_channel_indices]
+    phase_zero_samples = seek_thread_samples(framesets, start_sample, n_samples)
+    pol_samples = [[phase_zero_samples[index] for index in indices] for indices in pol_channel_indices]
     for chan_i, channel in enumerate(channels_keys):
         pdf_report.detail(
             f"Reference frequency for {channel} channel: {frequencies.sel(channel=channel)[0].item() * 1e-6:.3f} MHz."
