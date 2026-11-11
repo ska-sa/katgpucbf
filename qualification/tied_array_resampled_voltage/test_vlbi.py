@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 import pytest
+import xarray as xr
 from astropy.time import Time
 from matplotlib.figure import Figure
 from pytest_check import check
@@ -340,36 +341,41 @@ async def test_group_delay_compensation(
     pdf_report.detail(f"Skipping {start_sample} samples to start at a phase-zero epoch.")
     assert len(framesets) == n_frames
 
-    x_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "x"]
-    assert len(x_indices) == 1
-
-    x_indices = [x_indices[0], x_indices[0] + receiver.n_chans]
-    y_indices = [i for i, pol in enumerate(receiver.pol_ordering) if pol == "y"]
-    assert len(y_indices) == 1
-    y_indices = [y_indices[0], y_indices[0] + receiver.n_chans]
-
-    # channel zero is high frequency, channel one is low frequency
-    search_frequencies_split = [high_frequencies, low_frequencies]
-    tone_channels = [
-        [
-            sideband_tone_frequency(
-                freq, xb_receiver.adc_sample_rate, xb_receiver.centre_frequency, receiver_sample_rate
-            )
-            for freq in high_frequencies
-        ],
-        [
-            sideband_tone_frequency(
-                freq, xb_receiver.adc_sample_rate, xb_receiver.centre_frequency, receiver_sample_rate
-            )
-            for freq in low_frequencies
-        ],
-    ]
-
     channels_keys = ["high", "low"]
-    assert receiver.n_chans == len(tone_channels)
+    n_poles = len(receiver.pol_ordering)
+    # Each channel's polarisations are adjacent: X high, Y high, X low, Y low.
+    pol_channel_indices = []
+    for pol in ["X", "Y"]:
+        base = [i for i, name in enumerate(receiver.pol_ordering) if name == pol.lower()]
+        assert len(base) == 1
+        # Index 0 is the high-frequency channel, index 1 the low-frequency channel.
+        pol_channel_indices.append([base[0], base[0] + receiver.n_chans])
+
+    frequencies = xr.DataArray(
+        np.stack([high_frequencies, low_frequencies]),
+        dims=("channel", "tone"),
+        coords={"channel": channels_keys},
+    )
+    tone_channels = xr.DataArray(
+        [
+            [
+                [
+                    sideband_tone_frequency(
+                        freq, xb_receiver.adc_sample_rate, xb_receiver.centre_frequency, receiver_sample_rate
+                    )
+                    for freq in frequencies.sel(channel=channel).values
+                ]
+                for channel in channels_keys
+            ]
+            for _ in receiver.pol_ordering
+        ],
+        dims=("pol", "channel", "tone"),
+        coords={"pol": receiver.pol_ordering, "channel": channels_keys},
+    )
+
+    assert receiver.n_chans == frequencies.sizes["channel"]
     time = np.arange(n_samples) / receiver_sample_rate
-    x_phases = np.zeros((len(channels_keys), SEARCH_TONES))
-    y_phases = np.zeros((len(channels_keys), SEARCH_TONES))
+    phases = np.zeros((n_poles * receiver.n_chans, SEARCH_TONES))
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
@@ -385,42 +391,39 @@ async def test_group_delay_compensation(
                 per_index[k].append(np.reshape(frame.data, -1))
         return [np.concatenate(parts)[start_sample : start_sample + n_samples] for parts in per_index]
 
-    for i in range(len(channels_keys)):
-        pdf_report.step(f"Calculate the delays of the tones for the {channels_keys[i]} channel.")
-        pdf_report.detail(f"Reference frequency: {search_frequencies_split[i][0] * 1e-6:.3f} MHz.")
-        for j, tone in enumerate(tone_channels[i]):
-            ref_sin = np.sin(2 * np.pi * tone * time)
-            ref_cos = np.cos(2 * np.pi * tone * time)
-
-            def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
-                samples = np.reshape(data, -1)
-                assert len(data) == len(time)
-
-                nonlocal ref_sin, ref_cos
-                q = samples * ref_sin  # noqa: B023
-                i = samples * ref_cos  # noqa: B023
-
-                return np.atan2(np.sum(i), np.sum(q))
-
-            x_phases[i, j] = analyze_signal(samples_from_framesets(x_indices)[i])
-            y_phases[i, j] = analyze_signal(samples_from_framesets(y_indices)[i])
-
-        # Phases from atan2 are wrapped to ±π. Unwrap along the tone comb
-        # before subtracting the reference, so a slope past ±π stays continuous.
-        x_phase_differences = np.unwrap(x_phases[i])[1:] - x_phases[i, 0]
-        y_phase_differences = np.unwrap(y_phases[i])[1:] - y_phases[i, 0]
-
-        channel_frequencies = search_frequencies_split[i]
-        x_tau = -x_phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(x_phase_differences))))
-        ax.plot(channel_frequencies[1:] * 1e-6, x_tau * 1e6, label=f"X {channels_keys[i]}")
-
-        y_tau = -y_phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(y_phase_differences))))
-        ax.plot(channel_frequencies[1:] * 1e-6, y_tau * 1e6, label=f"Y {channels_keys[i]}")
-
+    pdf_report.step("Calculate the delays of the tones.")
+    pol_samples = [samples_from_framesets(indices) for indices in pol_channel_indices]
+    for chan_i, channel in enumerate(channels_keys):
+        pdf_report.detail(
+            f"Reference frequency for {channel} channel: {frequencies.sel(channel=channel)[0].item() * 1e-6:.3f} MHz."
+        )
         pdf_report.step(f"Verify the delays are within {delay_error * 1e6:.3f} µs of zero.")
-        with check:
-            assert np.all(x_tau == pytest.approx(0.0, abs=delay_error))
-            assert np.all(y_tau == pytest.approx(0.0, abs=delay_error))
+        for pol_i, pol in enumerate(tone_channels.pol.values):
+            order = chan_i * n_poles + pol_i
+            for j, tone in enumerate(tone_channels.sel(channel=channel, pol=pol).values):
+                ref_sin = np.sin(2 * np.pi * tone * time)
+                ref_cos = np.cos(2 * np.pi * tone * time)
+
+                def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
+                    samples = np.reshape(data, -1)
+                    assert len(data) == len(time)
+
+                    nonlocal ref_sin, ref_cos
+                    q = samples * ref_sin  # noqa: B023
+                    i = samples * ref_cos  # noqa: B023
+
+                    return np.atan2(np.sum(i), np.sum(q))
+
+                phases[order, j] = analyze_signal(pol_samples[pol_i][chan_i])
+
+            # Phases from atan2 are wrapped to ±π. Unwrap along the tone comb
+            # before subtracting the reference, so a slope past ±π stays continuous.
+            phase_differences = np.unwrap(phases[order])[1:] - phases[order, 0]
+            tau = -phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(phase_differences))))
+            ax.plot(frequencies.sel(channel=channel)[1:] * 1e-6, tau * 1e6, label=f"{str(pol).upper()} {channel}")
+
+            with check:
+                assert np.all(tau == pytest.approx(0.0, abs=delay_error))
 
     ax.legend()
     await run_async(pdf_report.figure, fig)
