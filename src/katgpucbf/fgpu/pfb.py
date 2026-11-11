@@ -306,17 +306,16 @@ class PFBFIR(accel.Operation):
 
         # Try to ensure that each workitem has enough work to do to amortise
         # the overhead of loading the initial taps. Each workitem should
-        # contribute to work_spectra outputs.
-        work_spectra = self.template.taps * 8
-        # Number of workgroups along the time axis to match this
+        # contribute to work_spectra outputs, also taking into account NGC-1737 findings.
+        groupsy = 1
+        work_spectra = self.spectra
+        while groupsy < work_spectra:
+            groupsy *= 2
+            work_spectra //= 2
+
+        # ensure there is enough works items for work spectra
         groupsy = accel.divup(self.spectra, work_spectra)
-        # Keep a minimum of 128K workitems (across all pols), to avoid starving
-        # the GPU for work.
-        groupsy = max(groupsy, accel.divup(128 * 1024 // self.template.n_pols, real_step))
-        # Re-compute work_spectra to balance the load
         work_spectra = accel.divup(self.spectra, groupsy)
-        # Rounding up may have left some workgroups with nothing to do, so recalculate
-        # groupsy again.
         groupsy = accel.divup(self.spectra, work_spectra)
 
         raw_in_offset = (self.in_offset * rps).astype(np.int32)
