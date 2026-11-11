@@ -372,12 +372,10 @@ async def test_group_delay_compensation(
     y_phases = np.zeros((len(channels_keys), SEARCH_TONES))
 
     fig = Figure(tight_layout=True)
-    axs = fig.subplots(
-        len(receiver.pol_ordering),
-        len(channels_keys),
-        sharex="col",
-        squeeze=False,
-    )
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xlabel("Sky frequency (MHz)")
+    ax.set_ylabel("Delay (µs)")
+    ax.set_title("Group delay")
 
     def samples_from_framesets(indices: list[int]) -> list[np.ndarray]:
         per_index: list[list[np.ndarray]] = [[] for _ in indices]
@@ -413,29 +411,16 @@ async def test_group_delay_compensation(
         y_phase_differences = np.unwrap(y_phases[i])[1:] - y_phases[i, 0]
 
         channel_frequencies = search_frequencies_split[i]
-        xplt = axs[0][i]
         x_tau = -x_phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(x_phase_differences))))
-        xplt.plot(
-            channel_frequencies[1:],
-            x_tau * 1e6,
-        )
-        xplt.set_title(f"X polarity {channels_keys[i]} channel delay")
-        xplt.set_ylabel("Delay (µs)")
-        xplt.legend()
+        ax.plot(channel_frequencies[1:] * 1e-6, x_tau * 1e6, label=f"X {channels_keys[i]}")
 
-        yplt = axs[1][i]
         y_tau = -y_phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(y_phase_differences))))
-        yplt.plot(
-            channel_frequencies[1:],
-            y_tau * 1e6,
-        )
-        yplt.set_title(f"Y polarity {channels_keys[i]} channel delay")
-        yplt.set_ylabel("Delay (µs)")
-        yplt.legend()
+        ax.plot(channel_frequencies[1:] * 1e-6, y_tau * 1e6, label=f"Y {channels_keys[i]}")
 
-        pdf_report.step("Verify the delays are within 0.5 µs of zero.")
+        pdf_report.step(f"Verify the delays are within {delay_error * 1e6:.3f} µs of zero.")
         with check:
             assert np.all(x_tau == pytest.approx(0.0, abs=delay_error))
             assert np.all(y_tau == pytest.approx(0.0, abs=delay_error))
 
+    ax.legend()
     await run_async(pdf_report.figure, fig)
