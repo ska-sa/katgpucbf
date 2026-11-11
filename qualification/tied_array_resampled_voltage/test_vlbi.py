@@ -257,10 +257,11 @@ async def test_group_delay_compensation(
 
     Verification method
     -------------------
-    Verified by means of test. Generate 10 tones in the passband seperated evenly.
-    Compensate for the filter-group-delay and the VLBI delay by setting the VLBI delay to the filter-group-delay.
-    Collect valid VDIF framesets, and determine the phase difference between each tone and the reference tone.
-    The phase difference should be linear and within 1% of the filter-group-delay to zero.
+    Verified by means of test. Generate ``SEARCH_TONES`` tones in the passband seperated evenly within the linear
+    passband. Compensate for the filter-group-delay and the VLBI delay by setting the VLBI delay to the
+    filter-group-delay. Collect valid VDIF framesets, and determine the phase difference between each tone and the
+    reference tone for each thread. The phase difference should be linear and within 1% of the filter-group-delay
+    to zero.
     """
     receiver = receive_tied_array_resampled_voltage
     xb_receiver = receive_tied_array_channelised_voltage
@@ -343,13 +344,6 @@ async def test_group_delay_compensation(
 
     channels_keys = ["high", "low"]
     n_poles = len(receiver.pol_ordering)
-    # Each channel's polarisations are adjacent: X high, Y high, X low, Y low.
-    pol_channel_indices = []
-    for pol in ["X", "Y"]:
-        base = [i for i, name in enumerate(receiver.pol_ordering) if name == pol.lower()]
-        assert len(base) == 1
-        # Index 0 is the high-frequency channel, index 1 the low-frequency channel.
-        pol_channel_indices.append([base[0], base[0] + receiver.n_chans])
 
     frequencies = xr.DataArray(
         np.stack([high_frequencies, low_frequencies]),
@@ -391,7 +385,12 @@ async def test_group_delay_compensation(
                 per_index[k].append(np.reshape(frame.data, -1))
         return [np.concatenate(parts)[start_sample : start_sample + n_samples] for parts in per_index]
 
-    pdf_report.step("Calculate the delays of the tones.")
+    pdf_report.step("Calculate the delays of the tones per polarisation-channel thread.")
+    # Each channel's polarisations are adjacent, build the index for each polarisation to thread index.
+    # example: [0, 2] for X, [1, 3] for Y.
+    pol_channel_indices = [
+        [base + channel_i * n_poles for channel_i in range(len(channels_keys))] for base in range(n_poles)
+    ]
     pol_samples = [samples_from_framesets(indices) for indices in pol_channel_indices]
     for chan_i, channel in enumerate(channels_keys):
         pdf_report.detail(
