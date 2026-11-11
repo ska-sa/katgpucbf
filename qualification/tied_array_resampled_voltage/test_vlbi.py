@@ -442,7 +442,7 @@ async def test_group_delay_compensation(
             ax.plot(frequencies.sel(channel=channel)[1:] * 1e-6, tau * 1e6, label=f"{str(pol).upper()} {channel}")
 
             with check:
-                assert np.all(tau == pytest.approx(0.0, abs=delay_error))
+                np.testing.assert_allclose(tau, 0.0, atol=delay_error)
 
     ax.legend()
     await run_async(pdf_report.figure, fig)
