@@ -17,11 +17,15 @@
 """Test for tied-array-resampled-voltage stream."""
 
 import asyncio
+import io
+import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 import numpy as np
 import pytest
+import xarray as xr
+from astropy.time import Time
 from matplotlib.figure import Figure
 from pytest_check import check
 
@@ -29,10 +33,12 @@ from katgpucbf.pytest_plugins.reporter import Reporter, plot_focus
 from katgpucbf.utils import TimeConverter
 from qualification.cbf import CBFRemoteControl
 from qualification.types import AsyncRunner
+from test.qualification.test_recv import BasebandVDIFFrame
 
-from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
+from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
 FRAMESETS_TO_CAPTURE = 10
+SEARCH_TONES = 10
 
 
 async def max_retry_test(
@@ -201,7 +207,6 @@ async def test_vlbi_vdif(
     Verified by means of test. Collect ``FRAMESETS_TO_CAPTURE`` valid VDIF framesets.
     Verify the number of threads in the framesets are correct.
     """
-    assert receive_tied_array_resampled_voltage is not None
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frameset.")
     # capture a few valid framesets
@@ -217,3 +222,227 @@ async def test_vlbi_vdif(
     with check:
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
+
+
+def sideband_tone_frequency(
+    sky_freq: float, adc_sample_rate: float, centre_frequency: float, output_sample_rate: float
+) -> float:
+    """Frequency of a sky tone in one VLBI sideband.
+
+    A tone above Nyquist aliases to ``adc_sample_rate - sky_freq``. The
+    narrowband mixer removes ``centre_frequency``, and the absolute remainder
+    is that tone's offset from the narrowband centre, folded into the real
+    V-engine output. Both sidebands share this offset: the high stream is the
+    upper half of the narrowband and the low stream is the lower half.
+    """
+    aliased = abs(sky_freq) % adc_sample_rate
+    if aliased > adc_sample_rate / 2:
+        aliased = adc_sample_rate - aliased
+    shifted = abs(aliased - centre_frequency) % output_sample_rate
+    if shifted > output_sample_rate / 2:
+        shifted = output_sample_rate - shifted
+    return shifted
+
+
+def seek_thread_samples(framesets: list[VDIFFrameset], start_sample: int, n_samples: int) -> list[np.ndarray]:
+    """Seek to the start sample for a thread and return the samples from the frameset.
+
+    Parameters
+    ----------
+    framesets
+        The list of framesets to seek in.
+    start_sample
+        The start sample to skip to.
+    n_samples
+        The number of samples to return.
+    indices
+        The indices of the frameset to seek.
+
+    Returns
+    -------
+    list[np.ndarray]
+        The samples from the frameset after seeking split by thread.
+    """
+    per_thread_id: list = [[] for _ in range(len(framesets[0].frames))]
+    for frameset in framesets:
+        for k, vdif_frame in enumerate(frameset.frames):
+            frame = BasebandVDIFFrame.fromfile(io.BytesIO(vdif_frame.raw_frame))
+            per_thread_id[k].append(np.reshape(frame.data, -1))
+    return [np.concatenate(parts)[start_sample : start_sample + n_samples] for parts in per_thread_id]
+
+
+@pytest.mark.name("VLBI group delay compensation")
+@pytest.mark.no_capture_start("gpucbf.tied_array_resampled_voltage")
+async def test_group_delay_compensation(
+    pdf_report: Reporter,
+    cbf: CBFRemoteControl,
+    receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
+    receive_tied_array_channelised_voltage: TiedArrayChannelisedVoltageReceiver,
+    run_async: AsyncRunner,
+) -> None:
+    """Test group delay compensation.
+
+    Verification method
+    -------------------
+    Verified by means of test. Generate ``SEARCH_TONES`` tones in the passband seperated evenly within the linear
+    passband. Compensate for the filter-group-delay and the VLBI delay by setting the VLBI delay to the
+    filter-group-delay. Collect valid VDIF framesets, and determine the phase difference between each tone and the
+    reference tone for each thread. The phase difference should be linear and within 1% of the filter-group-delay
+    to zero.
+    """
+    receiver = receive_tied_array_resampled_voltage
+    xb_receiver = receive_tied_array_channelised_voltage
+    pcc = cbf.product_controller_client
+    # filter-group-delay is in ADC samples; vlbi-delay is in seconds.
+    pdf_report.step("compensate for filter-group-delay.")
+    delay_samples = await pcc.sensor_value("antenna-channelised-voltage.filter-group-delay", float)
+    delay = delay_samples / xb_receiver.adc_sample_rate
+    delay_error = abs(0.01 * delay)
+    pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
+    await pcc.request("vlbi-delay", receiver.stream_name, delay)
+    pass_bandwidth = cbf.init_sensors[
+        f"{receiver.stream_name}.pass-bandwidth"
+    ].value  # Use flat response bandwidth reported rather than in the band
+    sky_centre = xb_receiver.adc_sample_rate - xb_receiver.centre_frequency
+
+    tone_spacing = pass_bandwidth // 2 // (SEARCH_TONES + 1)
+    # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
+    tone_offsets = np.arange(1, SEARCH_TONES + 1, dtype=np.float64) * tone_spacing
+    low_frequencies = sky_centre - tone_offsets[::-1]
+    high_frequencies = sky_centre + tone_offsets
+    assert len(low_frequencies) == len(high_frequencies), "the number of low and high frequencies must be equal"
+    n_injected = SEARCH_TONES * 2
+
+    n_samples = FRAMESETS_TO_CAPTURE * receiver.n_samples_per_frame
+    receiver_sample_rate = float(receiver.frame_rate * receiver.n_samples_per_frame)
+
+    assert len(cbf.dsim_names) == 1
+    pdf_report.step("Set Antenna Channelised Voltage gains.")
+    amplitude = 0.99 / n_injected
+    gain = xb_receiver.compute_tone_gain(amplitude, 100)
+    for input_label in xb_receiver.input_labels:
+        await pcc.request("gain", "antenna-channelised-voltage", input_label, gain)
+
+    pdf_report.step("Set dsim signals to search for phase in frequencies.")
+    pdf_report.detail(f"Searching for phase in {n_injected} frequencies.")
+    dsim_names = cbf.dsim_names
+    low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {tone_spacing})"
+    high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {tone_spacing})"
+    for dsim_name in dsim_names:
+        await pcc.request(
+            "dsim-signals",
+            dsim_name,
+            f"{low_signal} + {high_signal}; {low_signal} + {high_signal};",
+        )
+    await pcc.request("capture-start", receiver.stream_name)
+
+    steady_state_timestamp = await cbf.steady_state_timestamp()
+    # The dsim waveform repeats every `dsim_period` ADC samples, with phase 0 at
+    # each multiple. The signal request uses the default period, which is max-period.
+    dsim_period = int(cbf.init_sensors[f"{dsim_names[0]}.max-period"].value)
+    pdf_report.step("Collect VDIF framesets covering a dsim phase-zero epoch.")
+    framesets: list[VDIFFrameset] = []
+    start_sample = 0
+    n_frames = 0
+    async for frameset in receiver.complete_framesets(min_timestamp=steady_state_timestamp):
+        if framesets and frameset.timestamp.linear != framesets[-1].timestamp.linear + 1:
+            framesets.clear()
+        if not framesets:
+            sync = Time(receiver.sync_time, format="unix", scale="utc")
+            first_timestamp = round((frameset.timestamp.timestamp - sync).sec * receiver.scale_factor_timestamp)
+            # Same epoch as test_delay.compute_delay: the dsim period boundary at or
+            # before this frame. Step forward one period when that boundary is in the past.
+            phase_zero_timestamp = first_timestamp // dsim_period * dsim_period
+            if phase_zero_timestamp < first_timestamp:
+                phase_zero_timestamp += dsim_period
+            start_sample = round(
+                (phase_zero_timestamp - first_timestamp) * receiver_sample_rate / receiver.scale_factor_timestamp
+            )
+            n_frames = math.ceil((start_sample + n_samples) / receiver.n_samples_per_frame)
+            pdf_report.detail(
+                f"First frame ADC timestamp {first_timestamp}, reading from sample {start_sample} "
+                f"(ADC timestamp {phase_zero_timestamp})."
+            )
+        framesets.append(frameset)
+        if len(framesets) == n_frames:
+            break
+    pdf_report.detail(f"Skipping {start_sample} samples to start at a phase-zero epoch.")
+    assert len(framesets) == n_frames
+
+    channels_keys = ["high", "low"]
+    n_poles = len(receiver.pol_ordering)
+
+    frequencies = xr.DataArray(
+        np.stack([high_frequencies, low_frequencies]),
+        dims=("channel", "tone"),
+        coords={"channel": channels_keys},
+    )
+    tone_channels = xr.DataArray(
+        [
+            [
+                [
+                    sideband_tone_frequency(
+                        freq, xb_receiver.adc_sample_rate, xb_receiver.centre_frequency, receiver_sample_rate
+                    )
+                    for freq in frequencies.sel(channel=channel).values
+                ]
+                for channel in channels_keys
+            ]
+            for _ in receiver.pol_ordering
+        ],
+        dims=("pol", "channel", "tone"),
+        coords={"pol": receiver.pol_ordering, "channel": channels_keys},
+    )
+
+    assert receiver.n_chans == frequencies.sizes["channel"]
+    time = np.arange(n_samples) / receiver_sample_rate
+    phases = np.zeros((n_poles * receiver.n_chans, SEARCH_TONES))
+
+    fig = Figure(tight_layout=True)
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xlabel("Sky frequency (MHz)")
+    ax.set_ylabel("Delay (µs)")
+    ax.set_title("Group delay")
+
+    pdf_report.step("Calculate the delays of the tones per polarisation-channel thread.")
+    # Each channel's polarisations are adjacent, build the index for each polarisation to thread index.
+    # example: [0, 2] for X, [1, 3] for Y.
+    pol_channel_indices = [
+        [base + channel_i * n_poles for channel_i in range(len(channels_keys))] for base in range(n_poles)
+    ]
+    phase_zero_samples = seek_thread_samples(framesets, start_sample, n_samples)
+    pol_samples = [[phase_zero_samples[index] for index in indices] for indices in pol_channel_indices]
+    for chan_i, channel in enumerate(channels_keys):
+        pdf_report.detail(
+            f"Reference frequency for {channel} channel: {frequencies.sel(channel=channel)[0].item() * 1e-6:.3f} MHz."
+        )
+        pdf_report.step(f"Verify the delays are within {delay_error * 1e6:.3f} µs of zero.")
+        for pol_i, pol in enumerate(tone_channels.pol.values):
+            order = chan_i * n_poles + pol_i
+            for j, tone in enumerate(tone_channels.sel(channel=channel, pol=pol).values):
+                ref_sin = np.sin(2 * np.pi * tone * time)
+                ref_cos = np.cos(2 * np.pi * tone * time)
+
+                def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
+                    samples = np.reshape(data, -1)
+                    assert len(data) == len(time)
+
+                    nonlocal ref_sin, ref_cos
+                    q = samples * ref_sin  # noqa: B023
+                    i = samples * ref_cos  # noqa: B023
+
+                    return np.atan2(np.sum(i), np.sum(q))
+
+                phases[order, j] = analyze_signal(pol_samples[pol_i][chan_i])
+
+            # Phases from atan2 are wrapped to ±π. Unwrap along the tone comb
+            # before subtracting the reference, so a slope past ±π stays continuous.
+            phase_differences = np.unwrap(phases[order])[1:] - phases[order, 0]
+            tau = -phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(phase_differences))))
+            ax.plot(frequencies.sel(channel=channel)[1:] * 1e-6, tau * 1e6, label=f"{str(pol).upper()} {channel}")
+
+            with check:
+                np.testing.assert_allclose(tau, 0.0, atol=delay_error)
+
+    ax.legend()
+    await run_async(pdf_report.figure, fig)

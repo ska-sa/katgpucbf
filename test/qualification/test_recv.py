@@ -39,6 +39,9 @@ NP_DTYPE_SIZE_BITS = 8  # size of datatype used for vdif data array samples in b
 BYTES_PER_NP_ARRAY_FOR_FRAME = SAMPLES_PER_FRAME * (NP_DTYPE_SIZE_BITS // 8)  # The size of the numpy array for a frame.
 THREADS = 4
 FRAME_RATE_THREADS = FRAME_RATE * THREADS
+NP_DTYPE = np.int8
+NP_DTYPE_SIZE_BITS = np.dtype(NP_DTYPE).itemsize * 8
+BYTES_PER_NP_ARRAY_FOR_FRAME = SAMPLES_PER_FRAME * (NP_DTYPE_SIZE_BITS // 8)  # The size of the numpy array for a frame.
 
 
 def create_identity_data(samples_per_frame: int) -> np.ndarray:
@@ -48,11 +51,11 @@ def create_identity_data(samples_per_frame: int) -> np.ndarray:
     another for the difference to be visible.
     """
     identity_size = ceil(sqrt(samples_per_frame))
-    # even though we only have 2 bits per sample, np.array can do minimum 8 bits per sample.
-    identity_data = np.identity(identity_size, dtype=np.int8)
+    # even though we only have 2bits per sample, np.array can do minimum 8 bits per sample
+    identity_data = np.identity(identity_size, dtype=NP_DTYPE)
     # the identity matrix size is rounded up to the nearest square number, correct it.
     identity_data = identity_data.reshape(-1, 1)[:samples_per_frame]
-    # Quantization of -1 and 1 maps to itself in a 2-bit representation.
+    # Quantization of -1 and 1 to the 2bit data samples can be reversed to get the original values.
     return (np.ones_like(identity_data) * -1) + identity_data * 2
 
 

@@ -83,6 +83,7 @@ class XBReceiver:
         if "narrowband" in acv_config:
             self.decimation_factor = acv_config["narrowband"]["decimation_factor"]
         self.adc_sample_rate: float = cbf.config["outputs"][acv_config["src_streams"][0]]["adc_sample_rate"]
+        self.centre_frequency: float = cbf.init_sensors[f"{acv_name}.center-freq"].value
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
@@ -827,7 +828,9 @@ class TiedArrayResampledVoltageReceiver:
             cbf.init_sensors[f"{stream_name}.destination"].value.decode()
         )
         self.n_chans: int = cbf.init_sensors[f"{stream_name}.n-chans"].value
-        self.pol_ordering: list[str] = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value)
+        self.pol_ordering: list[str] = json.loads(
+            cbf.init_sensors[f"{stream_name}.pol-ordering"].value
+        )  # format: ["x", "y"]
         self.n_threads = self.n_chans * len(self.pol_ordering)
         self.veng_out_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.veng-out-bits-per-sample"].value
 
