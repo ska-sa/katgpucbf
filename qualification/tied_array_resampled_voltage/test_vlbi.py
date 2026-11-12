@@ -162,7 +162,7 @@ async def test_mean_power(
         return bool(
             np.all(mean_power_sensor_timestamps[:, j] >= min_sensor_time)
             and mean_power_sensor_values[x_indices, j] == pytest.approx(tacv_power, rel=5e-3)
-            and mean_power_sensor_values[y_indices, j] == pytest.approx(0.0, rel=5e-3)
+            and np.all(mean_power_sensor_values[y_indices, :] == pytest.approx(0.0, rel=5e-3))
         )
 
     pdf_report.step("Compare mean-power sensors against expected TACV power.")
@@ -198,15 +198,15 @@ async def test_mean_power(
     await run_async(pdf_report.figure, fig)
 
     pdf_report.step("Verify mean power sensor values are updated at the power-int-time intervals.")
-    timestamp_diffs = np.diff(np.unique(mean_power_sensor_timestamps[:, : last_attempt + 1]))
-    expected_timestamp_diffs = np.ones_like(timestamp_diffs) * power_int_time
-    assert np.all(len(mean_power_sensor_timestamps[:]) > 1)
-    with check:
-        np.testing.assert_allclose(
-            timestamp_diffs,
-            expected_timestamp_diffs,
-            err_msg="Mean power sensor values are not updated at the power-int-time intervals.",
-        )
+    for i in range(len(sensor_names)):
+        assert len(mean_power_sensor_timestamps[i]) > 1
+        timestamp_diffs = np.diff(np.unique(mean_power_sensor_timestamps[i, : last_attempt + 1]))
+        with check:
+            np.testing.assert_allclose(
+                timestamp_diffs,
+                power_int_time,
+                err_msg="Mean power sensor values are not updated at the power-int-time intervals.",
+            )
 
 
 @pytest.mark.name("VLBI VDIF output")
