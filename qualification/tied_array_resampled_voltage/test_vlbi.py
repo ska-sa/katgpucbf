@@ -130,9 +130,9 @@ async def test_mean_power(
         for chan in range(receiver.n_chans)
     ]
     x_pol = receiver.pol_ordering.index("x")
-    x_indices = slice(x_pol, (x_pol + 1) * receiver.n_chans, receiver.n_chans)
+    x_indices = slice(x_pol * receiver.n_chans, (x_pol + 1) * receiver.n_chans, receiver.n_chans)
     y_pol = receiver.pol_ordering.index("y")
-    y_indices = slice(y_pol, (y_pol + 1) * receiver.n_chans, receiver.n_chans)
+    y_indices = slice(y_pol * receiver.n_chans, (y_pol + 1) * receiver.n_chans, receiver.n_chans)
 
     pdf_report.step("Measure power from tied-array channelised voltage.")
     _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk_data()
