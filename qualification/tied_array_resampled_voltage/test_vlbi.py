@@ -19,6 +19,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from math import ceil
 
 import numpy as np
 import pytest
@@ -77,7 +78,7 @@ async def test_mean_power(
     pass_channels: slice,
     run_async: AsyncRunner,
 ) -> None:
-    """Test mean-power sensor values against tied-array channelised voltage.
+    """Test mean-power sensor values.
 
     Verification method
     -------------------
@@ -89,9 +90,18 @@ async def test_mean_power(
     passband channels, and compare against x polarity ``mean-power`` sensor.
     The values must agree to within 0.5%. During the test the mean power for the y polarity
     is verified to be zero.
+
+    Verify the mean power sensor values are updated every ``power-int-time`` seconds.
+    Measured by taking the mean power sensor values at a rate of ``2 / power-int-time`` Hz and verifying
+    the time taken each sensor value update is equal to the ``power-int-time``.
     """
     receiver = receive_tied_array_resampled_voltage
     pcc = cbf.product_controller_client
+
+    pdf_report.step("Verify power integration time sensor value is 1.0.")
+    power_int_time = (await pcc.sensor_reading(f"{receiver.stream_name}.power-int-time", float)).value
+    with check:
+        assert power_int_time == 1.0, "Power integration time is not 1.0"
 
     pdf_report.step("Set beam weights.")
     async with asyncio.TaskGroup() as tg:
@@ -114,7 +124,15 @@ async def test_mean_power(
     steady_state_unix = time_converter.adc_to_unix(await cbf.steady_state_timestamp())
     min_sensor_time = steady_state_unix + receiver.power_int_time
 
-    sensor_names = [f"{receiver.stream_name}.x{chan}.mean-power" for chan in range(receiver.n_chans)]
+    sensor_names = [
+        f"{receiver.stream_name}.{pol}{chan}.mean-power"
+        for pol in receiver.pol_ordering
+        for chan in range(receiver.n_chans)
+    ]
+    x_pol = receiver.pol_ordering.index("x")
+    x_indices = slice(x_pol * receiver.n_chans, (x_pol + 1) * receiver.n_chans, receiver.n_chans)
+    y_pol = receiver.pol_ordering.index("y")
+    y_indices = slice(y_pol * receiver.n_chans, (y_pol + 1) * receiver.n_chans, receiver.n_chans)
 
     pdf_report.step("Measure power from tied-array channelised voltage.")
     _, tacv_data = await receive_tied_array_channelised_voltage.next_complete_chunk_data()
@@ -124,12 +142,11 @@ async def test_mean_power(
     tacv_power = (np.square(tacv_data.real) + np.square(tacv_data.imag)).mean()
     pdf_report.detail(f"Mean TACV power over passband channels: {tacv_power}.")
 
+    sample_rate = 2 / power_int_time  # twice per int-time to guarantee we won't miss the update.
     # TODO: See NGC-2099 & 1689: Because the data is zero for the first several seconds,
-    # for now just retry with .2 second intervals (sample rate of 5) since steady state is
-    # not known beforehand.
-    sample_rate = 5
+    # we can't determine the period of the test to run, so we run for 5 seconds.
     seconds = 5
-    samples = seconds * sample_rate
+    samples = ceil(seconds * sample_rate)
     mean_power_sensor_timestamps = np.zeros((len(sensor_names), samples), float)
     mean_power_sensor_values = np.zeros_like(mean_power_sensor_timestamps)
 
@@ -144,25 +161,17 @@ async def test_mean_power(
 
         return bool(
             np.all(mean_power_sensor_timestamps[:, j] >= min_sensor_time)
-            and np.all(mean_power_sensor_values[:, j] == pytest.approx(tacv_power, rel=5e-3))
+            and np.all(mean_power_sensor_values[x_indices, j] == pytest.approx(tacv_power, rel=5e-3))
+            and np.all(mean_power_sensor_values[y_indices, :] == pytest.approx(0.0, rel=5e-3))
         )
 
-    pdf_report.step("Compare mean-power sensors against TACV power.")
+    pdf_report.step("Compare mean-power sensors against expected TACV power.")
     test_passed, last_attempt = await max_retry_test(wait_mean_power_steady_state, samples, 1 / sample_rate)
     with check:
         assert test_passed, (
             f"X polarity mean power does not agree to within 0.5% of TACV v polarity power after {samples} retries."
         )
         assert tacv_power > 0.0
-
-    pdf_report.step("Y polarity mean power sensors should be zero.")
-    for chan in range(receiver.n_chans):
-        sensor_name = f"{receiver.stream_name}.y{chan}.mean-power"
-        reading = await pcc.sensor_reading(sensor_name, float)
-        with check:
-            assert reading.value == pytest.approx(0.0, rel=5e-3), (
-                f"Y polarity mean power for channel {chan} is not zero: {reading.value}"
-            )
 
     pdf_report.detail(
         f"Mean power sensor readings from {datetime.fromtimestamp(np.min(mean_power_sensor_timestamps[:, 0]), UTC)}"
@@ -187,6 +196,17 @@ async def test_mean_power(
         )
     ax.legend()
     await run_async(pdf_report.figure, fig)
+
+    pdf_report.step("Verify mean-power sensor values are updated at the power-int-time intervals.")
+    for i in range(len(sensor_names)):
+        timestamp_diffs = np.diff(np.unique(mean_power_sensor_timestamps[i, : last_attempt + 1]))
+        assert len(timestamp_diffs) > 0
+        with check:
+            np.testing.assert_allclose(
+                timestamp_diffs,
+                power_int_time,
+                err_msg="Mean power sensor values are not updated at the power-int-time intervals.",
+            )
 
 
 @pytest.mark.name("VLBI VDIF output")
