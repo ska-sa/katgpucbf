@@ -101,7 +101,7 @@ async def test_mean_power(
     pdf_report.step("Verify power integration time sensor value is 1.0.")
     power_int_time = (await pcc.sensor_reading(f"{receiver.stream_name}.power-int-time", float)).value
     with check:
-        assert power_int_time == 1.0, f"Power integration time is not 1.0: {power_int_time}"
+        assert power_int_time == 1.0, "Power integration time is not 1.0"
 
     pdf_report.step("Set beam weights.")
     async with asyncio.TaskGroup() as tg:
