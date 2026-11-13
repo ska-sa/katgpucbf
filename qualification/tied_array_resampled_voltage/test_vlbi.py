@@ -91,9 +91,9 @@ async def test_mean_power(
     The values must agree to within 0.5%. During the test the mean power for the y polarity
     is verified to be zero.
 
-    Verify that the x polarity mean power sensor values are updated at the ``power-int-time`` intervals
-    by measuring the mean power sensor values at a rate of ``2 / power-int-time`` Hz and verifying
-    the time differences between the sensor value updates are equal to the ``power-int-time``.
+    Verify the mean power sensor values are updated every ``power-int-time`` seconds.
+    Measured by taking the mean power sensor values at a rate of ``2 / power-int-time`` Hz and verifying
+    the time taken each sensor value update is equal to the ``power-int-time``.
     """
     receiver = receive_tied_array_resampled_voltage
     pcc = cbf.product_controller_client
@@ -197,10 +197,10 @@ async def test_mean_power(
     ax.legend()
     await run_async(pdf_report.figure, fig)
 
-    pdf_report.step("Verify mean power sensor values are updated at the power-int-time intervals.")
+    pdf_report.step("Verify mean-power sensor values are updated at the power-int-time intervals.")
     for i in range(len(sensor_names)):
-        assert len(mean_power_sensor_timestamps[i]) > 1
         timestamp_diffs = np.diff(np.unique(mean_power_sensor_timestamps[i, : last_attempt + 1]))
+        assert len(timestamp_diffs) > 0
         with check:
             np.testing.assert_allclose(
                 timestamp_diffs,
