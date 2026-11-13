@@ -93,7 +93,7 @@ async def test_mean_power(
 
     Verify that the x polarity mean power sensor values are updated at the ``power-int-time`` intervals
     by measuring the mean power sensor values at a rate of ``2 / power-int-time`` Hz and verifying
-    the time differences between the sensor values are equal to the ``power-int-time``.
+    the time differences between the sensor value updates are equal to the ``power-int-time``.
     """
     receiver = receive_tied_array_resampled_voltage
     pcc = cbf.product_controller_client
