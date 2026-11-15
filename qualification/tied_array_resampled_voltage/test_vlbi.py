@@ -93,13 +93,13 @@ async def test_mean_power(
 
     Verify the mean power sensor values are updated every ``power-int-time`` seconds.
     Measured by taking the mean power sensor values at a rate of ``2 / power-int-time`` Hz and verifying
-    the time taken each sensor value update is equal to the ``power-int-time``.
+    the time taken for each sensor value update is equal to ``power-int-time``.
     """
     receiver = receive_tied_array_resampled_voltage
     pcc = cbf.product_controller_client
 
     pdf_report.step("Verify power integration time sensor value is 1.0.")
-    power_int_time = (await pcc.sensor_reading(f"{receiver.stream_name}.power-int-time", float)).value
+    power_int_time = cbf.init_sensors[f"{receiver.stream_name}.power-int-time"].value
     with check:
         assert power_int_time == 1.0, "Power integration time is not 1.0"
 
