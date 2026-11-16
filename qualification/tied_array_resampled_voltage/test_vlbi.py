@@ -201,6 +201,7 @@ async def test_mean_power(
     for i in range(len(sensor_names)):
         timestamp_diffs = np.diff(np.unique(mean_power_sensor_timestamps[i, : last_attempt + 1]))
         assert len(timestamp_diffs) > 0
+        pdf_report.detail(f"{len(timestamp_diffs)} updates to time found for {sensor_names[i]}.")
         with check:
             np.testing.assert_allclose(
                 timestamp_diffs,
