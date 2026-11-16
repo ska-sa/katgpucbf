@@ -60,7 +60,7 @@ janus==2.0.0
     # via aiomonitor
 jinja2==3.1.6
     # via aiomonitor
-katcbf-vlbi-resample==0.5.2
+katcbf-vlbi-resample @ git+https://github.com/ska-sa/katcbf-vlbi-resample@ebe12d781c131571a54a633027ff466eaf36de17
     # via katgpucbf (pyproject.toml)
 katcp-codec==0.2.2
     # via aiokatcp

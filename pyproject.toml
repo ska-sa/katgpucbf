@@ -24,7 +24,7 @@ dependencies = [
     "aiokatcp>=1.9.0",
     "astropy",
     "dask",
-    "katcbf-vlbi-resample>=0.5",
+    "katcbf-vlbi-resample @ git+https://github.com/ska-sa/katcbf-vlbi-resample@NGC-2118-update-resample",
     "katsdpservices[aiomonitor]",
     "katsdpsigproc>=1.9.0",
     "katsdptelstate",
