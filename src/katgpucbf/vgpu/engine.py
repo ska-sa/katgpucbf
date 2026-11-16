@@ -124,15 +124,10 @@ class RecvStream:
                     coords={"pol": list(self._pol_labels)},
                     attrs={"time_bias": chunk.timestamp // self._samples_between_spectra},
                 )
-                # TODO (NGC-1689): need to properly handle missing data in
-                # katcbf-vlbi-resample. This is a quick hack to keep things
-                # running by injecting zero data into the stream.
-                while last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
-                    last_chunk_id += 1
-                    nan_arr = xr.full_like(arr, np.nan + np.nan * 1j)
-                    timestamp = last_chunk_id * self._layout.chunk_timestamp_step
-                    nan_arr.attrs["time_bias"] = timestamp // self._samples_between_spectra
-                    yield nan_arr
+                # TODO (NGC-1689): need to properly handle missing data in katcbf-vlbi-resample.
+                # This is to test work being done in NGC-2118.
+                if last_chunk_id is not None and last_chunk_id < chunk.chunk_id - 1:
+                    logger.warning("Missed input data - Expected %d, Received %d", last_chunk_id + 1, chunk.chunk_id)
                 last_chunk_id = chunk.chunk_id
                 yield arr
 
