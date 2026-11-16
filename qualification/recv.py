@@ -1022,13 +1022,19 @@ class TiedArrayResampledVoltageReceiver:
                                     self.total_framesets += n_missed_framesets + 1
                                     self.last_frameset_timestamp = frame0_linear
 
-                                    yield VDIFFrameset(prefix)
+                                    try:
+                                        yield VDIFFrameset(prefix)
+                                    finally:
+                                        # GeneratorExit on close skips a plain statement
+                                        # after yield, but still runs this finally.
+                                        logger.debug("deleting %d frames from buffer", self.n_threads)
+                                        del self.buffer[: self.n_threads]
                                 else:
                                     logger.debug(
                                         "Skipping frameset because of min_timestamp: %d < %d", frame0_linear, min_frame
                                     )
                                     self.total_framesets += 1
-                                del self.buffer[: self.n_threads]
+                                    del self.buffer[: self.n_threads]
                                 continue
 
                         if frame0.seq_id <= self.min_seq_id - self.n_threads:
