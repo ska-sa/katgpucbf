@@ -176,7 +176,7 @@ def main() -> None:
         "--columns",
         type=int,
         default=4,
-        help="Number of columns to plot",
+        help="Number of columns to arrange plot in [%(default)s]",
     )
     parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
