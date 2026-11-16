@@ -1025,9 +1025,6 @@ class TiedArrayResampledVoltageReceiver:
                                     try:
                                         yield VDIFFrameset(prefix)
                                     finally:
-                                        # GeneratorExit on close skips a plain statement
-                                        # after yield, but still runs this finally.
-                                        logger.debug("deleting %d frames from buffer", self.n_threads)
                                         del self.buffer[: self.n_threads]
                                 else:
                                     logger.debug(
