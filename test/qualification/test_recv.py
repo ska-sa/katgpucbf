@@ -539,7 +539,7 @@ class TestTiedArrayResampledVoltageReceiver:
     async def test_next_complete_frameset_clears_buffer(
         self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
     ) -> None:
-        """next_complete_frameset() clears buffer on return"""
+        """next_complete_frameset() clears buffer on return."""
         receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
         mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
             [
