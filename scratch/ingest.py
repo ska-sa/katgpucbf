@@ -20,8 +20,10 @@ import argparse
 import ast
 import asyncio
 import logging
+import math
 import sys
 from collections.abc import Sequence
+from typing import override
 
 import aiokatcp
 import matplotlib
@@ -45,6 +47,7 @@ CORR2_SENSOR_REMAP = {
 # According to the ICD.
 TIMESTAMP = 0x1600
 FREQUENCY = 0x4103
+logger = logging.getLogger(__name__)
 
 
 async def get_product_controller_endpoint(mc_endpoint: Endpoint, product_name: str) -> Endpoint:
@@ -157,10 +160,23 @@ def main() -> None:
         help="Plot phase instead of magnitude",
     )
     parser.add_argument(
+        "--type",
+        choices=["spectrum", "waterfall"],
+        default="spectrum",
+        help="Type of plots to produce [%(default)s]",
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=60.0,
+        metavar="SECONDS",
+        help="Duration for waterfall plots [%(default)s]",
+    )
+    parser.add_argument(
         "--columns",
         type=int,
         default=4,
-        help="Number of columns to plot",
+        help="Number of columns to arrange plot in [%(default)s]",
     )
     parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
@@ -169,14 +185,209 @@ def main() -> None:
         # plt.show will run a Tornado event loop, which in turn runs an asyncio
         # event loop. So we can't directly run an event loop ourselves, but
         # must instead schedule async_main onto the one run by matplotlib.
-        asyncio.get_event_loop().create_task(async_main(args))
+        # We assign it to a variable which is never used but which prevents
+        # the task being garbage collected.
+        main_task = asyncio.get_event_loop().create_task(async_main(args))  # noqa: F841
         plt.show()
     else:
         asyncio.run(async_main(args))
 
 
+class Plotter:
+    """Base class for plotters.
+
+    A plotter has an overall figure with an Axes for each baseline.
+    """
+
+    def __init__(
+        self,
+        *,
+        n_chans: int,
+        adc_sample_rate: float,
+        bls_ordering: Sequence[tuple[str, str]],
+        columns: int,
+        bls_subset: list[int],
+        interactive: bool,
+    ) -> None:
+        columns = min(columns, len(bls_subset))
+        rows = (len(bls_subset) + columns - 1) // columns
+        fig, axs = plt.subplots(
+            rows,
+            columns,
+            sharex=True,
+            squeeze=False,
+            figsize=(12, 8) if interactive else (24, 16),
+            constrained_layout=True,
+        )
+        axs = axs.ravel()  # Now that the plot is several columns wide, this comes as a 2-d array. Which is a pain.
+        axs = axs[: len(bls_subset)]  # If there are gaps at the end, ignore them
+        for i, idx in enumerate(bls_subset):
+            axs[i].set_ylabel(bls_ordering[idx])
+            axs[i].xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Display frequency in MHz.
+            axs[i].set_xlabel("Frequency [MHz]")
+        if interactive:
+            plt.ion()
+            plt.show()
+
+        # [:-1] because it goes all the way to n/2
+        self.frequency_axis = np.fft.rfftfreq(2 * n_chans, d=1 / adc_sample_rate)[:-1]
+        self.bls_ordering = bls_ordering
+        self.bls_subset = bls_subset
+        self.fig = fig
+        self.axs = axs
+        self.interactive = interactive
+
+    def add_chunk(self, chunk: spead2.recv.Chunk) -> bool:
+        """Add a chunk received from the network.
+
+        If it returns False, the process exits.
+        """
+        return True  # pragma: nocover
+
+
+class SpectrumPlotter(Plotter):
+    @override
+    def __init__(
+        self,
+        *,
+        n_chans: int,
+        adc_sample_rate: float,
+        bls_ordering: Sequence[tuple[str, str]],
+        columns: int,
+        phase: bool,
+        bls_subset: list[int],
+        interactive: bool,
+    ) -> None:
+        super().__init__(
+            n_chans=n_chans,
+            adc_sample_rate=adc_sample_rate,
+            bls_ordering=bls_ordering,
+            columns=columns,
+            bls_subset=bls_subset,
+            interactive=interactive,
+        )
+        self.phase = phase
+        self._lines = []
+        for ax in self.axs:
+            self._lines.append(ax.plot(self.frequency_axis, [0.0] * len(self.frequency_axis))[0])
+
+    @override
+    def add_chunk(self, chunk: spead2.recv.Chunk) -> None:
+        for i, idx in enumerate(self.bls_subset):
+            data = chunk.data[:, idx, 0] + 1j * chunk.data[:, idx, 1]
+            if self.phase:
+                data = np.angle(data)
+            else:
+                data = np.abs(data)
+            self._lines[i].set_ydata(data)
+            self.axs[i].relim()
+            self.axs[i].autoscale_view()
+        plt.title(f"Chunk {chunk.chunk_id}")
+        if not self.interactive:
+            self.fig.savefig(f"{chunk.chunk_id}.png")
+            logger.info("Wrote chunk %d", chunk.chunk_id)
+        return True
+
+
+class WaterfallPlotter(Plotter):
+    @override
+    def __init__(
+        self,
+        *,
+        n_chans: int,
+        adc_sample_rate: float,
+        bls_ordering: Sequence[tuple[str, str]],
+        int_time: float,
+        columns: int,
+        phase: bool,
+        chunks: int,
+        bls_subset: list[int],
+        interactive: bool,
+    ) -> None:
+        super().__init__(
+            n_chans=n_chans,
+            adc_sample_rate=adc_sample_rate,
+            bls_ordering=bls_ordering,
+            columns=columns,
+            bls_subset=bls_subset,
+            interactive=interactive,
+        )
+        self.phase = phase
+        self.raw = np.full((len(bls_subset), chunks, len(self.frequency_axis)), np.nan)
+        self.first_chunk = None
+        self.int_time = int_time
+
+    def _finish(self) -> None:
+        if self.phase:
+            # if the phases span the bulk of the range, use a cyclic colormap
+            # so that there is no visible join at the phase wrap. If the
+            # phases are all close to zero then instead using a diverging
+            # colormap.
+            max_abs = np.max(np.abs(self.raw))
+            if max_abs > 3.0:
+                cmap = "twilight_shifted"
+                vmin = -math.pi
+                vmax = math.pi
+            else:
+                cmap = "coolwarm"
+                vmin = -max_abs
+                vmax = max_abs
+            norm = "linear"
+        else:
+            cmap = "hot"
+            # Set explicit vmin and vmax so that all baselines use a common
+            # colour scale.
+            vmin = np.min(self.raw)
+            vmax = np.max(self.raw)
+            norm = "log"
+        freq_bin = self.frequency_axis[1] - self.frequency_axis[0]
+        extent = (
+            self.frequency_axis[0] - 0.5 * freq_bin,
+            self.frequency_axis[-1] + 0.5 * freq_bin,
+            -0.5 * self.int_time,
+            self.raw.shape[1] - 0.5 * self.int_time,
+        )
+        for ax, data in zip(self.axs, self.raw, strict=True):
+            im = ax.imshow(
+                data,
+                interpolation="nearest",
+                origin="lower",
+                aspect="auto",
+                extent=extent,
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+                norm=norm,
+            )
+            self.fig.colorbar(im, cax=None, ax=ax, label="rad")
+        if not self.interactive:
+            self.fig.savefig("waterfall.png")
+
+    @override
+    def add_chunk(self, chunk: spead2.recv.Chunk) -> None:
+        n_chunks = self.raw.shape[1]
+        if self.first_chunk is None:
+            self.first_chunk = chunk.chunk_id
+        y = chunk.chunk_id - self.first_chunk
+        if y >= n_chunks:
+            self._finish()
+            return False
+
+        for i, idx in enumerate(self.bls_subset):
+            data = chunk.data[:, idx, 0] + 1j * chunk.data[:, idx, 1]
+            if self.phase:
+                data = np.angle(data)
+            else:
+                data = np.abs(data)
+            self.raw[i, y, :] = data
+            logger.info("Received chunk %d", chunk.chunk_id)
+        if y == n_chunks - 1:
+            self._finish()
+            return False
+        return True
+
+
 async def async_main(args: argparse.Namespace) -> None:
-    logger = logging.getLogger(__name__)
     if args.corr2:
         host, port = await get_subordinate_endpoint(args.mc_address, args.product_name)
     else:
@@ -266,48 +477,40 @@ async def async_main(args: argparse.Namespace) -> None:
             stream.add_udp_reader(*ep, interface_address=args.interface)
 
     # Preparation for the plot. Doing it outside the for-loop, no need to redo it lots.
-    frequency_axis = np.fft.rfftfreq(2 * n_chans, d=1 / adc_sample_rate)[:-1]  # -1 because it goes all the way to n/2
+    plotter: Plotter
+    match args.type:
+        case "spectrum":
+            plotter = SpectrumPlotter(
+                n_chans=n_chans,
+                adc_sample_rate=adc_sample_rate,
+                bls_ordering=bls_ordering,
+                columns=args.columns,
+                phase=args.phase,
+                bls_subset=bls_subset,
+                interactive=args.interactive,
+            )
+        case "waterfall":
+            plotter = WaterfallPlotter(
+                n_chans=n_chans,
+                adc_sample_rate=adc_sample_rate,
+                bls_ordering=bls_ordering,
+                int_time=int_time,
+                columns=args.columns,
+                phase=args.phase,
+                bls_subset=bls_subset,
+                chunks=math.ceil(args.duration / int_time),
+                interactive=args.interactive,
+            )
+        case _:
+            raise AssertionError("invalid --type value")
 
-    columns = args.columns
-    rows = (len(bls_subset) + columns - 1) // columns
-    fig, axs = plt.subplots(
-        rows,
-        columns,
-        sharex=True,
-        squeeze=False,
-        figsize=(12, 8) if args.interactive else (24, 16),
-        constrained_layout=True,
-    )
-    axs = axs.ravel()  # Now that the plot is several columns wide, this comes as a 2-d array. Which is a pain.
-    axs = axs[: len(bls_subset)]  # If there are gaps at the end, ignore them
-    lines = []
-    for i, idx in enumerate(bls_subset):
-        lines.append(axs[i].plot(frequency_axis, [0.0] * len(frequency_axis))[0])
-        axs[i].set_ylabel(bls_ordering[idx])
-        axs[i].xaxis.set_major_formatter(lambda x, _: x / 1e6)  # Display frequency in MHz.
-        axs[i].set_xlabel("Frequency [MHz]")
-    if args.interactive:
-        fig.canvas.mpl_connect("close_event", lambda event: stream.stop())
-        plt.ion()
-        plt.show()
     async for chunk in stream.data_ringbuffer:
         received_heaps = int(np.sum(chunk.present))
         if received_heaps == HEAPS_PER_CHUNK:
             # We have a full chunk.
-            for i, idx in enumerate(bls_subset):
-                data = chunk.data[:, idx, 0] + 1j * chunk.data[:, idx, 1]
-                if args.phase:
-                    data = np.angle(data)
-                else:
-                    data = np.abs(data)
-                lines[i].set_ydata(data)
-                axs[i].relim()
-                axs[i].autoscale_view()
-            plt.title(f"Chunk {chunk.chunk_id}")
-            if not args.interactive:
-                plt.savefig(f"{chunk.chunk_id}.png")
-                logger.info("Wrote chunk %d", chunk.chunk_id)
-        else:
+            if not plotter.add_chunk(chunk):
+                break
+        elif received_heaps > 0:
             logger.warning(
                 "Chunk %d missing %d/%d heaps! (This is expected for the first few.)",
                 chunk.chunk_id,
@@ -315,6 +518,7 @@ async def async_main(args: argparse.Namespace) -> None:
                 HEAPS_PER_CHUNK,
             )
         stream.add_free_chunk(chunk)
+    stream.stop()
 
 
 if __name__ == "__main__":
