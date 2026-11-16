@@ -1000,6 +1000,7 @@ class TiedArrayResampledVoltageReceiver:
                                 for frame in prefix
                             ) and sorted(frame.thread_id for frame in prefix) == list(range(self.n_threads)):
                                 # Make sure we don't re-accept these packets
+                                del self.buffer[: self.n_threads]
                                 self.min_seq_id = max(self.min_seq_id, prefix[0].seq_id + self.n_threads)
                                 prefix.sort(key=lambda frame: frame.thread_id)
                                 frame0_linear = frame0.timestamp.linear
@@ -1022,16 +1023,12 @@ class TiedArrayResampledVoltageReceiver:
                                     self.total_framesets += n_missed_framesets + 1
                                     self.last_frameset_timestamp = frame0_linear
 
-                                    try:
-                                        yield VDIFFrameset(prefix)
-                                    finally:
-                                        del self.buffer[: self.n_threads]
+                                    yield VDIFFrameset(prefix)
                                 else:
                                     logger.debug(
                                         "Skipping frameset because of min_timestamp: %d < %d", frame0_linear, min_frame
                                     )
                                     self.total_framesets += 1
-                                    del self.buffer[: self.n_threads]
                                 continue
 
                         if frame0.seq_id <= self.min_seq_id - self.n_threads:
