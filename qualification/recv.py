@@ -1024,6 +1024,10 @@ class TiedArrayResampledVoltageReceiver:
                                     self.last_frameset_timestamp = frame0_linear
 
                                     yield VDIFFrameset(prefix)
+                                    # Note: at this point the buffer must be in the correct state, because
+                                    # this generator might be closed after yielding and a new call to
+                                    # complete_framesets started; any cleanup that you might put here
+                                    # is not guaranteed to run.
                                 else:
                                     logger.debug(
                                         "Skipping frameset because of min_timestamp: %d < %d", frame0_linear, min_frame
