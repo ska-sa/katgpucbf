@@ -272,8 +272,9 @@ def seek_thread_samples(framesets: list[VDIFFrameset], start_sample: int, n_samp
 
 def analyze_signal(data: np.ndarray, tone: float, time: np.ndarray) -> np.ndarray:
     """Analyze a signal at a given tone frequency."""
-    assert len(data) == len(time)
-    analytical_signal = data * np.exp(1j * 2 * np.pi * tone * time)
+    samples = data.reshape(-1)
+    assert len(samples) == len(time)
+    analytical_signal = samples * np.exp(1j * 2 * np.pi * tone * time)
     return analytical_signal
 
 
@@ -301,7 +302,7 @@ async def test_group_delay_compensation(  # noqa: D103
     sky_centre = b_receiver.adc_sample_rate - b_receiver.centre_frequency
 
     # Use flat response bandwidth reported from the receiver rather than `pass_bandwidth` from conftest.
-    tone_spacing = min(receiver.pass_bandwidth // 2 // (SEARCH_TONES + 1), 2e6)
+    tone_spacing = min(receiver.pass_bandwidth // 2 // (SEARCH_TONES + 1), 2e3)
     # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
     tone_offsets = np.arange(1, SEARCH_TONES + 1, dtype=np.float64) * tone_spacing
     low_frequencies = sky_centre - tone_offsets[::-1]
@@ -417,7 +418,7 @@ async def test_group_delay_compensation(  # noqa: D103
         for pol_i, pol in enumerate(tone_channels.pol.values):
             order = chan_i * n_pols + pol_i
             for j, tone in enumerate(tone_channels.sel(channel=channel, pol=pol).values):
-                phases[order, j] = np.angle(analyze_signal(pol_samples[pol_i][chan_i], tone, time))
+                phases[order, j] = np.angle(np.sum(analyze_signal(pol_samples[pol_i][chan_i], tone, time)))
 
             # Phases from atan2 are wrapped to ±π. Unwrap along the tone comb
             # before subtracting the reference, so a slope past ±π stays continuous.
