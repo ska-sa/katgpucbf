@@ -38,7 +38,7 @@ from test.qualification.test_recv import BasebandVDIFFrame
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
-FRAMESETS_TO_CAPTURE = 10
+FRAMESETS_TO_CAPTURE = 5000
 SEARCH_TONES = 10
 
 
@@ -225,21 +225,12 @@ async def test_vlbi_vdif(
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
 
 
-def sideband_tone_frequency(
-    sky_freq: float, adc_sample_rate: float, centre_frequency: float, output_sample_rate: float
-) -> float:
-    """Frequency of a sky tone in one VLBI sideband.
+def sideband_tone_frequency(baseband_freq: float, centre_frequency: float, output_sample_rate: float) -> float:
+    """Frequency of a tone in one VLBI sideband.
 
-    A tone above Nyquist aliases to ``adc_sample_rate - sky_freq``. The
-    narrowband mixer removes ``centre_frequency``, and the absolute remainder
-    is that tone's offset from the narrowband centre, folded into the real
-    V-engine output. Both sidebands share this offset: the high stream is the
-    upper half of the narrowband and the low stream is the lower half.
+    A tone above Nyquist aliases to ``adc_sample_rate - centre_frequency``.
     """
-    aliased = abs(sky_freq) % adc_sample_rate
-    if aliased > adc_sample_rate / 2:
-        aliased = adc_sample_rate - aliased
-    shifted = abs(aliased - centre_frequency) % output_sample_rate
+    shifted = abs(baseband_freq - centre_frequency) % output_sample_rate
     if shifted > output_sample_rate / 2:
         shifted = output_sample_rate - shifted
     return shifted
@@ -299,14 +290,13 @@ async def test_group_delay_compensation(  # noqa: D103
     delay_tolerance = 4e-6
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
     await pcc.request("vlbi-delay", receiver.stream_name, delay)
-    sky_centre = b_receiver.adc_sample_rate - b_receiver.centre_frequency
 
     # Use flat response bandwidth reported from the receiver rather than `pass_bandwidth` from conftest.
-    tone_spacing = min(receiver.pass_bandwidth // 2 // (SEARCH_TONES + 1), 2e3)
+    tone_spacing = 1 / 2 * delay_tolerance
     # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
-    tone_offsets = np.arange(1, SEARCH_TONES + 1, dtype=np.float64) * tone_spacing
-    low_frequencies = sky_centre - tone_offsets[::-1]
-    high_frequencies = sky_centre + tone_offsets
+    tone_offsets = b_receiver.bandwidth / 4 + (np.arange(SEARCH_TONES) - SEARCH_TONES // 2) * tone_spacing
+    low_frequencies = b_receiver.centre_frequency - tone_offsets[::-1]
+    high_frequencies = b_receiver.centre_frequency + tone_offsets
     assert len(low_frequencies) == len(high_frequencies), "the number of low and high frequencies must be equal"
     n_injected = SEARCH_TONES * 2
 
@@ -316,7 +306,7 @@ async def test_group_delay_compensation(  # noqa: D103
     assert len(cbf.dsim_names) == 1
     pdf_report.step("Set Antenna Channelised Voltage gains.")
     amplitude = 0.99 / n_injected
-    gain = b_receiver.compute_tone_gain(amplitude, 100)
+    gain = b_receiver.compute_tone_gain(amplitude, 100)  # assuming single tone per channel maximum
     pdf_report.detail(
         f"Setting gain for {len(b_receiver.input_labels)} antenna-channelised-voltage streams to {gain:.3f}."
     )
@@ -379,9 +369,7 @@ async def test_group_delay_compensation(  # noqa: D103
         [
             [
                 [
-                    sideband_tone_frequency(
-                        freq, b_receiver.adc_sample_rate, b_receiver.centre_frequency, receiver_sample_rate
-                    )
+                    sideband_tone_frequency(freq, b_receiver.centre_frequency, receiver_sample_rate)
                     for freq in frequencies.sel(channel=channel).values
                 ]
                 for channel in channels_keys
@@ -398,7 +386,7 @@ async def test_group_delay_compensation(  # noqa: D103
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
-    ax.set_xlabel("Sky frequency (MHz)")
+    ax.set_xlabel("Basebandfrequency (MHz)")
     ax.set_ylabel("Delay (µs)")
     ax.set_title("Group delay")
 
@@ -414,7 +402,6 @@ async def test_group_delay_compensation(  # noqa: D103
         pdf_report.detail(
             f"Reference frequency for {channel} channel: {frequencies.sel(channel=channel)[0].item() * 1e-6:.3f} MHz."
         )
-        pdf_report.step(f"Verify the delays are within {delay_tolerance * 1e6:.3f} µs of zero.")
         for pol_i, pol in enumerate(tone_channels.pol.values):
             order = chan_i * n_pols + pol_i
             for j, tone in enumerate(tone_channels.sel(channel=channel, pol=pol).values):
@@ -426,6 +413,9 @@ async def test_group_delay_compensation(  # noqa: D103
             tau = -phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(phase_differences))))
             ax.plot(frequencies.sel(channel=channel)[1:] * 1e-6, tau * 1e6, label=f"{str(pol).upper()} {channel}")
 
+            pdf_report.detail(
+                f"Verify the delays are within {delay_tolerance * 1e6:.3f} µs of zero for {channel} channel {pol} pols."
+            )
             with check:
                 np.testing.assert_allclose(tau, 0.0, atol=delay_tolerance)
 
