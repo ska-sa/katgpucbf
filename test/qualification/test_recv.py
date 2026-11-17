@@ -535,3 +535,19 @@ class TestTiedArrayResampledVoltageReceiver:
         receiver.close()
         assert receiver.buffer == []
         assert receiver.sock.close.call_count == 1  # type: ignore[attr-defined]
+
+    async def test_next_complete_frameset_clears_buffer(
+        self, mock_cbf: CBFRemoteControl, mock_socket: socket.socket
+    ) -> None:
+        """next_complete_frameset() clears buffer on return."""
+        receiver = TiedArrayResampledVoltageReceiver(mock_cbf, "stream0", "127.0.0.1", sock=mock_socket)
+        mock_socket.recv_into.side_effect = sock_recv_into(  # type: ignore[attr-defined]
+            [
+                make_vtp_packet(0, frame_nr=0, seconds=101, thread_id=0),
+                make_vtp_packet(1, frame_nr=0, seconds=101, thread_id=1),
+                make_vtp_packet(2, frame_nr=0, seconds=101, thread_id=2),
+                make_vtp_packet(3, frame_nr=0, seconds=101, thread_id=3),
+            ]
+        )
+        await receiver.next_complete_frameset()
+        assert receiver.buffer == []
