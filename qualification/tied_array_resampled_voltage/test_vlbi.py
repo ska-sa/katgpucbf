@@ -198,16 +198,16 @@ async def test_mean_power(
     await run_async(pdf_report.figure, fig)
 
     pdf_report.step("Verify mean-power sensor values are updated at the power-int-time intervals.")
-    for i in range(len(sensor_names)):
+    for i, sensor_name in enumerate(sensor_names):
         timestamp_diffs = np.diff(np.unique(mean_power_sensor_timestamps[i, : last_attempt + 1]))
         assert len(timestamp_diffs) > 0
-        pdf_report.detail(f"{len(timestamp_diffs)} updates to time found for {sensor_names[i]}.")
         with check:
             np.testing.assert_allclose(
                 timestamp_diffs,
                 power_int_time,
-                err_msg="Mean power sensor values are not updated at the power-int-time intervals.",
+                err_msg="{sensor_name} values are not updated at the power-int-time intervals.",
             )
+            pdf_report.detail(f"{len(timestamp_diffs)} updates to time found for {sensor_name}.")
 
 
 @pytest.mark.name("VLBI VDIF output")
