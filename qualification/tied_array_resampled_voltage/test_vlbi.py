@@ -207,7 +207,7 @@ async def test_mean_power(
                 power_int_time,
                 err_msg=f"{sensor_name} values were not updated at the power-int-time intervals.",
             )
-            pdf_report.detail(f"{len(timestamp_diffs)} unique value updates found for {sensor_name}.")
+            pdf_report.detail(f"{len(timestamp_diffs)} unique updates found for {sensor_name}.")
 
 
 @pytest.mark.name("VLBI VDIF output")
