@@ -18,6 +18,7 @@
 
 import asyncio
 import io
+import logging
 import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -37,8 +38,9 @@ from test.qualification.test_recv import BasebandVDIFFrame
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
-FRAMESETS_TO_CAPTURE = 10
-SEARCH_TONES = 10
+logger = logging.getLogger(__name__)
+FRAMESETS_TO_CAPTURE = 5000
+SEARCH_TONES = 8
 
 
 async def max_retry_test(
@@ -244,19 +246,15 @@ def sideband_tone_frequency(
     return shifted
 
 
-def seek_thread_samples(framesets: list[VDIFFrameset], start_sample: int, n_samples: int) -> list[np.ndarray]:
+def seek_thread_samples(framesets: list[VDIFFrameset], n_samples: int) -> list[np.ndarray]:
     """Seek to the start sample for a thread and return the samples from the frameset.
 
     Parameters
     ----------
     framesets
         The list of framesets to seek in.
-    start_sample
-        The start sample to skip to.
     n_samples
         The number of samples to return.
-    indices
-        The indices of the frameset to seek.
 
     Returns
     -------
@@ -268,7 +266,7 @@ def seek_thread_samples(framesets: list[VDIFFrameset], start_sample: int, n_samp
         for k, vdif_frame in enumerate(frameset.frames):
             frame = BasebandVDIFFrame.fromfile(io.BytesIO(vdif_frame.raw_frame))
             per_thread_id[k].append(np.reshape(frame.data, -1))
-    return [np.concatenate(parts)[start_sample : start_sample + n_samples] for parts in per_thread_id]
+    return [np.concatenate(parts)[:n_samples] for parts in per_thread_id]
 
 
 @pytest.mark.name("VLBI group delay compensation")
@@ -299,17 +297,13 @@ async def test_group_delay_compensation(
     delay = delay_samples / xb_receiver.adc_sample_rate
     delay_error = abs(0.01 * delay)
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
-    await pcc.request("vlbi-delay", receiver.stream_name, delay)
-    pass_bandwidth = cbf.init_sensors[
-        f"{receiver.stream_name}.pass-bandwidth"
-    ].value  # Use flat response bandwidth reported rather than in the band
-    sky_centre = xb_receiver.adc_sample_rate - xb_receiver.centre_frequency
+    await pcc.request("vlbi-delay", receiver.stream_name, -delay)
 
-    tone_spacing = pass_bandwidth // 2 // (SEARCH_TONES + 1)
+    tone_spacing = xb_receiver.bandwidth / 1048576
     # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
-    tone_offsets = np.arange(1, SEARCH_TONES + 1, dtype=np.float64) * tone_spacing
-    low_frequencies = sky_centre - tone_offsets[::-1]
-    high_frequencies = sky_centre + tone_offsets
+    tone_offsets = xb_receiver.bandwidth / 4 + (np.arange(SEARCH_TONES) - SEARCH_TONES // 2) * tone_spacing
+    low_frequencies = xb_receiver.centre_frequency - tone_offsets[::-1]
+    high_frequencies = xb_receiver.centre_frequency + tone_offsets
     assert len(low_frequencies) == len(high_frequencies), "the number of low and high frequencies must be equal"
     n_injected = SEARCH_TONES * 2
 
@@ -319,7 +313,8 @@ async def test_group_delay_compensation(
     assert len(cbf.dsim_names) == 1
     pdf_report.step("Set Antenna Channelised Voltage gains.")
     amplitude = 0.99 / n_injected
-    gain = xb_receiver.compute_tone_gain(amplitude, 100)
+    # Divide by SEARCH_TONES because many of them will end up in the same FFT bin
+    gain = xb_receiver.compute_tone_gain(amplitude, 100) / SEARCH_TONES
     for input_label in xb_receiver.input_labels:
         await pcc.request("gain", "antenna-channelised-voltage", input_label, gain)
 
@@ -342,31 +337,23 @@ async def test_group_delay_compensation(
     dsim_period = int(cbf.init_sensors[f"{dsim_names[0]}.max-period"].value)
     pdf_report.step("Collect VDIF framesets covering a dsim phase-zero epoch.")
     framesets: list[VDIFFrameset] = []
-    start_sample = 0
-    n_frames = 0
+    n_frames = math.ceil(n_samples / receiver.n_samples_per_frame)
     async for frameset in receiver.complete_framesets(min_timestamp=steady_state_timestamp):
         if framesets and frameset.timestamp.linear != framesets[-1].timestamp.linear + 1:
             framesets.clear()
         if not framesets:
             sync = Time(receiver.sync_time, format="unix", scale="utc")
-            first_timestamp = round((frameset.timestamp.timestamp - sync).sec * receiver.scale_factor_timestamp)
+            first_timestamp = (frameset.timestamp.timestamp - sync).sec * receiver.scale_factor_timestamp
             # Same epoch as test_delay.compute_delay: the dsim period boundary at or
-            # before this frame. Step forward one period when that boundary is in the past.
+            # before this frame.
             phase_zero_timestamp = first_timestamp // dsim_period * dsim_period
-            if phase_zero_timestamp < first_timestamp:
-                phase_zero_timestamp += dsim_period
-            start_sample = round(
-                (phase_zero_timestamp - first_timestamp) * receiver_sample_rate / receiver.scale_factor_timestamp
-            )
-            n_frames = math.ceil((start_sample + n_samples) / receiver.n_samples_per_frame)
+            t0 = (first_timestamp - phase_zero_timestamp) / receiver.scale_factor_timestamp
             pdf_report.detail(
-                f"First frame ADC timestamp {first_timestamp}, reading from sample {start_sample} "
-                f"(ADC timestamp {phase_zero_timestamp})."
+                f"First frame ADC timestamp {first_timestamp}, measuring time from {phase_zero_timestamp}"
             )
         framesets.append(frameset)
         if len(framesets) == n_frames:
             break
-    pdf_report.detail(f"Skipping {start_sample} samples to start at a phase-zero epoch.")
     assert len(framesets) == n_frames
 
     channels_keys = ["high", "low"]
@@ -380,12 +367,7 @@ async def test_group_delay_compensation(
     tone_channels = xr.DataArray(
         [
             [
-                [
-                    sideband_tone_frequency(
-                        freq, xb_receiver.adc_sample_rate, xb_receiver.centre_frequency, receiver_sample_rate
-                    )
-                    for freq in frequencies.sel(channel=channel).values
-                ]
+                [freq - xb_receiver.centre_frequency for freq in frequencies.sel(channel=channel).values]
                 for channel in channels_keys
             ]
             for _ in receiver.pol_ordering
@@ -395,12 +377,12 @@ async def test_group_delay_compensation(
     )
 
     assert receiver.n_chans == frequencies.sizes["channel"]
-    time = np.arange(n_samples) / receiver_sample_rate
+    time = np.arange(n_samples) / receiver_sample_rate + t0
     phases = np.zeros((n_poles * receiver.n_chans, SEARCH_TONES))
 
     fig = Figure(tight_layout=True)
     ax = fig.add_subplot(1, 1, 1)
-    ax.set_xlabel("Sky frequency (MHz)")
+    ax.set_xlabel("Baseband frequency (MHz)")
     ax.set_ylabel("Delay (µs)")
     ax.set_title("Group delay")
 
@@ -410,7 +392,7 @@ async def test_group_delay_compensation(
     pol_channel_indices = [
         [base + channel_i * n_poles for channel_i in range(len(channels_keys))] for base in range(n_poles)
     ]
-    phase_zero_samples = seek_thread_samples(framesets, start_sample, n_samples)
+    phase_zero_samples = seek_thread_samples(framesets, n_samples)
     pol_samples = [[phase_zero_samples[index] for index in indices] for indices in pol_channel_indices]
     for chan_i, channel in enumerate(channels_keys):
         pdf_report.detail(
@@ -420,25 +402,24 @@ async def test_group_delay_compensation(
         for pol_i, pol in enumerate(tone_channels.pol.values):
             order = chan_i * n_poles + pol_i
             for j, tone in enumerate(tone_channels.sel(channel=channel, pol=pol).values):
-                ref_sin = np.sin(2 * np.pi * tone * time)
-                ref_cos = np.cos(2 * np.pi * tone * time)
+                ref = np.exp(2j * np.pi * -tone * time)
 
-                def analyze_signal(data: np.ndarray) -> tuple[float, np.ndarray]:
+                def analyze_signal(data: np.ndarray, ref: np.ndarray) -> tuple[float, np.ndarray]:
                     samples = np.reshape(data, -1)
                     assert len(data) == len(time)
+                    return np.angle(np.dot(samples, ref))
 
-                    nonlocal ref_sin, ref_cos
-                    q = samples * ref_sin  # noqa: B023
-                    i = samples * ref_cos  # noqa: B023
-
-                    return np.atan2(np.sum(i), np.sum(q))
-
-                phases[order, j] = analyze_signal(pol_samples[pol_i][chan_i])
+                phases[order, j] = analyze_signal(pol_samples[pol_i][chan_i], ref)
 
             # Phases from atan2 are wrapped to ±π. Unwrap along the tone comb
             # before subtracting the reference, so a slope past ±π stays continuous.
-            phase_differences = np.unwrap(phases[order])[1:] - phases[order, 0]
-            tau = -phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(phase_differences))))
+            # phase_differences = np.unwrap(phases[order])[1:] - phases[order, 0]
+            # logger.warning("phase diff: %s", np.diff(np.unwrap(phases[order])))
+            phase_differences = np.diff(np.unwrap(phases[order]))
+            tau = -phase_differences / (2 * np.pi * tone_spacing)
+            logger.warning("phase_diff: %s", phase_differences)
+            logger.warning("tau: %s µs", tau * 1e6)
+            logger.warning("tau modulus: %.3f us", 1e6 / tone_spacing)
             ax.plot(frequencies.sel(channel=channel)[1:] * 1e-6, tau * 1e6, label=f"{str(pol).upper()} {channel}")
 
             with check:
