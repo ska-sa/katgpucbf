@@ -301,7 +301,7 @@ async def test_group_delay_compensation(  # noqa: D103
     sky_centre = b_receiver.adc_sample_rate - b_receiver.centre_frequency
 
     # Use flat response bandwidth reported from the receiver rather than `pass_bandwidth` from conftest.
-    tone_spacing = receiver.pass_bandwidth // 2 // (SEARCH_TONES + 1)
+    tone_spacing = min(receiver.pass_bandwidth // 2 // (SEARCH_TONES + 1), 2e6)
     # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
     tone_offsets = np.arange(1, SEARCH_TONES + 1, dtype=np.float64) * tone_spacing
     low_frequencies = sky_centre - tone_offsets[::-1]
