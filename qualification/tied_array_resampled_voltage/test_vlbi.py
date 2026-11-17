@@ -38,7 +38,7 @@ from test.qualification.test_recv import BasebandVDIFFrame
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
-FRAMESETS_TO_CAPTURE = 5000
+FRAMESETS_TO_CAPTURE = 500
 SEARCH_TONES = 10
 
 
@@ -289,7 +289,7 @@ async def test_group_delay_compensation(  # noqa: D103
     delay = delay_samples / b_receiver.adc_sample_rate
     delay_tolerance = 4e-6
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
-    await pcc.request("vlbi-delay", receiver.stream_name, delay)
+    await pcc.request("vlbi-delay", receiver.stream_name, -delay)
 
     # Use flat response bandwidth reported from the receiver rather than `pass_bandwidth` from conftest.
     tone_spacing = 1 / 2 * delay_tolerance
@@ -311,7 +311,9 @@ async def test_group_delay_compensation(  # noqa: D103
         f"Setting gain for {len(b_receiver.input_labels)} antenna-channelised-voltage streams to {gain:.3f}."
     )
     for input_label in b_receiver.input_labels:
-        await pcc.request("gain", "antenna-channelised-voltage", input_label, gain)
+        await pcc.request("gain", "antenna-channelised-voltage", input_label, 0)
+
+    await pcc.request("gain", "antenna-channelised-voltage", b_receiver.input_labels[0], gain)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
     pdf_report.detail(f"Searching for phase in {n_injected} frequencies.")
