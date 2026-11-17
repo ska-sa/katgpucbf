@@ -828,9 +828,8 @@ class TiedArrayResampledVoltageReceiver:
             cbf.init_sensors[f"{stream_name}.destination"].value.decode()
         )
         self.n_chans: int = cbf.init_sensors[f"{stream_name}.n-chans"].value
-        self.pol_ordering: list[str] = json.loads(
-            cbf.init_sensors[f"{stream_name}.pol-ordering"].value
-        )  # format: ["x", "y"]
+        # format: ["x", "y"]
+        self.pol_ordering: list[str] = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value)
         self.n_threads = self.n_chans * len(self.pol_ordering)
         self.veng_out_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.veng-out-bits-per-sample"].value
 
@@ -843,6 +842,8 @@ class TiedArrayResampledVoltageReceiver:
         self.scale_factor_timestamp: float = cbf.init_sensors[f"{stream_name}.scale-factor-timestamp"].value
         self.power_int_time: float = cbf.init_sensors[f"{stream_name}.power-int-time"].value
         self.bandwidth: float = cbf.init_sensors[f"{stream_name}.bandwidth"].value
+        # usable bandwidth from the V-engine after window function
+        self.pass_bandwidth: float = cbf.init_sensors[f"{stream_name}.pass-bandwidth"].value
         self.n_samples_per_frame: int = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
         self.frame_rate = round(self.bandwidth / self.n_samples_per_frame)
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
