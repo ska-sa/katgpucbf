@@ -407,7 +407,7 @@ async def test_group_delay_compensation(  # noqa: D103
     pol_channel_indices = [
         [base + channel_i * n_pols for channel_i in range(len(channels_keys))] for base in range(n_pols)
     ]
-    phase_zero_samples = seek_thread_samples(framesets, start_sample, n_samples)
+    phase_zero_samples = seek_thread_samples(framesets, math.floor(start_sample), n_samples)
     pol_samples = [[phase_zero_samples[index] for index in indices] for indices in pol_channel_indices]
     for chan_i, channel in enumerate(channels_keys):
         pdf_report.detail(
