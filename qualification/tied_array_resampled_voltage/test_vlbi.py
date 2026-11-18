@@ -38,8 +38,8 @@ from test.qualification.test_recv import BasebandVDIFFrame
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
-FRAMESETS_TO_CAPTURE = 500
-SEARCH_TONES = 10
+FRAMESETS_TO_CAPTURE = 5000
+SEARCH_TONES = 8
 
 
 async def max_retry_test(
@@ -292,7 +292,7 @@ async def test_group_delay_compensation(  # noqa: D103
     await pcc.request("vlbi-delay", receiver.stream_name, -delay)
 
     # Use flat response bandwidth reported from the receiver rather than `pass_bandwidth` from conftest.
-    tone_spacing = 1 / 2 * delay_tolerance
+    tone_spacing = 1 / (2 * delay_tolerance)
     # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
     tone_offsets = b_receiver.bandwidth / 4 + (np.arange(SEARCH_TONES) - SEARCH_TONES // 2) * tone_spacing
     low_frequencies = b_receiver.centre_frequency - tone_offsets[::-1]
@@ -305,18 +305,18 @@ async def test_group_delay_compensation(  # noqa: D103
 
     assert len(cbf.dsim_names) == 1
     pdf_report.step("Set Antenna Channelised Voltage gains.")
-    amplitude = 0.99 / n_injected
+    amplitude = 0.9 / n_injected
     gain = b_receiver.compute_tone_gain(amplitude, 100)  # assuming single tone per channel maximum
     pdf_report.detail(
         f"Setting gain for {len(b_receiver.input_labels)} antenna-channelised-voltage streams to {gain:.3f}."
     )
-    for input_label in b_receiver.input_labels:
-        await pcc.request("gain", "antenna-channelised-voltage", input_label, 0)
+    await cbf.product_controller_client.request("gain-all", "antenna-channelised-voltage", 0)
+    await cbf.product_controller_client.request("gain-all", "wideband-antenna-channelised-voltage", 0)
 
     await pcc.request("gain", "antenna-channelised-voltage", b_receiver.input_labels[0], gain)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
-    pdf_report.detail(f"Searching for phase in {n_injected} frequencies.")
+    pdf_report.detail(f"Searching for phase in {n_injected} frequencies every {tone_spacing * 1e3:.3f} KHz.")
     dsim_names = cbf.dsim_names
     low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {tone_spacing})"
     high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {tone_spacing})"
@@ -415,11 +415,17 @@ async def test_group_delay_compensation(  # noqa: D103
             tau = -phase_differences / (2 * np.pi * tone_spacing * (1 + np.arange(len(phase_differences))))
             ax.plot(frequencies.sel(channel=channel)[1:] * 1e-6, tau * 1e6, label=f"{str(pol).upper()} {channel}")
 
-            pdf_report.detail(
-                f"Verify the delays are within {delay_tolerance * 1e6:.3f} µs of zero for {channel} channel {pol} pols."
-            )
             with check:
-                np.testing.assert_allclose(tau, 0.0, atol=delay_tolerance)
+                np.testing.assert_allclose(
+                    tau,
+                    0.0,
+                    atol=delay_tolerance,
+                    err_msg=f"Delay for channel {channel}, {pol} polarisation does not agree to "
+                    + f"within {delay_tolerance * 1e6:.3f} µs of zero.",
+                )
+                pdf_report.detail(
+                    f"Delays are within {delay_tolerance * 1e6:.3f} µs of zero for {channel} channel {pol} pols."
+                )
 
     ax.legend()
     await run_async(pdf_report.figure, fig)
