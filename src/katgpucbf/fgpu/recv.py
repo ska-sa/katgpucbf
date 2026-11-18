@@ -95,6 +95,7 @@ class Layout(BaseLayout):
     heap_samples: int
     chunk_samples: int  #: Samples in time i.e. per polarisation
     mask_timestamp: bool
+    timestamp_add1: int = 0
 
     @property
     def heap_bytes(self) -> int:  # noqa: D102
@@ -134,6 +135,7 @@ class Layout(BaseLayout):
         chunk_batches = self.chunk_batches
         chunk_samples = self.chunk_samples
         timestamp_mask = self.timestamp_mask
+        timestamp_add1 = self.timestamp_add1
         n_statistics = len(_Statistic)
 
         # numba.types doesn't have a size_t, so assume it is the same as uintptr_t
@@ -160,6 +162,8 @@ class Layout(BaseLayout):
                 batch_stats[user_data[0].stats_base + _Statistic.METADATA_HEAPS] += 1
                 return
             timestamp &= timestamp_mask
+            if pol == 1:
+                timestamp += timestamp_add1
             if timestamp % heap_samples != 0:
                 batch_stats[user_data[0].stats_base + _Statistic.BAD_TIMESTAMP_HEAPS] += 1
                 return

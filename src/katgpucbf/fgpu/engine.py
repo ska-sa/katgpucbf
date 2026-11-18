@@ -1278,6 +1278,8 @@ class FEngine(Engine):
         UNIX time at which the digitisers were synced.
     mask_timestamp
         Mask off bottom bits of timestamp (workaround for broken digitiser).
+    timestamp_add1
+        Add to timestamp for pol 1 (for debugging)
     use_vkgdr
         Assemble chunks directly in GPU memory (requires Vulkan).
     use_peerdirect
@@ -1324,6 +1326,7 @@ class FEngine(Engine):
         gain: complex,
         sync_time: float,
         mask_timestamp: bool,
+        timestamp_add1: int,
         use_vkgdr: bool,
         use_peerdirect: bool,
         monitor: Monitor,
@@ -1340,7 +1343,9 @@ class FEngine(Engine):
         self._recv_interface = recv_interface
         self._recv_buffer = recv_buffer
         self._recv_ibv = recv_ibv
-        self.recv_layout = recv.Layout(dig_sample_bits, recv_packet_samples, chunk_samples, mask_timestamp)
+        self.recv_layout = recv.Layout(
+            dig_sample_bits, recv_packet_samples, chunk_samples, mask_timestamp, timestamp_add1
+        )
         self._send_interface = send_interface
         self._send_ttl = send_ttl
         self._send_ibv = send_ibv

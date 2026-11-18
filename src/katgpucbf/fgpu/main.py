@@ -248,6 +248,13 @@ def parse_args(arglist: Sequence[str] | None = None) -> argparse.Namespace:
         help="Mask off bottom bits of timestamp (workaround for broken digitiser)",
     )
     parser.add_argument(
+        "--timestamp-add1",
+        type=int,
+        metavar="SAMPLES",
+        default=0,
+        help="Amount to add to the timestamps for polarisation 1 (for debugging) [%(default)s]",
+    )
+    parser.add_argument(
         "--use-vkgdr",
         action="store_true",
         help="Assemble chunks directly in GPU memory (requires sufficient GPU BAR space)",
@@ -339,6 +346,7 @@ def make_engine(ctx: AbstractContext, vkgdr_handle: vkgdr.Vkgdr, args: argparse.
         gain=args.gain,
         sync_time=args.sync_time,
         mask_timestamp=args.mask_timestamp,
+        timestamp_add1=args.timestamp_add1,
         use_vkgdr=args.use_vkgdr,
         use_peerdirect=args.use_peerdirect,
         monitor=monitor,
