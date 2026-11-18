@@ -35,9 +35,9 @@ from qualification.types import AsyncRunner
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
 
-FRAMESETS_TO_CAPTURE: Final = 10
-VGPU_SAMPLES_PER_FRAME: Final = 32000
-STATION: Final = "Me"
+FRAMESETS_TO_CAPTURE = 10
+VGPU_SAMPLES_PER_FRAME = 32000
+STATION = "Me"
 
 async def max_retry_test(
     test_procedure: Callable[[int], Awaitable[bool]], max_attempts: int, retry_interval: float
@@ -194,7 +194,7 @@ async def test_mean_power(
 
 
 @pytest.mark.name("VLBI VDIF output")
-async def test_vlbi_vdif( # noqq: D103
+async def test_vlbi_vdif( # noqa: D103
     pdf_report: Reporter,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
 ) -> None:
