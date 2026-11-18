@@ -35,9 +35,9 @@ from qualification.types import AsyncRunner
 
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
 
-FRAMESETS_TO_CAPTURE = 10
-VGPU_SAMPLES_PER_FRAME = 32000
-
+FRAMESETS_TO_CAPTURE: Final = 10
+VGPU_SAMPLES_PER_FRAME: Final = 32000
+STATION: Final = "Me"
 
 async def max_retry_test(
     test_procedure: Callable[[int], Awaitable[bool]], max_attempts: int, retry_interval: float
@@ -194,24 +194,11 @@ async def test_mean_power(
 
 
 @pytest.mark.name("VLBI VDIF output")
-async def test_vlbi_vdif(
+async def test_vlbi_vdif( # noqq: D103
     pdf_report: Reporter,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
 ) -> None:
-    """Test VDIF frame headers and output.
-
-    Verification method
-    -------------------
-    Verified by means of test. Collect ``FRAMESETS_TO_CAPTURE`` valid VDIF framesets.
-    Verify the number of threads in the framesets are correct.
-
-    Collect 10 framesets. For each frame in each frameset, verify that:
-
-    - EDV is 0.
-    - There are 32000 samples.
-    - There are 2 bits per sample.
-    - The number of seconds since the reference epoch is no more than 186 days.
-    """
+    # The docstring is re-assigned after the function so that it can use an f-string.
     assert receive_tied_array_resampled_voltage is not None
     receiver = receive_tied_array_resampled_voltage
     pdf_report.step("Collect a valid VDIF frameset.")
@@ -220,6 +207,8 @@ async def test_vlbi_vdif(
     async with aclosing(receiver.complete_framesets()) as frameset_it:
         async for frameset in frameset_it:
             framesets.append(frameset)
+            if len(framesets) >= FRAMESETS_TO_CAPTURE:
+                break
 
     pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
     with check:
@@ -228,7 +217,25 @@ async def test_vlbi_vdif(
             for frame in frameset.frames:
                 buffer = io.BytesIO(frame.raw_frame)
                 header = VDIFHeader.fromfile(buffer)
-                assert header.edv == 0
                 assert header.bps == 2
+                assert not header.complex_data
+                assert header.edv == 0
+                assert header.nchan == 1
+                assert header.station == STATION
                 assert header.samples_per_frame == VGPU_SAMPLES_PER_FRAME
                 assert frame.timestamp.seconds <= 189 * 24 * 3600
+
+
+test_vlbi_vdif.__doc__ = f"""Test VDIF frame headers and output.
+
+    Verification method
+    -------------------
+    Verified by means of test. Collect ``FRAMESETS_TO_CAPTURE`` valid VDIF framesets.
+    Verify the number of threads in the framesets are correct.
+    Collect {FRAMESETS_TO_CAPTURE} framesets. For each frame in each frameset, verify that:
+
+    - EDV is 0.
+    - There are {VGPU_SAMPLES_PER_FRAME} samples.
+    - There are 2 bits per sample.
+    - The number of seconds since the reference epoch is no more than 186 days.
+    """
