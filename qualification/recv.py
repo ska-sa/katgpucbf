@@ -1050,6 +1050,9 @@ class TiedArrayResampledVoltageReceiver:
 
     async def next_complete_frameset(self, min_timestamp: int | None = None) -> VDIFFrameset:
         """Listen until a single complete VDIF frameset is available, then return it."""
+        async with aclosing(self.complete_framesets(min_timestamp=min_timestamp)) as frameset_it:
+            async for frameset in frameset_it:
+                return frameset
         async for frameset in self.complete_framesets(min_timestamp=min_timestamp):
             return frameset
         raise RuntimeError("stream was shut down before we received a complete frameset")
