@@ -41,138 +41,141 @@
  */
 def COMMIT_ID = 'unknown'
 pipeline {
-  agent {
-    dockerfile {
-      label params.label
-      registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
-
-      /* Use the Jenkins-specific stage of the Dockerfile as the image for
-       * testing. This provides the appropriate dependencies. The label
-       * is just to assist with garbage collection.
-       */
-      additionalBuildArgs "--target=jenkins --label=za.ac.kat.dpp.jenkins.build=${env.BUILD_ID}"
-
-      /* The following argument needs to be specified in order for the container
-       * to launch correctly.
-       *
-       * --network=host: The Docker container requires access to the high-speed
-       * CBF network. This command passes all the host network interfaces to the
-       * container to be used as required.
-       *
-       * --ulimit=memlock=-1: This argument is required when using ibverbs.
-       *
-       * --ulimit=rtprio=1: Allows qualification tests to use real-time scheduling.
-       *
-       * -e NVIDIA_MOFED=enabled: This will pass the drivers required for ibverbs
-       * to the container.
-       *
-       * --runtime=nvidia': The NVIDIA Container Runtime is used to pass the ibverbs
-       * devices into the container.
-       */
-      args '--network=host --ulimit=memlock=-1 --ulimit=rtprio=1 -e NVIDIA_MOFED=enabled --runtime=nvidia'
-    }
-  }
-
+  agent none
   options {
     disableConcurrentBuilds()
     timeout(time: 16, unit: 'HOURS')
   }
-
   stages {
-    stage('Install requirements to run qualification tests') {
-      steps {
-        // Workaround for https://github.com/JelteF/PyLaTeX/issues/391
-        // See NGC-1657
-        // Extract the pinned versions of pylatex and its dependencies
-        sh 'echo "pylatex" | uv pip compile - -c qualification/requirements.txt -o constrain-setuptools.txt'
-        // Pin setuptools to a version that is known to work (it still warns)
-        sh 'echo "setuptools<78" >> constrain-setuptools.txt'
-        sh 'pip install --build-constraint constrain-setuptools.txt pylatex'
-        sh 'pip install -r qualification/requirements.txt'
-        sh 'pip install --no-deps ".[qualification]" && pip check'
-      }
-    }
+    stage('Build & Run Qualification Test') {
+      agent {
+        dockerfile {
+          label params.label
+          registryCredentialsId 'dockerhub'  // Supply credentials to avoid rate limit
 
-    /* This stage executes the qualification tests on the latest docker image
-     * of katgpucbf that has been previously unit-tested, and generates a report of the
-     * qualification test results.
-     */
-    stage('Run qualification tests') {
-      steps {
-        /* Run the actual pytest.
-         * Jenkins will not run subsequent steps if pytest returns a non-zero
-         * exit code. Passing --suppress-tests-failed-exit-code causes the
-         * exit code to be zero if there are failed tests, so that we can still
-         * get the report in that case. The junit step will detect the failed
-         * tests and mark the build as unstable.
-         */
-        sh '''
-          spead2_net_raw pytest -vv -c ${ini} qualification \
-          --suppress-tests-failed-exit-code \
-          --image-override katgpucbf:${katgpucbf_image} \
-          --image-override katsdpcontroller:${katsdpcontroller_image} \
-          --junitxml=result.xml \
-          ${extra_args}
-        '''
-      }
-    }
+          /* Use the Jenkins-specific stage of the Dockerfile as the image for
+           * testing. This provides the appropriate dependencies. The label
+           * is just to assist with garbage collection.
+           */
+          additionalBuildArgs "--target=jenkins --label=za.ac.kat.dpp.jenkins.build=${env.BUILD_ID}"
 
-    stage('Publish results') {
-      steps {
-        // skipPublishingChecks because it's a feature we don't use.
-        // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
-        junit testResults: 'result.xml', skipPublishingChecks: true
-
-        // Compress and publish json file so that at least we have that.
-        // 'includes' specifies which files from the current directory to archive;
-        // we only want the linked file itself
-        sh 'xz --keep --force -T 0 report.json'
-        publishHTML(target: [
-          keepAll: true,
-          reportName: 'Qualification Test Intermediate JSON',
-          reportDir: '',
-          reportFiles: 'report.json.xz',
-          includes: 'report.json.xz'
-        ])
-
-        // Save any numpy arrays recorded by failing tests. We use zstd
-        // because --xz and --gzip can be extremely slow if there is a
-        // lot of data.
-        sh 'tar --zstd -cf arrays.tar.zstd -C qualification arrays/'
-        publishHTML(target: [
-          keepAll: true,
-          reportName: 'Qualification Test Raw Failed Arrays',
-          reportDir: '',
-          reportFiles: 'arrays.tar.zstd',
-          includes: 'arrays.tar.zstd'
-        ])
-
-        script {
-          // Generate and publish test report
-          COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
-          currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
+          /* The following argument needs to be specified in order for the container
+           * to launch correctly.
+           *
+           * --network=host: The Docker container requires access to the high-speed
+           * CBF network. This command passes all the host network interfaces to the
+           * container to be used as required.
+           *
+           * --ulimit=memlock=-1: This argument is required when using ibverbs.
+           *
+           * --ulimit=rtprio=1: Allows qualification tests to use real-time scheduling.
+           *
+           * -e NVIDIA_MOFED=enabled: This will pass the drivers required for ibverbs
+           * to the container.
+           *
+           * --runtime=nvidia': The NVIDIA Container Runtime is used to pass the ibverbs
+           * devices into the container.
+           */
+          args '--network=host --ulimit=memlock=-1 --ulimit=rtprio=1 -e NVIDIA_MOFED=enabled --runtime=nvidia'
         }
-        publishHTML(target: [
-          keepAll: true,
-          reportName: 'Qualification Test Report',
-          reportDir: '',
-          reportFiles: 'report.pdf',
-          includes: 'report.pdf'
-        ])
+      }
 
-        // If that worked, we can probably generate and publish a procedure as well
-        sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
-        publishHTML(target: [
-          keepAll: true,
-          reportName: 'Qualification Test Procedure',
-          reportDir: '',
-          reportFiles: 'procedure.pdf',
-          includes: 'procedure.pdf'
-        ])
+      stages {
+        stage('Install requirements to run qualification tests') {
+          steps {
+            // Workaround for https://github.com/JelteF/PyLaTeX/issues/391
+            // See NGC-1657
+            // Extract the pinned versions of pylatex and its dependencies
+            sh 'echo "pylatex" | uv pip compile - -c qualification/requirements.txt -o constrain-setuptools.txt'
+            // Pin setuptools to a version that is known to work (it still warns)
+            sh 'echo "setuptools<78" >> constrain-setuptools.txt'
+            sh 'pip install --build-constraint constrain-setuptools.txt pylatex'
+            sh 'pip install -r qualification/requirements.txt'
+            sh 'pip install --no-deps ".[qualification]" && pip check'
+          }
+        }
+
+            /* This stage executes the qualification tests on the latest docker image
+             * of katgpucbf that has been previously unit-tested, and generates a report of the
+             * qualification test results.
+             */
+        stage('Run qualification tests') {
+          steps {
+            /* Run the actual pytest.
+             * Jenkins will not run subsequent steps if pytest returns a non-zero
+             * exit code. Passing --suppress-tests-failed-exit-code causes the
+             * exit code to be zero if there are failed tests, so that we can still
+             * get the report in that case. The junit step will detect the failed
+             * tests and mark the build as unstable.
+             */
+            sh '''
+              spead2_net_raw pytest -vv -c ${ini} qualification \
+              --suppress-tests-failed-exit-code \
+              --image-override katgpucbf:${katgpucbf_image} \
+              --image-override katsdpcontroller:${katsdpcontroller_image} \
+              --junitxml=result.xml \
+              ${extra_args}
+            '''
+          }
+        }
+
+        stage('Publish results') {
+          steps {
+            // skipPublishingChecks because it's a feature we don't use.
+            // See https://stackoverflow.com/questions/67162746/how-to-get-rid-of-noisy-warning-no-suitable-checks-publisher-found/68992826#68992826
+            junit testResults: 'result.xml', skipPublishingChecks: true
+
+            // Compress and publish json file so that at least we have that.
+            // 'includes' specifies which files from the current directory to archive;
+            // we only want the linked file itself
+            sh 'xz --keep --force -T 0 report.json'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Test Intermediate JSON',
+              reportDir: '',
+              reportFiles: 'report.json.xz',
+              includes: 'report.json.xz'
+            ])
+
+            // Save any numpy arrays recorded by failing tests. We use zstd
+            // because --xz and --gzip can be extremely slow if there is a
+            // lot of data.
+            sh 'tar --zstd -cf arrays.tar.zstd -C qualification arrays/'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Test Raw Failed Arrays',
+              reportDir: '',
+              reportFiles: 'arrays.tar.zstd',
+              includes: 'arrays.tar.zstd'
+            ])
+
+            script {
+              // Generate and publish test report
+              COMMIT_ID = sh(script: 'qualification/report/generate_pdf.py report.json report.pdf -c', returnStdout: true)
+              currentBuild.displayName = "#${BUILD_NUMBER} (${COMMIT_ID})"
+            }
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Test Report',
+              reportDir: '',
+              reportFiles: 'report.pdf',
+              includes: 'report.pdf'
+            ])
+
+            // If that worked, we can probably generate and publish a procedure as well
+            sh 'qualification/report/generate_pdf.py report.json procedure.pdf --generate-procedure-doc'
+            publishHTML(target: [
+              keepAll: true,
+              reportName: 'Qualification Test Procedure',
+              reportDir: '',
+              reportFiles: 'procedure.pdf',
+              includes: 'procedure.pdf'
+            ])
+          }
+        }
       }
     }
   }
-
   /* This post stage is configured to always run at the end of this pipeline,
    * regardless of the completion status. In this stage an email is sent to
    * the specified address with details of the Jenkins job and a PDF report
