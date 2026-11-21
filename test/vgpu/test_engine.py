@@ -19,6 +19,7 @@
 import asyncio
 import functools
 import io
+import logging
 import math
 import struct
 from collections.abc import Awaitable, Callable
@@ -55,6 +56,8 @@ SAMPLES_PER_FRAME: Final = 4000  # Reduced to keep the tests small
 FIRST_TIMESTAMP: Final = 0x30000000  # must be a multiple of chunk_timestamp_step
 N_THREADS: Final = 4
 
+logger = logging.getLogger(__name__)
+
 
 @pytest.fixture
 def n_recv_streams() -> int:  # noqa: D103
@@ -72,6 +75,7 @@ async def _send_data(
     mock_recv_streams: list[spead2.InprocQueue],
     factory: Callable[[np.ndarray], None] | None = None,
     first_timestamp: int = FIRST_TIMESTAMP,
+    missing_heap_indices: slice | None = None,
 ) -> None:
     """Send data to the engine.
 
@@ -85,7 +89,11 @@ async def _send_data(
     )
     if factory is not None:
         factory(data)
-    for heap in gen_heaps(layout, data, first_timestamp):
+    heaps = list(gen_heaps(layout, data, first_timestamp))
+    if missing_heap_indices is not None:
+        logger.warning(f"Removing heaps {missing_heap_indices} to simulate missing data")
+        del heaps[missing_heap_indices]
+    for heap in heaps:
         await beng.async_send_heap(heap.heap, substream_index=heap.substream_index)
 
 
@@ -190,7 +198,6 @@ class TestVEngine:
             expected_time = start_time + i // N_THREADS / frame_rate
             assert seq == i
             assert not header.complex_data
-            assert not header["invalid_data"]
             assert header.bps == 2
             assert header.nchan == 1
             assert header.samples_per_frame == SAMPLES_PER_FRAME
@@ -296,3 +303,92 @@ class TestVEngine:
         with pytest.raises(aiokatcp.FailReply, match="cannot set vlbi-delay while capturing"):
             await engine_client.request("vlbi-delay", 0.1)
         await engine_client.request("capture-stop")
+
+    @pytest.mark.parametrize(
+        "whole_chunks_missing",
+        [
+            True,
+        ],
+    )
+    async def test_missing_data(
+        self,
+        engine: VEngine,
+        engine_client: aiokatcp.Client,
+        mock_recv_streams: list[spead2.InprocQueue],
+        sendmsg_packets: list[bytes],
+        capture_complete_event: asyncio.Event,
+        whole_chunks_missing: bool,
+    ) -> None:
+        """Test vgpu's handling of missing data.
+
+        Currently this tests entire chunks being missing. This confirms specific
+        output VDIF frames are affected by checking their `invalid_data` header flags.
+        """
+        chunks = 60
+        await engine_client.request("capture-start", 0)
+
+        recv_layout = engine.config.recv_config.layout
+        logger.warning(f"recv_layout: {recv_layout}")
+        start_heap_id = stop_heap_id = 0
+        start_missing_tick = stop_missing_tick = 0
+        if whole_chunks_missing:
+            # TODO: The start and end is chosen arbitrarily. The specific
+            # VDIF frames affected need to calculated ahead of time, and
+            # verified accordingly.
+            # Remove data exactly on chunk boundaries
+            start_missing_chunk_id = chunks // 2
+            stop_missing_chunk_id = start_missing_chunk_id + 5
+            start_heap_id = start_missing_chunk_id * recv_layout.chunk_heaps
+            stop_heap_id = stop_missing_chunk_id * recv_layout.chunk_heaps
+            start_missing_tick = FIRST_TIMESTAMP + start_missing_chunk_id * recv_layout.chunk_timestamp_step
+            stop_missing_tick = FIRST_TIMESTAMP + stop_missing_chunk_id * recv_layout.chunk_timestamp_step
+        # TODO: else - Remove data in the middle of a chunk
+        start_missing_unix = math.ceil(TIME_CONVERTER.adc_to_unix(start_missing_tick))
+        stop_missing_unix = math.floor(TIME_CONVERTER.adc_to_unix(stop_missing_tick))
+        start_missing_time = Time(start_missing_unix, format="unix")
+        stop_missing_time = Time(stop_missing_unix, format="unix")
+        logger.warning(f"Missing data from {start_missing_time} to {stop_missing_time} (astropy time)")
+
+        data_factory = functools.partial(_randomize, seed=123234)
+        await _send_data(
+            recv_layout,
+            chunks,
+            mock_recv_streams,
+            factory=data_factory,
+            missing_heap_indices=slice(start_heap_id, stop_heap_id),
+        )
+        for queue in mock_recv_streams:
+            queue.stop()
+        await capture_complete_event.wait()
+        await engine_client.request("capture-stop")
+
+        # frame_rate = round(SEND_BANDWIDTH / SAMPLES_PER_FRAME) * u.Hz
+        # start_time_unix = math.ceil(TIME_CONVERTER.adc_to_unix(FIRST_TIMESTAMP))
+        # start_time = Time(start_time_unix, format="unix")
+
+        sendmsg_counter = 0
+        invalid_frame_counter = 0
+        for i, packet in enumerate(sendmsg_packets):
+            assert len(packet) > 40
+            fh = io.BytesIO(packet)
+            seq = struct.unpack("<Q", fh.read(8))[0]
+            frame = VDIFFrame.fromfile(fh)
+            header = frame.header
+            # frame_time = frame.get_time(frame_rate=frame_rate)
+            # expected_time = start_time + i // N_THREADS / frame_rate
+            # Check received packets now
+            if header["invalid_data"]:
+                # logger.warning(f"\t\t\tFrame {i} has time {frame_time}")
+                invalid_frame_counter += 1
+            assert not header.complex_data
+            assert seq == i
+            assert header.bps == 2
+            assert header.nchan == 1
+            assert header.samples_per_frame == SAMPLES_PER_FRAME
+            assert header.station == STATION
+            assert header["thread_id"] == i % N_THREADS
+            # TODO: Would normally compare frame_time to expected_time here
+            sendmsg_counter += 1
+
+        logger.warning(f"Total sendmsg_packets: {sendmsg_counter}")
+        logger.warning(f"Total invalid frames: {invalid_frame_counter}")
