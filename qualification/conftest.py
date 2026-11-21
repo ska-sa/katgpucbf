@@ -803,12 +803,14 @@ async def receive_tied_array_resampled_voltage(
 ) -> AsyncGenerator[TiedArrayResampledVoltageReceiver | None, None]:
     """Get the receiver for ingesting the tied-array-resampled-voltage streams."""
     receiver = cbf.tied_array_resampled_voltage_receiver
-    # Receiver is only created when vlbi is enabled.
-    if "tied-array-resampled-voltage" in capture_start_streams:
-        assert receiver is not None
-        await receiver.wait_complete_frameset(timeout=3 * DEFAULT_TIMEOUT)
-        with diff_vdif_stats(receiver) as delta_stats:
-            yield receiver
-        pdf_report.vdif_statistics("tied_array_resampled_voltage", delta_stats)
-    else:
+    # Receiver is only created when vlbi is enabled. Tests marked
+    # no_capture_start still need the receiver so they can set vlbi-delay
+    # and issue capture-start themselves.
+    if receiver is None:
         yield None
+        return
+    if "tied-array-resampled-voltage" in capture_start_streams:
+        await receiver.wait_complete_frameset(timeout=3 * DEFAULT_TIMEOUT)
+    with diff_vdif_stats(receiver) as delta_stats:
+        yield receiver
+    pdf_report.vdif_statistics("tied_array_resampled_voltage", delta_stats)

@@ -83,6 +83,7 @@ class XBReceiver:
         if "narrowband" in acv_config:
             self.decimation_factor = acv_config["narrowband"]["decimation_factor"]
         self.adc_sample_rate: float = cbf.config["outputs"][acv_config["src_streams"][0]]["adc_sample_rate"]
+        self.centre_frequency: float = cbf.init_sensors[f"{acv_name}.center-freq"].value
 
         # But some we don't. Note: these could be properties. But copying them up
         # front ensures we get an exception early if the sensor is missing.
@@ -827,6 +828,7 @@ class TiedArrayResampledVoltageReceiver:
             cbf.init_sensors[f"{stream_name}.destination"].value.decode()
         )
         self.n_chans: int = cbf.init_sensors[f"{stream_name}.n-chans"].value
+        # format: ["x", "y"]
         self.pol_ordering: list[str] = json.loads(cbf.init_sensors[f"{stream_name}.pol-ordering"].value)
         self.n_threads = self.n_chans * len(self.pol_ordering)
         self.veng_out_bits_per_sample: int = cbf.init_sensors[f"{stream_name}.veng-out-bits-per-sample"].value
@@ -840,6 +842,8 @@ class TiedArrayResampledVoltageReceiver:
         self.scale_factor_timestamp: float = cbf.init_sensors[f"{stream_name}.scale-factor-timestamp"].value
         self.power_int_time: float = cbf.init_sensors[f"{stream_name}.power-int-time"].value
         self.bandwidth: float = cbf.init_sensors[f"{stream_name}.bandwidth"].value
+        # usable bandwidth from the V-engine after window function
+        self.pass_bandwidth: float = cbf.init_sensors[f"{stream_name}.pass-bandwidth"].value
         self.n_samples_per_frame: int = cbf.init_sensors[f"{stream_name}.n-samples-per-frame"].value
         self.frame_rate = round(self.bandwidth / self.n_samples_per_frame)
         self.sync_time: float = cbf.init_sensors[f"{stream_name}.sync-time"].value
