@@ -7,3 +7,4 @@ pytest-cov
 pytest-xdist  # Allows for pytest to launch multiple threads
 statsmodels   # Only needed for scratch/benchmarks/fit.py
 uv
+zarr          # Only needed for scratch/ingest.py
