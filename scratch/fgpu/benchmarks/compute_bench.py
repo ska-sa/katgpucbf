@@ -163,7 +163,25 @@ def main():
             if name in fn.slots:  # dig_total_power doesn't exist in narrowband modes
                 fn.buffer(name).zero(command_queue)
 
-        buffers = replicate_slots(fn, ["in", "out"])
+        # Get the input and output slots specific to the processing we are
+        # executing.
+        # TODO: katsdpsigproc doesn't provide a way to rebind alias slots.
+        # We thus ignore the fft_in slot.
+        match args.kernel:
+            case "ddc":
+                slots = ["in", "subsampled"]
+            case "pfb_fir":
+                if narrowband_config is not None:
+                    slots = ["subsampled"]
+                else:
+                    slots = ["in"]
+            case "fft":
+                slots = ["fft_out"]
+            case "postproc":
+                slots = ["fft_out", "out"]
+            case "all":
+                slots = ["in", "out"]
+        buffers = replicate_slots(fn, slots)
 
         def run_ddc():
             fn.ddc()
