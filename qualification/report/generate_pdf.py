@@ -1168,7 +1168,7 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             stats_table.add_hline()
             n_streams = len(result.spead2_statistics)
             for i, (name, stats) in enumerate(result.spead2_statistics.items()):
-                row = list([name] + [stats.get(value, "-") for value in spead2_stat_names.values()])
+                row: list = [name] + [stats.get(value, "-") for value in spead2_stat_names.values()]
                 if i == 0:
                     for value in net_device_stat_names.values():
                         if not result.net_device_statistics:
@@ -1190,12 +1190,17 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
                     stats_table.add_hline()
 
     if result.vdif_statistics:
-        vdif_stat_names = {
-            "Total framesets": "total_framesets",
-            "Missed framesets": "missed_framesets",
-            "Dropped frames": "dropped_frames",
+        vdif_stat_framesets = {
+            "Total": "total_framesets",
+            "Missed": "missed_framesets",
         }
-        n_stats = len(vdif_stat_names)
+        vdif_stat_frames = {
+            "Too old": "frame_older_than_window",
+            "Incomplete frameset": "incomplete_frameset_frames",
+            "Duplicate": "duplicate_frames",
+        }
+
+        n_stats = len({**vdif_stat_framesets, **vdif_stat_frames})
         with (
             section.create(SmallText()) as small_text,
             small_text.create(LongTable(r"|l|" + "r|" * n_stats)) as stats_table,
@@ -1203,10 +1208,28 @@ def _doc_result(section: Container, result: Result, tmp_dir: pathlib.Path, figur
             stats_table.add_hline()
             stats_table.add_row((MultiColumn(n_stats + 1, align="|c|", data=bold("VDIF receiver statistics")),))
             stats_table.add_hline()
-            stats_table.add_row([bold("Stream")] + [bold(name) for name in vdif_stat_names])
+            stats_table.add_row(
+                [
+                    MultiRow(2, data=bold("Stream")),
+                    MultiColumn(len(vdif_stat_framesets), align="c|", data=bold("Framesets")),
+                    MultiColumn(len(vdif_stat_frames), align="c|", data=bold("Frames")),
+                ]
+            )
+            stats_table.add_hline(2, len(vdif_stat_framesets) + len(vdif_stat_frames) + 1)
+
+            stats_table.add_row(
+                [""]
+                + [bold(name) for name in vdif_stat_framesets.keys()]
+                + [bold(name) for name in vdif_stat_frames.keys()]
+            )
             stats_table.add_hline()
             for name, stats in result.vdif_statistics.items():
-                row = list([name] + [stats.get(value, "-") for value in vdif_stat_names.values()])
+                row = (
+                    [name]
+                    + [stats.get(value, "-") for value in vdif_stat_framesets.values()]
+                    + [stats.get(value, "-") for value in vdif_stat_frames.values()]
+                )
+
                 stats_table.add_row(row)
                 stats_table.add_hline()
 

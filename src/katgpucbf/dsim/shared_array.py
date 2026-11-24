@@ -48,7 +48,7 @@ class SharedArray:
         size = self._byte_size(shape, dtype)
         self._mapping = mmap.mmap(fd, size, flags=mmap.MAP_SHARED)
         self._fd = fd
-        self.buffer = np.ndarray(shape, dtype, buffer=self._mapping)  # type: ignore
+        self.buffer = np.ndarray(shape, dtype, buffer=self._mapping)
 
     def close(self) -> None:
         """Close the reference shared array and release the mapping.

@@ -125,8 +125,7 @@ def generate_pfb_weights(step: int, taps: int, w_cutoff: float, window_function:
             raise ValueError(f"Invalid window function {window_function!r} (must be HANN or RECT)")
     sinc = np.sinc(w_cutoff * ((idx + 0.5) / step - taps / 2))
     weights = window * sinc
-    # Work around https://github.com/numpy/numpy/issues/21898
-    weights /= np.sqrt(np.sum(np.square(weights)))  # type: ignore[misc]
+    weights /= np.sqrt(np.sum(np.square(weights)))
     return weights.astype(np.float32)
 
 
