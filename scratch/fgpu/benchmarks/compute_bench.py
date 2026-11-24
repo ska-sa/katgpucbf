@@ -19,6 +19,7 @@
 import argparse
 from fractions import Fraction
 
+import cuda.core
 import numpy as np
 from katsdpsigproc import accel
 from katsdptelstate.endpoint import Endpoint
@@ -212,30 +213,28 @@ def main():
 
         run = locals()[f"run_{args.kernel}"]
         run()  # Warmup pass
+        command_queue.finish()
 
-        markers = [command_queue.enqueue_marker()]
+        cc_stream = cuda.core.Stream.from_handle(command_queue._pycuda_stream.handle)
+        cc_gb = cc_stream.create_graph_builder()
+        cc_gb.begin_building(mode="thread_local")
+
         for i in range(1, args.passes + 1):
             # Cycle through the different buffers to prevent
             # unwanted caching.
             fn.bind(**buffers[i % len(buffers)])
             run()
-            if args.sem is not None and i % args.sem == 0:
-                markers.append(command_queue.enqueue_marker())
-        if args.sem is None:
-            markers.append(command_queue.enqueue_marker())
+
+        cc_gb.end_building()
+        cc_graph = cc_gb.complete()
+
+        start_marker = command_queue.enqueue_marker()
+        cc_graph.launch(cc_stream)
+        end_marker = command_queue.enqueue_marker()
         command_queue.finish()
-        average = markers[-1].time_since(markers[0]) / args.passes
-        if args.sem is not None:
-            times = []
-            for i in range(1, len(markers)):
-                times.append(markers[i].time_since(markers[i - 1]))
-            # Standard error in the mean of elements of times
-            measure_sem = np.std(times, ddof=1) / np.sqrt(len(times))
-            # Standard error in `average`
-            sem = measure_sem / args.sem
-            print(f"{average * 1000:.5f} ± {sem * 1000:.5f} ms")
-        else:
-            print(f"{average * 1000:.5f} ms")
+
+        average = end_marker.time_since(start_marker) / args.passes
+        print(f"{average * 1000:.5f} ms")
 
 
 if __name__ == "__main__":
