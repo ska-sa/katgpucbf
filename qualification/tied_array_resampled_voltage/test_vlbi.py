@@ -236,6 +236,9 @@ test_vlbi_vdif.__doc__ = f"""Test VDIF frame headers and output.
     Collect {FRAMESETS_TO_CAPTURE} framesets. For each frame in each frameset, verify that:
 
     - EDV is 0.
+    - header.complex_data is False.
+    - header.nchan is 1.
+    - header.station is {STATION}.
     - There are {VGPU_SAMPLES_PER_FRAME} samples.
     - There are 2 bits per sample.
     - The number of seconds since the reference epoch is no more than 186 days.
