@@ -35,6 +35,7 @@ from katgpucbf.fgpu.output import (
     WindowFunction,
 )
 from katgpucbf.main import parse_dither
+from katgpucbf.profile_utils import replicate_slots
 from katgpucbf.utils import DitherType
 
 
@@ -132,7 +133,7 @@ def main():
         extra_samples = output.window - output.spectra_samples
         fn = template.instantiate(
             command_queue,
-            samples=args.recv_chunk_samples + extra_samples,
+            samples=frontend_spectra * output.spectra_samples + extra_samples,
             spectra=out_spectra,
             spectra_per_heap=spectra_per_heap,
             seed=123,
@@ -161,6 +162,8 @@ def main():
         for name in ["fine_delay", "phase", "saturated", "dig_total_power"]:
             if name in fn.slots:  # dig_total_power doesn't exist in narrowband modes
                 fn.buffer(name).zero(command_queue)
+
+        buffers = replicate_slots(fn, ["in", "out"])
 
         def run_ddc():
             fn.ddc()
@@ -193,9 +196,12 @@ def main():
         run()  # Warmup pass
 
         markers = [command_queue.enqueue_marker()]
-        for i in range(args.passes):
+        for i in range(1, args.passes + 1):
+            # Cycle through the different buffers to prevent
+            # unwanted caching.
+            fn.bind(**buffers[i % len(buffers)])
             run()
-            if args.sem is not None and (i + 1) % args.sem == 0:
+            if args.sem is not None and i % args.sem == 0:
                 markers.append(command_queue.enqueue_marker())
         if args.sem is None:
             markers.append(command_queue.enqueue_marker())
