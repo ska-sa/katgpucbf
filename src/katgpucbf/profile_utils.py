@@ -107,7 +107,7 @@ def replicate_slots(
     ctx = queue.context
 
     if len(kwargs) > 1:
-        raise TypeError("too many kwargs (pass only one of count and cache_factor)")
+        raise TypeError("too many kwargs (pass only one of count, size and cache_factor)")
 
     if "count" in kwargs:
         count = kwargs["count"]
@@ -117,7 +117,9 @@ def replicate_slots(
         if "size" in kwargs:
             target_size = kwargs["size"]
         else:
-            target_size = int(_get_cache_size(ctx.device.cache_size) * kwargs.get("cache_factor", 2))
+            target_size = int(_get_cache_size(ctx.device) * kwargs.get("cache_factor", 2))
+        if item_size == 0:
+            raise ValueError("slots consume zero bytes")
         count = max(1, (target_size + item_size - 1) // item_size)
 
     ret = [{slot: operation.buffer(slot) for slot in slots}]

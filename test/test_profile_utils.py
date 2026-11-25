@@ -86,3 +86,27 @@ class TestReplicateSlots:
         assert len(buffers) == 3  # Fits exactly
         buffers = replicate_slots(op, size=9000001)
         assert len(buffers) == 4  # Target is one byte too big for 3
+
+    def test_bad_count(self, command_queue: AbstractCommandQueue) -> None:
+        """Test failure handling when count is not positive."""
+        op = DummyOperation(command_queue)
+        op.ensure_all_bound()
+        with pytest.raises(ValueError, match="count must be at least 1"):
+            replicate_slots(op, count=0)
+
+    def test_multi_keywords(self, command_queue: AbstractCommandQueue) -> None:
+        """Test failure handling when several sizing keywords are passed."""
+        op = DummyOperation(command_queue)
+        op.ensure_all_bound()
+        with pytest.raises(TypeError, match="too many kwargs"):
+            replicate_slots(op, count=1, size=1)  # type: ignore
+        with pytest.raises(TypeError, match="too many kwargs"):
+            replicate_slots(op, size=1, cache_factor=1)  # type: ignore
+
+    def test_no_slots(self, command_queue: AbstractCommandQueue) -> None:
+        """Test failure handling when the slots have no size."""
+        op = DummyOperation(command_queue)
+        op.slots["in"] = IOSlot((Dimension(0, min_padded_size=1),), np.uint8)
+        op.ensure_all_bound()
+        with pytest.raises(ValueError, match="slots consume zero bytes"):
+            replicate_slots(op, ["in"])
