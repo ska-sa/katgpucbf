@@ -106,6 +106,8 @@ docutils==0.21.2
     #   sphinx
     #   sphinx-rtd-theme
     #   sphinxcontrib-bibtex
+donfig==0.8.1.post1
+    # via zarr
 execnet==2.1.2
     # via pytest-xdist
 executing==2.3.0
@@ -127,6 +129,8 @@ fsspec==2026.6.0
     # via
     #   -c requirements.txt
     #   dask
+google-crc32c==1.9.0
+    # via zarr
 hiredis==3.3.0
     # via
     #   -c requirements.txt
@@ -209,6 +213,8 @@ msgpack==1.2.4
     # via
     #   -c requirements.txt
     #   katsdptelstate
+msgspec==0.22.0
+    # via zarr
 multidict==6.9.1
     # via
     #   -c requirements.txt
@@ -227,6 +233,8 @@ numba==0.63.1
     #   -c requirements.txt
     #   katgpucbf (pyproject.toml)
     #   katsdpsigproc
+numcodecs==0.17.1
+    # via zarr
 numpy==2.3.5
     # via
     #   -c requirements.txt
@@ -239,6 +247,7 @@ numpy==2.3.5
     #   katsdptelstate
     #   matplotlib
     #   numba
+    #   numcodecs
     #   pandas
     #   patsy
     #   pyerfa
@@ -246,6 +255,7 @@ numpy==2.3.5
     #   spead2
     #   statsmodels
     #   xarray
+    #   zarr
 packaging==26.3
     # via
     #   -c requirements.txt
@@ -260,6 +270,7 @@ packaging==26.3
     #   statsmodels
     #   virtualenv
     #   xarray
+    #   zarr
 pandas==2.3.3
     # via
     #   -c requirements.txt
@@ -400,6 +411,7 @@ pyyaml==6.0.3
     #   -c requirements.txt
     #   astropy
     #   dask
+    #   donfig
     #   pre-commit
     #   pybtex
 redis==7.1.0
@@ -505,8 +517,10 @@ typing-extensions==4.15.0
     #   formulaic
     #   katcp-codec
     #   katsdpsigproc
+    #   numcodecs
     #   pytest-asyncio
     #   pytools
+    #   zarr
 tzdata==2025.3
     # via
     #   -c requirements.txt
@@ -537,3 +551,5 @@ yarl==1.25.1
     # via
     #   -c requirements.txt
     #   aiohttp
+zarr==3.4.2
+    # via -r requirements-dev.in

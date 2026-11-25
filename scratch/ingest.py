@@ -34,6 +34,7 @@ import scipy
 import spead2
 import spead2.recv
 import spead2.recv.asyncio
+import zarr
 from katsdpservices import get_interface_address
 from katsdptelstate.endpoint import Endpoint, endpoint_list_parser, endpoint_parser
 from numba import types
@@ -161,16 +162,20 @@ def main() -> None:
     )
     parser.add_argument(
         "--type",
-        choices=["spectrum", "waterfall"],
+        choices=["spectrum", "waterfall", "none"],
         default="spectrum",
         help="Type of plots to produce [%(default)s]",
     )
     parser.add_argument(
         "--duration",
         type=float,
-        default=60.0,
         metavar="SECONDS",
-        help="Duration for waterfall plots [%(default)s]",
+        help="Duration to run for [forever]",
+    )
+    parser.add_argument(
+        "--write",
+        metavar="FILENAME",
+        help="Write data to Zarr array",
     )
     parser.add_argument(
         "--columns",
@@ -180,6 +185,13 @@ def main() -> None:
     )
     parser.add_argument("product_name", type=str, help="Name of the subarray to get baselines from.")
     args = parser.parse_args()
+    if args.type == "waterfall" and args.duration is None:
+        parser.error("--duration is required with --type=waterfall")
+    if args.type == "waterfall" and args.interactive:
+        parser.error("--waterfall is incompatible with --interactive")
+    if args.type == "none" and args.write is None:
+        logger.warning("Using --type=none without --write will do nothing at all.")
+
     if args.interactive:
         matplotlib.use("WebAgg")
         # plt.show will run a Tornado event loop, which in turn runs an asyncio
@@ -193,7 +205,49 @@ def main() -> None:
         asyncio.run(async_main(args))
 
 
-class Plotter:
+class Consumer:
+    """Base class for consumers of chunk data."""
+
+    def add_chunk(self, chunk: spead2.recv.Chunk, chunk_index: int) -> None:
+        """Add a chunk received from the network.
+
+        chunk_index is the chunk ID relative to the first chunk ID. Note
+        that if data is lost, calls will not have consecutive chunk_index
+        values.
+        """
+
+    def close(self) -> None:
+        """Finalise after the duration is up."""
+
+
+class ZarrWriter(Consumer):
+    """Consumer that writes data to disk."""
+
+    def __init__(
+        self, n_chans: int, bls_ordering: Sequence[tuple[str, str]], bls_subset: list[int], filename: str
+    ) -> None:
+        n_bls = len(bls_subset)
+        self._bls_subset = np.array(bls_subset)
+        self._array = zarr.create_array(
+            filename,
+            overwrite=True,
+            shape=(0, n_chans, n_bls),
+            chunks=(1, n_chans, n_bls),
+            dtype=np.complex128,
+            fill_value=np.nan + 1j * np.nan,
+            config={"write_empty_chunks": True},
+        )
+
+    @override
+    def add_chunk(self, chunk: spead2.recv.Chunk, chunk_index: int) -> None:
+        # Take the bls subset and convert Gaussian integers to complex128
+        data = chunk.data[:, self._bls_subset, :].astype(np.float64).view(np.complex128)[..., 0]
+        old_shape = self._array.shape
+        self._array.resize((chunk_index + 1, *old_shape[1:]))
+        self._array[chunk_index] = data
+
+
+class Plotter(Consumer):
     """Base class for plotters.
 
     A plotter has an overall figure with an Axes for each baseline.
@@ -237,16 +291,8 @@ class Plotter:
         self.axs = axs
         self.interactive = interactive
 
-    def add_chunk(self, chunk: spead2.recv.Chunk) -> bool:
-        """Add a chunk received from the network.
-
-        If it returns False, the process exits.
-        """
-        return True  # pragma: nocover
-
 
 class SpectrumPlotter(Plotter):
-    @override
     def __init__(
         self,
         *,
@@ -272,7 +318,7 @@ class SpectrumPlotter(Plotter):
             self._lines.append(ax.plot(self.frequency_axis, [0.0] * len(self.frequency_axis))[0])
 
     @override
-    def add_chunk(self, chunk: spead2.recv.Chunk) -> None:
+    def add_chunk(self, chunk: spead2.recv.Chunk, chunk_index: int) -> None:
         for i, idx in enumerate(self.bls_subset):
             data = chunk.data[:, idx, 0] + 1j * chunk.data[:, idx, 1]
             if self.phase:
@@ -290,7 +336,6 @@ class SpectrumPlotter(Plotter):
 
 
 class WaterfallPlotter(Plotter):
-    @override
     def __init__(
         self,
         *,
@@ -314,10 +359,10 @@ class WaterfallPlotter(Plotter):
         )
         self.phase = phase
         self.raw = np.full((len(bls_subset), chunks, len(self.frequency_axis)), np.nan)
-        self.first_chunk = None
         self.int_time = int_time
 
-    def _finish(self) -> None:
+    @override
+    def close(self) -> None:
         if self.phase:
             # if the phases span the bulk of the range, use a cyclic colormap
             # so that there is no visible join at the phase wrap. If the
@@ -360,31 +405,17 @@ class WaterfallPlotter(Plotter):
                 norm=norm,
             )
             self.fig.colorbar(im, cax=None, ax=ax, label="rad")
-        if not self.interactive:
-            self.fig.savefig("waterfall.png")
+        self.fig.savefig("waterfall.png")
 
     @override
-    def add_chunk(self, chunk: spead2.recv.Chunk) -> None:
-        n_chunks = self.raw.shape[1]
-        if self.first_chunk is None:
-            self.first_chunk = chunk.chunk_id
-        y = chunk.chunk_id - self.first_chunk
-        if y >= n_chunks:
-            self._finish()
-            return False
-
+    def add_chunk(self, chunk: spead2.recv.Chunk, chunk_index: int) -> None:
         for i, idx in enumerate(self.bls_subset):
             data = chunk.data[:, idx, 0] + 1j * chunk.data[:, idx, 1]
             if self.phase:
                 data = np.angle(data)
             else:
                 data = np.abs(data)
-            self.raw[i, y, :] = data
-            logger.info("Received chunk %d", chunk.chunk_id)
-        if y == n_chunks - 1:
-            self._finish()
-            return False
-        return True
+            self.raw[i, chunk_index, :] = data
 
 
 async def async_main(args: argparse.Namespace) -> None:
@@ -477,47 +508,72 @@ async def async_main(args: argparse.Namespace) -> None:
             stream.add_udp_reader(*ep, interface_address=args.interface)
 
     # Preparation for the plot. Doing it outside the for-loop, no need to redo it lots.
-    plotter: Plotter
+    consumers: list[Consumer] = []
+    n_chunks = math.ceil(args.duration / int_time) if args.duration is not None else None
     match args.type:
         case "spectrum":
-            plotter = SpectrumPlotter(
-                n_chans=n_chans,
-                adc_sample_rate=adc_sample_rate,
-                bls_ordering=bls_ordering,
-                columns=args.columns,
-                phase=args.phase,
-                bls_subset=bls_subset,
-                interactive=args.interactive,
+            consumers.append(
+                SpectrumPlotter(
+                    n_chans=n_chans,
+                    adc_sample_rate=adc_sample_rate,
+                    bls_ordering=bls_ordering,
+                    columns=args.columns,
+                    phase=args.phase,
+                    bls_subset=bls_subset,
+                    interactive=args.interactive,
+                )
             )
         case "waterfall":
-            plotter = WaterfallPlotter(
-                n_chans=n_chans,
-                adc_sample_rate=adc_sample_rate,
-                bls_ordering=bls_ordering,
-                int_time=int_time,
-                columns=args.columns,
-                phase=args.phase,
-                bls_subset=bls_subset,
-                chunks=math.ceil(args.duration / int_time),
-                interactive=args.interactive,
+            assert n_chunks is not None  # Enforced by the argument parser
+            consumers.append(
+                WaterfallPlotter(
+                    n_chans=n_chans,
+                    adc_sample_rate=adc_sample_rate,
+                    bls_ordering=bls_ordering,
+                    int_time=int_time,
+                    columns=args.columns,
+                    phase=args.phase,
+                    bls_subset=bls_subset,
+                    chunks=n_chunks,
+                    interactive=args.interactive,
+                )
             )
+        case "none":
+            pass
         case _:
             raise AssertionError("invalid --type value")
+    if args.write is not None:
+        consumers.append(
+            ZarrWriter(n_chans=n_chans, bls_ordering=bls_ordering, bls_subset=bls_subset, filename=args.write)
+        )
 
+    first_chunk: int | None = None
     async for chunk in stream.data_ringbuffer:
-        received_heaps = int(np.sum(chunk.present))
-        if received_heaps == HEAPS_PER_CHUNK:
-            # We have a full chunk.
-            if not plotter.add_chunk(chunk):
-                break
-        elif received_heaps > 0:
-            logger.warning(
-                "Chunk %d missing %d/%d heaps! (This is expected for the first few.)",
-                chunk.chunk_id,
-                HEAPS_PER_CHUNK - received_heaps,
-                HEAPS_PER_CHUNK,
-            )
-        stream.add_free_chunk(chunk)
+        try:
+            received_heaps = int(np.sum(chunk.present))
+            if received_heaps == HEAPS_PER_CHUNK:
+                # We have a full chunk.
+                logger.info("Received chunk %d", chunk.chunk_id)
+                if first_chunk is None:
+                    first_chunk = chunk.chunk_id
+                chunk_index = chunk.chunk_id - first_chunk
+                if n_chunks is not None and chunk_index >= n_chunks:
+                    break
+                for consumer in consumers:
+                    consumer.add_chunk(chunk, chunk_index)
+                if n_chunks is not None and chunk_index == n_chunks - 1:
+                    break
+            elif received_heaps > 0:
+                logger.warning(
+                    "Chunk %d missing %d/%d heaps! (This is expected for the first few.)",
+                    chunk.chunk_id,
+                    HEAPS_PER_CHUNK - received_heaps,
+                    HEAPS_PER_CHUNK,
+                )
+        finally:
+            stream.add_free_chunk(chunk)
+    for consumer in consumers:
+        consumer.close()
     stream.stop()
 
 
