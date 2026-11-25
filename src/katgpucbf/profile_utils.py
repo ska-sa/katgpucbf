@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from typing import overload
 
 import numpy as np
-from katsdpsigproc.abc import AbstractCommandQueue
+from katsdpsigproc.abc import AbstractCommandQueue, AbstractDevice
 from katsdpsigproc.accel import DeviceArray, Operation
 
 
@@ -28,6 +28,14 @@ def _duplicate(array: DeviceArray, command_queue: AbstractCommandQueue) -> Devic
     new_array = DeviceArray(array.context, array.shape, array.dtype, array.padded_shape)
     array.copy_region(command_queue, new_array, (), ())
     return new_array
+
+
+def _get_cache_size(device: AbstractDevice) -> int:
+    """Get the cache size of a device.
+
+    This is a wrapper function to make mocking easier.
+    """
+    return device.cache_size
 
 
 @overload
@@ -109,7 +117,7 @@ def replicate_slots(
         if "size" in kwargs:
             target_size = kwargs["size"]
         else:
-            target_size = int(ctx.device.cache_size * kwargs.get("cache_factor", 2))
+            target_size = int(_get_cache_size(ctx.device.cache_size) * kwargs.get("cache_factor", 2))
         count = max(1, (target_size + item_size - 1) // item_size)
 
     ret = [{slot: operation.buffer(slot) for slot in slots}]
