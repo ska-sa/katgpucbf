@@ -73,7 +73,8 @@ def replicate_slots(
 
     2. Pass `size` as a keyword argument. This specifies a minimum total size
        for the returned buffers (the actual size may be larger due to
-       rounding).
+       rounding). Note that the padding is not considered, on the assumption
+       that it might not be touched and hence might not end up in the cache.
 
     3. Pass `cache_factor` as a keyword argument. The total size of the
        returned buffers will be at least `cache_factor` times the size of the
@@ -93,7 +94,7 @@ def replicate_slots(
         buffer = operation.buffer(slot)
         if buffer is None:
             raise ValueError(f"slot {slot} is not populated")
-        item_size += int(np.prod(buffer.padded_shape)) * buffer.dtype.itemsize
+        item_size += int(np.prod(buffer.shape)) * buffer.dtype.itemsize
     queue = operation.command_queue
     ctx = queue.context
 
