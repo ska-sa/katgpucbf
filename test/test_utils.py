@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Tests for :mod:`katcbfgpu.utils`."""
+"""Tests for :mod:`katgpucbf.utils`."""
 
 import asyncio
 import gc

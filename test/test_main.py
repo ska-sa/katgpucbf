@@ -14,7 +14,7 @@
 # limitations under the License.
 ################################################################################
 
-"""Tests for :mod:`katcbfgpu.main`."""
+"""Tests for :mod:`katgpucbf.main`."""
 
 import argparse
 from typing import NoReturn
