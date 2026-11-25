@@ -189,6 +189,8 @@ def main() -> None:
         parser.error("--duration is required with --type=waterfall")
     if args.type == "waterfall" and args.interactive:
         parser.error("--waterfall is incompatible with --interactive")
+    if args.type == "none" and args.write is None:
+        logger.warning("Using --type=none without --write will do nothing at all.")
 
     if args.interactive:
         matplotlib.use("WebAgg")
