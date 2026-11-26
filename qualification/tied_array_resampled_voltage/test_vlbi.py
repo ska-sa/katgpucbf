@@ -17,12 +17,15 @@
 """Test for tied-array-resampled-voltage stream."""
 
 import asyncio
+import io
 from collections.abc import Awaitable, Callable
+from contextlib import aclosing
 from datetime import UTC, datetime
 from math import ceil
 
 import numpy as np
 import pytest
+from baseband.vdif.header import VDIFHeader
 from matplotlib.figure import Figure
 from pytest_check import check
 
@@ -34,6 +37,8 @@ from qualification.types import AsyncRunner
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver
 
 FRAMESETS_TO_CAPTURE = 10
+VGPU_SAMPLES_PER_FRAME = 32000
+STATION = "Me"
 
 
 async def max_retry_test(
@@ -211,30 +216,53 @@ async def test_mean_power(
 
 
 @pytest.mark.name("VLBI VDIF output")
-async def test_vlbi_vdif(
+async def test_vlbi_vdif(  # noqa: D103
     pdf_report: Reporter,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
 ) -> None:
-    """Test VDIF frame output.
+    # The docstring is re-assigned after the function so that it can use an f-string.
+    assert receive_tied_array_resampled_voltage is not None
+    receiver = receive_tied_array_resampled_voltage
+    pdf_report.step("Collect a valid VDIF frameset.")
+    # capture a few valid framesets
+    framesets = []
+    async with aclosing(receiver.complete_framesets()) as frameset_it:
+        async for frameset in frameset_it:
+            framesets.append(frameset)
+            if len(framesets) >= FRAMESETS_TO_CAPTURE:
+                break
+
+    pdf_report.detail(
+        "Verify we have `n_chans * len(pol_ordering)` threads in the set and that the VDIFHeader structure is correct."
+    )
+    with check:
+        for frameset in framesets:
+            assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
+            for frame in frameset.frames:
+                buffer = io.BytesIO(frame.raw_frame)
+                header = VDIFHeader.fromfile(buffer)
+                assert header.bps == 2
+                assert not header.complex_data
+                assert header.edv == 0
+                assert header.nchan == 1
+                assert header.station == STATION
+                assert header.samples_per_frame == VGPU_SAMPLES_PER_FRAME
+                assert frame.timestamp.seconds <= 189 * 24 * 3600
+
+
+test_vlbi_vdif.__doc__ = f"""Test VDIF frame headers and output.
 
     Verification method
     -------------------
     Verified by means of test. Collect ``FRAMESETS_TO_CAPTURE`` valid VDIF framesets.
     Verify the number of threads in the framesets are correct.
-    """
-    assert receive_tied_array_resampled_voltage is not None
-    receiver = receive_tied_array_resampled_voltage
-    pdf_report.step("Collect a valid VDIF frameset.")
-    # capture a few valid framesets
-    framesets = np.empty(FRAMESETS_TO_CAPTURE, dtype=object)
-    frameset_count = 0
-    async for frameset in receiver.complete_framesets():
-        framesets[frameset_count] = frameset
-        frameset_count += 1
-        if frameset_count == FRAMESETS_TO_CAPTURE:
-            break
+    Collect {FRAMESETS_TO_CAPTURE} framesets. For each frame in each frameset, verify that:
 
-    pdf_report.detail("Verify we have `n_chans * len(pol_ordering)` threads in the set.")
-    with check:
-        for frameset in framesets:
-            assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
+    - EDV is 0.
+    - header.complex_data is False.
+    - header.nchan is 1.
+    - header.station is {STATION}.
+    - There are {VGPU_SAMPLES_PER_FRAME} samples.
+    - There are 2 bits per sample.
+    - The number of seconds since the reference epoch is no more than 186 days.
+    """
