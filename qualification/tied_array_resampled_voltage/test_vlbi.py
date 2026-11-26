@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import io
 import math
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -39,7 +40,11 @@ from test.qualification.test_recv import BasebandVDIFFrame
 from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltageReceiver, VDIFFrameset
 
 FRAMESETS_TO_CAPTURE = 10
-SEARCH_TONES = 15
+SEARCH_TONES = 10
+CAPTURE_SECONDS = 0.2
+TONE_SPACING_FACTOR = 0.01
+
+xr.DataArray.copy
 
 
 async def max_retry_test(
@@ -271,7 +276,7 @@ def analyze_signal(data: np.ndarray, phasor: np.complex128, time: np.ndarray) ->
 
 @pytest.mark.name("VLBI group delay compensation")
 @pytest.mark.no_capture_start("gpucbf.tied_array_resampled_voltage")
-async def test_group_delay_compensation(  # noqa: D103
+async def test_vlbi_delay_compensation(  # noqa: D103
     pdf_report: Reporter,
     cbf: CBFRemoteControl,
     receive_tied_array_resampled_voltage: TiedArrayResampledVoltageReceiver,
@@ -286,30 +291,41 @@ async def test_group_delay_compensation(  # noqa: D103
     # filter-group-delay is in ADC samples; vlbi-delay is in seconds.
     pdf_report.step("compensate for filter-group-delay.")
     delay_samples = cbf.init_sensors["antenna-channelised-voltage.filter-group-delay"].value
-    delay = delay_samples / b_receiver.adc_sample_rate - 19e-6  # 19µs group-delay introduced by the hilbert transforms?
+    delay = delay_samples / b_receiver.adc_sample_rate
     delay_tolerance = 5e-6
-    framesets_to_capture = math.ceil(receiver.frame_rate * 1 / 20)  # 50ms of framesets
+    framesets_to_capture = math.ceil(receiver.frame_rate * CAPTURE_SECONDS)  # 50ms of framesets
     pdf_report.detail(f"group-delay: {delay * 1e6:.3f} µs.")
-    await pcc.request("vlbi-delay", receiver.stream_name, -delay)
-    ratio = 5000
+    await pcc.request("vlbi-delay", receiver.stream_name, 0)
+
+    pdf_report.step("Set F-engine phase rate.")
+    # Swing phase through 2pi radians over the collection time. Start away from
+    # phase 0 where quantisation effects are particularly bad.
+    delay_model = f"0,0:0.00005,{2 * np.pi / (CAPTURE_SECONDS)}"
+    delay_models = [delay_model] * b_receiver.n_inputs
+    await pcc.request("delays", "antenna-channelised-voltage", receiver.sync_time, *delay_models)
+    pdf_report.detail(f"Set delays to {delay_model} for all inputs.")
 
     # Use flat response bandwidth reported from the receiver rather than `pass_bandwidth` from conftest.
-    tone_spacing = ratio * receiver.frame_rate / framesets_to_capture
-    # Narrower than the comb, so a constant delay can be larger than one comb step
-    # before the phase wraps. Taking care not to make it narrower than the bins that would cause leakage,
-    large_delay_tone_spacing = tone_spacing / 10
+    # ``bandwidth`` already includes the decimation, so one channel is ``bandwidth / n_chans``.
+    dsim_names = cbf.dsim_names
+    dsim_period = int(cbf.init_sensors[f"{dsim_names[0]}.max-period"].value)
+    dsim_resolution = b_receiver.adc_sample_rate / dsim_period
+    pdf_report.detail(f"Resolution is {dsim_resolution:.6f} Hz.")
+    channel_bandwidth = b_receiver.bandwidth / b_receiver.n_chans
+    tone_spacing = channel_bandwidth * TONE_SPACING_FACTOR
+    tone_spacing = tone_spacing - (tone_spacing % dsim_resolution)
     # A phase step wraps at ±π, so one group-delay step can measure up to half a cycle.
     measurement_max_delay = 1 / (2 * tone_spacing)
+    assert CAPTURE_SECONDS > 100 * measurement_max_delay, (
+        "Capture seconds must be much larger than the maximum delay measurable"
+    )
     # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
     tone_offsets = b_receiver.bandwidth / 4 + (np.arange(SEARCH_TONES) - SEARCH_TONES // 2) * tone_spacing
     low_frequencies = b_receiver.centre_frequency - tone_offsets[::-1]
     high_frequencies = b_receiver.centre_frequency + tone_offsets
     # Just above the close comb, so the pair does not land on a comb tone.
-    large_delay_offsets = tone_offsets[-1] + tone_spacing + np.array([0.0, large_delay_tone_spacing])
-    low_large_delay_frequencies = b_receiver.centre_frequency - large_delay_offsets[::-1]
-    high_large_delay_frequencies = b_receiver.centre_frequency + large_delay_offsets
     assert len(low_frequencies) == len(high_frequencies), "the number of low and high frequencies must be equal"
-    n_injected = (SEARCH_TONES + len(large_delay_offsets)) * 2
+    n_injected = SEARCH_TONES * 2
 
     n_samples = framesets_to_capture * receiver.n_samples_per_frame
     receiver_sample_rate = receiver.frame_rate * receiver.n_samples_per_frame
@@ -328,64 +344,17 @@ async def test_group_delay_compensation(  # noqa: D103
     await pcc.request("gain", "antenna-channelised-voltage", b_receiver.input_labels[1], gain)
 
     pdf_report.step("Set dsim signals to search for phase in frequencies.")
-    pdf_report.detail(
-        f"Searching for phase in {n_injected} frequencies every {tone_spacing * 1e-3:.3f} kHz, "
-        f"with a pair {large_delay_tone_spacing * 1e-3:.3f} kHz apart."
-    )
-    dsim_names = cbf.dsim_names
+    pdf_report.detail(f"Searching for phase in {n_injected} frequencies every {tone_spacing * 1e-3:.3f} kHz.")
     low_signal = f"multicw({len(low_frequencies)}, {amplitude}, 0, {low_frequencies[0]}, {tone_spacing})"
     high_signal = f"multicw({len(high_frequencies)}, {amplitude}, 0, {high_frequencies[0]}, {tone_spacing})"
-    # cw rather than multicw: a multicw of two tones still builds a full-period spectrum.
-    low_large_delay = " + ".join(f"cw({amplitude}, {freq})" for freq in low_large_delay_frequencies)
-    high_large_delay = " + ".join(f"cw({amplitude}, {freq})" for freq in high_large_delay_frequencies)
-    dsim_signals = f"signal={low_signal} + {low_large_delay} + {high_signal} + {high_large_delay}; signal;signal;"
+    dsim_signals = f"signal={low_signal} + {high_signal}; signal;signal;"
     async with asyncio.TaskGroup() as tg:
         for dsim_name in dsim_names:
             tg.create_task(pcc.request("dsim-signals", dsim_name, dsim_signals))
-    await pcc.request("capture-start", receiver.stream_name)
-
-    # The dsim waveform repeats every `dsim_period` ADC samples, with phase 0 at
-    # each multiple. The signal request uses the default period, which is max-period.
-    dsim_period = int(cbf.init_sensors[f"{dsim_names[0]}.max-period"].value)
-    pdf_report.step(
-        f"Collect {framesets_to_capture / receiver.frame_rate * 1e3:.3f} milliseconds ({framesets_to_capture} frames)"
-        + " VDIF framesets covering a dsim phase-zero epoch."
-    )
-    framesets: list[VDIFFrameset] = []
-    start_sample = 0
-    n_framesets = 0
-    sync = Time(receiver.sync_time, format="unix", scale="utc")
-
-    async with contextlib.aclosing(receiver.complete_framesets()) as framesets_generator:
-        async for frameset in framesets_generator:
-            if framesets and frameset.timestamp.linear != framesets[-1].timestamp.linear + 1:
-                framesets.clear()
-            if not framesets:
-                first_timestamp = (frameset.timestamp.timestamp - sync).sec * receiver.scale_factor_timestamp
-                phase_zero_timestamp = first_timestamp // dsim_period * dsim_period
-                if phase_zero_timestamp < first_timestamp:
-                    phase_zero_timestamp += dsim_period
-                start_sample = (
-                    (phase_zero_timestamp - first_timestamp) * receiver_sample_rate / receiver.scale_factor_timestamp
-                )
-
-                n_framesets = math.ceil((start_sample + n_samples) / receiver.n_samples_per_frame)
-            framesets.append(frameset)
-            if len(framesets) == n_framesets:
-                break
-    pdf_report.detail(f"Skipping {start_sample} samples to start at a phase-zero epoch.")
-    assert len(framesets) == n_framesets
-
     channels_keys = ["high", "low"]
     n_pols = len(receiver.pol_ordering)
-
     frequencies = xr.DataArray(
         np.stack([high_frequencies, low_frequencies]),
-        dims=("channel", "tone"),
-        coords={"channel": channels_keys},
-    )
-    large_delay_frequencies = xr.DataArray(
-        np.stack([high_large_delay_frequencies, low_large_delay_frequencies]),
         dims=("channel", "tone"),
         coords={"channel": channels_keys},
     )
@@ -404,129 +373,190 @@ async def test_group_delay_compensation(  # noqa: D103
         dims=("channel", "tone"),
         coords={"channel": channels_keys},
     )
-    large_delay_tone_channels = xr.DataArray(
-        [
-            [
-                sideband_tone_frequency(
-                    freq,
-                    b_receiver.centre_frequency,
-                    receiver_sample_rate,
-                )
-                for freq in large_delay_frequencies.sel(channel=channel).values
-            ]
-            for channel in channels_keys
-        ],
-        dims=("channel", "tone"),
-        coords={"channel": channels_keys},
-    )
-
     assert receiver.n_chans == frequencies.sizes["channel"]
-    time = np.arange(n_samples) / receiver_sample_rate
-
-    phase_fig = Figure(tight_layout=True)
-    phase_ax = phase_fig.add_subplot(1, 1, 1)
-    phase_ax.set_xlabel("Frequency (MHz)")
-    phase_ax.set_ylabel("Phase (rad)")
-    phase_ax.set_title("Tone phase")
-
-    fig = Figure(tight_layout=True)
-    ax = fig.add_subplot(1, 1, 1)
-    ax.set_xlabel("Baseband frequency (MHz)")
-    ax.set_ylabel("Delay (µs)")
-    ax.set_title("Group delay")
-
-    pdf_report.step("Calculate the delays of the tones per polarisation-channel thread.")
+    timestamps = np.arange(n_samples) / receiver_sample_rate
+    phasors = {
+        channel: [np.exp(1j * 2 * np.pi * tone * timestamps) for tone in tone_channels.sel(channel=channel).values]
+        for channel in channels_keys
+    }
     # Each channel's polarisations are adjacent, build the index for each polarisation to thread index.
     # example: [0, 2] for X, [1, 3] for Y.
     pol_channel_indices = [
         [base + channel_i * n_pols for channel_i in range(len(channels_keys))] for base in range(n_pols)
     ]
-    phase_zero_samples = seek_thread_samples(framesets, 0, n_samples)
-    pol_samples = [[phase_zero_samples[index] for index in indices] for indices in pol_channel_indices]
     pdf_report.detail(f"Maximum delay measurable: {measurement_max_delay * 1e6:.3f} µs.")
-    phasors = {}
-    large_delay_phasors = {}
-    for channel in channels_keys:
-        phasors[channel] = [np.exp(1j * 2 * np.pi * tone * time) for tone in tone_channels.sel(channel=channel).values]
-        large_delay_phasors[channel] = [
-            np.exp(1j * 2 * np.pi * tone * time) for tone in large_delay_tone_channels.sel(channel=channel).values
-        ]
-    for chan_i, channel in enumerate(channels_keys):
-        pdf_report.detail(
-            f"Reference frequency for {channel} channel: {frequencies.sel(channel=channel)[0].item() * 1e-6:.3f} MHz."
-        )
-        for pol_i, pol in enumerate(receiver.pol_ordering):
-            phases = np.zeros(SEARCH_TONES)
-            for j in range(SEARCH_TONES):
-                phases[j] = np.angle(np.sum(analyze_signal(pol_samples[pol_i][chan_i], phasors[channel][j], time)))
 
-            phase_ax.plot(
-                frequencies.sel(channel=channel) * 1e-6,
-                phases,
-                label=f"{str(pol).upper()} {channel}",
-            )
-            # Phases from np.angle() are wrapped to ±π. Unwrap along this channel
-            # before calculating the delay, so a slope past ±π stays continuous.
-            # Divide by the snapped baseband spacing. Rounding onto the dsim grid
-            # makes the true separation differ from ``tone_spacing``.
-            phases_unwrapped = np.unwrap(phases)
-            baseband = tone_channels.sel(channel=channel).values
-            phase_differences = np.diff(phases_unwrapped)
-            assert len(phase_differences) == SEARCH_TONES - 1
-            tau = -phase_differences / (2 * np.pi * np.diff(baseband))
-            large_delay_phases = np.array(
-                [
-                    np.angle(np.sum(analyze_signal(pol_samples[pol_i][chan_i], large_delay_phasors[channel][j], time)))
-                    for j in range(len(large_delay_offsets))
-                ]
-            )
-            phase_ax.plot(
-                large_delay_frequencies.sel(channel=channel) * 1e-6,
-                large_delay_phases,
-                linestyle="None",
-                marker="o",
-                label=f"{str(pol).upper()} {channel} constant",
-            )
-            large_delay_unwrapped = np.unwrap(large_delay_phases)
-            large_delay_baseband = large_delay_tone_channels.sel(channel=channel).values
-            # The constant-delay pair is a separate dsim signal, 5 times closer than one
-            # comb step. Its delay is the common value subtracted from the comb.
-            common_delay = -(large_delay_unwrapped[1] - large_delay_unwrapped[0]) / (
-                2 * np.pi * (large_delay_baseband[1] - large_delay_baseband[0])
-            )
-            tau_relative = tau - common_delay
-            ax.plot(
-                frequencies.sel(channel=channel)[1:] * 1e-6,
-                tau_relative * 1e6,
-                label=f"{str(pol).upper()} {channel}",
-            )
+    async def collect_framesets() -> (list[VDIFFrameset], int):
+        # The dsim waveform repeats every `dsim_period` ADC samples, with phase 0 at
+        # each multiple. The signal request uses the default period, which is max-period.
+        pdf_report.step(
+            f"Collect {framesets_to_capture / receiver.frame_rate * 1e3:.3f} milliseconds"
+            f" ({framesets_to_capture} frames) VDIF framesets covering a dsim phase-zero epoch."
+        )
+        collected: list[VDIFFrameset] = []
+        start_sample = 0.0
+        n_framesets = 0
+        sync = Time(receiver.sync_time, format="unix", scale="utc")
+        min_timestamp = round(
+            TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp).unix_to_adc(
+                time.time() + 5
+            )  # possibly ask dsim for it's current time
+        )
+        async with contextlib.aclosing(receiver.complete_framesets(min_timestamp=min_timestamp)) as framesets_generator:
+            async for frameset in framesets_generator:
+                if collected and frameset.timestamp.linear != collected[-1].timestamp.linear + 1:
+                    collected.clear()
+                if not collected:
+                    first_timestamp = (frameset.timestamp.timestamp - sync).sec * receiver.scale_factor_timestamp
+                    phase_zero_timestamp = first_timestamp // dsim_period * dsim_period
+                    if phase_zero_timestamp < first_timestamp:
+                        phase_zero_timestamp += dsim_period
+                    start_sample = (
+                        (phase_zero_timestamp - first_timestamp)
+                        * receiver_sample_rate
+                        / receiver.scale_factor_timestamp
+                    )
+                    n_framesets = math.ceil((start_sample + n_samples) / receiver.n_samples_per_frame)
+                collected.append(frameset)
+                if len(collected) == n_framesets:
+                    break
+        pdf_report.detail(f"Skipping {start_sample} samples to start at a phase-zero epoch.")
+        assert len(collected) == n_framesets
+        return collected, start_sample
+
+    async def measure_delays(
+        framesets: list[VDIFFrameset],
+        start_sample: int,
+        description: str,
+    ) -> float:
+        """Plot one pass and return the mean common delay across channels and polarisations.
+
+        The uncompensated pass checks that the delay is flat. The compensated pass checks
+        that the delay itself is zero, so a constant error is no longer removed before the comparison.
+        """
+        phase_figs = {}
+        phase_axes = {}
+        unwrapped_figs = {}
+        unwrapped_axes = {}
+        delay_figs = {}
+        delay_axes = {}
+        for channel in channels_keys:
+            phase_figs[channel] = Figure(tight_layout=True)
+            phase_axes[channel] = phase_figs[channel].add_subplot(1, 1, 1)
+            phase_axes[channel].set_xlabel("Frequency (MHz)")
+            phase_axes[channel].set_ylabel("Phase (rad)")
+            phase_axes[channel].set_title(f"Tone phase ({channel}, {description})")
+
+            unwrapped_figs[channel] = Figure(tight_layout=True)
+            unwrapped_axes[channel] = unwrapped_figs[channel].add_subplot(1, 1, 1)
+            unwrapped_axes[channel].set_xlabel("Frequency (MHz)")
+            unwrapped_axes[channel].set_ylabel("Phase (rad)")
+            unwrapped_axes[channel].set_title(f"Unwrapped tone phase ({channel}, {description})")
+
+            delay_figs[channel] = Figure(tight_layout=True)
+            delay_axes[channel] = delay_figs[channel].add_subplot(1, 1, 1)
+            delay_axes[channel].set_xlabel("Baseband frequency (MHz)")
+            delay_axes[channel].set_ylabel("Delay (µs)")
+            delay_axes[channel].set_title(f"Group delay ({channel}, {description})")
+
+            # Each real sideband occupies half the beamformer band, so its centre is a
+            # quarter bandwidth above or below the sky centre.
+            centre_sign = 1 if channel == "high" else -1
+            channel_centre_mhz = (b_receiver.centre_frequency + centre_sign * b_receiver.bandwidth / 4) * 1e-6
+            for ax in (phase_axes[channel], unwrapped_axes[channel], delay_axes[channel]):
+                ax.axvline(channel_centre_mhz, linestyle=":", color="black", label="Centre")
+
+        pdf_report.step(f"Calculate the delays of the tones per polarisation-channel thread ({description}).")
+        phase_zero_samples = seek_thread_samples(framesets, 0, n_samples)
+        pol_samples = [[phase_zero_samples[index] for index in indices] for indices in pol_channel_indices]
+        common_delays: list[float] = []
+        for chan_i, channel in enumerate(channels_keys):
             pdf_report.detail(
-                f"Common delay from the outer tone pair for {channel} channel {pol} pol: {common_delay * 1e6:.3f} µs."
+                f"Reference frequency for {channel} channel: "
+                f"{frequencies.sel(channel=channel)[0].item() * 1e-6:.3f} MHz."
             )
-            with check:
-                np.testing.assert_allclose(
-                    tau_relative,
-                    0.0,
-                    atol=delay_tolerance,
-                    err_msg=f"Delay for channel {channel}, {pol} polarisation does not agree to "
-                    + f"within {delay_tolerance * 1e6:.3f} µs of zero.",
+            for pol_i, pol in enumerate(receiver.pol_ordering):
+                phases = np.zeros(SEARCH_TONES)
+                for j in range(SEARCH_TONES):
+                    phases[j] = np.angle(
+                        np.sum(analyze_signal(pol_samples[pol_i][chan_i], phasors[channel][j], timestamps))
+                    )
+
+                phase_axes[channel].plot(
+                    frequencies.sel(channel=channel) * 1e-6,
+                    phases,
+                    marker="o",
+                    label=str(pol).upper(),
+                )
+                # Phases from np.angle() are wrapped to ±π. Unwrap along this channel
+                # before calculating the delay, so a slope past ±π stays continuous.
+                # Divide by the snapped baseband spacing. Rounding onto the dsim grid
+                # makes the true separation differ from ``tone_spacing``.
+                phases_unwrapped = np.unwrap(phases)
+                unwrapped_axes[channel].plot(
+                    frequencies.sel(channel=channel) * 1e-6,
+                    phases_unwrapped,
+                    marker="o",
+                    label=str(pol).upper(),
+                )
+                baseband = tone_channels.sel(channel=channel).values
+                phase_differences = np.diff(phases_unwrapped)
+                assert len(phase_differences) == SEARCH_TONES - 1
+                tau = -phase_differences / (2 * np.pi * np.diff(baseband))
+                common_delay = np.mean(tau, axis=-1)
+                # The compensated pass must keep the constant. Removing it would make any delay pass.
+                plotted = tau
+                delay_axes[channel].plot(
+                    frequencies.sel(channel=channel)[1:] * 1e-6,
+                    plotted * 1e6,
+                    label=str(pol).upper(),
                 )
                 pdf_report.detail(
-                    f"Delays are within {delay_tolerance * 1e6:.3f} µs of zero for {channel} channel {pol} pols."
+                    f"Common delay for {channel} channel {pol} pol ({description}): {common_delay * 1e6:.3f} µs."
                 )
+                common_delays.append(float(common_delay))
+                with check:
+                    np.testing.assert_allclose(
+                        plotted,
+                        0.0,
+                        atol=delay_tolerance,
+                        err_msg=f"Delay for channel {channel}, {pol} polarisation ({description}) does not agree to "
+                        + f"within {delay_tolerance * 1e6:.3f} µs of zero.",
+                    )
+                    pdf_report.detail(
+                        f"Delays are within {delay_tolerance * 1e6:.3f} µs of zero for {channel} channel {pol} pols."
+                    )
 
-    phase_ax.legend()
-    ax.legend()
-    await run_async(pdf_report.figure, phase_fig)
-    await run_async(pdf_report.figure, fig)
+        for channel in channels_keys:
+            phase_axes[channel].legend()
+            unwrapped_axes[channel].legend()
+            delay_axes[channel].legend()
+            await run_async(pdf_report.figure, phase_figs[channel])
+            await run_async(pdf_report.figure, unwrapped_figs[channel])
+            await run_async(pdf_report.figure, delay_figs[channel])
+        return float(np.mean(common_delays))
+
+    await pcc.request("capture-start", receiver.stream_name)
+    common_delay = await measure_delays(*(await collect_framesets()), "uncompensated")
+
+    # vlbi-delay is rejected while a capture is running.
+    await pcc.request("capture-stop", receiver.stream_name)
+    receiver.buffer.clear()
+    receiver.last_frameset_timestamp = None
+    vlbi_delay = common_delay
+    pdf_report.step(f"Set vlbi-delay to {vlbi_delay * 1e6:.3f} µs, delay expected.")
+    await pcc.request("vlbi-delay", receiver.stream_name, vlbi_delay)
+    await pcc.request("capture-start", receiver.stream_name)
+    await measure_delays(*(await collect_framesets()), "compensated")
 
 
-test_group_delay_compensation.__doc__ = f"""Test group delay compensation.
+test_vlbi_delay_compensation.__doc__ = f"""Test group delay compensation.
 
     Verification method
     -------------------
+    Set the channelised data to cycle the delay at a rate of about once every four {CAPTURE_SECONDS * 1e3:3f} microseconds, this causes the delay set in the vlbi-delay to measure as the same value as the .
     Verified by means of test. Generate {SEARCH_TONES} tones in the passband separated evenly within the linear
-    passband. Compensate for the filter-group-delay by setting the VLBI delay to the filter-group-delay.
-    Collect valid VDIF framesets, and determine the phase difference between each tone and the
-    reference tone for each thread. The phase difference should be linear and near zero with 4µs tolerance.
+    passband. With vlbi-delay at zero, collect valid VDIF framesets and measure the common delay on each thread.
+    Stop capture, set vlbi-delay to the filter group delay plus that common delay, and repeat the measurement.
+    The compensated delay should be within 5µs of zero.
     """
