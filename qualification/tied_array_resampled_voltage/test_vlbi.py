@@ -214,7 +214,6 @@ async def test_vlbi_vdif(  # noqa: D103
     pdf_report.detail(
         "Verify we have `n_chans * len(pol_ordering)` threads in the set and that the VDIFHeader structure is correct."
     )
-    pdf_report.detail("")
     with check:
         for frameset in framesets:
             assert len(frameset.frames) == receiver.n_chans * len(receiver.pol_ordering)
