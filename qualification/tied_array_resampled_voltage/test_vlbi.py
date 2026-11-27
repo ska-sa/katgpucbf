@@ -42,7 +42,7 @@ FRAMESETS_TO_CAPTURE = 10
 SEARCH_TONES = 10
 CAPTURE_SECONDS = 5
 TONE_SPACING_FACTOR = 0.10
-WINDOW_FACTOR = 8
+WINDOW_SIZE = 20
 
 
 async def max_retry_test(
@@ -304,7 +304,7 @@ async def test_vlbi_delay_compensation(  # noqa: D103
     assert CAPTURE_SECONDS > 100 * measurement_max_delay, (
         "Capture seconds must be much larger than the maximum delay measurable"
     )
-    frames_per_measurement = max(1, math.ceil(receiver.frame_rate * measurement_max_delay * WINDOW_FACTOR))
+    frames_per_measurement = max(math.ceil(receiver.frame_rate * measurement_max_delay * 2), WINDOW_SIZE)
     window_seconds = frames_per_measurement / receiver.frame_rate
     # Integer count, so a float endpoint cannot add an extra tone at sky_centre.
     tone_offsets = b_receiver.bandwidth / 4 + (np.arange(SEARCH_TONES) - SEARCH_TONES // 2) * tone_spacing
@@ -394,7 +394,11 @@ async def test_vlbi_delay_compensation(  # noqa: D103
             framesets[i + 1].timestamp.linear - framesets[i].timestamp.linear - 1 for i in range(len(framesets) - 1)
         ]
         n_skipped = sum(skipped)
-        assert n_skipped == 0, f"Skipped {n_skipped} frames in a delay window"
+        with check:
+            assert n_skipped == 0, f"Skipped {n_skipped} frames in a delay window"
+            if n_skipped > 0:
+                return
+
         thread_samples = seek_thread_samples(framesets)
         pol_samples = [[thread_samples[index] for index in indices] for indices in pol_channel_indices]
 
