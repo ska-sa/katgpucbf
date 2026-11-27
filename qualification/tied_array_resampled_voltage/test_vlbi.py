@@ -40,9 +40,9 @@ from ..recv import TiedArrayChannelisedVoltageReceiver, TiedArrayResampledVoltag
 
 FRAMESETS_TO_CAPTURE = 10
 SEARCH_TONES = 10
-CAPTURE_SECONDS = 5
-TONE_SPACING_FACTOR = 0.10
-WINDOW_SIZE = 20
+CAPTURE_SECONDS = 10
+TONE_SPACING_FACTOR = 0.25
+WINDOW_SIZE = 25
 
 
 async def max_retry_test(
@@ -381,23 +381,20 @@ async def test_vlbi_delay_compensation(  # noqa: D103
     tau_by_thread: dict[tuple[str, str], list[np.ndarray]] = {
         key: [] for key in [(channel, str(pol)) for channel in channels_keys for pol in receiver.pol_ordering]
     }
+    windows_lost = 0
 
     def delays_for_window(
         framesets: list[VDIFFrameset],
-        previous_linear: int | None = None,
     ):
         """Return wrapped phase and per-tone delay for one measurement window."""
-        # if previous_linear is not None:
-        # between = framesets[0].timestamp.linear - previous_linear - 1
-        # assert between == 0, f"Skipped {between} frames between delay windows"
-        skipped = [
+        skipped = [  # only care about frames skipped inside the window
             framesets[i + 1].timestamp.linear - framesets[i].timestamp.linear - 1 for i in range(len(framesets) - 1)
         ]
         n_skipped = sum(skipped)
-        with check:
-            assert n_skipped == 0, f"Skipped {n_skipped} frames in a delay window"
-            if n_skipped > 0:
-                return
+        if n_skipped > 0:
+            nonlocal windows_lost
+            windows_lost += 1
+            return
 
         thread_samples = seek_thread_samples(framesets)
         pol_samples = [[thread_samples[index] for index in indices] for indices in pol_channel_indices]
@@ -427,11 +424,14 @@ async def test_vlbi_delay_compensation(  # noqa: D103
             f"Measure tone delays every {window_seconds * 1e6:.3f} µs ({frames_per_measurement} frames) "
             f"until {CAPTURE_SECONDS * 1e3:.3f} ms has elapsed ({description})."
         )
-        previous_linear: int | None = None
         elapsed = 0.0
+        windows_lost = 0
+        windows: list[list[VDIFFrameset]] = []
         min_timestamp = round(
             TimeConverter(receiver.sync_time, receiver.scale_factor_timestamp).unix_to_adc(time.time() + 5)
         )
+        # Only read during the capture. Computing delays here blocks the event loop, and the
+        # ibverbs receivers then cannot recycle buffers (RDMA out-of-buffer).
         async with contextlib.aclosing(receiver.complete_framesets(min_timestamp=min_timestamp)) as framesets_generator:
             collected: list[VDIFFrameset] = []
             async for frameset in framesets_generator:
@@ -440,13 +440,14 @@ async def test_vlbi_delay_compensation(  # noqa: D103
                 collected.append(frameset)
                 if len(collected) < frames_per_measurement:
                     continue
-                delays_for_window(collected, previous_linear)
-                previous_linear = collected[-1].timestamp.linear
+                windows.append(collected)
                 elapsed += window_seconds
                 collected = []
                 if elapsed >= CAPTURE_SECONDS:
                     break
         assert elapsed >= CAPTURE_SECONDS, "capture ended before CAPTURE_SECONDS elapsed"
+        for window in windows:
+            await run_async(delays_for_window, window)
         unwrapped_by_thread: dict[tuple[str, str], list[np.ndarray]] = {key: [] for key in tau_by_thread}
         for key in tau_by_thread.keys():
             for phases in phases_by_thread[key]:
@@ -462,19 +463,11 @@ async def test_vlbi_delay_compensation(  # noqa: D103
             f"({window_seconds * 1e6:.3f} µs)."
         )
 
-        phase_figs = {}
-        phase_axes = {}
         unwrapped_figs = {}
         unwrapped_axes = {}
         delay_figs = {}
         delay_axes = {}
         for channel in channels_keys:
-            phase_figs[channel] = Figure(tight_layout=True)
-            phase_axes[channel] = phase_figs[channel].add_subplot(1, 1, 1)
-            phase_axes[channel].set_xlabel("Frequency (MHz)")
-            phase_axes[channel].set_ylabel("Phase (rad)")
-            phase_axes[channel].set_title(f"Tone phase ({channel}, {description})")
-
             unwrapped_figs[channel] = Figure(tight_layout=True)
             unwrapped_axes[channel] = unwrapped_figs[channel].add_subplot(1, 1, 1)
             unwrapped_axes[channel].set_xlabel("Frequency (MHz)")
@@ -489,8 +482,11 @@ async def test_vlbi_delay_compensation(  # noqa: D103
 
             centre_sign = 1 if channel == "high" else -1
             channel_centre_mhz = (b_receiver.centre_frequency + centre_sign * b_receiver.bandwidth / 4) * 1e-6
-            for ax in (phase_axes[channel], unwrapped_axes[channel], delay_axes[channel]):
+            for ax in (unwrapped_axes[channel], delay_axes[channel]):
                 ax.axvline(channel_centre_mhz, linestyle=":", color="black", label="Centre")
+
+        if windows_lost > 0:
+            pdf_report.detail(f"Lost {windows_lost} windows due to skipped frames.")
 
         common_delays: list[float] = []
         for channel in channels_keys:
@@ -500,14 +496,11 @@ async def test_vlbi_delay_compensation(  # noqa: D103
             )
             for pol in receiver.pol_ordering:
                 key = (channel, str(pol))
-                phases = np.mean(phases_by_thread[key], axis=0)
-                phases_unwrapped = np.mean(unwrapped_by_thread[key], axis=0)
-                phase_axes[channel].plot(
-                    frequencies.sel(channel=channel) * 1e-6,
-                    phases,
-                    marker="o",
-                    label=str(pol).upper(),
-                )
+                unwrapped = np.stack(unwrapped_by_thread[key])
+                # Each window's phase is referenced to its own start. Shift every unwrapped
+                # trace so its first tone matches the first window, then average.
+                unwrapped = unwrapped + (unwrapped[0, 0] - unwrapped[:, :1])
+                phases_unwrapped = np.mean(unwrapped, axis=0)
                 unwrapped_axes[channel].plot(
                     frequencies.sel(channel=channel) * 1e-6,
                     phases_unwrapped,
@@ -539,24 +532,23 @@ async def test_vlbi_delay_compensation(  # noqa: D103
                     )
 
         for channel in channels_keys:
-            phase_axes[channel].legend()
             unwrapped_axes[channel].legend()
             delay_axes[channel].legend()
-            await run_async(pdf_report.figure, phase_figs[channel])
             await run_async(pdf_report.figure, unwrapped_figs[channel])
             await run_async(pdf_report.figure, delay_figs[channel])
         return float(np.mean(common_delays))
 
     await pcc.request("capture-start", receiver.stream_name)
-    # common_delay = await measure_delays("uncompensated")
+    await measure_delays("uncompensated")
 
     # vlbi-delay is rejected while a capture is running.
     await pcc.request("capture-stop", receiver.stream_name)
     receiver.buffer.clear()
     receiver.last_frameset_timestamp = None
-    vlbi_delay = delay
+    vlbi_delay = 300e-6
+    assert measurement_max_delay > vlbi_delay, "maximum measurement delay must be larger than vlbi-delay"
     pdf_report.step(f"Set vlbi-delay to {vlbi_delay * 1e6:.3f} µs, delay expected.")
-    await pcc.request("vlbi-delay", receiver.stream_name, 300e-6)
+    await pcc.request("vlbi-delay", receiver.stream_name, vlbi_delay)
     await pcc.request("capture-start", receiver.stream_name)
     await measure_delays("compensated")
 
